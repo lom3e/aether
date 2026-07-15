@@ -1,30 +1,50 @@
+from __future__ import annotations
+
+from typing import Any
+
 from aether.providers.base import AIProvider
 
 
 class Agent:
     """
-    Base Aether Agent.
+    Base Aether agent.
 
-    An agent represents a digital worker
-    with identity, responsibilities and capabilities.
+    The class keeps the core identity and execution surface small so that
+    skills, tools, memory and providers can be added later without reshaping
+    the contract.
     """
 
     def __init__(
         self,
         name: str,
         role: str = "assistant",
-        provider: AIProvider | None = None
+        provider: AIProvider | None = None,
+        agent_id: str | None = None,
     ):
+        self.id = agent_id or self._build_id(name)
         self.name = name
         self.role = role
         self.provider = provider
+        self.skills: list[str] = []
+        self.tools: list[str] = []
+        self.memory: Any = None
+        self.metadata: dict[str, Any] = {}
+
+    def execute(self, task: str) -> str:
+        """
+        Execute a task using the configured provider when available.
+        """
+        if self.provider:
+            return self.provider.generate(task)
+        return f"{self.name} received: {task}"
 
     def run(self, task: str) -> str:
         """
-        Execute a task.
+        Backward-compatible alias for execute().
         """
 
-        if not self.provider:
-            return f"{self.name} has no AI provider configured."
+        return self.execute(task)
 
-        return self.provider.generate(task)
+    @staticmethod
+    def _build_id(name: str) -> str:
+        return name.strip().lower().replace(" ", "-")
