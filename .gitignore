@@ -113,3 +113,6 @@ local_settings.py
 .pypirc
 .abstra/
 .streamlit/secrets.toml
+
+# AI agent instructions
+AGENTS.md
