@@ -81,7 +81,7 @@ Create the project foundation.
 
 Status:
 
-IN PROGRESS
+COMPLETED
 
 ---
 
@@ -103,7 +103,51 @@ Completed:
 * Git repository;
 * documentation structure;
 * Constitution;
-* initial architecture planning.
+* initial architecture planning;
+* Python package structure;
+* Core module organization;
+* Base Agent contract;
+* Runtime execution layer;
+* Agent registration system;
+* Initial automated test coverage.
+
+---
+
+## Milestone 0.1 — Agent Runtime Foundation
+
+**Status:** Completed
+
+**Date:** 2026-07-15
+
+The first Aether execution foundation has been implemented.
+
+### Architecture Result
+
+The current execution flow is:
+
+```text
+User
+ |
+Runtime
+ |
+Agent
+ |
+Provider Interface
+```
+
+The Provider layer is prepared for future integrations with AI models.
+
+### Next Steps
+
+The next foundation tasks are:
+
+* Provider abstraction;
+* AI model integrations;
+* Event communication system;
+* Memory infrastructure;
+* Tool system;
+* Skill system;
+* Agent orchestration.
 
 ---
 
@@ -673,15 +717,15 @@ Includes:
 
 Current priority:
 
-Build the foundation.
+Continue Phase 0 and prepare Aether Core MVP.
 
 Order:
 
-1. Finish documentation.
-2. Define architecture.
-3. Create project structure.
-4. Implement minimal Agent Runtime.
-5. Create first demo agent.
+1. Complete Provider abstraction.
+2. Connect first AI model provider.
+3. Improve Agent execution flow.
+4. Create first real demo agent.
+5. Start Phase 1 development.
 
 ---
 
@@ -690,6 +734,10 @@ Order:
 Aether is currently in:
 
 Phase 0 - Foundation
+
+Current milestone:
+
+Milestone 0.1 - Agent Runtime Foundation
 
 The goal is to create a professional foundation before writing large amounts of code.
 

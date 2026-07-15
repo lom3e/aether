@@ -603,6 +603,106 @@ More discipline is required from the beginning.
 
 ---
 
+
+
+
+
+
+# ADR-010
+
+## Title
+
+Implement the first Agent Runtime Foundation.
+
+## Date
+
+2026-07-15
+
+## Status
+
+Accepted
+
+---
+
+## Context
+
+Aether required an initial execution foundation before implementing advanced capabilities such as:
+
+* multi-agent collaboration;
+* memory;
+* tools;
+* skills;
+* event communication.
+
+The project needed a minimal runtime architecture capable of executing agents while remaining extensible.
+
+---
+
+## Decision
+
+Implement the first execution layer with:
+
+```text
+User
+
+↓
+
+Runtime
+
+↓
+
+Agent
+
+↓
+
+Provider Interface
+```
+
+The Runtime is responsible for:
+
+* registering agents;
+* finding agents;
+* delegating tasks.
+
+The Agent is responsible for:
+
+* identity;
+* role;
+* execution contract.
+
+The Provider layer remains abstract for future AI model integrations.
+
+---
+
+## Reasoning
+
+A minimal execution core allows Aether to validate the architecture before introducing more complex systems.
+
+Future components can be added without changing the fundamental execution model.
+
+---
+
+## Consequences
+
+Positive:
+
+* simple and testable foundation;
+* clear separation of responsibilities;
+* future provider independence;
+* easier extension with tools, skills and memory.
+
+Negative:
+
+* no persistent agent state;
+* no asynchronous communication;
+* no advanced orchestration yet.
+
+---
+
+# Related Milestone
+
+Milestone 0.1 - Agent Runtime Foundation
+
 # Future Decisions
 
 Future ADRs will document:
@@ -629,6 +729,7 @@ Aether currently has the following architectural decisions approved:
 ✅ Incremental roadmap
 ✅ Professional Git workflow
 ✅ Extension ecosystem vision
+✅ Initial Agent Runtime Foundation
 
 ---
 
