@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from aether.agents.agent import Agent
+from aether.core.execution import ExecutionContext, ExecutionResult, Task
 
 
 class Runtime:
@@ -27,9 +28,39 @@ class Runtime:
         except KeyError as exc:
             raise KeyError(f"Agent '{name}' is not registered.") from exc
 
-    def execute(self, agent_name: str, task: str) -> str:
-        agent = self.get_agent(agent_name)
-        return agent.execute(task)
+    def execute(self, task: Task) -> ExecutionResult:
+        try:
+            agent = self.get_agent(task.agent_name)
+        except KeyError as exc:
+            return ExecutionResult(
+                success=False,
+                error=str(exc),
+                metadata={"task_id": task.id, "agent_name": task.agent_name},
+            )
+
+        context = ExecutionContext(
+            task=task,
+            agent_name=agent.name,
+            tools=tuple(agent.tools),
+            skills=tuple(agent.skills),
+            metadata={
+                "agent_id": agent.id,
+                "agent_role": agent.role,
+            },
+        )
+
+        try:
+            return agent.execute(task, context)
+        except Exception as exc:  # pragma: no cover - defensive base path
+            return ExecutionResult(
+                success=False,
+                error=str(exc),
+                metadata={
+                    "task_id": task.id,
+                    "agent_name": agent.name,
+                    "agent_id": agent.id,
+                },
+            )
 
     def list_agents(self) -> list[Agent]:
         return list(self._agents.values())
