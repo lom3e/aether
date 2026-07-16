@@ -4,6 +4,8 @@ from dataclasses import dataclass, field
 from enum import Enum
 from typing import Any
 
+from aether.engine.units import UnitType
+
 
 class UnitExecutionStatus(Enum):
     SUCCESS = "success"
@@ -21,7 +23,7 @@ class UnitExecutionResult:
 
     unit_id: str
     unit_name: str
-    unit_type: str
+    unit_type: UnitType
     status: UnitExecutionStatus
     unit_version: str | None = None
     output: Any | None = None

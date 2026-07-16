@@ -4,6 +4,7 @@ import time
 from dataclasses import dataclass
 
 from aether.engine.result import UnitExecutionResult, UnitExecutionStatus
+from aether.engine.units import UnitType
 from aether.tools.base import Tool, ToolExecutionContext
 
 
@@ -32,7 +33,7 @@ class ToolExecutor:
             return UnitExecutionResult(
                 unit_id=tool.name,
                 unit_name=tool.name,
-                unit_type="tool",
+                unit_type=UnitType.TOOL,
                 status=UnitExecutionStatus.SUCCESS,
                 output=output,
                 execution_time_ms=execution_time_ms,
@@ -47,7 +48,7 @@ class ToolExecutor:
             return UnitExecutionResult(
                 unit_id=tool.name,
                 unit_name=tool.name,
-                unit_type="tool",
+                unit_type=UnitType.TOOL,
                 status=UnitExecutionStatus.FAILED,
                 error=str(exc),
                 error_type=exc.__class__.__name__,

@@ -5,6 +5,7 @@ import pytest
 from aether.core.execution import ExecutionContext, Task
 from aether.engine.core import ExecutionEngine
 from aether.engine.result import UnitExecutionStatus
+from aether.engine.units import UnitType
 from aether.skills.skill import Skill
 from aether.tools.base import Tool, ToolExecutionContext
 from aether.tools.registry import ToolRegistry
@@ -32,7 +33,7 @@ def test_engine_executes_skill():
     # The skill executor should return a VALIDATION_FAILED result
     assert result.status == UnitExecutionStatus.VALIDATION_FAILED
     assert result.unit_id == "test_skill"
-    assert result.unit_type == "skill"
+    assert result.unit_type == UnitType.SKILL
 
 
 def test_engine_executes_tool():
@@ -47,7 +48,7 @@ def test_engine_executes_tool():
     assert result.success is True
     assert result.status == UnitExecutionStatus.SUCCESS
     assert result.unit_id == "dummy_tool"
-    assert result.unit_type == "tool"
+    assert result.unit_type == UnitType.TOOL
     assert result.output == "processed: data"
 
 

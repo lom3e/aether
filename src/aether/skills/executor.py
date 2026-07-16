@@ -10,6 +10,7 @@ from aether.skills.policy import ExecutionPolicy
 from aether.skills.registry import SkillRegistry
 from aether.skills.result import SkillResult, SkillExecutionStatus
 from aether.skills.skill import Skill
+from aether.engine.units import UnitType
 
 
 @dataclass(slots=True)
@@ -39,7 +40,7 @@ class SkillExecutor:
                 status=SkillExecutionStatus.SUCCESS,
                 unit_id=resolved_skill.skill_id,
                 unit_name=resolved_skill.name,
-                unit_type="skill",
+                unit_type=UnitType.SKILL,
                 unit_version=resolved_skill.version,
                 execution_time_ms=execution_time_ms,
                 metadata=self._build_metadata(resolved_skill, context),
@@ -104,7 +105,7 @@ class SkillExecutor:
             status=status,
             unit_id=skill.skill_id,
             unit_name=skill.name,
-            unit_type="skill",
+            unit_type=UnitType.SKILL,
             unit_version=skill.version,
             error=error,
             error_type=error_type,

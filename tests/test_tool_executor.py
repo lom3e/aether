@@ -3,6 +3,7 @@ from __future__ import annotations
 import pytest
 
 from aether.engine.result import UnitExecutionStatus
+from aether.engine.units import UnitType
 from aether.tools.base import Tool, ToolExecutionContext
 from aether.tools.executor import ToolExecutor
 
@@ -26,7 +27,7 @@ def test_tool_executor_success():
     assert result.success is True
     assert result.status == UnitExecutionStatus.SUCCESS
     assert result.unit_id == "dummy_tool"
-    assert result.unit_type == "tool"
+    assert result.unit_type == UnitType.TOOL
     assert result.output == "processed: hello"
     assert result.error is None
     assert result.execution_time_ms is not None
