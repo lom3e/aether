@@ -5,6 +5,7 @@ from typing import Any
 
 from aether.agents.lifecycle import AgentLifecycle, AgentLifecycleState
 from aether.core.execution import ExecutionContext, ExecutionResult, Task
+from aether.engine.core import ExecutionEngine
 from aether.memory.base import Memory
 from aether.skills.executor import SkillExecutor
 from aether.skills.registry import SkillRegistry
@@ -45,7 +46,10 @@ class Agent:
         self.skills: list[Skill] = []
         self.tools: list[str] = []
         self.metadata: dict[str, Any] = {}
-        self.skill_executor = SkillExecutor(registry=self.skill_registry)
+        self.execution_engine = ExecutionEngine(
+            skill_executor=SkillExecutor(registry=self.skill_registry),
+            tool_registry=self.tool_registry,
+        )
         self.assign_skills(list(skills or []))
 
     def initialize(self) -> AgentLifecycleState:
@@ -66,11 +70,11 @@ class Agent:
                 execution_context = replace(execution_context, skills=active_skills)
 
             for skill in active_skills:
-                skill_result = self.skill_executor.execute(skill, execution_context)
+                skill_result = self.execution_engine.execute_skill(skill, execution_context)
                 if not skill_result.success:
                     self.lifecycle.fail()
                     metadata = self._build_metadata(task, execution_context)
-                    metadata["incompatible_skills"] = (skill_result.skill_id,)
+                    metadata["incompatible_skills"] = (skill_result.unit_id,)
                     metadata["agent_state"] = self.lifecycle.state.value
                     return ExecutionResult(
                         success=False,
@@ -247,4 +251,15 @@ class Agent:
             task_id=task.id,
             metadata={"task_metadata": task.metadata},
         )
-        return registry.execute(tool_name, tool_input, tool_context)
+        try:
+            result = self.execution_engine.execute_tool(
+                tool_name,
+                tool_input,
+                tool_context,
+                override_registry=registry,
+            )
+            if not result.success:
+                raise RuntimeError(result.error)
+            return result.output
+        except KeyError:
+            raise
