@@ -827,6 +827,9 @@ Aether currently has the following architectural decisions approved:
 ✅ Extension ecosystem vision
 ✅ Initial Agent Runtime Foundation
 ✅ Provider Layer Foundation
+✅ Unified Execution Contract (see [docs/adr/ADR-001.md](file:///Users/matteo/Matteo/Lavoro/aether/docs/adr/ADR-001.md))
+✅ ExecutionEngine as Runtime Orchestrator (see [docs/adr/ADR-002.md](file:///Users/matteo/Matteo/Lavoro/aether/docs/adr/ADR-002.md))
+✅ ExecutionPlan Foundation (see [docs/adr/ADR-003.md](file:///Users/matteo/Matteo/Lavoro/aether/docs/adr/ADR-003.md))
 
 ---
 

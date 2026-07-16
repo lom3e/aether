@@ -236,6 +236,31 @@ Implementation of a robust, standardized runtime contract for SkillResult, separ
 
 ---
 
+## Milestone 0.7.0 — Unified Execution Runtime
+
+**Status:** Completed
+
+Unification of Skill and Tool execution under a single contract (`UnitExecutionResult`), introducing `ToolExecutor` and a unified `ExecutionEngine` helper.
+
+---
+
+## Milestone 0.8.0 — Execution Orchestration Foundation
+
+**Status:** Completed
+
+Elevation of `ExecutionEngine` to primary orchestrator of execution, removing loop mechanics from the Agent, introducing `ExecutionPlan` structure, and enforcing typed `UnitType` transitions.
+
+---
+
+## Milestone 0.9.0 — Planning & Context Runtime
+
+**Status:** Planned
+
+Introduce the primary Planning Engine to build `ExecutionPlan`s dynamically using LLM reasoning, incorporate capability context directly into prompt generation, and enhance state machine transitions.
+
+---
+
+
 
 ## Next Tasks
 
@@ -823,13 +848,18 @@ Phase 0 - Foundation
 
 Current milestone:
 
-
+Milestone 0.9.0 - Planning & Context Runtime
 
 Completed milestones:
 
 ✅ Milestone 0.1 - Agent Runtime Foundation
 ✅ Milestone 0.2 - Provider Layer Foundation
+✅ Milestone 0.6.0 - Skill Execution Runtime
+✅ Milestone 0.6.1 - SkillResult Runtime Contract
+✅ Milestone 0.7.0 - Unified Execution Runtime
+✅ Milestone 0.8.0 - Execution Orchestration Foundation
 
 The goal is to create a professional foundation before writing large amounts of code.
+
 
 ---

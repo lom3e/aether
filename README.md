@@ -11,9 +11,13 @@ Runtime
   ↓
 Agent
   ↓
-SkillExecutor
+ExecutionEngine
   ↓
-SkillResult
+ExecutionPlan
+  ↓
+Execution Units (Skill / Tool)
+  ↓
+UnitExecutionResult
   ↓
 ExecutionResult
 ```
@@ -21,22 +25,25 @@ ExecutionResult
 ### Responsibilities
 
 **Agent** is responsible for:
-- orchestration
-- agent lifecycle
+- agent lifecycle management
 - managing ExecutionContext
-- interaction with LLM providers
-- generating the final ExecutionResult
+- LLM provider coordination and reasoning
+- final ExecutionResult generation
 
-**SkillExecutor** is responsible for:
-- canonical skill resolution
-- validation
-- hooks
-- skill lifecycle handling
-- generating the SkillResult
+**ExecutionEngine** is responsible for:
+- plan construction (`build_plan()`)
+- sequential execution loop with fail-fast semantics (`run()`)
+- routing execution units (`_dispatch()`) to specific executors
+- runtime error trapping and wrapping
 
-**SkillResult** represents the standardized contract for the result of a single skill execution.
+**ExecutionPlan** represents the declared sequence of execution steps.
+
+**UnitExecutionResult** represents the unified outcome of a single execution unit (Skill or Tool).
 
 ## Project Status
 
 - **v0.6.0**: Skill Execution Runtime
 - **v0.6.1**: SkillResult Runtime Contract
+- **v0.7.0**: Unified Execution Runtime
+- **v0.8.0**: Execution Orchestration Foundation
+
