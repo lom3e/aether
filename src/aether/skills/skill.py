@@ -42,6 +42,19 @@ class SkillPermission:
     effect: str = "allow"
     metadata: dict[str, Any] = field(default_factory=dict)
 
+    def __post_init__(self) -> None:
+        self.namespace = self.namespace.strip()
+        self.action = self.action.strip()
+        self.resource = self.resource.strip() if isinstance(self.resource, str) else self.resource
+        self.effect = self.effect.strip().lower() or "allow"
+
+        if not self.namespace:
+            raise ValueError("SkillPermission namespace cannot be empty.")
+        if not self.action:
+            raise ValueError("SkillPermission action cannot be empty.")
+        if self.resource == "":
+            self.resource = None
+
     @property
     def identifier(self) -> str:
         if self.resource:
@@ -80,6 +93,12 @@ class SkillDependency:
     version_spec: str = "*"
     optional: bool = False
     metadata: dict[str, Any] = field(default_factory=dict)
+
+    def __post_init__(self) -> None:
+        self.name = self.name.strip()
+        self.version_spec = self.version_spec.strip() or "*"
+        if not self.name:
+            raise ValueError("SkillDependency name cannot be empty.")
 
     @classmethod
     def from_value(cls, value: str | dict[str, Any]) -> SkillDependency:
@@ -121,6 +140,19 @@ class Skill:
     source_path: str | None = None
 
     def __post_init__(self) -> None:
+        self.name = self.name.strip()
+        self.description = self.description.strip()
+        self.version = self.version.strip()
+        self.skill_id = self.skill_id.strip() if isinstance(self.skill_id, str) else self.skill_id
+        self.metadata = dict(self.metadata)
+
+        if not self.name:
+            raise ValueError("Skill name cannot be empty.")
+        if not self.version:
+            raise ValueError("Skill version cannot be empty.")
+        if self.skill_id is not None and not self.skill_id:
+            raise ValueError("Skill identifier cannot be empty.")
+
         if self.skill_id is None:
             self.skill_id = self._build_skill_id(self.name, self.version)
 

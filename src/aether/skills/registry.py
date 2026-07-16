@@ -1,13 +1,9 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import TYPE_CHECKING, Iterable
 
 from aether.skills.package import SkillPackage
 from aether.skills.skill import Skill
-
-if TYPE_CHECKING:
-    from aether.agents.agent import Agent
 
 
 @dataclass(slots=True)
@@ -17,6 +13,7 @@ class SkillRegistry:
     """
 
     _skills: dict[str, Skill] = field(default_factory=dict)
+    _skills_by_name: dict[str, Skill] = field(default_factory=dict)
     _packages: dict[str, SkillPackage] = field(default_factory=dict)
 
     def register(self, skill: Skill) -> None:
@@ -24,6 +21,7 @@ class SkillRegistry:
             raise ValueError(f"Skill '{skill.skill_id}' is already registered.")
 
         self._skills[skill.skill_id] = skill
+        self._skills_by_name[self._normalize_name(skill.name)] = skill
 
     def register_package(self, package: SkillPackage, *, replace: bool = False) -> None:
         package.validate()
@@ -40,6 +38,7 @@ class SkillRegistry:
             skill.package_id = package.package_id
             skill.source_path = str(package.source_path) if package.source_path is not None else None
             self._skills[skill.skill_id] = skill
+            self._skills_by_name[self._normalize_name(skill.name)] = skill
 
         self._packages[package.package_id] = package
 
@@ -54,8 +53,13 @@ class SkillRegistry:
     def resolve(self, skill_id: str) -> Skill:
         return self.get(skill_id)
 
-    def resolve_many(self, skill_ids: Iterable[str]) -> tuple[Skill, ...]:
-        return tuple(self.resolve(skill_id) for skill_id in skill_ids)
+    def resolve_skill(self, skill: Skill) -> Skill:
+        normalized_name = self._normalize_name(skill.name)
+        if skill.skill_id in self._skills:
+            return self._skills[skill.skill_id]
+        if normalized_name in self._skills_by_name:
+            return self._skills_by_name[normalized_name]
+        return skill
 
     def get_package(self, package_id: str) -> SkillPackage:
         try:
@@ -72,19 +76,19 @@ class SkillRegistry:
     def has(self, skill_id: str) -> bool:
         return skill_id in self._skills
 
-    def assign_to_agent(self, agent: "Agent", skill_id: str) -> Skill:
-        skill = self.resolve(skill_id)
-        agent.assign_skill(skill)
-        return skill
-
-    def assign_many_to_agent(self, agent: "Agent", skill_ids: Iterable[str]) -> tuple[Skill, ...]:
-        skills = self.resolve_many(skill_ids)
-        agent.assign_skills(list(skills))
-        return skills
-
     def _remove_package_skills(self, package_id: str) -> None:
         to_remove = [skill_id for skill_id, skill in self._skills.items() if skill.package_id == package_id]
         for skill_id in to_remove:
             self._skills.pop(skill_id, None)
 
         self._packages.pop(package_id, None)
+        self._reindex_skill_names()
+
+    def _reindex_skill_names(self) -> None:
+        self._skills_by_name = {}
+        for skill in self._skills.values():
+            self._skills_by_name[self._normalize_name(skill.name)] = skill
+
+    @staticmethod
+    def _normalize_name(name: str) -> str:
+        return name.strip().lower()

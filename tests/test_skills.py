@@ -10,7 +10,7 @@ from aether.providers.mock import MockProvider
 from aether.skills.loader import LocalSkillPackageLoader
 from aether.skills.package import SkillPackage
 from aether.skills.registry import SkillRegistry
-from aether.skills.skill import Skill, SkillLifecycleCompatibility, SkillPermission
+from aether.skills.skill import Skill, SkillDependency, SkillLifecycleCompatibility, SkillPermission
 
 
 def test_skill_model_builds_identity_and_compatibility():
@@ -19,7 +19,7 @@ def test_skill_model_builds_identity_and_compatibility():
         description="Research skill",
         version="1.0.0",
         permissions=(
-            SkillPermission(namespace="filesystem", action="read"),
+            SkillPermission(namespace=" filesystem ", action=" read "),
             "gmail.send",
         ),
     )
@@ -27,10 +27,19 @@ def test_skill_model_builds_identity_and_compatibility():
     assert skill.skill_id == "research@1.0.0"
     assert skill.description == "Research skill"
     assert skill.permissions[0].identifier == "filesystem.read"
+    assert skill.permissions[0].effect == "allow"
     assert skill.permissions[1].identifier == "gmail.send"
     assert skill.capabilities == skill.permissions
     assert skill.supports_agent_state(AgentLifecycleState.READY) is True
     assert skill.supports_agent_state(AgentLifecycleState.FAILED) is False
+
+
+def test_skill_domain_models_validate_required_fields():
+    with pytest.raises(ValueError):
+        SkillPermission(namespace=" ", action="read")
+
+    with pytest.raises(ValueError):
+        SkillDependency(name=" ")
 
 
 def test_skill_registry_registers_skills_and_validates_duplicates():
@@ -46,17 +55,17 @@ def test_skill_registry_registers_skills_and_validates_duplicates():
         registry.register(skill)
 
 
-def test_skill_registry_assigns_skills_to_agent():
+def test_skill_registry_provides_canonical_skill_version():
     registry = SkillRegistry()
-    skill = Skill(name="Research", version="1.0.0")
-    registry.register(skill)
+    canonical_skill = Skill(name="Research", version="2.0.0")
+    registry.register(canonical_skill)
 
-    agent = Agent(name="Assistant Agent", skill_registry=registry)
+    agent = Agent(name="Assistant Agent", skill_registry=registry, skills=[Skill(name="Research", version="1.0.0")])
 
-    assigned = registry.assign_to_agent(agent, skill.skill_id)
+    resolved_skill = agent.resolve_skills()[0]
 
-    assert assigned is skill
-    assert agent.skills[0] is skill
+    assert resolved_skill is canonical_skill
+    assert resolved_skill.version == "2.0.0"
 
 
 def test_local_skill_package_loader_loads_package_and_registry_installs_it(tmp_path):
@@ -120,9 +129,13 @@ def test_local_skill_package_loader_rejects_invalid_package_manifest(tmp_path):
             {
                 "name": "Broken Package",
                 "version": "1.0.0",
+                "aether_compatibility": [">=0.5,<1.0"],
                 "skills": [
-                    {"name": "Research", "version": "1.0.0"},
-                    {"name": "Research", "version": "1.0.0"},
+                    {
+                        "name": "Research",
+                        "version": "1.0.0",
+                        "package_id": "other-package@1.0.0",
+                    }
                 ],
             }
         ),

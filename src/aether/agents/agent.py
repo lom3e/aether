@@ -192,8 +192,8 @@ class Agent:
         return metadata
 
     def _resolve_canonical_skill(self, skill: Skill) -> Skill:
-        if self.skill_registry is not None and self.skill_registry.has(skill.skill_id):
-            return self.skill_registry.resolve(skill.skill_id)
+        if self.skill_registry is not None:
+            return self.skill_registry.resolve_skill(skill)
         return skill
 
     def _validate_skill_compatibility(self, skills: tuple[Skill, ...]) -> list[Skill]:
