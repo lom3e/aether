@@ -826,7 +826,7 @@ Aether currently has the following architectural decisions approved:
 ✅ Professional Git workflow
 ✅ Extension ecosystem vision
 ✅ Initial Agent Runtime Foundation
-✅ Provider Layer Foundation Design
+✅ Provider Layer Foundation
 
 ---
 

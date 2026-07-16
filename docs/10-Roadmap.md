@@ -153,7 +153,7 @@ The next foundation tasks are:
 
 ## Milestone 0.2 — Provider Layer Foundation
 
-**Status:** In Progress
+**Status:** Completed
 
 **Date:** 2026-07-16
 
@@ -806,7 +806,12 @@ Phase 0 - Foundation
 
 Current milestone:
 
-Milestone 0.2 - Provider Layer Foundation
+
+
+Completed milestones:
+
+✅ Milestone 0.1 - Agent Runtime Foundation
+✅ Milestone 0.2 - Provider Layer Foundation
 
 The goal is to create a professional foundation before writing large amounts of code.
 
