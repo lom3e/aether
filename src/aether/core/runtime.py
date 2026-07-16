@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from aether.agents.agent import Agent
 from aether.core.execution import ExecutionContext, ExecutionResult, Task
+from aether.agents.lifecycle import AgentLifecycleState
 
 
 class Runtime:
@@ -19,6 +20,9 @@ class Runtime:
     def register_agent(self, agent: Agent) -> None:
         if agent.name in self._agents:
             raise ValueError(f"Agent '{agent.name}' is already registered.")
+
+        if agent.lifecycle.state == AgentLifecycleState.CREATED:
+            agent.initialize()
 
         self._agents[agent.name] = agent
 
@@ -41,6 +45,8 @@ class Runtime:
         context = ExecutionContext(
             task=task,
             agent_name=agent.name,
+            memory=agent.memory,
+            tool_registry=agent.tool_registry,
             tools=tuple(agent.tools),
             skills=tuple(agent.skills),
             metadata={
