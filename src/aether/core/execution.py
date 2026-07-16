@@ -5,6 +5,8 @@ from typing import Any
 from uuid import uuid4
 
 from aether.memory.base import Memory
+from aether.skills.registry import SkillRegistry
+from aether.skills.skill import Skill
 from aether.tools.registry import ToolRegistry
 
 
@@ -29,9 +31,10 @@ class ExecutionContext:
     task: Task
     agent_name: str
     memory: Memory | None = None
+    skill_registry: SkillRegistry | None = None
     tool_registry: ToolRegistry | None = None
+    skills: tuple[Skill, ...] = ()
     tools: tuple[str, ...] = ()
-    skills: tuple[str, ...] = ()
     provider_config: dict[str, Any] = field(default_factory=dict)
     metadata: dict[str, Any] = field(default_factory=dict)
 

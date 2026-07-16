@@ -5,6 +5,8 @@ from typing import Any
 from aether.agents.lifecycle import AgentLifecycle, AgentLifecycleState
 from aether.core.execution import ExecutionContext, ExecutionResult, Task
 from aether.memory.base import Memory
+from aether.skills.registry import SkillRegistry
+from aether.skills.skill import Skill
 from aether.providers.base import AIProvider
 from aether.tools.base import ToolExecutionContext
 from aether.tools.registry import ToolRegistry
@@ -25,7 +27,9 @@ class Agent:
         role: str = "assistant",
         provider: AIProvider | None = None,
         memory: Memory | None = None,
+        skill_registry: SkillRegistry | None = None,
         tool_registry: ToolRegistry | None = None,
+        skills: list[Skill] | None = None,
         agent_id: str | None = None,
     ):
         self.id = agent_id or self._build_id(name)
@@ -33,9 +37,10 @@ class Agent:
         self.role = role
         self.provider = provider
         self.memory = memory
+        self.skill_registry = skill_registry
         self.tool_registry = tool_registry
         self.lifecycle = AgentLifecycle()
-        self.skills: list[str] = []
+        self.skills: list[Skill] = list(skills or [])
         self.tools: list[str] = []
         self.metadata: dict[str, Any] = {}
 
@@ -48,6 +53,7 @@ class Agent:
         Execute a task using the configured provider when available.
         """
         self.lifecycle.start()
+        metadata: dict[str, Any] = {"task_id": task.id, "agent_name": self.name}
         try:
             execution_context = context or self._build_context(task)
             metadata = self._build_metadata(task, execution_context)
@@ -63,7 +69,7 @@ class Agent:
             return ExecutionResult(
                 success=False,
                 error=str(exc),
-                metadata={"task_id": task.id, "agent_name": self.name},
+                metadata=metadata,
             )
 
         self.lifecycle.complete()
@@ -80,6 +86,19 @@ class Agent:
 
         return self.execute(task, context)
 
+    def assign_skill(self, skill: Skill) -> None:
+        if any(existing.skill_id == skill.skill_id for existing in self.skills):
+            return
+
+        self.skills.append(skill)
+
+    def assign_skills(self, skills: list[Skill]) -> None:
+        for skill in skills:
+            self.assign_skill(skill)
+
+    def clear_skills(self) -> None:
+        self.skills.clear()
+
     @staticmethod
     def _build_id(name: str) -> str:
         return name.strip().lower().replace(" ", "-")
@@ -89,9 +108,10 @@ class Agent:
             task=task,
             agent_name=self.name,
             memory=self.memory,
+            skill_registry=self.skill_registry,
             tool_registry=self.tool_registry,
-            tools=tuple(self.tools),
             skills=tuple(self.skills),
+            tools=tuple(self.tools),
         )
 
     def _build_metadata(
@@ -104,6 +124,9 @@ class Agent:
             "agent_name": self.name,
             "role": self.role,
             "task_id": task.id,
+            "skill_ids": tuple(skill.skill_id for skill in context.skills),
+            "skill_names": tuple(skill.name for skill in context.skills),
+            "skill_versions": tuple(skill.version for skill in context.skills),
         }
         if context.metadata:
             metadata.update(context.metadata)

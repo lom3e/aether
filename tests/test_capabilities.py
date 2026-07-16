@@ -1,4 +1,5 @@
 from aether.agents.agent import Agent
+from aether.agents.lifecycle import AgentLifecycleState
 from aether.core.execution import Task
 from aether.core.runtime import Runtime
 from aether.memory.in_memory import InMemoryMemory
@@ -57,3 +58,18 @@ def test_runtime_uses_memory_and_tools_in_execution_pipeline():
     assert result.success is True
     assert "memory: context=shared-memory" in result.output
     assert "tool: echo:tool input" in result.output
+
+
+def test_agent_lifecycle_transitions_through_runtime_execution():
+    runtime = Runtime()
+    agent = Agent(name="Assistant Agent", provider=MockProvider())
+
+    assert agent.lifecycle.state == AgentLifecycleState.CREATED
+
+    runtime.register_agent(agent)
+    assert agent.lifecycle.state == AgentLifecycleState.READY
+
+    result = runtime.execute(Task(agent_name="Assistant Agent", instruction="Hello Aether"))
+
+    assert result.success is True
+    assert agent.lifecycle.state == AgentLifecycleState.COMPLETED
