@@ -4,6 +4,7 @@ from dataclasses import dataclass, field
 from typing import Any
 from uuid import uuid4
 
+from aether.agents.lifecycle import AgentLifecycleState
 from aether.memory.base import Memory
 from aether.skills.registry import SkillRegistry
 from aether.skills.skill import Skill
@@ -30,6 +31,7 @@ class ExecutionContext:
 
     task: Task
     agent_name: str
+    agent_state: AgentLifecycleState | None = None
     memory: Memory | None = None
     skill_registry: SkillRegistry | None = None
     tool_registry: ToolRegistry | None = None
