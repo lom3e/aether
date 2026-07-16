@@ -1,10 +1,5 @@
 from aether.agents.agent import Agent
-from aether.providers.base import AIProvider
-
-
-class MockProvider(AIProvider):
-    def generate(self, prompt: str) -> str:
-        return f"Response to: {prompt}"
+from aether.providers.mock import MockProvider
 
 
 def test_agent_execution():
@@ -16,6 +11,6 @@ def test_agent_execution():
         provider=provider
     )
 
-    result = agent.run("Hello Aether")
+    result = agent.execute("Hello Aether")
 
-    assert result == "Response to: Hello Aether"
+    assert result == "Mock response: Hello Aether"

@@ -151,6 +151,75 @@ The next foundation tasks are:
 
 ---
 
+## Milestone 0.2 — Provider Layer Foundation
+
+**Status:** In Progress
+
+**Date:** 2026-07-16
+
+The second Aether foundation milestone focuses on creating the abstraction layer required to integrate different AI model providers.
+
+### Objective
+
+Create a clean provider architecture that allows agents to communicate with different AI backends without direct dependencies.
+
+### Architecture Target
+
+The execution flow will evolve into:
+
+User
+
+↓
+
+Runtime
+
+↓
+
+Agent
+
+↓
+
+AIProvider Interface
+
+↓
+
+Provider Implementation
+
+↓
+
+AI Model
+
+### Deliverables
+
+Implement:
+
+* Provider interface;
+* provider contract;
+* mock provider for testing;
+* provider execution flow;
+* automated tests.
+
+### Not Included
+
+This milestone will not implement:
+
+* real LLM integrations;
+* Ollama integration;
+* OpenAI API integration;
+* model management;
+* advanced configuration.
+
+### Next Steps
+
+After completing this milestone:
+
+* integrate first AI model provider;
+* improve agent execution pipeline;
+* begin Aether Core MVP development.
+
+---
+
+
 ## Next Tasks
 
 * complete technical documentation;
@@ -737,7 +806,7 @@ Phase 0 - Foundation
 
 Current milestone:
 
-Milestone 0.1 - Agent Runtime Foundation
+Milestone 0.2 - Provider Layer Foundation
 
 The goal is to create a professional foundation before writing large amounts of code.
 

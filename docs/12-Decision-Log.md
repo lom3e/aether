@@ -699,9 +699,105 @@ Negative:
 
 ---
 
+# ADR-011
+
+## Title
+
+Create a Provider Abstraction Layer for AI model integrations.
+
+## Date
+
+2026-07-16
+
+## Status
+
+Accepted
+
+---
+
+## Context
+
+Aether agents need to interact with different AI backends.
+
+Future integrations may include:
+
+* local models;
+* cloud models;
+* custom AI providers.
+
+Directly coupling agents to a specific AI service would make the architecture difficult to extend.
+
+---
+
+## Decision
+
+Create a Provider abstraction layer.
+
+The Agent will communicate only with the Provider interface.
+
+Architecture:
+
+```text
+Agent
+
+↓
+
+AIProvider Interface
+
+↓
+
+Provider Implementation
+
+↓
+
+AI Model
+```
+
+The first provider contract will expose a minimal generation interface:
+
+```python
+generate(prompt: str) -> str
+```
+
+Initial implementations will focus on:
+
+* abstract provider contract;
+* mock provider for testing.
+
+Real AI integrations will be added in future milestones.
+
+---
+
+## Reasoning
+
+A provider abstraction allows:
+
+* multiple AI backends;
+* local and cloud model support;
+* easier testing;
+* reduced coupling between agents and AI systems.
+
+---
+
+## Consequences
+
+Positive:
+
+* flexible AI integration architecture;
+* easier future provider additions;
+* cleaner agent design.
+
+Negative:
+
+* additional abstraction layer;
+* more interfaces to maintain.
+
+---
+
 # Related Milestone
 
-Milestone 0.1 - Agent Runtime Foundation
+* Milestone 0.1 - Agent Runtime Foundation
+* Milestone 0.2 - Provider Layer Foundation
 
 # Future Decisions
 
@@ -730,6 +826,7 @@ Aether currently has the following architectural decisions approved:
 ✅ Professional Git workflow
 ✅ Extension ecosystem vision
 ✅ Initial Agent Runtime Foundation
+✅ Provider Layer Foundation Design
 
 ---
 
