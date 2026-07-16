@@ -6,6 +6,7 @@ from typing import Any
 from aether.agents.lifecycle import AgentLifecycle, AgentLifecycleState
 from aether.core.execution import ExecutionContext, ExecutionResult, Task
 from aether.memory.base import Memory
+from aether.skills.executor import SkillExecutor
 from aether.skills.registry import SkillRegistry
 from aether.skills.skill import Skill
 from aether.providers.base import AIProvider
@@ -44,6 +45,7 @@ class Agent:
         self.skills: list[Skill] = []
         self.tools: list[str] = []
         self.metadata: dict[str, Any] = {}
+        self.skill_executor = SkillExecutor(registry=self.skill_registry)
         self.assign_skills(list(skills or []))
 
     def initialize(self) -> AgentLifecycleState:
@@ -58,21 +60,23 @@ class Agent:
         metadata: dict[str, Any] = {"task_id": task.id, "agent_name": self.name}
         try:
             execution_context = context or self._build_context(task)
+            execution_context.agent_state = self.lifecycle.state
             active_skills = execution_context.skills or self.resolve_skills()
             if active_skills is not execution_context.skills:
                 execution_context = replace(execution_context, skills=active_skills)
 
-            incompatible_skills = self._validate_skill_compatibility(execution_context.skills)
-            if incompatible_skills:
-                self.lifecycle.fail()
-                metadata = self._build_metadata(task, execution_context)
-                metadata["incompatible_skills"] = tuple(skill.skill_id for skill in incompatible_skills)
-                metadata["agent_state"] = self.lifecycle.state.value
-                return ExecutionResult(
-                    success=False,
-                    error="One or more skills are incompatible with the current agent lifecycle state.",
-                    metadata=metadata,
-                )
+            for skill in active_skills:
+                skill_result = self.skill_executor.execute(skill, execution_context)
+                if not skill_result.success:
+                    self.lifecycle.fail()
+                    metadata = self._build_metadata(task, execution_context)
+                    metadata["incompatible_skills"] = (skill_result.skill_id,)
+                    metadata["agent_state"] = self.lifecycle.state.value
+                    return ExecutionResult(
+                        success=False,
+                        error="One or more skills are incompatible with the current agent lifecycle state.",
+                        metadata=metadata,
+                    )
 
             metadata = self._build_metadata(task, execution_context)
             prompt = self._build_prompt(task, execution_context)
@@ -195,10 +199,6 @@ class Agent:
         if self.skill_registry is not None:
             return self.skill_registry.resolve_skill(skill)
         return skill
-
-    def _validate_skill_compatibility(self, skills: tuple[Skill, ...]) -> list[Skill]:
-        incompatible = [skill for skill in skills if not skill.is_compatible_with(self.lifecycle.state)]
-        return incompatible
 
     def _build_prompt(self, task: Task, context: ExecutionContext) -> str:
         prompt_parts = [task.instruction]
