@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import time
 from dataclasses import dataclass
 from dataclasses import field
 
@@ -7,7 +8,7 @@ from aether.core.execution import ExecutionContext
 from aether.skills.hooks import SkillExecutionHooks
 from aether.skills.policy import ExecutionPolicy
 from aether.skills.registry import SkillRegistry
-from aether.skills.result import SkillResult
+from aether.skills.result import SkillResult, SkillExecutionStatus
 from aether.skills.skill import Skill
 
 
@@ -26,27 +27,43 @@ class SkillExecutor:
 
     def execute(self, skill: Skill, context: ExecutionContext) -> SkillResult:
         resolved_skill = self.resolve_skill(skill)
+        start_time = time.perf_counter()
 
         try:
             resolved_skill = self.validate(skill, context)
             self.hooks.before_execute(resolved_skill, context)
+            
+            execution_time_ms = (time.perf_counter() - start_time) * 1000
+            
             result = SkillResult(
-                success=True,
+                status=SkillExecutionStatus.SUCCESS,
                 skill_id=resolved_skill.skill_id,
                 skill_name=resolved_skill.name,
+                skill_version=resolved_skill.version,
+                execution_time_ms=execution_time_ms,
                 metadata=self._build_metadata(resolved_skill, context),
             )
             self.hooks.after_execute(resolved_skill, context, result)
             return result
         except ValueError as exc:
             self.hooks.on_error(resolved_skill, context, exc)
-            return self._build_failure_result(resolved_skill, context, str(exc))
+            return self._build_failure_result(
+                resolved_skill, 
+                context, 
+                str(exc),
+                status=SkillExecutionStatus.VALIDATION_FAILED,
+                error_type="ValidationError",
+                start_time=start_time,
+            )
         except Exception as exc:
             self.hooks.on_error(resolved_skill, context, exc)
             return self._build_failure_result(
                 resolved_skill,
                 context,
                 f"Unexpected skill execution error: {exc}",
+                status=SkillExecutionStatus.FAILED,
+                error_type=exc.__class__.__name__,
+                start_time=start_time,
             )
 
     def validate(self, skill: Skill, context: ExecutionContext) -> Skill:
@@ -69,12 +86,27 @@ class SkillExecutor:
 
         return self.registry.resolve_skill(skill)
 
-    def _build_failure_result(self, skill: Skill, context: ExecutionContext, error: str) -> SkillResult:
+    def _build_failure_result(
+        self, 
+        skill: Skill, 
+        context: ExecutionContext, 
+        error: str,
+        status: SkillExecutionStatus = SkillExecutionStatus.FAILED,
+        error_type: str | None = None,
+        start_time: float | None = None,
+    ) -> SkillResult:
+        execution_time_ms = None
+        if start_time is not None:
+            execution_time_ms = (time.perf_counter() - start_time) * 1000
+
         return SkillResult(
-            success=False,
+            status=status,
             skill_id=skill.skill_id,
             skill_name=skill.name,
+            skill_version=skill.version,
             error=error,
+            error_type=error_type,
+            execution_time_ms=execution_time_ms,
             metadata=self._build_metadata(skill, context),
         )
 

@@ -42,10 +42,13 @@ def test_skill_executor_uses_canonical_skill_from_registry():
     )
 
     assert result.success is True
+    assert result.status.value == "success"
     assert result.skill_id == canonical_skill.skill_id
     assert result.skill_name == canonical_skill.name
+    assert result.skill_version == "2.0.0"
     assert result.metadata["skill_version"] == "2.0.0"
     assert result.metadata["timeout_ms"] is None
+    assert result.execution_time_ms is not None
 
 
 def test_skill_executor_blocks_incompatible_skill():
@@ -60,6 +63,8 @@ def test_skill_executor_blocks_incompatible_skill():
     result = executor.execute(skill, context)
 
     assert result.success is False
+    assert result.status.value == "validation_failed"
+    assert result.error_type == "ValidationError"
     assert result.skill_id == skill.skill_id
     assert "incompatible" in result.error.lower()
 
@@ -76,6 +81,8 @@ def test_skill_executor_rejects_incomplete_context():
     result = executor.execute(skill, context)
 
     assert result.success is False
+    assert result.status.value == "validation_failed"
+    assert result.error_type == "ValidationError"
     assert result.skill_id == skill.skill_id
     assert "agent name" in result.error.lower()
 
