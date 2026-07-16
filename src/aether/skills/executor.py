@@ -37,9 +37,10 @@ class SkillExecutor:
             
             result = SkillResult(
                 status=SkillExecutionStatus.SUCCESS,
-                skill_id=resolved_skill.skill_id,
-                skill_name=resolved_skill.name,
-                skill_version=resolved_skill.version,
+                unit_id=resolved_skill.skill_id,
+                unit_name=resolved_skill.name,
+                unit_type="skill",
+                unit_version=resolved_skill.version,
                 execution_time_ms=execution_time_ms,
                 metadata=self._build_metadata(resolved_skill, context),
             )
@@ -101,9 +102,10 @@ class SkillExecutor:
 
         return SkillResult(
             status=status,
-            skill_id=skill.skill_id,
-            skill_name=skill.name,
-            skill_version=skill.version,
+            unit_id=skill.skill_id,
+            unit_name=skill.name,
+            unit_type="skill",
+            unit_version=skill.version,
             error=error,
             error_type=error_type,
             execution_time_ms=execution_time_ms,
