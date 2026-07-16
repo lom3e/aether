@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from dataclasses import replace
 from typing import Any
 
 from aether.agents.lifecycle import AgentLifecycle, AgentLifecycleState
@@ -40,9 +41,10 @@ class Agent:
         self.skill_registry = skill_registry
         self.tool_registry = tool_registry
         self.lifecycle = AgentLifecycle()
-        self.skills: list[Skill] = list(skills or [])
+        self.skills: list[Skill] = []
         self.tools: list[str] = []
         self.metadata: dict[str, Any] = {}
+        self.assign_skills(list(skills or []))
 
     def initialize(self) -> AgentLifecycleState:
         self.lifecycle.initialize()
@@ -56,6 +58,22 @@ class Agent:
         metadata: dict[str, Any] = {"task_id": task.id, "agent_name": self.name}
         try:
             execution_context = context or self._build_context(task)
+            active_skills = execution_context.skills or self.resolve_skills()
+            if active_skills is not execution_context.skills:
+                execution_context = replace(execution_context, skills=active_skills)
+
+            incompatible_skills = self._validate_skill_compatibility(execution_context.skills)
+            if incompatible_skills:
+                self.lifecycle.fail()
+                metadata = self._build_metadata(task, execution_context)
+                metadata["incompatible_skills"] = tuple(skill.skill_id for skill in incompatible_skills)
+                metadata["agent_state"] = self.lifecycle.state.value
+                return ExecutionResult(
+                    success=False,
+                    error="One or more skills are incompatible with the current agent lifecycle state.",
+                    metadata=metadata,
+                )
+
             metadata = self._build_metadata(task, execution_context)
             prompt = self._build_prompt(task, execution_context)
 
@@ -87,6 +105,8 @@ class Agent:
         return self.execute(task, context)
 
     def assign_skill(self, skill: Skill) -> None:
+        skill = self._resolve_canonical_skill(skill)
+
         if any(existing.skill_id == skill.skill_id for existing in self.skills):
             return
 
@@ -99,6 +119,29 @@ class Agent:
     def clear_skills(self) -> None:
         self.skills.clear()
 
+    def resolve_skills(self) -> tuple[Skill, ...]:
+        if self.skill_registry is None:
+            return tuple(self.skills)
+
+        resolved: list[Skill] = []
+        seen: set[str] = set()
+        for skill in self.skills:
+            canonical = self._resolve_canonical_skill(skill)
+            if canonical.skill_id in seen:
+                continue
+            resolved.append(canonical)
+            seen.add(canonical.skill_id)
+
+        return tuple(resolved)
+
+    def assign_registered_skill(self, skill_id: str) -> Skill:
+        if self.skill_registry is None:
+            raise ValueError("No SkillRegistry is configured for this agent.")
+
+        skill = self.skill_registry.resolve(skill_id)
+        self.assign_skill(skill)
+        return skill
+
     @staticmethod
     def _build_id(name: str) -> str:
         return name.strip().lower().replace(" ", "-")
@@ -110,7 +153,7 @@ class Agent:
             memory=self.memory,
             skill_registry=self.skill_registry,
             tool_registry=self.tool_registry,
-            skills=tuple(self.skills),
+            skills=self.resolve_skills(),
             tools=tuple(self.tools),
         )
 
@@ -127,12 +170,35 @@ class Agent:
             "skill_ids": tuple(skill.skill_id for skill in context.skills),
             "skill_names": tuple(skill.name for skill in context.skills),
             "skill_versions": tuple(skill.version for skill in context.skills),
+            "skill_permissions": tuple(
+                permission.identifier
+                for skill in context.skills
+                for permission in skill.permissions
+            ),
+            "skill_dependencies": tuple(
+                {
+                    "skill_id": dependency.name,
+                    "version_spec": dependency.version_spec,
+                    "optional": dependency.optional,
+                }
+                for skill in context.skills
+                for dependency in skill.dependencies
+            ),
         }
         if context.metadata:
             metadata.update(context.metadata)
         if task.metadata:
             metadata["task_metadata"] = task.metadata
         return metadata
+
+    def _resolve_canonical_skill(self, skill: Skill) -> Skill:
+        if self.skill_registry is not None and self.skill_registry.has(skill.skill_id):
+            return self.skill_registry.resolve(skill.skill_id)
+        return skill
+
+    def _validate_skill_compatibility(self, skills: tuple[Skill, ...]) -> list[Skill]:
+        incompatible = [skill for skill in skills if not skill.is_compatible_with(self.lifecycle.state)]
+        return incompatible
 
     def _build_prompt(self, task: Task, context: ExecutionContext) -> str:
         prompt_parts = [task.instruction]

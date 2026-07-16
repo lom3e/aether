@@ -1,9 +1,13 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
+from typing import TYPE_CHECKING, Iterable
 
 from aether.skills.package import SkillPackage
 from aether.skills.skill import Skill
+
+if TYPE_CHECKING:
+    from aether.agents.agent import Agent
 
 
 @dataclass(slots=True)
@@ -22,6 +26,8 @@ class SkillRegistry:
         self._skills[skill.skill_id] = skill
 
     def register_package(self, package: SkillPackage, *, replace: bool = False) -> None:
+        package.validate()
+
         if package.package_id in self._packages and not replace:
             raise ValueError(f"Package '{package.package_id}' is already registered.")
 
@@ -45,6 +51,12 @@ class SkillRegistry:
         except KeyError as exc:
             raise KeyError(f"Skill '{skill_id}' is not registered.") from exc
 
+    def resolve(self, skill_id: str) -> Skill:
+        return self.get(skill_id)
+
+    def resolve_many(self, skill_ids: Iterable[str]) -> tuple[Skill, ...]:
+        return tuple(self.resolve(skill_id) for skill_id in skill_ids)
+
     def get_package(self, package_id: str) -> SkillPackage:
         try:
             return self._packages[package_id]
@@ -59,6 +71,16 @@ class SkillRegistry:
 
     def has(self, skill_id: str) -> bool:
         return skill_id in self._skills
+
+    def assign_to_agent(self, agent: "Agent", skill_id: str) -> Skill:
+        skill = self.resolve(skill_id)
+        agent.assign_skill(skill)
+        return skill
+
+    def assign_many_to_agent(self, agent: "Agent", skill_ids: Iterable[str]) -> tuple[Skill, ...]:
+        skills = self.resolve_many(skill_ids)
+        agent.assign_skills(list(skills))
+        return skills
 
     def _remove_package_skills(self, package_id: str) -> None:
         to_remove = [skill_id for skill_id, skill in self._skills.items() if skill.package_id == package_id]

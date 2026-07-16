@@ -48,7 +48,7 @@ class Runtime:
             memory=agent.memory,
             skill_registry=agent.skill_registry,
             tool_registry=agent.tool_registry,
-            skills=tuple(agent.skills),
+            skills=agent.resolve_skills(),
             tools=tuple(agent.tools),
             metadata={
                 "agent_id": agent.id,
