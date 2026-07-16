@@ -25,6 +25,8 @@ class SkillExecutor:
     hooks: SkillExecutionHooks = field(default_factory=SkillExecutionHooks)
 
     def execute(self, skill: Skill, context: ExecutionContext) -> SkillResult:
+        resolved_skill = self.resolve_skill(skill)
+
         try:
             resolved_skill = self.validate(skill, context)
             self.hooks.before_execute(resolved_skill, context)
@@ -36,15 +38,15 @@ class SkillExecutor:
             )
             self.hooks.after_execute(resolved_skill, context, result)
             return result
+        except ValueError as exc:
+            self.hooks.on_error(resolved_skill, context, exc)
+            return self._build_failure_result(resolved_skill, context, str(exc))
         except Exception as exc:
-            self.hooks.on_error(skill, context, exc)
-            resolved_skill = self.resolve_skill(skill)
-            return SkillResult(
-                success=False,
-                skill_id=resolved_skill.skill_id,
-                skill_name=resolved_skill.name,
-                error=str(exc),
-                metadata=self._build_metadata(resolved_skill, context),
+            self.hooks.on_error(resolved_skill, context, exc)
+            return self._build_failure_result(
+                resolved_skill,
+                context,
+                f"Unexpected skill execution error: {exc}",
             )
 
     def validate(self, skill: Skill, context: ExecutionContext) -> Skill:
@@ -66,6 +68,15 @@ class SkillExecutor:
             return skill
 
         return self.registry.resolve_skill(skill)
+
+    def _build_failure_result(self, skill: Skill, context: ExecutionContext, error: str) -> SkillResult:
+        return SkillResult(
+            success=False,
+            skill_id=skill.skill_id,
+            skill_name=skill.name,
+            error=error,
+            metadata=self._build_metadata(skill, context),
+        )
 
     def _build_metadata(self, skill: Skill, context: ExecutionContext) -> dict[str, object]:
         metadata: dict[str, object] = {

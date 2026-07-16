@@ -24,9 +24,9 @@ class RecordingHooks(SkillExecutionHooks):
         self.events.append(f"error:{skill.skill_id}:{error}")
 
 
-def test_skill_executor_resolves_canonical_skill_and_builds_result():
+def test_skill_executor_uses_canonical_skill_from_registry():
     registry = SkillRegistry()
-    canonical_skill = Skill(name="Research", version="2.0.0")
+    canonical_skill = Skill(skill_id="research@2.0.0", name="Research", version="2.0.0")
     registry.register(canonical_skill)
 
     executor = SkillExecutor(registry=registry)
@@ -36,7 +36,10 @@ def test_skill_executor_resolves_canonical_skill_and_builds_result():
         agent_state=AgentLifecycleState.READY,
     )
 
-    result = executor.execute(Skill(name="Research", version="1.0.0"), context)
+    result = executor.execute(
+        Skill(skill_id=canonical_skill.skill_id, name="Research", version="1.0.0"),
+        context,
+    )
 
     assert result.success is True
     assert result.skill_id == canonical_skill.skill_id
@@ -59,6 +62,22 @@ def test_skill_executor_blocks_incompatible_skill():
     assert result.success is False
     assert result.skill_id == skill.skill_id
     assert "incompatible" in result.error.lower()
+
+
+def test_skill_executor_rejects_incomplete_context():
+    executor = SkillExecutor()
+    context = ExecutionContext(
+        task=Task(agent_name="Assistant Agent", instruction="Prepare a research brief"),
+        agent_name="",
+        agent_state=AgentLifecycleState.READY,
+    )
+    skill = Skill(name="Research", version="1.0.0")
+
+    result = executor.execute(skill, context)
+
+    assert result.success is False
+    assert result.skill_id == skill.skill_id
+    assert "agent name" in result.error.lower()
 
 
 def test_skill_executor_invokes_hooks_and_policy_metadata():
