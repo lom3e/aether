@@ -219,6 +219,23 @@ After completing this milestone:
 
 ---
 
+## Milestone 0.6.0 — Skill Execution Runtime
+
+**Status:** Completed
+
+Implementation of the foundational runtime for skill execution.
+SkillExecutor is integrated into the Agent execution flow.
+
+---
+
+## Milestone 0.6.1 — SkillResult Runtime Contract
+
+**Status:** Completed
+
+Implementation of a robust, standardized runtime contract for SkillResult, separating validation logic, capturing exact execution state, and avoiding error overlaps.
+
+---
+
 
 ## Next Tasks
 
