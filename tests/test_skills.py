@@ -179,4 +179,4 @@ def test_incompatible_skill_blocks_execution():
 
     assert result.success is False
     assert "incompatible" in result.error.lower()
-    assert result.metadata["incompatible_skills"] == (incompatible_skill.skill_id,)
+    assert result.metadata["failed_unit"] == incompatible_skill.skill_id

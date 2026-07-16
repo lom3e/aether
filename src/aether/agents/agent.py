@@ -11,7 +11,6 @@ from aether.skills.executor import SkillExecutor
 from aether.skills.registry import SkillRegistry
 from aether.skills.skill import Skill
 from aether.providers.base import AIProvider
-from aether.tools.base import ToolExecutionContext
 from aether.tools.registry import ToolRegistry
 
 
@@ -19,9 +18,14 @@ class Agent:
     """
     Base Aether agent.
 
-    The class keeps the core identity and execution surface small so that
-    skills, tools, memory and providers can be added later without reshaping
-    the contract.
+    The Agent is responsible for:
+    - identity and lifecycle management
+    - building the ExecutionContext
+    - coordinating the LLM provider
+    - returning the final ExecutionResult
+
+    All runtime orchestration (skill loop, tool dispatch, fail-fast)
+    is delegated to the ExecutionEngine.
     """
 
     def __init__(
@@ -34,6 +38,7 @@ class Agent:
         tool_registry: ToolRegistry | None = None,
         skills: list[Skill] | None = None,
         agent_id: str | None = None,
+        execution_engine: ExecutionEngine | None = None,
     ):
         self.id = agent_id or self._build_id(name)
         self.name = name
@@ -46,7 +51,7 @@ class Agent:
         self.skills: list[Skill] = []
         self.tools: list[str] = []
         self.metadata: dict[str, Any] = {}
-        self.execution_engine = ExecutionEngine(
+        self.execution_engine = execution_engine or ExecutionEngine(
             skill_executor=SkillExecutor(registry=self.skill_registry),
             tool_registry=self.tool_registry,
         )
@@ -58,36 +63,42 @@ class Agent:
 
     def execute(self, task: Task, context: ExecutionContext | None = None) -> ExecutionResult:
         """
-        Execute a task using the configured provider when available.
+        Execute a task.
+
+        The Agent coordinates lifecycle and provider.
+        The ExecutionEngine orchestrates skill/tool execution.
         """
         self.lifecycle.start()
         metadata: dict[str, Any] = {"task_id": task.id, "agent_name": self.name}
         try:
             execution_context = context or self._build_context(task)
             execution_context.agent_state = self.lifecycle.state
-            active_skills = execution_context.skills or self.resolve_skills()
-            if active_skills is not execution_context.skills:
-                execution_context = replace(execution_context, skills=active_skills)
 
-            for skill in active_skills:
-                skill_result = self.execution_engine.execute_skill(skill, execution_context)
-                if not skill_result.success:
-                    self.lifecycle.fail()
-                    metadata = self._build_metadata(task, execution_context)
-                    metadata["incompatible_skills"] = (skill_result.unit_id,)
-                    metadata["agent_state"] = self.lifecycle.state.value
-                    return ExecutionResult(
-                        success=False,
-                        error="One or more skills are incompatible with the current agent lifecycle state.",
-                        metadata=metadata,
-                    )
+            plan = self.execution_engine.build_plan(execution_context)
+            unit_results = self.execution_engine.run(plan, execution_context)
+
+            failed = next((r for r in unit_results if not r.success), None)
+            if failed:
+                self.lifecycle.fail()
+                metadata = self._build_metadata(task, execution_context)
+                metadata["failed_unit"] = failed.unit_id
+                metadata["agent_state"] = self.lifecycle.state.value
+                return ExecutionResult(
+                    success=False,
+                    error=failed.error or "Execution unit failed.",
+                    metadata=metadata,
+                )
 
             metadata = self._build_metadata(task, execution_context)
-            prompt = self._build_prompt(task, execution_context)
+            prompt = self._build_prompt(task, execution_context, unit_results)
 
             if self.provider is None:
                 self.lifecycle.complete()
-                return ExecutionResult(success=True, output=f"{self.name} received: {prompt}", metadata=metadata)
+                return ExecutionResult(
+                    success=True,
+                    output=f"{self.name} received: {prompt}",
+                    metadata=metadata,
+                )
 
             output = self.provider.generate(prompt)
         except Exception as exc:  # pragma: no cover - defensive base path
@@ -106,10 +117,7 @@ class Agent:
         )
 
     def run(self, task: Task, context: ExecutionContext | None = None) -> ExecutionResult:
-        """
-        Backward-compatible alias for execute().
-        """
-
+        """Backward-compatible alias for execute()."""
         return self.execute(task, context)
 
     def assign_skill(self, skill: Skill) -> None:
@@ -204,15 +212,22 @@ class Agent:
             return self.skill_registry.resolve_skill(skill)
         return skill
 
-    def _build_prompt(self, task: Task, context: ExecutionContext) -> str:
+    def _build_prompt(
+        self,
+        task: Task,
+        context: ExecutionContext,
+        unit_results: list,
+    ) -> str:
         prompt_parts = [task.instruction]
         memory_context = self._collect_memory_context(task, context)
         if memory_context:
             prompt_parts.append(f"memory: {memory_context}")
 
-        tool_output = self._execute_requested_tool(task, context)
-        if tool_output:
-            prompt_parts.append(f"tool: {tool_output}")
+        # Extract tool output from unit results
+        for result in unit_results:
+            from aether.engine.units import UnitType
+            if result.unit_type == UnitType.TOOL and result.output:
+                prompt_parts.append(f"tool: {result.output}")
 
         return "\n".join(prompt_parts)
 
@@ -235,31 +250,3 @@ class Agent:
                 values.append(f"{key}={value}")
 
         return ", ".join(values) if values else None
-
-    def _execute_requested_tool(self, task: Task, context: ExecutionContext) -> str | None:
-        registry = context.tool_registry or self.tool_registry
-        if registry is None:
-            return None
-
-        tool_name = task.metadata.get("tool_name")
-        if not tool_name:
-            return None
-
-        tool_input = task.metadata.get("tool_input", task.instruction)
-        tool_context = ToolExecutionContext(
-            agent_name=self.name,
-            task_id=task.id,
-            metadata={"task_metadata": task.metadata},
-        )
-        try:
-            result = self.execution_engine.execute_tool(
-                tool_name,
-                tool_input,
-                tool_context,
-                override_registry=registry,
-            )
-            if not result.success:
-                raise RuntimeError(result.error)
-            return result.output
-        except KeyError:
-            raise
