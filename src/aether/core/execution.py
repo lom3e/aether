@@ -4,6 +4,9 @@ from dataclasses import dataclass, field
 from typing import Any
 from uuid import uuid4
 
+from aether.memory.base import Memory
+from aether.tools.registry import ToolRegistry
+
 
 @dataclass(slots=True)
 class Task:
@@ -25,7 +28,8 @@ class ExecutionContext:
 
     task: Task
     agent_name: str
-    memory: Any = None
+    memory: Memory | None = None
+    tool_registry: ToolRegistry | None = None
     tools: tuple[str, ...] = ()
     skills: tuple[str, ...] = ()
     provider_config: dict[str, Any] = field(default_factory=dict)
