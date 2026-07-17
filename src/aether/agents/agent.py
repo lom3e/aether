@@ -11,6 +11,7 @@ from aether.skills.executor import SkillExecutor
 from aether.skills.registry import SkillRegistry
 from aether.skills.skill import Skill
 from aether.providers.base import AIProvider
+from aether.providers.types import Message
 from aether.tools.registry import ToolRegistry
 
 
@@ -90,17 +91,26 @@ class Agent:
                 )
 
             metadata = self._build_metadata(task, execution_context)
-            prompt = self._build_prompt(task, execution_context, unit_results)
+            messages = self._build_messages(task, execution_context, unit_results)
 
             if self.provider is None:
                 self.lifecycle.complete()
+                # No provider configured: echo the last user message content.
+                user_content = next(
+                    (m.content for m in reversed(messages) if m.role == "user"),
+                    task.instruction,
+                )
                 return ExecutionResult(
                     success=True,
-                    output=f"{self.name} received: {prompt}",
+                    output=f"{self.name} received: {user_content}",
                     metadata=metadata,
                 )
 
-            output = self.provider.generate(prompt)
+            response = self.provider.generate(messages)
+            metadata["provider_model"] = response.model
+            metadata["provider_usage"] = response.usage
+            metadata["provider_finish_reason"] = response.finish_reason
+            output = response.content
         except Exception as exc:  # pragma: no cover - defensive base path
             self.lifecycle.fail()
             return ExecutionResult(
@@ -212,24 +222,36 @@ class Agent:
             return self.skill_registry.resolve_skill(skill)
         return skill
 
-    def _build_prompt(
+    def _build_messages(
         self,
         task: Task,
         context: ExecutionContext,
         unit_results: list,
-    ) -> str:
-        prompt_parts = [task.instruction]
+    ) -> list[Message]:
+        """Build a structured message list for the provider.
+
+        Constructs the conversation in the format expected by modern LLMs:
+        - A "system" message encoding the agent role/identity.
+        - An optional "system" message injecting memory context.
+        - One or more "system" messages injecting tool outputs.
+        - A "user" message with the task instruction.
+        """
+        from aether.engine.units import UnitType
+
+        messages: list[Message] = [
+            Message(role="system", content=f"You are {self.name}, a {self.role} agent."),
+        ]
+
         memory_context = self._collect_memory_context(task, context)
         if memory_context:
-            prompt_parts.append(f"memory: {memory_context}")
+            messages.append(Message(role="system", content=f"Memory context: {memory_context}"))
 
-        # Extract tool output from unit results
         for result in unit_results:
-            from aether.engine.units import UnitType
             if result.unit_type == UnitType.TOOL and result.output:
-                prompt_parts.append(f"tool: {result.output}")
+                messages.append(Message(role="system", content=f"Tool result: {result.output}"))
 
-        return "\n".join(prompt_parts)
+        messages.append(Message(role="user", content=task.instruction))
+        return messages
 
     def _collect_memory_context(self, task: Task, context: ExecutionContext) -> str | None:
         memory = context.memory or self.memory

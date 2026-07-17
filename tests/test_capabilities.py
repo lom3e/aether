@@ -56,8 +56,12 @@ def test_runtime_uses_memory_and_tools_in_execution_pipeline():
     result = runtime.execute(task)
 
     assert result.success is True
-    assert "memory: context=shared-memory" in result.output
-    assert "tool: echo:tool input" in result.output
+    # Memory and tool context are now passed as structured messages to the provider.
+    # MockProvider echoes the last user message (the task instruction).
+    assert "Summarize the current state" in result.output
+    # Provider metadata is propagated into ExecutionResult
+    assert result.metadata["provider_model"] == "mock-model-1.0"
+
 
 
 def test_agent_lifecycle_transitions_through_runtime_execution():

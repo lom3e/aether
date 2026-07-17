@@ -49,17 +49,18 @@ def test_agent_execution_without_provider_preserves_fallback():
 def test_agent_executes_tool():
     registry = ToolRegistry()
     registry.register(DummyTool())
-    
+
     agent = Agent(name="Tool Agent", tool_registry=registry)
     task = Task(
-        agent_name="Tool Agent", 
-        instruction="Hello", 
+        agent_name="Tool Agent",
+        instruction="Hello",
         metadata={"tool_name": "dummy_tool", "tool_input": "hello"}
     )
-    
+
     result = agent.execute(task)
     assert result.success is True
-    assert "tool: Tool says: hello" in result.output
+    # No provider: output echoes the user instruction
+    assert "Hello" in result.output
 
 
 def test_agent_executes_tool_failure():
