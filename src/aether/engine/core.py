@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 
-from aether.core.execution import ExecutionContext
+from aether.core.execution import ExecutionContext, ToolCall, ToolResult
 from aether.engine.plan import ExecutionPlan, ExecutionPlanState
 from aether.engine.result import UnitExecutionResult, UnitExecutionStatus
 from aether.engine.units import SkillUnit, ToolUnit, UnitType
@@ -29,6 +29,88 @@ class ExecutionEngine:
     tool_registry: ToolRegistry | None = None
 
     # ── Public orchestration API ─────────────────────────────────────────────
+
+    def execute_tool_calls(
+        self,
+        tool_calls: list[ToolCall],
+        context: ExecutionContext,
+    ) -> list[ToolResult]:
+        """
+        Execute a list of ToolCall requests dynamically.
+
+        Uses ToolExecutor to invoke each tool and returns the list of ToolResults.
+        """
+        results: list[ToolResult] = []
+
+        for call in tool_calls:
+            registry = self.tool_registry
+            if not registry:
+                results.append(ToolResult(
+                    call_id=call.call_id,
+                    output="",
+                    error="ToolRegistry is not configured.",
+                    success=False,
+                ))
+                continue
+
+            try:
+                tool = registry.get(call.tool_name)
+            except KeyError:
+                results.append(ToolResult(
+                    call_id=call.call_id,
+                    output="",
+                    error=f"Tool '{call.tool_name}' is not registered.",
+                    success=False,
+                ))
+                continue
+
+            tool_context = ToolExecutionContext(
+                agent_name=context.agent_name,
+                task_id=context.task.id,
+            )
+
+            # Resolve input arguments (Tool.execute accepts a string)
+            input_data = ""
+            args = call.arguments
+            if isinstance(args, dict):
+                if "input_data" in args:
+                    input_data = str(args["input_data"])
+                elif "input" in args:
+                    input_data = str(args["input"])
+                elif args:
+                    input_data = str(next(iter(args.values())))
+                else:
+                    input_data = ""
+            elif isinstance(args, str):
+                input_data = args
+            else:
+                input_data = str(args)
+
+            try:
+                res = self.tool_executor.execute(tool, input_data, tool_context)
+                if res.success:
+                    results.append(ToolResult(
+                        call_id=call.call_id,
+                        output=str(res.output) if res.output is not None else "",
+                        success=True,
+                    ))
+                else:
+                    results.append(ToolResult(
+                        call_id=call.call_id,
+                        output="",
+                        error=res.error or "Tool execution failed.",
+                        success=False,
+                    ))
+            except Exception as e:
+                results.append(ToolResult(
+                    call_id=call.call_id,
+                    output="",
+                    error=str(e),
+                    success=False,
+                ))
+
+        return results
+
 
     def build_plan(self, context: ExecutionContext) -> ExecutionPlan:
         """

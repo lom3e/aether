@@ -6,8 +6,9 @@ from aether.providers.mock import MockProvider
 
 
 class FailingProvider(AIProvider):
-    def generate(self, prompt: str) -> str:
+    def generate(self, messages, tools=None):
         raise RuntimeError("provider failed")
+
 
 
 def test_task_and_result_models_can_be_created():
