@@ -26,6 +26,30 @@ class Message:
 
 
 @dataclass(slots=True)
+class ToolCall:
+    """
+    A request by the LLM to execute a tool.
+    """
+
+    call_id: str
+    tool_name: str
+    arguments: dict[str, Any]
+
+
+@dataclass(slots=True)
+class ToolResult:
+    """
+    The result of executing a ToolCall.
+    """
+
+    call_id: str
+    output: str
+    error: str | None = None
+    success: bool = True
+
+
+
+@dataclass(slots=True)
 class Task:
     """
     Minimal work unit assigned to an agent.
