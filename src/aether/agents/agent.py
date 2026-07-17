@@ -157,6 +157,8 @@ class Agent:
                     metadata = self._build_metadata(task, agent_context)
                     metadata["agent_state"] = self.lifecycle.state.value
                     metadata["provider_usage"] = agent_context.token_usage
+                    metadata["turns"] = agent_context.current_turn
+                    metadata["tool_calls"] = tool_calls_count
                     return ExecutionResult(
                         success=False,
                         error=f"Max turns ({self.max_turns}) reached.",
@@ -180,6 +182,8 @@ class Agent:
                         metadata = self._build_metadata(task, agent_context)
                         metadata["agent_state"] = self.lifecycle.state.value
                         metadata["provider_usage"] = agent_context.token_usage
+                        metadata["turns"] = agent_context.current_turn
+                        metadata["tool_calls"] = tool_calls_count
                         return ExecutionResult(
                             success=False,
                             error=f"Max total tokens limit ({self.max_total_tokens}) exceeded.",
@@ -209,11 +213,14 @@ class Agent:
                         metadata = self._build_metadata(task, agent_context)
                         metadata["agent_state"] = self.lifecycle.state.value
                         metadata["provider_usage"] = agent_context.token_usage
+                        metadata["turns"] = agent_context.current_turn
+                        metadata["tool_calls"] = tool_calls_count
                         return ExecutionResult(
                             success=False,
                             error=f"Max tool calls limit ({self.max_tool_calls}) exceeded.",
                             metadata=metadata,
                         )
+
 
                     tool_calls_count += len(calls_to_execute)
 
