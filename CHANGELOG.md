@@ -7,6 +7,26 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [v0.10.0] - 2026-07-17
+
+### Added
+- **`AgentContext`**: Runtime stateful execution context subclassing `ExecutionContext` to track messages, tokens usage, metadata, and loop turns.
+- **Dynamic Tool Contracts**: `ToolCall` and `ToolResult` defined in the core execution layer (`src/aether/core/execution.py`) to keep runtime contracts independent of specific AI providers.
+- **ReAct Execution Loop**: Stateful agent execution loop directly in `Agent.execute()`, supporting dynamic, multi-turn tool execution.
+- **Loop Protections**: Configurable, independent safety limits `max_turns` (default 10), `max_tool_calls` (default 20), and `max_total_tokens` (default `None`) inside `Agent`.
+- **Dynamic Engine Dispatch**: `ExecutionEngine.execute_tool_calls()` executes `ToolCall` objects dynamically using `ToolExecutor`.
+- **Enhanced `ProviderResponse`**: Includes a normalized `Message` returned by the provider for cleaner, provider-agnostic handling.
+
+### Changed
+- **`AIProvider.generate()`** signature extended with optional `tools: list[dict[str, Any]] | None = None`.
+- **`OllamaProvider`** updated to support schema-based tool registration via `/api/chat` and native Ollama tool call parsing back to `ToolCall` contracts.
+- **Ollama Payload Adapter**: Dynamically converts stringified JSON arguments back to dicts for compatibility with Ollama Go parser (preventing HTTP 400 Bad Request errors).
+
+### Breaking Changes
+- `AIProvider.generate()` signature updated from `generate(messages: list[Message]) -> ProviderResponse` to `generate(messages: list[Message], tools: list[dict[str, Any]] | None = None) -> ProviderResponse`.
+
+---
+
 ## [v0.9.0] - 2026-07-17
 
 ### Added
