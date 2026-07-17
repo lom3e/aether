@@ -55,6 +55,12 @@ class OllamaProvider(AIProvider):
 
     The provider converts Aether's structured ``Message`` list into the
     Ollama request format and maps the response back into a ``ProviderResponse``.
+
+    .. note::
+       Local Ollama models (especially larger ones) can take a significant
+       amount of time to load into memory on the first request (cold start).
+       It is highly recommended to increase the ``timeout`` in ``ProviderConfig``
+       (e.g., to 120.0s or more) when running large models locally.
     """
 
     def __init__(self, config: ProviderConfig | None = None) -> None:
