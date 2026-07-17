@@ -12,6 +12,20 @@ from aether.tools.registry import ToolRegistry
 
 
 @dataclass(slots=True)
+class Message:
+    """
+    A single message in a conversation.
+    """
+
+    role: str
+    content: str
+
+    def to_dict(self) -> dict[str, str]:
+        """Serialize to a plain dict for HTTP payloads."""
+        return {"role": self.role, "content": self.content}
+
+
+@dataclass(slots=True)
 class Task:
     """
     Minimal work unit assigned to an agent.
@@ -51,3 +65,42 @@ class ExecutionResult:
     output: str | None = None
     error: str | None = None
     metadata: dict[str, Any] = field(default_factory=dict)
+
+
+@dataclass(slots=True)
+class AgentContext(ExecutionContext):
+    """
+    Mutable context tracking temporary conversation/execution state for a single run.
+    """
+
+    messages: list[Message] = field(default_factory=list)
+    token_usage: dict[str, int] = field(
+        default_factory=lambda: {
+            "prompt_tokens": 0,
+            "completion_tokens": 0,
+            "total_tokens": 0,
+        }
+    )
+    execution_state: str = "pending"
+    current_turn: int = 0
+
+    @classmethod
+    def from_context(
+        cls,
+        context: ExecutionContext,
+        messages: list[Message] | None = None,
+    ) -> AgentContext:
+        return cls(
+            task=context.task,
+            agent_name=context.agent_name,
+            agent_state=context.agent_state,
+            memory=context.memory,
+            skill_registry=context.skill_registry,
+            tool_registry=context.tool_registry,
+            skills=context.skills,
+            tools=context.tools,
+            provider_config=context.provider_config,
+            metadata=context.metadata,
+            messages=messages or [],
+        )
+

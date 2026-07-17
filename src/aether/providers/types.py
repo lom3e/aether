@@ -11,22 +11,8 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 
 
-@dataclass
-class Message:
-    """
-    A single message in a conversation.
+from aether.core.execution import Message
 
-    Attributes:
-        role: The role of the message sender. One of "system", "user", "assistant".
-        content: The text content of the message.
-    """
-
-    role: str
-    content: str
-
-    def to_dict(self) -> dict[str, str]:
-        """Serialize to a plain dict for HTTP payloads."""
-        return {"role": self.role, "content": self.content}
 
 
 @dataclass
