@@ -51,9 +51,12 @@ class ProviderResponse:
                "prompt_tokens", "completion_tokens", "total_tokens".
         finish_reason: Why the model stopped. Typically "stop", "length",
                        "tool_calls", or "content_filter".
+        message: Normalized Message object returned by the provider.
     """
 
     content: str
     model: str
     usage: dict[str, int] = field(default_factory=dict)
     finish_reason: str = "stop"
+    message: Message | None = None
+

@@ -4,6 +4,7 @@ from dataclasses import dataclass, field
 from typing import Any
 from uuid import uuid4
 
+import json
 from aether.agents.lifecycle import AgentLifecycleState
 from aether.memory.base import Memory
 from aether.skills.registry import SkillRegistry
@@ -19,10 +20,25 @@ class Message:
 
     role: str
     content: str
+    tool_calls: list[ToolCall] | None = None
 
     def to_dict(self) -> dict[str, str]:
         """Serialize to a plain dict for HTTP payloads."""
-        return {"role": self.role, "content": self.content}
+        d = {"role": self.role, "content": self.content}
+        if self.tool_calls is not None:
+            d["tool_calls"] = [
+                {
+                    "id": tc.call_id,
+                    "type": "function",
+                    "function": {
+                        "name": tc.tool_name,
+                        "arguments": json.dumps(tc.arguments) if isinstance(tc.arguments, dict) else tc.arguments,
+                    },
+                }
+                for tc in self.tool_calls
+            ]
+        return d
+
 
 
 @dataclass(slots=True)
