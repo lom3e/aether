@@ -98,13 +98,27 @@ class OllamaProvider(AIProvider):
         messages: list[Message],
         tools: list[dict[str, Any]] | None = None,
     ) -> dict[str, Any]:
+        msg_dicts = []
+        for m in messages:
+            d = m.to_dict()
+            if d.get("role") == "assistant" and "tool_calls" in d:
+                for tc in d["tool_calls"]:
+                    func = tc.get("function", {})
+                    if "arguments" in func and isinstance(func["arguments"], str):
+                        try:
+                            func["arguments"] = json.loads(func["arguments"])
+                        except json.JSONDecodeError:
+                            pass
+            msg_dicts.append(d)
+
         payload: dict[str, Any] = {
             "model": self._model,
-            "messages": [m.to_dict() for m in messages],
+            "messages": msg_dicts,
             "stream": False,
         }
         if tools:
             payload["tools"] = tools
+
         if self.config.max_tokens is not None:
             payload["options"] = {"num_predict": self.config.max_tokens}
         if self.config.temperature != 0.7:  # Only include if non-default

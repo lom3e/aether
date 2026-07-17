@@ -21,6 +21,7 @@ class Message:
     role: str
     content: str
     tool_calls: list[ToolCall] | None = None
+    tool_call_id: str | None = None
 
     def to_dict(self) -> dict[str, str]:
         """Serialize to a plain dict for HTTP payloads."""
@@ -37,7 +38,10 @@ class Message:
                 }
                 for tc in self.tool_calls
             ]
+        if self.tool_call_id is not None:
+            d["tool_call_id"] = self.tool_call_id
         return d
+
 
 
 
