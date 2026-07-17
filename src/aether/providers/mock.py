@@ -7,6 +7,8 @@ conversation. No external calls are made, making tests fast and hermetic.
 
 from __future__ import annotations
 
+from typing import Any
+
 from aether.providers.base import AIProvider
 from aether.providers.types import Message, ProviderConfig, ProviderResponse
 
@@ -24,7 +26,11 @@ class MockProvider(AIProvider):
     def __init__(self, config: ProviderConfig | None = None) -> None:
         super().__init__(config)
 
-    def generate(self, messages: list[Message]) -> ProviderResponse:
+    def generate(
+        self,
+        messages: list[Message],
+        tools: list[dict[str, Any]] | None = None,
+    ) -> ProviderResponse:
         """
         Return a deterministic mock response.
 
@@ -33,6 +39,7 @@ class MockProvider(AIProvider):
 
         Args:
             messages: Conversation messages.
+            tools: Optional tool definitions.
 
         Returns:
             ProviderResponse with mock content and zero-cost usage metadata.
@@ -41,9 +48,12 @@ class MockProvider(AIProvider):
         last_user = user_messages[-1].content if user_messages else "empty"
 
         content = f"Mock response: {last_user}"
+        msg = Message(role="assistant", content=content)
         return ProviderResponse(
             content=content,
             model=self.MOCK_MODEL,
             usage={"prompt_tokens": 0, "completion_tokens": 0, "total_tokens": 0},
             finish_reason="stop",
+            message=msg,
         )
+

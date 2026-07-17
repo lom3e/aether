@@ -39,9 +39,14 @@ class AIProvider(ABC):
         self.config = config or ProviderConfig()
 
     @abstractmethod
-    def generate(self, messages: list[Message]) -> ProviderResponse:
+    def generate(
+        self,
+        messages: list[Message],
+        tools: list[dict[str, Any]] | None = None,
+    ) -> ProviderResponse:
         """
         Generate a response from an AI model.
+
 
         Args:
             messages: Ordered list of conversation messages. Typically starts

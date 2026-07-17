@@ -69,12 +69,17 @@ class OllamaProvider(AIProvider):
         self._model = self.config.model or _DEFAULT_MODEL
         self._endpoint = f"{self._base_url}{_CHAT_PATH}"
 
-    def generate(self, messages: list[Message]) -> ProviderResponse:
+    def generate(
+        self,
+        messages: list[Message],
+        tools: list[dict[str, Any]] | None = None,
+    ) -> ProviderResponse:
         """
         Send messages to the Ollama chat API and return the response.
 
         Args:
             messages: Ordered conversation messages.
+            tools: Optional tool definitions.
 
         Returns:
             ProviderResponse with content, model, usage, and finish_reason.
@@ -85,15 +90,21 @@ class OllamaProvider(AIProvider):
             RateLimitError: If Ollama returns HTTP 429.
             AuthenticationError: If Ollama returns HTTP 401.
         """
-        payload = self._build_payload(messages)
+        payload = self._build_payload(messages, tools)
         return self._send(payload)
 
-    def _build_payload(self, messages: list[Message]) -> dict[str, Any]:
+    def _build_payload(
+        self,
+        messages: list[Message],
+        tools: list[dict[str, Any]] | None = None,
+    ) -> dict[str, Any]:
         payload: dict[str, Any] = {
             "model": self._model,
             "messages": [m.to_dict() for m in messages],
             "stream": False,
         }
+        if tools:
+            payload["tools"] = tools
         if self.config.max_tokens is not None:
             payload["options"] = {"num_predict": self.config.max_tokens}
         if self.config.temperature != 0.7:  # Only include if non-default
@@ -139,10 +150,29 @@ class OllamaProvider(AIProvider):
         ) from exc
 
     def _parse_response(self, raw: dict[str, Any]) -> ProviderResponse:
+        import uuid
         message = raw.get("message", {})
         content = message.get("content", "")
         model = raw.get("model", self._model)
         finish_reason = "stop" if raw.get("done", True) else "length"
+
+        # Parse tool calls if present
+        tool_calls = None
+        raw_calls = message.get("tool_calls")
+        if raw_calls:
+            from aether.core.execution import ToolCall
+            tool_calls = []
+            for tc in raw_calls:
+                func = tc.get("function", {})
+                name = func.get("name", "")
+                args = func.get("arguments", {})
+                if isinstance(args, str):
+                    try:
+                        args = json.loads(args)
+                    except json.JSONDecodeError:
+                        args = {"input": args}
+                call_id = tc.get("id") or f"call_{uuid.uuid4().hex[:8]}"
+                tool_calls.append(ToolCall(call_id=call_id, tool_name=name, arguments=args))
 
         # Ollama usage keys
         usage: dict[str, int] = {}
@@ -153,9 +183,17 @@ class OllamaProvider(AIProvider):
         if "prompt_tokens" in usage and "completion_tokens" in usage:
             usage["total_tokens"] = usage["prompt_tokens"] + usage["completion_tokens"]
 
+        final_finish = "tool_calls" if tool_calls else finish_reason
+        normalized_msg = Message(
+            role="assistant",
+            content=content,
+            tool_calls=tool_calls,
+        )
+
         return ProviderResponse(
             content=content,
             model=model,
             usage=usage,
-            finish_reason=finish_reason,
+            finish_reason=final_finish,
+            message=normalized_msg,
         )
