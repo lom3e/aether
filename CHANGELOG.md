@@ -7,7 +7,44 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
-## [v0.8.0] - 2026-07-16
+## [v0.9.0] - 2026-07-17
+
+### Added
+- **Provider data contracts**: `Message`, `ProviderConfig`, `ProviderResponse` in `src/aether/providers/types.py`.
+- **Provider error hierarchy**: `ProviderError`, `AuthenticationError`, `RateLimitError`, `TimeoutError`, `ProviderNotFoundError`, `ProviderConnectionError` in `src/aether/providers/errors.py`.
+- **ProviderManager**: Registry and factory for dynamic provider instantiation by name (`src/aether/providers/manager.py`).
+- **OllamaProvider**: Concrete integration with a locally-running Ollama server via stdlib `urllib`. Supports `base_url`, `model`, `temperature`, `max_tokens`, `timeout`. No external dependencies (`src/aether/providers/ollama.py`).
+- **`pytest.mark.integration`**: Marker registered in `pyproject.toml` for tests requiring external services.
+
+### Changed
+- **`AIProvider.generate()`** now accepts `list[Message]` and returns `ProviderResponse` (previously `str -> str`).
+- **`MockProvider`** updated to conform to the new message-based interface.
+- **`Agent._build_messages()`** replaces `_build_prompt()`: builds a structured message list (system identity, memory, tool results, user instruction).
+- **`ExecutionResult.metadata`** now includes `provider_model`, `provider_usage`, and `provider_finish_reason` when a provider is used.
+
+### Breaking Changes
+- `AIProvider.generate()` signature changed from `generate(prompt: str) -> str` to `generate(messages: list[Message]) -> ProviderResponse`. Custom provider implementations must be updated.
+
+### Migration Notes
+```python
+# Before (v0.8.0 and earlier)
+class MyProvider(AIProvider):
+    def generate(self, prompt: str) -> str:
+        return call_llm(prompt)
+
+# After (v0.9.0)
+from aether.providers import Message, ProviderResponse
+
+class MyProvider(AIProvider):
+    def generate(self, messages: list[Message]) -> ProviderResponse:
+        prompt = messages[-1].content  # or process all messages
+        content = call_llm(prompt)
+        return ProviderResponse(content=content, model="my-model")
+```
+
+---
+
+
 
 ### Added
 - **ExecutionEngine Orchestration**: The engine now owns the execution loop, dispatch mechanism, fail-fast implementation, and execution plan building.

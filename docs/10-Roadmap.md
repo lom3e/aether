@@ -254,11 +254,20 @@ Elevation of `ExecutionEngine` to primary orchestrator of execution, removing lo
 
 ## Milestone 0.9.0 — Planning & Context Runtime
 
-**Status:** Planned
+**Status:** Completed
 
-Introduce the primary Planning Engine to build `ExecutionPlan`s dynamically using LLM reasoning, incorporate capability context directly into prompt generation, and enhance state machine transitions.
+Modernization of the provider layer: introduced `Message`, `ProviderConfig`, `ProviderResponse`, error hierarchy, `ProviderManager` registry, and `OllamaProvider` for real local LLM integration.
 
 ---
+
+## Milestone 0.10.0 — Planning & Context Runtime
+
+**Status:** Planned
+
+Introduce a Planning Engine that uses LLM reasoning to dynamically construct `ExecutionPlan`s from task instructions. Enhance the context layer with capability-aware prompt building.
+
+---
+
 
 
 
@@ -848,7 +857,7 @@ Phase 0 - Foundation
 
 Current milestone:
 
-Milestone 0.9.0 - Planning & Context Runtime
+Milestone 0.10.0 - Planning & Context Runtime
 
 Completed milestones:
 
@@ -858,8 +867,10 @@ Completed milestones:
 ✅ Milestone 0.6.1 - SkillResult Runtime Contract
 ✅ Milestone 0.7.0 - Unified Execution Runtime
 ✅ Milestone 0.8.0 - Execution Orchestration Foundation
+✅ Milestone 0.9.0 - Provider Runtime Integration
 
 The goal is to create a professional foundation before writing large amounts of code.
+
 
 
 ---

@@ -19,6 +19,10 @@ Execution Units (Skill / Tool)
   ↓
 UnitExecutionResult
   ↓
+Agent._build_messages() → list[Message]
+  ↓
+AIProvider.generate(messages) → ProviderResponse
+  ↓
 ExecutionResult
 ```
 
@@ -40,10 +44,18 @@ ExecutionResult
 
 **UnitExecutionResult** represents the unified outcome of a single execution unit (Skill or Tool).
 
+**Provider** is responsible for:
+- receiving structured `list[Message]` input
+- communicating with external LLM APIs
+- returning a `ProviderResponse` with content, model, usage, and finish_reason
+
+**ProviderManager** allows registering and resolving providers by name.
+
 ## Project Status
 
 - **v0.6.0**: Skill Execution Runtime
 - **v0.6.1**: SkillResult Runtime Contract
 - **v0.7.0**: Unified Execution Runtime
 - **v0.8.0**: Execution Orchestration Foundation
+- **v0.9.0**: Provider Runtime Integration
 
