@@ -7,6 +7,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [v0.12.0] - 2026-07-18
+
+### Added
+- **`AgentMessage`**: Provider-agnostic communication contract for inter-agent messaging, with `parent_task_id` for hierarchical task tracking and `to_dict()`/`from_dict()` serialization.
+- **`DelegationContext`**: Lightweight contract tracking the delegation chain between agents, with `max_depth` enforcement and circular delegation detection.
+- **`DelegationError`**: Specific exception raised when delegation constraints (depth or circularity) are violated.
+- **`AgentRegistry`**: Central agent registry supporting `register()`, `resolve()`, `search_by_role()`, and `search_by_capability()` with `AgentEntry` capability metadata.
+- **`AgentTool`**: Tool adapter that wraps an `Agent`, enabling inter-agent delegation with full context isolation (unique `task_id`, independent `AgentContext` and conversation memory per delegation).
+
+---
+
 ## [v0.11.0] - 2026-07-18
 
 ### Added
