@@ -268,8 +268,12 @@ Introduce a Planning Engine that uses LLM reasoning to dynamically construct `Ex
 
 ---
 
+## Technical Backlog & Future Improvements
 
+- **Memory lifecycle management**: Transition fully to Context Managers for Memory storage release.
+- **Public API stabilization**: Standardize root exports and clean up internal coupling for developer ergonomics.
 
+---
 
 ## Next Tasks
 
