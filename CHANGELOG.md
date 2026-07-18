@@ -7,7 +7,27 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [v0.11.0] - 2026-07-18
+
+### Added
+- **`MemoryDocument`**: Data contract representing a unit of long-term semantic memory containing content, id, metadata, and timestamp.
+- **`BaseMemoryStore`**: Abstract base class for memory store components.
+- **`ConversationMemory`**: Short-term/session memory store for Message histories, implementing sliding window and token-based truncation.
+- **`SemanticMemory`**: Local-first long-term memory store using SQLite for document persistence and keyword-matching retrieval.
+- **`MemoryManager`**: Central orchestrator that coordinates `ConversationMemory` and `SemanticMemory` to load, format, and save contexts during agent loops.
+
+### Changed
+- **`Agent`**: Integrates `MemoryManager` to load facts and history before ReAct loops, perform context truncation mid-loop, and persist conversation threads upon successful execution.
+- **`Tool.to_json_schema()`**: Abstracted parameter JSON schema compilation out of `Agent` directly into `Tool` subclasses, providing clean default string input parameters.
+- **`ToolCall.arguments`**: Strictly normalized as a dictionary (`dict[str, Any]`), with validation checks in `__post_init__` to raise TypeErrors for non-dict payloads.
+
+### Deprecated
+- **`Agent.memory`**: Legacy key-value store attribute. Will be removed in future releases.
+
+---
+
 ## [v0.10.0] - 2026-07-17
+
 
 ### Added
 - **`AgentContext`**: Runtime stateful execution context subclassing `ExecutionContext` to track messages, tokens usage, metadata, and loop turns.
