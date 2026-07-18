@@ -4,6 +4,7 @@ from aether.coordination.events import EventType, AgentEvent, EventEmitter
 from aether.coordination.task_tracker import TaskState, TaskRecord, TaskTracker
 from aether.coordination.message_bus import AgentMessageBus
 from aether.coordination.coordinator import Coordinator
+from aether.coordination.parallel import RetryPolicy
 
 __all__ = [
     "EventType",
@@ -14,4 +15,6 @@ __all__ = [
     "TaskTracker",
     "AgentMessageBus",
     "Coordinator",
+    "RetryPolicy",
 ]
+

@@ -9,6 +9,8 @@ from aether.core.execution import Task, ExecutionResult
 from aether.coordination.events import EventEmitter, AgentEvent, EventType
 from aether.coordination.task_tracker import TaskTracker, TaskState
 from aether.coordination.message_bus import AgentMessageBus
+from aether.coordination.parallel import RetryPolicy
+
 
 
 class Coordinator:
@@ -172,3 +174,64 @@ class Coordinator:
                 )
 
         return result
+
+    def delegate_parallel(
+        self,
+        delegations: list[dict[str, Any]],
+        parent_task_id: str | None = None,
+        timeout: float | None = None,
+        retry_policy: RetryPolicy | None = None,
+    ) -> list[ExecutionResult]:
+        """
+        Executes a list of delegations in parallel using a ThreadPoolExecutor.
+        """
+        from concurrent.futures import ThreadPoolExecutor, wait
+        from aether.coordination.parallel import execute_with_retry
+
+        results: list[ExecutionResult | None] = [None] * len(delegations)
+        futures_map = {}
+
+        # Sincrono: max_workers is matching delegations count
+        executor = ThreadPoolExecutor(max_workers=max(1, len(delegations)))
+        try:
+            for idx, delegation in enumerate(delegations):
+                agent_name = delegation["agent_name"]
+                instruction = delegation["instruction"]
+                parent_agent_name = delegation.get("parent_agent_name")
+                delegation_context = delegation.get("delegation_context")
+
+                future = executor.submit(
+                    execute_with_retry,
+                    coordinator=self,
+                    agent_name=agent_name,
+                    instruction=instruction,
+                    parent_task_id=parent_task_id,
+                    parent_agent_name=parent_agent_name,
+                    delegation_context=delegation_context,
+                    retry_policy=retry_policy,
+                )
+                futures_map[future] = idx
+
+            done, not_done = wait(futures_map.keys(), timeout=timeout)
+
+            # Record success/failure for completed futures
+            for future in done:
+                idx = futures_map[future]
+                try:
+                    results[idx] = future.result()
+                except Exception as exc:
+                    results[idx] = ExecutionResult(success=False, error=str(exc))
+
+            # Record timeout failures for unfinished futures
+            for future in not_done:
+                idx = futures_map[future]
+                results[idx] = ExecutionResult(
+                    success=False,
+                    error=f"Task timed out after {timeout} seconds",
+                )
+        finally:
+            # Shutdown the executor but don't block waiting for threads to finish if timed out
+            executor.shutdown(wait=False)
+
+        return [r for r in results if r is not None]
+
