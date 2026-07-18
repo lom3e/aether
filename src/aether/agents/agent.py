@@ -249,12 +249,12 @@ class Agent:
 
                 # Append results as system/tool messages
                 for res in tool_results:
-                    from aether.core.execution import Message
                     msg_res = Message(
                         role="tool",
                         content=res.output if res.success else (res.error or "Tool failed."),
                         tool_call_id=res.call_id,
                     )
+
                     agent_context.messages.append(msg_res)
 
                 # Continue the loop

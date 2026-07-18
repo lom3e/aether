@@ -120,7 +120,7 @@ def test_memory_manager_orchestration() -> None:
     manager.add_fact("Aether is an agentic AI framework.", {"source": "docs"})
     manager.add_fact("The primary language of Aether is Python.")
 
-    task = Task(id="task_123", instruction="Tell me about Aether framework")
+    task = Task(agent_name="Assistant", instruction="Tell me about Aether framework", id="task_123")
     exec_context = ExecutionContext(task=task, agent_name="Assistant")
     agent_context = AgentContext.from_context(exec_context)
     agent_context.messages = [
@@ -165,7 +165,7 @@ def test_agent_integration() -> None:
         memory_manager=manager,
     )
 
-    task = Task(id="session_xyz", instruction="What is my favourite color?")
+    task = Task(agent_name="TestAgent", instruction="What is my favourite color?", id="session_xyz")
     res = agent.execute(task)
 
     assert res.success is True

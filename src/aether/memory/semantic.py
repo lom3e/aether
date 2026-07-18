@@ -16,37 +16,36 @@ class SemanticMemory(BaseMemoryStore):
 
     def __init__(self, db_path: str = ":memory:") -> None:
         self.db_path = db_path
+        self._conn = sqlite3.connect(self.db_path, check_same_thread=False)
         self._init_db()
 
     def _init_db(self) -> None:
-        with sqlite3.connect(self.db_path) as conn:
-            conn.execute(
-                """
-                CREATE TABLE IF NOT EXISTS documents (
-                    id TEXT PRIMARY KEY,
-                    content TEXT NOT NULL,
-                    metadata TEXT,
-                    timestamp TEXT NOT NULL
-                )
-                """
+        self._conn.execute(
+            """
+            CREATE TABLE IF NOT EXISTS documents (
+                id TEXT PRIMARY KEY,
+                content TEXT NOT NULL,
+                metadata TEXT,
+                timestamp TEXT NOT NULL
             )
-            conn.commit()
+            """
+        )
+        self._conn.commit()
 
     def add(self, document: MemoryDocument) -> None:
         """
         Store a MemoryDocument in the database.
         """
-        with sqlite3.connect(self.db_path) as conn:
-            conn.execute(
-                "INSERT OR REPLACE INTO documents (id, content, metadata, timestamp) VALUES (?, ?, ?, ?)",
-                (
-                    document.id,
-                    document.content,
-                    json.dumps(document.metadata),
-                    document.timestamp.isoformat(),
-                ),
-            )
-            conn.commit()
+        self._conn.execute(
+            "INSERT OR REPLACE INTO documents (id, content, metadata, timestamp) VALUES (?, ?, ?, ?)",
+            (
+                document.id,
+                document.content,
+                json.dumps(document.metadata),
+                document.timestamp.isoformat(),
+            ),
+        )
+        self._conn.commit()
 
     def search(self, query: str, limit: int = 5) -> list[MemoryDocument]:
         """
@@ -62,23 +61,22 @@ class SemanticMemory(BaseMemoryStore):
 
         scored_docs: list[tuple[float, MemoryDocument]] = []
 
-        with sqlite3.connect(self.db_path) as conn:
-            cursor = conn.execute("SELECT id, content, metadata, timestamp FROM documents")
-            for row in cursor:
-                doc_id, content, meta_str, ts_str = row
-                content_lower = content.lower()
+        cursor = self._conn.execute("SELECT id, content, metadata, timestamp FROM documents")
+        for row in cursor:
+            doc_id, content, meta_str, ts_str = row
+            content_lower = content.lower()
 
-                # Simple word-level overlap
-                match_count = sum(1 for w in query_words if w in content_lower)
+            # Simple word-level overlap
+            match_count = sum(1 for w in query_words if w in content_lower)
 
-                if match_count > 0:
-                    doc = MemoryDocument(
-                        content=content,
-                        id=doc_id,
-                        metadata=json.loads(meta_str) if meta_str else {},
-                        timestamp=datetime.fromisoformat(ts_str),
-                    )
-                    scored_docs.append((match_count, doc))
+            if match_count > 0:
+                doc = MemoryDocument(
+                    content=content,
+                    id=doc_id,
+                    metadata=json.loads(meta_str) if meta_str else {},
+                    timestamp=datetime.fromisoformat(ts_str),
+                )
+                scored_docs.append((match_count, doc))
 
         # Sort by score descending, then by timestamp descending
         scored_docs.sort(key=lambda x: (x[0], x[1].timestamp.timestamp()), reverse=True)
@@ -89,6 +87,12 @@ class SemanticMemory(BaseMemoryStore):
         """
         Clear all documents in semantic memory.
         """
-        with sqlite3.connect(self.db_path) as conn:
-            conn.execute("DELETE FROM documents")
-            conn.commit()
+        self._conn.execute("DELETE FROM documents")
+        self._conn.commit()
+
+    def close(self) -> None:
+        """
+        Close the SQLite database connection.
+        """
+        self._conn.close()
+
