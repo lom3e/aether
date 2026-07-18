@@ -27,3 +27,27 @@ class Tool(ABC):
     @abstractmethod
     def execute(self, input_data: str, context: ToolExecutionContext | None = None) -> str:
         raise NotImplementedError
+
+    def to_json_schema(self) -> dict[str, Any]:
+        """
+        Return the JSON Schema representation of this tool's parameters.
+        Default implementation assumes a single required 'input_data' string parameter.
+        """
+        return {
+            "type": "function",
+            "function": {
+                "name": self.name,
+                "description": self.description,
+                "parameters": {
+                    "type": "object",
+                    "properties": {
+                        "input_data": {
+                            "type": "string",
+                            "description": "Input data for the tool.",
+                        }
+                    },
+                    "required": ["input_data"],
+                },
+            },
+        }
+

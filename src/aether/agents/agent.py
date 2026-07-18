@@ -127,128 +127,12 @@ class Agent:
                 for tool_name in agent_context.tools:
                     try:
                         tool = agent_context.tool_registry.get(tool_name)
-                        tools_schema.append({
-                            "type": "function",
-                            "function": {
-                                "name": tool.name,
-                                "description": tool.description,
-                                "parameters": {
-                                    "type": "object",
-                                    "properties": {
-                                        "input_data": {
-                                            "type": "string",
-                                            "description": "Input data for the tool.",
-                                        }
-                                    },
-                                    "required": ["input_data"],
-                                },
-                            },
-                        })
+                        tools_schema.append(tool.to_json_schema())
                     except KeyError:
                         pass
 
-            # Loop state
-            tool_calls_count = 0
-
-            while True:
-                # Turn check
-                if agent_context.current_turn >= self.max_turns:
-                    self.lifecycle.fail()
-                    metadata = self._build_metadata(task, agent_context)
-                    metadata["agent_state"] = self.lifecycle.state.value
-                    metadata["provider_usage"] = agent_context.token_usage
-                    metadata["turns"] = agent_context.current_turn
-                    metadata["tool_calls"] = tool_calls_count
-                    return ExecutionResult(
-                        success=False,
-                        error=f"Max turns ({self.max_turns}) reached.",
-                        metadata=metadata,
-                    )
-
-                # Generate provider response
-                provider_tools = tools_schema if tools_schema else None
-                response = self.provider.generate(agent_context.messages, tools=provider_tools)
-
-                # Accumulate token usage in AgentContext
-                if response.usage:
-                    for key in ["prompt_tokens", "completion_tokens", "total_tokens"]:
-                        if key in response.usage:
-                            agent_context.token_usage[key] = agent_context.token_usage.get(key, 0) + response.usage[key]
-
-                # Check token limit
-                if self.max_total_tokens is not None:
-                    if agent_context.token_usage.get("total_tokens", 0) > self.max_total_tokens:
-                        self.lifecycle.fail()
-                        metadata = self._build_metadata(task, agent_context)
-                        metadata["agent_state"] = self.lifecycle.state.value
-                        metadata["provider_usage"] = agent_context.token_usage
-                        metadata["turns"] = agent_context.current_turn
-                        metadata["tool_calls"] = tool_calls_count
-                        return ExecutionResult(
-                            success=False,
-                            error=f"Max total tokens limit ({self.max_total_tokens}) exceeded.",
-                            metadata=metadata,
-                        )
-
-                # Increment turn count
-                agent_context.current_turn += 1
-
-                # Append assistant message
-                if response.message is not None:
-                    agent_context.messages.append(response.message)
-                else:
-                    agent_context.messages.append(Message(role="assistant", content=response.content))
-
-                # Handle tool calls
-                msg_tool_calls = response.message.tool_calls if response.message else None
-
-                if response.finish_reason == "tool_calls" or msg_tool_calls:
-                    calls_to_execute = msg_tool_calls or []
-                    if not calls_to_execute:
-                        break
-
-                    # Tool calls limit check
-                    if tool_calls_count + len(calls_to_execute) > self.max_tool_calls:
-                        self.lifecycle.fail()
-                        metadata = self._build_metadata(task, agent_context)
-                        metadata["agent_state"] = self.lifecycle.state.value
-                        metadata["provider_usage"] = agent_context.token_usage
-                        metadata["turns"] = agent_context.current_turn
-                        metadata["tool_calls"] = tool_calls_count
-                        return ExecutionResult(
-                            success=False,
-                            error=f"Max tool calls limit ({self.max_tool_calls}) exceeded.",
-                            metadata=metadata,
-                        )
-
-
-                    tool_calls_count += len(calls_to_execute)
-
-                    # Dynamic tool execution by ExecutionEngine
-                    tool_results = self.execution_engine.execute_tool_calls(calls_to_execute, agent_context)
-
-                    # Append results as system/tool messages
-                    for res in tool_results:
-                        from aether.core.execution import Message
-                        msg_res = Message(
-                            role="tool",
-                            content=res.output if res.success else (res.error or "Tool failed."),
-                            tool_call_id=res.call_id,
-                        )
-                        agent_context.messages.append(msg_res)
-
-                    # Continue the loop
-                    continue
-                else:
-                    break
-
-            metadata = self._build_metadata(task, agent_context)
-            metadata["provider_model"] = response.model
-            metadata["provider_usage"] = agent_context.token_usage
-            metadata["provider_finish_reason"] = response.finish_reason
-            metadata["turns"] = agent_context.current_turn
-            metadata["tool_calls"] = tool_calls_count
-            output = response.content
+            # 3. Run the ReAct loop
+            return self._run_loop(task, agent_context, tools_schema)
         except Exception as exc:  # pragma: no cover
             self.lifecycle.fail()
             return ExecutionResult(
@@ -257,12 +141,126 @@ class Agent:
                 metadata=metadata,
             )
 
+    def _run_loop(
+        self,
+        task: Task,
+        agent_context: AgentContext,
+        tools_schema: list[dict[str, Any]],
+    ) -> ExecutionResult:
+        """
+        Run the iterative ReAct loop on the agent context.
+        This represents the primary point of future extension to extract into
+        an AgentRunner or ReActOrchestrator class in v0.11.0.
+        """
+        metadata = self._build_metadata(task, agent_context)
+        tool_calls_count = 0
+
+        while True:
+            # Turn check
+            if agent_context.current_turn >= self.max_turns:
+                self.lifecycle.fail()
+                metadata = self._build_metadata(task, agent_context)
+                metadata["agent_state"] = self.lifecycle.state.value
+                metadata["provider_usage"] = agent_context.token_usage
+                metadata["turns"] = agent_context.current_turn
+                metadata["tool_calls"] = tool_calls_count
+                return ExecutionResult(
+                    success=False,
+                    error=f"Max turns ({self.max_turns}) reached.",
+                    metadata=metadata,
+                )
+
+            # Generate provider response
+            provider_tools = tools_schema if tools_schema else None
+            response = self.provider.generate(agent_context.messages, tools=provider_tools)
+
+            # Accumulate token usage in AgentContext
+            if response.usage:
+                for key in ["prompt_tokens", "completion_tokens", "total_tokens"]:
+                    if key in response.usage:
+                        agent_context.token_usage[key] = agent_context.token_usage.get(key, 0) + response.usage[key]
+
+            # Check token limit
+            if self.max_total_tokens is not None:
+                if agent_context.token_usage.get("total_tokens", 0) > self.max_total_tokens:
+                    self.lifecycle.fail()
+                    metadata = self._build_metadata(task, agent_context)
+                    metadata["agent_state"] = self.lifecycle.state.value
+                    metadata["provider_usage"] = agent_context.token_usage
+                    metadata["turns"] = agent_context.current_turn
+                    metadata["tool_calls"] = tool_calls_count
+                    return ExecutionResult(
+                        success=False,
+                        error=f"Max total tokens limit ({self.max_total_tokens}) exceeded.",
+                        metadata=metadata,
+                    )
+
+            # Increment turn count
+            agent_context.current_turn += 1
+
+            # Append assistant message
+            if response.message is not None:
+                agent_context.messages.append(response.message)
+            else:
+                agent_context.messages.append(Message(role="assistant", content=response.content))
+
+            # Handle tool calls
+            msg_tool_calls = response.message.tool_calls if response.message else None
+
+            if response.finish_reason == "tool_calls" or msg_tool_calls:
+                calls_to_execute = msg_tool_calls or []
+                if not calls_to_execute:
+                    break
+
+                # Tool calls limit check
+                if tool_calls_count + len(calls_to_execute) > self.max_tool_calls:
+                    self.lifecycle.fail()
+                    metadata = self._build_metadata(task, agent_context)
+                    metadata["agent_state"] = self.lifecycle.state.value
+                    metadata["provider_usage"] = agent_context.token_usage
+                    metadata["turns"] = agent_context.current_turn
+                    metadata["tool_calls"] = tool_calls_count
+                    return ExecutionResult(
+                        success=False,
+                        error=f"Max tool calls limit ({self.max_tool_calls}) exceeded.",
+                        metadata=metadata,
+                    )
+
+                tool_calls_count += len(calls_to_execute)
+
+                # Dynamic tool execution by ExecutionEngine
+                tool_results = self.execution_engine.execute_tool_calls(calls_to_execute, agent_context)
+
+                # Append results as system/tool messages
+                for res in tool_results:
+                    from aether.core.execution import Message
+                    msg_res = Message(
+                        role="tool",
+                        content=res.output if res.success else (res.error or "Tool failed."),
+                        tool_call_id=res.call_id,
+                    )
+                    agent_context.messages.append(msg_res)
+
+                # Continue the loop
+                continue
+            else:
+                break
+
+        metadata = self._build_metadata(task, agent_context)
+        metadata["provider_model"] = response.model
+        metadata["provider_usage"] = agent_context.token_usage
+        metadata["provider_finish_reason"] = response.finish_reason
+        metadata["turns"] = agent_context.current_turn
+        metadata["tool_calls"] = tool_calls_count
+        output = response.content
+
         self.lifecycle.complete()
         return ExecutionResult(
             success=True,
             output=output,
             metadata=metadata,
         )
+
 
 
     def run(self, task: Task, context: ExecutionContext | None = None) -> ExecutionResult:
