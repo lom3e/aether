@@ -175,3 +175,12 @@ def test_agent_integration() -> None:
     # The facts system message should have been injected
     system_messages = [m.content for m in history if m.role == "system"]
     assert any("favourite color is blue" in sm for sm in system_messages)
+
+
+def test_semantic_memory_close_and_destructor() -> None:
+    store = SemanticMemory()
+    store.add(MemoryDocument(content="Some content"))
+    store.close()
+    # Should not raise exception on delete even when already closed
+    del store
+

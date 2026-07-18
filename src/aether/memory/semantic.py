@@ -96,3 +96,13 @@ class SemanticMemory(BaseMemoryStore):
         """
         self._conn.close()
 
+    def __del__(self) -> None:
+        """
+        Ensure SQLite database connection is closed when object is deleted.
+        """
+        try:
+            self.close()
+        except Exception:
+            pass
+
+
