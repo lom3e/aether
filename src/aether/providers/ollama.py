@@ -128,7 +128,7 @@ class OllamaProvider(AIProvider):
         
         # Disabilita esplicitamente il thinking mode per supportare modelli moderni
         # in modo trasparente e restituire solo la risposta finale.
-        payload.setdefault("options", {})["think"] = False
+        payload["think"] = False
         
         return payload
 

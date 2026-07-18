@@ -120,8 +120,7 @@ class TestOllamaProviderGenerate:
         with patch("urllib.request.urlopen", side_effect=capture_request):
             OllamaProvider().generate(messages)
 
-        options = captured["body"].get("options", {})
-        assert options.get("think") is False
+        assert captured["body"].get("think") is False
 
     def test_parse_response_with_empty_content_and_thinking(self) -> None:
         # Simulate a model that returns empty content and thinking

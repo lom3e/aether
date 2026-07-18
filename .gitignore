@@ -116,3 +116,4 @@ local_settings.py
 
 # AI agent instructions
 AGENTS.md
+.vexp/
