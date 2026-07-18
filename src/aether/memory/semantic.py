@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import sqlite3
+import threading
 from datetime import datetime
 from typing import Any
 
@@ -17,6 +18,7 @@ class SemanticMemory(BaseMemoryStore):
     def __init__(self, db_path: str = ":memory:") -> None:
         self.db_path = db_path
         self._conn = sqlite3.connect(self.db_path, check_same_thread=False)
+        self._lock = threading.Lock()
         self._init_db()
 
     def _init_db(self) -> None:
@@ -36,16 +38,18 @@ class SemanticMemory(BaseMemoryStore):
         """
         Store a MemoryDocument in the database.
         """
-        self._conn.execute(
-            "INSERT OR REPLACE INTO documents (id, content, metadata, timestamp) VALUES (?, ?, ?, ?)",
-            (
-                document.id,
-                document.content,
-                json.dumps(document.metadata),
-                document.timestamp.isoformat(),
-            ),
-        )
-        self._conn.commit()
+        with self._lock:
+            self._conn.execute(
+                "INSERT OR REPLACE INTO documents (id, content, metadata, timestamp) VALUES (?, ?, ?, ?)",
+                (
+                    document.id,
+                    document.content,
+                    json.dumps(document.metadata),
+                    document.timestamp.isoformat(),
+                ),
+            )
+            self._conn.commit()
+
 
     def search(self, query: str, limit: int = 5) -> list[MemoryDocument]:
         """
@@ -61,10 +65,14 @@ class SemanticMemory(BaseMemoryStore):
 
         scored_docs: list[tuple[float, MemoryDocument]] = []
 
-        cursor = self._conn.execute("SELECT id, content, metadata, timestamp FROM documents")
-        for row in cursor:
+        with self._lock:
+            cursor = self._conn.execute("SELECT id, content, metadata, timestamp FROM documents")
+            rows = cursor.fetchall()
+
+        for row in rows:
             doc_id, content, meta_str, ts_str = row
             content_lower = content.lower()
+
 
             # Simple word-level overlap
             match_count = sum(1 for w in query_words if w in content_lower)
@@ -87,8 +95,10 @@ class SemanticMemory(BaseMemoryStore):
         """
         Clear all documents in semantic memory.
         """
-        self._conn.execute("DELETE FROM documents")
-        self._conn.commit()
+        with self._lock:
+            self._conn.execute("DELETE FROM documents")
+            self._conn.commit()
+
 
     def close(self) -> None:
         """
