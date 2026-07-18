@@ -7,7 +7,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [v0.14.0] - Unreleased
+
+### Proposed
+- **Parallel Execution Layer**: Concurrent delegation of sub-tasks using local `ThreadPoolExecutor` to execute multiple agent instances in parallel.
+- **Retry Policy & Timeout Management**: Support for automatic retries of failed runs with configurable backoff and cancellation via thread timeouts.
+- **Thread-Safe Semantic Memory**: Synchronized write access to SQLite databases in `SemanticMemory` to ensure stability under concurrent thread calls.
+
+---
+
 ## [v0.13.0] - 2026-07-18
+
 
 ### Added
 - **`AgentMessageBus`**: Synchronous, in-process, local message bus for inter-agent communication supporting handler registration and message log tracking.
