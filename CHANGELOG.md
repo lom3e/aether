@@ -7,7 +7,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [v0.13.0] - 2026-07-18
+
+### Added
+- **`AgentMessageBus`**: Synchronous, in-process, local message bus for inter-agent communication supporting handler registration and message log tracking.
+- **`TaskState` & `TaskTracker`**: Formal state lifecycle management (`CREATED`, `ASSIGNED`, `RUNNING`, `COMPLETED`, `FAILED`) for delegated tasks with history logging and transition validation.
+- **`EventType` & `EventEmitter`**: In-process event system emitting `AGENT_STARTED`, `TASK_DELEGATED`, `TASK_COMPLETED`, and `AGENT_FAILED` events.
+- **`Coordinator`**: Structured orchestrator tying together `AgentRegistry`, `AgentMessageBus`, `TaskTracker`, and `EventEmitter` to run multi-agent workflows safely.
+
+---
+
 ## [v0.12.0] - 2026-07-18
+
 
 ### Added
 - **`AgentMessage`**: Provider-agnostic communication contract for inter-agent messaging, with `parent_task_id` for hierarchical task tracking and `to_dict()`/`from_dict()` serialization.
