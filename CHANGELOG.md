@@ -7,13 +7,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
-## [Unreleased]
+## [v0.15.0] - 2026-07-18
 
 ### Added
 - **Observability Layer**: Introduced `src/aether/observability` package to provide complete in-process tracing and metrics without external dependencies.
 - **Trace Management**: Added `TraceEvent` and `RuntimeTrace` for building hierarchical execution timelines with parent-child correlation IDs.
 - **Metrics Aggregation**: Added `ExecutionMetrics` to track duration, tool calls, provider usage, retries, and timeouts.
 - **Trace Collector & Diagnostics**: Added `TraceCollector` to gather events in memory and `RuntimeDiagnostics` facade to export traces to JSON format.
+- **Integration**: `RuntimeDiagnostics` seamlessly attaches to `EventEmitter` to automatically translate agent, task, and lifecycle events into traces.
 
 ---
 
