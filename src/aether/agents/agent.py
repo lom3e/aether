@@ -7,12 +7,14 @@ from aether.agents.lifecycle import AgentLifecycle, AgentLifecycleState
 from aether.core.execution import ExecutionContext, ExecutionResult, Task
 from aether.engine.core import ExecutionEngine
 from aether.memory.base import Memory
+from aether.memory.manager import MemoryManager
 from aether.skills.executor import SkillExecutor
 from aether.skills.registry import SkillRegistry
 from aether.skills.skill import Skill
 from aether.providers.base import AIProvider
 from aether.providers.types import Message
 from aether.tools.registry import ToolRegistry
+
 
 
 class Agent:
@@ -35,6 +37,7 @@ class Agent:
         role: str = "assistant",
         provider: AIProvider | None = None,
         memory: Memory | None = None,
+        memory_manager: MemoryManager | None = None,
         skill_registry: SkillRegistry | None = None,
         tool_registry: ToolRegistry | None = None,
         skills: list[Skill] | None = None,
@@ -49,6 +52,8 @@ class Agent:
         self.role = role
         self.provider = provider
         self.memory = memory
+        self.memory_manager = memory_manager
+
         self.skill_registry = skill_registry
         self.tool_registry = tool_registry
         self.lifecycle = AgentLifecycle()
@@ -106,6 +111,10 @@ class Agent:
             initial_messages = self._build_messages(task, exec_context, unit_results)
             agent_context.messages = list(initial_messages)
             agent_context.execution_state = "running"
+
+            if self.memory_manager is not None:
+                self.memory_manager.load_context(agent_context)
+
 
             metadata = self._build_metadata(task, agent_context)
 
@@ -168,6 +177,13 @@ class Agent:
                     success=False,
                     error=f"Max turns ({self.max_turns}) reached.",
                     metadata=metadata,
+                )
+
+            # Truncation before the generate call if memory_manager is configured
+            if self.memory_manager is not None:
+                limit = self.max_total_tokens if self.max_total_tokens is not None else 8192
+                agent_context.messages = self.memory_manager.conversation_memory.truncate_context(
+                    agent_context.messages, limit
                 )
 
             # Generate provider response
@@ -254,12 +270,17 @@ class Agent:
         metadata["tool_calls"] = tool_calls_count
         output = response.content
 
+        # Persist memory on success
+        if self.memory_manager is not None:
+            self.memory_manager.persist_context(agent_context)
+
         self.lifecycle.complete()
         return ExecutionResult(
             success=True,
             output=output,
             metadata=metadata,
         )
+
 
 
 
