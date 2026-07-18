@@ -7,6 +7,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [v0.15.1] - Runtime Consistency Patch
+
+### Fixed
+- Unified timezone-aware datetime handling across runtime components.
+- Removed remaining `datetime.utcnow()` usage.
+- Improved timestamp consistency between Memory and Observability layers.
+
 ## [v0.15.0] - 2026-07-18
 
 ### Added

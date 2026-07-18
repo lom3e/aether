@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from datetime import datetime
+from datetime import datetime, timezone
 from enum import Enum
 from typing import Any
 
@@ -20,7 +20,7 @@ class TaskRecord:
     parent_task_id: str | None
     agent_name: str
     state: TaskState
-    created_at: datetime = field(default_factory=datetime.utcnow)
+    created_at: datetime = field(default_factory=lambda: datetime.now(timezone.utc))
     history: list[tuple[TaskState, datetime]] = field(default_factory=list)
     result: str | None = None
     error: str | None = None
@@ -79,7 +79,7 @@ class TaskTracker:
             )
 
         record.state = new_state
-        record.history.append((new_state, datetime.utcnow()))
+        record.history.append((new_state, datetime.now(timezone.utc)))
         if result is not None:
             record.result = result
         if error is not None:

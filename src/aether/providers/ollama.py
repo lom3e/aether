@@ -138,7 +138,10 @@ class OllamaProvider(AIProvider):
             with urllib.request.urlopen(req, timeout=self.config.timeout) as resp:
                 raw = json.loads(resp.read().decode("utf-8"))
         except urllib.error.HTTPError as exc:
-            self._handle_http_error(exc)
+            try:
+                self._handle_http_error(exc)
+            finally:
+                exc.close()
         except TimeoutError as exc:
             raise ProviderTimeoutError(
                 f"Request to {self._endpoint} timed out after {self.config.timeout}s",
