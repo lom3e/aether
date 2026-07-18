@@ -29,6 +29,7 @@ from __future__ import annotations
 import json
 import urllib.error
 import urllib.request
+import uuid
 from typing import Any
 
 from aether.providers.base import AIProvider
@@ -39,6 +40,7 @@ from aether.providers.errors import (
 )
 from aether.providers.errors import TimeoutError as ProviderTimeoutError
 from aether.providers.types import Message, ProviderConfig, ProviderResponse
+from aether.core.execution import ToolCall
 
 _DEFAULT_BASE_URL = "http://localhost:11434"
 _DEFAULT_MODEL = "llama3"
@@ -120,9 +122,14 @@ class OllamaProvider(AIProvider):
             payload["tools"] = tools
 
         if self.config.max_tokens is not None:
-            payload["options"] = {"num_predict": self.config.max_tokens}
+            payload.setdefault("options", {})["num_predict"] = self.config.max_tokens
         if self.config.temperature != 0.7:  # Only include if non-default
             payload.setdefault("options", {})["temperature"] = self.config.temperature
+        
+        # Disabilita esplicitamente il thinking mode per supportare modelli moderni
+        # in modo trasparente e restituire solo la risposta finale.
+        payload.setdefault("options", {})["think"] = False
+        
         return payload
 
     def _send(self, payload: dict[str, Any]) -> ProviderResponse:
@@ -167,9 +174,8 @@ class OllamaProvider(AIProvider):
         ) from exc
 
     def _parse_response(self, raw: dict[str, Any]) -> ProviderResponse:
-        import uuid
         message = raw.get("message", {})
-        content = message.get("content", "")
+        content = message.get("content") or ""
         model = raw.get("model", self._model)
         finish_reason = "stop" if raw.get("done", True) else "length"
 
@@ -177,7 +183,6 @@ class OllamaProvider(AIProvider):
         tool_calls = None
         raw_calls = message.get("tool_calls")
         if raw_calls:
-            from aether.core.execution import ToolCall
             tool_calls = []
             for tc in raw_calls:
                 func = tc.get("function", {})

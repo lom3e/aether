@@ -108,6 +108,36 @@ class TestOllamaProviderGenerate:
         assert captured["body"]["stream"] is False
         assert "stream" in captured["body"]
 
+    def test_payload_contains_think_false_by_default(self) -> None:
+        messages = [Message(role="user", content="ping")]
+        mock_resp = _mock_urlopen(_make_ollama_response("pong"))
+        captured = {}
+
+        def capture_request(req, **kwargs):
+            captured["body"] = json.loads(req.data.decode())
+            return mock_resp
+
+        with patch("urllib.request.urlopen", side_effect=capture_request):
+            OllamaProvider().generate(messages)
+
+        options = captured["body"].get("options", {})
+        assert options.get("think") is False
+
+    def test_parse_response_with_empty_content_and_thinking(self) -> None:
+        # Simulate a model that returns empty content and thinking
+        mock_resp = _mock_urlopen(json.dumps({
+            "model": "llama3",
+            "message": {"role": "assistant", "content": None, "think": "I am thinking..."},
+            "done": True,
+        }).encode("utf-8"))
+
+        with patch("urllib.request.urlopen", return_value=mock_resp):
+            response = OllamaProvider().generate([Message(role="user", content="hello")])
+
+        assert response.content == ""
+        # The internal message object also has content as empty string, not None
+        assert response.message.content == ""
+
 
 class TestOllamaProviderErrors:
     def _http_error(self, code: int) -> urllib.error.HTTPError:
@@ -157,7 +187,10 @@ class TestOllamaProviderIntegration:
 
     def test_real_generation(self) -> None:
         import os
-        model = os.environ.get("OLLAMA_MODEL", "llama3")
+        model = os.environ.get("OLLAMA_MODEL")
+        if not model:
+            pytest.skip("OLLAMA_MODEL not set, skipping integration test")
+            
         provider = OllamaProvider(ProviderConfig(model=model, max_tokens=32))
         response = provider.generate([
             Message(role="system", content="Reply in one word only."),
