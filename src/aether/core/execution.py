@@ -55,6 +55,13 @@ class ToolCall:
     tool_name: str
     arguments: dict[str, Any]
 
+    def __post_init__(self) -> None:
+        if not isinstance(self.arguments, dict):
+            raise TypeError(
+                f"ToolCall.arguments must be a dict, got {type(self.arguments).__name__}"
+            )
+
+
 
 @dataclass(slots=True)
 class ToolResult:

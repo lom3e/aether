@@ -72,19 +72,13 @@ class ExecutionEngine:
             # Resolve input arguments (Tool.execute accepts a string)
             input_data = ""
             args = call.arguments
-            if isinstance(args, dict):
-                if "input_data" in args:
-                    input_data = str(args["input_data"])
-                elif "input" in args:
-                    input_data = str(args["input"])
-                elif args:
-                    input_data = str(next(iter(args.values())))
-                else:
-                    input_data = ""
-            elif isinstance(args, str):
-                input_data = args
-            else:
-                input_data = str(args)
+            if "input_data" in args:
+                input_data = str(args["input_data"])
+            elif "input" in args:
+                input_data = str(args["input"])
+            elif args:
+                input_data = str(next(iter(args.values())))
+
 
             try:
                 res = self.tool_executor.execute(tool, input_data, tool_context)

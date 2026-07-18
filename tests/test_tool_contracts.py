@@ -54,3 +54,27 @@ def test_message_to_dict_with_tool_call_id() -> None:
     assert d["role"] == "tool"
     assert d["content"] == "4"
     assert d["tool_call_id"] == "call_123"
+
+
+def test_tool_call_enforces_dict_arguments() -> None:
+    import pytest
+    with pytest.raises(TypeError) as exc:
+        ToolCall(call_id="call_1", tool_name="Test", arguments="string args")
+    assert "must be a dict" in str(exc.value)
+
+
+def test_tool_to_json_schema() -> None:
+    from aether.tools.base import Tool
+    class CustomTool(Tool):
+        name = "custom_tool"
+        description = "A custom description"
+        def execute(self, input_data: str, context=None) -> str:
+            return "ok"
+
+    t = CustomTool()
+    schema = t.to_json_schema()
+    assert schema["type"] == "function"
+    assert schema["function"]["name"] == "custom_tool"
+    assert schema["function"]["description"] == "A custom description"
+    assert schema["function"]["parameters"]["properties"]["input_data"]["type"] == "string"
+
