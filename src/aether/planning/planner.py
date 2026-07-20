@@ -7,6 +7,7 @@ from typing import Any
 
 from aether.core.execution import ExecutionContext
 from aether.planning.types import CognitivePlan, Decision, DecisionAction, Goal, Observation
+from aether.planning.validation import ValidationResult
 from aether.providers.base import AIProvider
 from aether.providers.types import Message
 
@@ -39,6 +40,42 @@ class BasePlanner(ABC):
         Evaluate an observation from the execution engine and decide the next action.
         """
         pass
+
+    def evaluate_validation_result(
+        self,
+        result: ValidationResult,
+        goal: Goal,
+        plan: CognitivePlan,
+    ) -> Decision:
+        """
+        Produce a Decision when a PlanValidator reports an invalid CognitivePlan.
+
+        This method is intentionally separate from ``evaluate()``, which handles
+        post-execution Observations from the ExecutionEngine. A ValidationResult
+        is a *pre-execution* cognitive event, not a runtime observation.
+
+        The default implementation unconditionally requests a REPLAN, embedding
+        the validation errors as reasoning so that higher-level tooling (e.g.
+        LLM-powered planners in v0.18+) can inspect the cause and generate a
+        corrected plan.
+
+        Subclasses may override this method to implement more sophisticated
+        recovery strategies (e.g. constraint relaxation, alternative tool selection).
+
+        Args:
+            result: The ValidationResult produced by the PlanValidator.
+            goal: The Goal being pursued (unchanged, gives subclasses the full context).
+            plan: The CognitivePlan that failed validation.
+
+        Returns:
+            A Decision directing the planner loop (typically REPLAN).
+        """
+        error_summary = "; ".join(result.errors) if result.errors else "unspecified validation failure"
+        return Decision(
+            action=DecisionAction.REPLAN,
+            reasoning=f"Plan '{plan.plan_id}' failed pre-execution validation: {error_summary}",
+            metadata={"validation_errors": list(result.errors)},
+        )
 
 
 class BasicPlanner(BasePlanner):

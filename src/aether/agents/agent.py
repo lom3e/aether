@@ -116,16 +116,24 @@ class Agent:
                 if self.plan_validator:
                     validation = self.plan_validator.validate(cognitive_plan)
                     if not validation.is_valid:
-                        # Emulate an evaluation if plan is invalid without touching the engine
-                        # Wait, the prompt says "evitare ExecutionEngine, informare Planner, generare nuova Decision"
-                        # We can construct an error Observation for the planner to evaluate.
-                        # Wait, the prompt says "NON trasformare ValidationResult in Observation... 
-                        # Planner deve valutare o no? The prompt says "se invalid: evitare ExecutionEngine, informare Planner, generare nuova Decision".
-                        # How to inform planner of ValidationResult? The BasePlanner doesn't have a method for ValidationResult.
-                        # I'll just use a direct REPLAN decision for this basic integration if validation fails, or pass the validation result to the planner if it has an evaluate_validation method.
-                        # Since BasePlanner doesn't have evaluate_validation, let's just break and handle it.
-                        decision = Decision(action=DecisionAction.REPLAN, reasoning=f"Validation failed: {validation.errors}")
-                        continue
+                        # Delegate the decision back to the Planner.
+                        # The Agent must NOT create a Decision autonomously: it is an
+                        # orchestrator, not a cognitive reasoner.
+                        # evaluate_validation_result() is a distinct entry-point from
+                        # evaluate(), which handles post-execution Observations.
+                        decision = planner.evaluate_validation_result(
+                            validation, goal, cognitive_plan
+                        )
+                        # The only supported pre-execution action is REPLAN: return
+                        # a failure result for FINISH/CONTINUE to avoid a silent loop.
+                        if decision.action != DecisionAction.REPLAN:
+                            self.lifecycle.complete()
+                            return ExecutionResult(
+                                success=False,
+                                error=f"Plan validation failed: {decision.reasoning}",
+                                metadata=metadata,
+                            )
+                        continue  # regenerate the plan
                 
                 for step_idx, step in enumerate(cognitive_plan.steps):
                     # Compilation: CognitivePlan -> engine.ExecutionPlan
