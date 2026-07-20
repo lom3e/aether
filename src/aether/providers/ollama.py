@@ -40,6 +40,7 @@ from aether.providers.errors import (
 )
 from aether.providers.errors import TimeoutError as ProviderTimeoutError
 from aether.providers.types import Message, ProviderConfig, ProviderResponse
+from aether.providers.capabilities import ProviderCapabilities
 from aether.core.execution import ToolCall
 
 _DEFAULT_BASE_URL = "http://localhost:11434"
@@ -71,10 +72,21 @@ class OllamaProvider(AIProvider):
         self._model = self.config.model or _DEFAULT_MODEL
         self._endpoint = f"{self._base_url}{_CHAT_PATH}"
 
+    @property
+    def capabilities(self) -> ProviderCapabilities:
+        # Ollama supports tool calling, structured outputs via format parameter,
+        # and thinking capabilities on modern models.
+        return ProviderCapabilities(
+            tools=True,
+            structured_output=True,
+            thinking=True,
+        )
+
     def generate(
         self,
         messages: list[Message],
         tools: list[dict[str, Any]] | None = None,
+        output_schema: Any | None = None,
     ) -> ProviderResponse:
         """
         Send messages to the Ollama chat API and return the response.
@@ -92,13 +104,14 @@ class OllamaProvider(AIProvider):
             RateLimitError: If Ollama returns HTTP 429.
             AuthenticationError: If Ollama returns HTTP 401.
         """
-        payload = self._build_payload(messages, tools)
+        payload = self._build_payload(messages, tools, output_schema)
         return self._send(payload)
 
     def _build_payload(
         self,
         messages: list[Message],
         tools: list[dict[str, Any]] | None = None,
+        output_schema: Any | None = None,
     ) -> dict[str, Any]:
         msg_dicts = []
         for m in messages:
@@ -129,6 +142,14 @@ class OllamaProvider(AIProvider):
         # Disabilita esplicitamente il thinking mode per supportare modelli moderni
         # in modo trasparente e restituire solo la risposta finale.
         payload["think"] = False
+        
+        if output_schema is not None:
+            if hasattr(output_schema, "model_json_schema"):
+                payload["format"] = output_schema.model_json_schema()
+            elif isinstance(output_schema, dict):
+                payload["format"] = output_schema
+            else:
+                payload["format"] = "json"
         
         return payload
 

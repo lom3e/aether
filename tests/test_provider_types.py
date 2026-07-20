@@ -98,3 +98,5 @@ class TestProviderErrors:
         err = AuthenticationError("invalid key", provider="openai")
         assert "invalid key" in str(err)
         assert "openai" in str(err)
+
+

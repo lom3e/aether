@@ -28,13 +28,18 @@ from aether.tools.agent_tool import AgentTool
 # ---------------------------------------------------------------------------
 
 class TimingProvider(AIProvider):
+    @property
+    def capabilities(self):
+        from aether.providers.capabilities import ProviderCapabilities
+        return ProviderCapabilities()
+
     def __init__(self, delay: float = 0.2):
         super().__init__(config=None)
         self.delay = delay
         self.start_times: list[float] = []
         self._lock = threading.Lock()
 
-    def generate(self, messages, tools=None) -> ProviderResponse:
+    def generate(self, messages, tools=None, output_schema=None) -> ProviderResponse:
         with self._lock:
             self.start_times.append(time.time())
         time.sleep(self.delay)
@@ -53,13 +58,18 @@ class TimingProvider(AIProvider):
 # ---------------------------------------------------------------------------
 
 class RetryFailingProvider(AIProvider):
+    @property
+    def capabilities(self):
+        from aether.providers.capabilities import ProviderCapabilities
+        return ProviderCapabilities()
+
     def __init__(self, fail_count: int = 1):
         super().__init__(config=None)
         self.fail_count = fail_count
         self.attempts = 0
         self._lock = threading.Lock()
 
-    def generate(self, messages, tools=None) -> ProviderResponse:
+    def generate(self, messages, tools=None, output_schema=None) -> ProviderResponse:
         with self._lock:
             self.attempts += 1
             if self.attempts <= self.fail_count:
@@ -254,3 +264,5 @@ def test_retrocompatibility_agent_tool() -> None:
     tool = AgentTool(agent=child)
     res = tool.execute("Some instruction")
     assert res == "timing complete"
+
+

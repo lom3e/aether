@@ -9,8 +9,11 @@ from __future__ import annotations
 
 from typing import Any
 
+from typing import Any
+
 from aether.providers.base import AIProvider
 from aether.providers.types import Message, ProviderConfig, ProviderResponse
+from aether.providers.capabilities import ProviderCapabilities
 
 
 class MockProvider(AIProvider):
@@ -23,13 +26,20 @@ class MockProvider(AIProvider):
 
     MOCK_MODEL = "mock-model-1.0"
 
-    def __init__(self, config: ProviderConfig | None = None) -> None:
+    def __init__(self, config: ProviderConfig | None = None, responses: list[str] | None = None) -> None:
         super().__init__(config)
+        self.responses = responses or []
+        self._current_index = 0
+
+    @property
+    def capabilities(self) -> ProviderCapabilities:
+        return ProviderCapabilities(tools=True)
 
     def generate(
         self,
         messages: list[Message],
         tools: list[dict[str, Any]] | None = None,
+        output_schema: Any | None = None,
     ) -> ProviderResponse:
         """
         Return a deterministic mock response.

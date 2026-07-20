@@ -3,6 +3,8 @@ from __future__ import annotations
 import uuid
 from abc import ABC, abstractmethod
 
+from typing import Any
+
 from aether.core.execution import ExecutionContext
 from aether.planning.types import CognitivePlan, Decision, DecisionAction, Goal, Observation
 from aether.providers.base import AIProvider
@@ -20,9 +22,14 @@ class BasePlanner(ABC):
         self.provider = provider
 
     @abstractmethod
-    def generate_plan(self, goal: Goal, context: ExecutionContext) -> CognitivePlan:
+    def generate_plan(
+        self, 
+        goal: Goal, 
+        context: ExecutionContext,
+        output_schema: Any | None = None
+    ) -> CognitivePlan:
         """
-        Generate a CognitivePlan from a Goal and the current execution context.
+        Generate a CognitivePlan based on the given goal and context.
         """
         pass
 
@@ -40,11 +47,16 @@ class BasicPlanner(BasePlanner):
     It provides a basic implementation without advanced ReAct or OODA loops.
     """
 
-    def generate_plan(self, goal: Goal, context: ExecutionContext) -> CognitivePlan:
+    def generate_plan(
+        self, 
+        goal: Goal, 
+        context: ExecutionContext,
+        output_schema: Any | None = None
+    ) -> CognitivePlan:
         """
         Generates a basic plan.
         If a provider is available, it asks for a simple strategy.
-        Otherwise, it returns a single-step plan echoing the goal description.
+        Otherwise, it falls back to a deterministic instruction.
         """
         plan_id = f"plan-{uuid.uuid4().hex[:8]}"
 
@@ -61,7 +73,7 @@ class BasicPlanner(BasePlanner):
             f"Goal: {goal.description}\n"
             "Please outline the primary step to take."
         )
-        response = self.provider.generate([Message(role="user", content=prompt)])
+        response = self.provider.generate([Message(role="user", content=prompt)], output_schema=output_schema)
         
         # In this basic planner, we treat the entire response as a single cognitive step
         step = response.content if response.content else goal.description

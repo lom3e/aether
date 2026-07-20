@@ -6,7 +6,12 @@ from aether.providers.mock import MockProvider
 
 
 class FailingProvider(AIProvider):
-    def generate(self, messages, tools=None):
+    @property
+    def capabilities(self):
+        from aether.providers.capabilities import ProviderCapabilities
+        return ProviderCapabilities()
+
+    def generate(self, messages, tools=None, output_schema=None):
         raise RuntimeError("provider failed")
 
 
@@ -57,3 +62,5 @@ def test_runtime_returns_failure_when_provider_raises():
     assert result.success is False
     assert result.error == "provider failed"
     assert result.metadata["agent_name"] == "Assistant Agent"
+
+

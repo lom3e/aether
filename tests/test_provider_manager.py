@@ -12,9 +12,14 @@ from aether.providers.types import Message, ProviderConfig, ProviderResponse
 
 
 class DummyProvider(AIProvider):
+    @property
+    def capabilities(self):
+        from aether.providers.capabilities import ProviderCapabilities
+        return ProviderCapabilities()
+
     """Minimal provider for tests."""
 
-    def generate(self, messages: list[Message]) -> ProviderResponse:
+    def generate(self, messages: list[Message], tools=None, output_schema=None) -> ProviderResponse:
         return ProviderResponse(content="dummy", model="dummy-model")
 
 
@@ -78,3 +83,5 @@ class TestProviderManager:
         p2 = manager.get("dummy")
         assert isinstance(p1, MockProvider)
         assert isinstance(p2, DummyProvider)
+
+

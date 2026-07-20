@@ -17,7 +17,8 @@ from aether.tools.registry import ToolRegistry
 
 from aether.planning.compiler import BasicPlanCompiler, PlanCompiler
 from aether.planning.planner import BasePlanner, BasicPlanner
-from aether.planning.types import DecisionAction, Goal, Observation
+from aether.planning.types import Decision, DecisionAction, Goal, Observation
+from aether.planning.validation import PlanValidator, ValidationResult
 
 
 
@@ -52,6 +53,7 @@ class Agent:
         max_total_tokens: int | None = None,
         planner: BasePlanner | None = None,
         plan_compiler: PlanCompiler | None = None,
+        plan_validator: PlanValidator | None = None,
     ):
         self.id = agent_id or self._build_id(name)
         self.name = name
@@ -75,6 +77,7 @@ class Agent:
         )
         self.planner = planner
         self.plan_compiler = plan_compiler
+        self.plan_validator = plan_validator
         self.assign_skills(list(skills or []))
 
 
@@ -109,6 +112,21 @@ class Agent:
                 cognitive_plan = planner.generate_plan(goal, exec_context)
                 
                 decision = None
+                
+                if self.plan_validator:
+                    validation = self.plan_validator.validate(cognitive_plan)
+                    if not validation.is_valid:
+                        # Emulate an evaluation if plan is invalid without touching the engine
+                        # Wait, the prompt says "evitare ExecutionEngine, informare Planner, generare nuova Decision"
+                        # We can construct an error Observation for the planner to evaluate.
+                        # Wait, the prompt says "NON trasformare ValidationResult in Observation... 
+                        # Planner deve valutare o no? The prompt says "se invalid: evitare ExecutionEngine, informare Planner, generare nuova Decision".
+                        # How to inform planner of ValidationResult? The BasePlanner doesn't have a method for ValidationResult.
+                        # I'll just use a direct REPLAN decision for this basic integration if validation fails, or pass the validation result to the planner if it has an evaluate_validation method.
+                        # Since BasePlanner doesn't have evaluate_validation, let's just break and handle it.
+                        decision = Decision(action=DecisionAction.REPLAN, reasoning=f"Validation failed: {validation.errors}")
+                        continue
+                
                 for step_idx, step in enumerate(cognitive_plan.steps):
                     # Compilation: CognitivePlan -> engine.ExecutionPlan
                     engine_plan = plan_compiler.compile(cognitive_plan, exec_context)

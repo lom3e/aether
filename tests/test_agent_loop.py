@@ -15,11 +15,14 @@ class DummyTool(Tool):
 
 
 class IterativeProvider(AIProvider):
+    @property
+    def capabilities(self):
+        return ProviderCapabilities()
     def __init__(self, config=None):
         super().__init__(config)
         self.calls = 0
 
-    def generate(self, messages, tools=None) -> ProviderResponse:
+    def generate(self, messages, tools=None, output_schema=None) -> ProviderResponse:
         self.calls += 1
         if self.calls == 1:
             # First turn: request a tool call
@@ -76,7 +79,12 @@ def test_agent_loop_success() -> None:
 
 def test_agent_loop_max_turns_protection() -> None:
     class InfiniteProvider(AIProvider):
-        def generate(self, messages, tools=None) -> ProviderResponse:
+        @property
+        def capabilities(self):
+            from aether.providers.capabilities import ProviderCapabilities
+            return ProviderCapabilities()
+    
+        def generate(self, messages, tools=None, output_schema=None) -> ProviderResponse:
             tc = ToolCall(
                 call_id="call_inf",
                 tool_name="dummy_tool",
@@ -113,7 +121,12 @@ def test_agent_loop_max_turns_protection() -> None:
 
 def test_agent_loop_max_tool_calls_protection() -> None:
     class MultiToolProvider(AIProvider):
-        def generate(self, messages, tools=None) -> ProviderResponse:
+        @property
+        def capabilities(self):
+            from aether.providers.capabilities import ProviderCapabilities
+            return ProviderCapabilities()
+    
+        def generate(self, messages, tools=None, output_schema=None) -> ProviderResponse:
             tc1 = ToolCall(call_id="call1", tool_name="dummy_tool", arguments={"input_data": "1"})
             tc2 = ToolCall(call_id="call2", tool_name="dummy_tool", arguments={"input_data": "2"})
             msg = Message(role="assistant", content="", tool_calls=[tc1, tc2])
@@ -146,7 +159,12 @@ def test_agent_loop_max_tool_calls_protection() -> None:
 
 def test_agent_loop_max_tokens_protection() -> None:
     class HighTokenProvider(AIProvider):
-        def generate(self, messages, tools=None) -> ProviderResponse:
+        @property
+        def capabilities(self):
+            from aether.providers.capabilities import ProviderCapabilities
+            return ProviderCapabilities()
+    
+        def generate(self, messages, tools=None, output_schema=None) -> ProviderResponse:
             return ProviderResponse(
                 content="Too long",
                 model="test",
@@ -166,3 +184,5 @@ def test_agent_loop_max_tokens_protection() -> None:
 
     assert result.success is False
     assert "Max total tokens limit" in result.error
+
+

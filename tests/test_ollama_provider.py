@@ -198,3 +198,5 @@ class TestOllamaProviderIntegration:
         assert isinstance(response.content, str)
         assert len(response.content) > 0
         assert response.model == model
+
+

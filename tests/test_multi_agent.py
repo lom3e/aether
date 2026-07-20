@@ -32,13 +32,18 @@ from aether.tools.registry import ToolRegistry
 # ---------------------------------------------------------------------------
 
 class SingleShotProvider(AIProvider):
+    @property
+    def capabilities(self):
+        from aether.providers.capabilities import ProviderCapabilities
+        return ProviderCapabilities()
+
     """Provider that returns a fixed response without tool calls."""
 
     def __init__(self, response_text: str = "Done."):
         super().__init__(config=None)
         self._response_text = response_text
 
-    def generate(self, messages, tools=None) -> ProviderResponse:
+    def generate(self, messages, tools=None, output_schema=None) -> ProviderResponse:
         msg = Message(role="assistant", content=self._response_text)
         return ProviderResponse(
             content=self._response_text,
@@ -250,10 +255,15 @@ def test_agent_tool_context_isolation() -> None:
     executed_task_ids: list[str] = []
 
     class TrackingProvider(AIProvider):
+        @property
+        def capabilities(self):
+            from aether.providers.capabilities import ProviderCapabilities
+            return ProviderCapabilities()
+    
         def __init__(self):
             super().__init__(config=None)
 
-        def generate(self, messages, tools=None) -> ProviderResponse:
+        def generate(self, messages, tools=None, output_schema=None) -> ProviderResponse:
             msg = Message(role="assistant", content="ok")
             return ProviderResponse(
                 content="ok", model="test", usage={}, finish_reason="stop", message=msg,
@@ -291,10 +301,15 @@ def test_agent_tool_child_error_handling() -> None:
     """AgentTool returns error gracefully if child agent fails."""
 
     class FailingProvider(AIProvider):
+        @property
+        def capabilities(self):
+            from aether.providers.capabilities import ProviderCapabilities
+            return ProviderCapabilities()
+    
         def __init__(self):
             super().__init__(config=None)
 
-        def generate(self, messages, tools=None) -> ProviderResponse:
+        def generate(self, messages, tools=None, output_schema=None) -> ProviderResponse:
             raise RuntimeError("Provider crashed")
 
     child = Agent(name="Faulty", role="worker", provider=FailingProvider())
@@ -384,3 +399,5 @@ def test_orchestrator_delegates_to_child() -> None:
     task = Task(agent_name="Orchestrator", instruction="Coordinate the work.")
     result = orchestrator.execute(task)
     assert result.success is True
+
+

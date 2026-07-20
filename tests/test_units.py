@@ -27,3 +27,5 @@ def test_tool_unit_has_correct_unit_type():
 
 def test_unit_type_values_are_distinct():
     assert UnitType.SKILL != UnitType.TOOL
+
+

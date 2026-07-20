@@ -11,6 +11,9 @@ from __future__ import annotations
 
 from abc import ABC, abstractmethod
 
+from typing import Any
+
+from aether.providers.capabilities import ProviderCapabilities
 from aether.providers.types import Message, ProviderConfig, ProviderResponse
 
 
@@ -38,11 +41,20 @@ class AIProvider(ABC):
         """
         self.config = config or ProviderConfig()
 
+    @property
+    @abstractmethod
+    def capabilities(self) -> ProviderCapabilities:
+        """
+        Return the provider's capabilities (e.g., tool calling, structured output).
+        """
+        pass
+
     @abstractmethod
     def generate(
         self,
         messages: list[Message],
         tools: list[dict[str, Any]] | None = None,
+        output_schema: Any | None = None,
     ) -> ProviderResponse:
         """
         Generate a response from an AI model.
@@ -51,6 +63,9 @@ class AIProvider(ABC):
         Args:
             messages: Ordered list of conversation messages. Typically starts
                       with a "system" message followed by "user" messages.
+            tools: Optional list of tool definitions.
+            output_schema: Optional schema (e.g., Pydantic model or JSON Schema)
+                           to enforce structured output, if the provider supports it.
 
         Returns:
             ProviderResponse containing the generated content, model name,

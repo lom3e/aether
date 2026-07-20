@@ -132,3 +132,5 @@ def test_skill_package_validation_rejects_inconsistent_data():
             skills=(skill,),
             aether_compatibility=(">=0.6,<1.0",),
         )
+
+

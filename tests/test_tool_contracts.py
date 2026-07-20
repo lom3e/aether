@@ -78,3 +78,5 @@ def test_tool_to_json_schema() -> None:
     assert schema["function"]["description"] == "A custom description"
     assert schema["function"]["parameters"]["properties"]["input_data"]["type"] == "string"
 
+
+

@@ -11,7 +11,12 @@ from aether.providers.types import ProviderResponse, Message
 
 
 class MockProvider(AIProvider):
-    def generate(self, messages, tools=None, response_format=None):
+    @property
+    def capabilities(self):
+        from aether.providers.capabilities import ProviderCapabilities
+        return ProviderCapabilities()
+
+    def generate(self, messages, tools=None, output_schema=None):
         return ProviderResponse(
             content="Use the mock tool to proceed.",
             finish_reason="stop",
@@ -103,3 +108,5 @@ def test_agent_achieve_lifecycle():
     assert result.success is True
     assert result.output == "The step completed successfully."
     assert result.metadata["goal_description"] == "Lifecycle test"
+
+

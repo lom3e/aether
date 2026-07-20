@@ -77,3 +77,5 @@ def test_agent_lifecycle_transitions_through_runtime_execution():
 
     assert result.success is True
     assert agent.lifecycle.state == AgentLifecycleState.COMPLETED
+
+

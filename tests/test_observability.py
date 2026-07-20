@@ -123,3 +123,5 @@ def test_runtime_diagnostics_integration():
     assert t_event.parent_task_id == "task_000"
     assert t_event.event_type == "agent_started"
     assert t_event.component == "test_agent"
+
+

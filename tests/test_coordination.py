@@ -21,11 +21,16 @@ from aether.tools.agent_tool import AgentTool
 
 
 class DummyProvider(AIProvider):
+    @property
+    def capabilities(self):
+        from aether.providers.capabilities import ProviderCapabilities
+        return ProviderCapabilities()
+
     def __init__(self, response: str = "Dummy Response"):
         super().__init__(config=None)
         self.response = response
 
-    def generate(self, messages, tools=None) -> ProviderResponse:
+    def generate(self, messages, tools=None, output_schema=None) -> ProviderResponse:
         msg = Message(role="assistant", content=self.response)
         return ProviderResponse(
             content=self.response,
@@ -206,10 +211,15 @@ def test_coordinator_error_handling() -> None:
     registry = AgentRegistry()
 
     class FailingProvider(AIProvider):
+        @property
+        def capabilities(self):
+            from aether.providers.capabilities import ProviderCapabilities
+            return ProviderCapabilities()
+    
         def __init__(self):
             super().__init__(config=None)
 
-        def generate(self, messages, tools=None) -> ProviderResponse:
+        def generate(self, messages, tools=None, output_schema=None) -> ProviderResponse:
             raise RuntimeError("LLM Failure")
 
     child_agent = Agent(name="FailingChild", role="worker", provider=FailingProvider())
@@ -301,3 +311,5 @@ def test_retrocompatibility_agent_tool() -> None:
 
     res = tool.execute("Some Task")
     assert res == "Child Output"
+
+

@@ -147,7 +147,12 @@ def test_memory_manager_orchestration() -> None:
 
 
 class DummyProvider(AIProvider):
-    def generate(self, messages: list, tools: list | None = None) -> ProviderResponse:
+    @property
+    def capabilities(self):
+        from aether.providers.capabilities import ProviderCapabilities
+        return ProviderCapabilities()
+
+    def generate(self, messages: list, tools: list | None = None, output_schema=None) -> ProviderResponse:
         return ProviderResponse(content="Dummy answer", model="dummy", finish_reason="stop")
 
 
@@ -183,4 +188,6 @@ def test_semantic_memory_close_and_destructor() -> None:
     store.close()
     # Should not raise exception on delete even when already closed
     del store
+
+
 
