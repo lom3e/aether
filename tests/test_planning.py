@@ -4,6 +4,7 @@ from dataclasses import FrozenInstanceError
 from aether.core.execution import ExecutionContext, Task
 from aether.planning.types import Goal, CognitivePlan, Observation, Decision, DecisionAction
 from aether.planning.planner import BasicPlanner
+from aether.planning.compiler import BasicPlanCompiler
 from aether.agents.agent import Agent
 from aether.providers.base import AIProvider
 from aether.providers.types import ProviderResponse, Message
@@ -38,6 +39,16 @@ def test_cognitive_plan_creation():
     with pytest.raises(FrozenInstanceError):
         plan.plan_id = "p-456"
 
+def test_basic_plan_compiler():
+    compiler = BasicPlanCompiler()
+    goal = Goal(description="Test")
+    cognitive_plan = CognitivePlan(plan_id="p-1", goal=goal, steps=("step",))
+    context = ExecutionContext(task=Task(instruction="Test", agent_name="Agent", id="t-1"), agent_name="Agent")
+    
+    engine_plan = compiler.compile(cognitive_plan, context)
+    
+    assert engine_plan.metadata["cognitive_plan_id"] == "p-1"
+    assert len(engine_plan.units) == 0
 
 def test_basic_planner_no_provider():
     planner = BasicPlanner(provider=None)

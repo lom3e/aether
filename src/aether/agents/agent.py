@@ -15,6 +15,7 @@ from aether.providers.base import AIProvider
 from aether.providers.types import Message
 from aether.tools.registry import ToolRegistry
 
+from aether.planning.compiler import BasicPlanCompiler, PlanCompiler
 from aether.planning.planner import BasePlanner, BasicPlanner
 from aether.planning.types import DecisionAction, Goal, Observation
 
@@ -50,6 +51,7 @@ class Agent:
         max_tool_calls: int = 20,
         max_total_tokens: int | None = None,
         planner: BasePlanner | None = None,
+        plan_compiler: PlanCompiler | None = None,
     ):
         self.id = agent_id or self._build_id(name)
         self.name = name
@@ -72,6 +74,7 @@ class Agent:
             tool_registry=self.tool_registry,
         )
         self.planner = planner
+        self.plan_compiler = plan_compiler
         self.assign_skills(list(skills or []))
 
 
@@ -98,6 +101,7 @@ class Agent:
         exec_context.agent_state = self.lifecycle.state
         
         planner = self.planner or BasicPlanner(provider=self.provider)
+        plan_compiler = self.plan_compiler or BasicPlanCompiler()
         metadata: dict[str, Any] = {"agent_name": self.name, "goal_description": goal.description}
         
         try:
@@ -106,14 +110,8 @@ class Agent:
                 
                 decision = None
                 for step_idx, step in enumerate(cognitive_plan.steps):
-                    # Conversion: CognitivePlan -> engine.ExecutionPlan
-                    from aether.engine.plan import ExecutionPlan as EnginePlan
-                    from aether.engine.units import SkillUnit
-                    
-                    engine_plan = EnginePlan(units=[])
-                    # Minimal mapping for v0.16.0: attach available skills to the execution plan
-                    for skill in exec_context.skills:
-                        engine_plan.units.append(SkillUnit(skill=skill))
+                    # Compilation: CognitivePlan -> engine.ExecutionPlan
+                    engine_plan = plan_compiler.compile(cognitive_plan, exec_context)
                         
                     unit_results = self.execution_engine.run(engine_plan, exec_context)
                     
