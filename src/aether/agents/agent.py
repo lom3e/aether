@@ -15,6 +15,9 @@ from aether.providers.base import AIProvider
 from aether.providers.types import Message
 from aether.tools.registry import ToolRegistry
 
+from aether.planning.planner import BasePlanner, BasicPlanner
+from aether.planning.types import DecisionAction, Goal, Observation
+
 
 
 class Agent:
@@ -46,6 +49,7 @@ class Agent:
         max_turns: int = 10,
         max_tool_calls: int = 20,
         max_total_tokens: int | None = None,
+        planner: BasePlanner | None = None,
     ):
         self.id = agent_id or self._build_id(name)
         self.name = name
@@ -67,12 +71,86 @@ class Agent:
             skill_executor=SkillExecutor(registry=self.skill_registry),
             tool_registry=self.tool_registry,
         )
+        self.planner = planner
         self.assign_skills(list(skills or []))
 
 
     def initialize(self) -> AgentLifecycleState:
         self.lifecycle.initialize()
         return self.lifecycle.ready()
+
+    def achieve(self, goal: Goal, context: ExecutionContext | None = None) -> ExecutionResult:
+        """
+        Achieve a high-level goal using the Intelligence Layer (Planner).
+        """
+        self.lifecycle.start()
+        
+        # Build execution context
+        exec_context = context or ExecutionContext(
+            task=Task(instruction=goal.description, id=f"task-goal-{self.id}", agent_name=self.name),
+            agent_name=self.name,
+            memory=self.memory,
+            skill_registry=self.skill_registry,
+            tool_registry=self.tool_registry,
+            skills=self.resolve_skills(),
+            tools=tuple(self.tools),
+        )
+        exec_context.agent_state = self.lifecycle.state
+        
+        planner = self.planner or BasicPlanner(provider=self.provider)
+        metadata: dict[str, Any] = {"agent_name": self.name, "goal_description": goal.description}
+        
+        try:
+            while True:
+                cognitive_plan = planner.generate_plan(goal, exec_context)
+                
+                decision = None
+                for step_idx, step in enumerate(cognitive_plan.steps):
+                    # Conversion: CognitivePlan -> engine.ExecutionPlan
+                    from aether.engine.plan import ExecutionPlan as EnginePlan
+                    from aether.engine.units import SkillUnit
+                    
+                    engine_plan = EnginePlan(units=[])
+                    # Minimal mapping for v0.16.0: attach available skills to the execution plan
+                    for skill in exec_context.skills:
+                        engine_plan.units.append(SkillUnit(skill=skill))
+                        
+                    unit_results = self.execution_engine.run(engine_plan, exec_context)
+                    
+                    is_error = engine_plan.has_failures
+                    result_text = "\\n".join(str(r.output or r.error) for r in unit_results) if unit_results else "Step evaluated."
+                    
+                    obs = Observation(
+                        plan_id=cognitive_plan.plan_id,
+                        step_id=f"step-{step_idx}",
+                        action_taken=str(step),
+                        result=result_text,
+                        is_error=is_error
+                    )
+                    
+                    decision = planner.evaluate(obs, goal, cognitive_plan)
+                    
+                    if decision.action == DecisionAction.REPLAN:
+                        break  # Break the step loop to regenerate the plan
+                    elif decision.action == DecisionAction.FINISH:
+                        break  # Goal achieved
+                        
+                if decision and decision.action == DecisionAction.FINISH:
+                    self.lifecycle.complete()
+                    return ExecutionResult(success=True, output=decision.reasoning, metadata=metadata)
+                    
+                if decision is None or decision.action == DecisionAction.CONTINUE:
+                    # Plan exhausted successfully
+                    self.lifecycle.complete()
+                    return ExecutionResult(success=True, output="Plan completed successfully.", metadata=metadata)
+                    
+        except Exception as exc:
+            self.lifecycle.fail()
+            return ExecutionResult(
+                success=False,
+                error=str(exc),
+                metadata=metadata,
+            )
 
     def execute(self, task: Task, context: ExecutionContext | None = None) -> ExecutionResult:
         """
