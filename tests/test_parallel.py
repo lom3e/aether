@@ -7,7 +7,7 @@ import pytest
 
 from aether.agents.agent import Agent
 from aether.agents.registry import AgentRegistry
-from aether.core.communication import DelegationContext
+from aether.core.delegation import DelegationContext
 from aether.core.execution import Message, Task
 from aether.coordination import (
     Coordinator,

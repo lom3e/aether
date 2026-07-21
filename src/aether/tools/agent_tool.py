@@ -3,7 +3,7 @@ from __future__ import annotations
 from typing import Any
 from uuid import uuid4
 
-from aether.core.communication import DelegationContext, DelegationError
+from aether.core.delegation import DelegationContext, DelegationError
 from aether.core.execution import Task
 from aether.tools.base import Tool, ToolExecutionContext
 

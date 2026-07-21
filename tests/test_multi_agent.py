@@ -15,10 +15,11 @@ from aether.agents.agent import Agent
 from aether.agents.registry import AgentRegistry
 from aether.core.communication import (
     AgentMessage,
-    DelegationContext,
+    
     DelegationError,
     MessageType,
 )
+from aether.core.delegation import DelegationContext
 from aether.core.execution import Message, Task
 from aether.providers.base import AIProvider
 from aether.providers.types import ProviderResponse

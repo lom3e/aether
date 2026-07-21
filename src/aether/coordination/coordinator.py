@@ -4,7 +4,7 @@ from typing import Any
 from uuid import uuid4
 
 from aether.agents.registry import AgentRegistry
-from aether.core.communication import DelegationContext, DelegationError
+from aether.core.delegation import DelegationContext, DelegationError
 from aether.core.execution import Task, ExecutionResult
 from aether.coordination.events import EventEmitter, AgentEvent, EventType
 from aether.coordination.task_tracker import TaskTracker, TaskState
