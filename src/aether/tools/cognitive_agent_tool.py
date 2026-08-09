@@ -29,11 +29,22 @@ class CognitiveAgentTool(Tool):
         self._delegation_context = delegation_context
 
     def execute(
-        self, input_data: dict[str, Any], context: ToolExecutionContext | None = None
+        self, input_data: str | dict[str, Any], context: ToolExecutionContext | None = None
     ) -> DelegationResult:
         """
         Creates a Goal from the DelegationRequest and invokes `achieve` on the child agent.
         """
+        if isinstance(input_data, str):
+            try:
+                import json
+                parsed = json.loads(input_data)
+                if isinstance(parsed, dict):
+                    input_data = parsed
+                else:
+                    input_data = {"goal_description": input_data}
+            except Exception:
+                input_data = {"goal_description": input_data}
+                
         # 1. Parse and validate DelegationRequest
         try:
             req = DelegationRequest(**input_data)

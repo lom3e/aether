@@ -3,7 +3,9 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 
 
-class DelegationError(Exception):
+from aether.errors import DelegationError as BaseDelegationError
+
+class DelegationError(BaseDelegationError):
     """Raised when a delegation constraint is violated."""
     pass
 

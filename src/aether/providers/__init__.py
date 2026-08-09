@@ -22,6 +22,7 @@ from aether.providers.errors import TimeoutError as ProviderTimeoutError
 from aether.providers.manager import ProviderManager
 from aether.providers.mock import MockProvider
 from aether.providers.ollama import OllamaProvider
+from aether.providers.resilience import ResilientProvider
 from aether.providers.types import Message, ProviderConfig, ProviderResponse
 
 __all__ = [
@@ -43,4 +44,5 @@ __all__ = [
     # Implementations
     "MockProvider",
     "OllamaProvider",
+    "ResilientProvider",
 ]

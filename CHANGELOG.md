@@ -7,6 +7,58 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [v1.0.0]
+
+### Added
+- **First Stable Release**: Complete cognitive loop from goal decomposition to plan execution with built-in safety constraints, structured observation, and provider abstraction.
+- **Goal-Driven Agents**: High-level task execution via the `achieve()` API.
+- **Extensible Tool System**: Dynamic tool definition with `ToolRegistry` and `ToolExecutionContext`.
+- **Agent Delegation**: Multi-agent orchestration via `CognitiveAgentTool`.
+- **Runtime Safety**: Protection against infinite loops with `RuntimeSafetyPolicy` and `Deadline`.
+- **Comprehensive Error Model**: Unified exception hierarchy (`AetherError`, `ProviderError`, `PlanningError`, `ExecutionError`, `RuntimeSafetyError`).
+- **Resilient Execution**: `ResilientProvider` decorator for exponential backoff and retry.
+- **Structured Observations**: Safe propagation of structured data through the cognitive loop without json-corruption or premature string flattening.
+
+## [v0.20.0] - Public API & Developer Experience
+
+### Added
+- **Public API Contract**: Clean package exports from `aether`, `aether.tools`, `aether.providers`, and `aether.errors`.
+- **Unified Error Model**: Clear semantic error hierarchy.
+- **Safe Truncation**: Structured objects (`dict`, `list`) are preserved, and fallback mechanisms prevent corrupting JSON during truncation.
+- **Enhanced Documentation & Examples**: 6 working examples and a complete README.
+
+## [v0.19.0] - Runtime Safety
+
+### Added
+- **RuntimeSafetyPolicy**: Infrastructure-level constraints (`max_cognitive_cycles`, `max_replans`).
+- **Deadline Management**: Execution bounds enforced safely across cycles.
+- **Safe Observation Boundaries**: No cognitive logic leaks into the observation layer.
+
+## [v0.18.0] - Agent Delegation Layer
+
+### Added
+- **CognitiveAgentTool**: Native delegation primitive mapping child agents as tools.
+- **DelegationRequest/DelegationResult**: Structured contracts for inter-agent communication.
+- **Hierarchical Execution**: Parent agents pass context cleanly to child agents without coupling.
+
+## [v0.17.0] - Plan Validation & Decision Layer
+
+### Added
+- **PlanValidator**: Independent validation of proposed cognitive plans.
+- **Decision Engine**: Formal `Decision` and `DecisionAction` abstractions replacing raw string matching.
+- **Adaptive Replanning**: System dynamically detects task completion, failure, or need for continuation based on safe observation.
+
+## [v0.16.0] - Cognitive Planning Layer
+
+### Added
+- **Planner Interfaces**: `BasePlanner` and `BasicPlanner` introduced.
+- **CognitivePlan**: Structured representation of reasoning and proposed execution steps.
+- **PlanCompiler**: Translates `CognitivePlan` into an `ExecutionPlan`.
+- **ObservationFactory**: Translates `ExecutionResult` back into a formalized `Observation`.
+- **Decoupled Architecture**: Strict separation between Planner (intelligence) and ExecutionEngine (runtime mechanics).
+
+---
+
 ## [v0.15.1] - Runtime Consistency Patch
 
 ### Fixed
@@ -135,7 +187,7 @@ class MyProvider(AIProvider):
 
 ---
 
-
+## [v0.8.0]
 
 ### Added
 - **ExecutionEngine Orchestration**: The engine now owns the execution loop, dispatch mechanism, fail-fast implementation, and execution plan building.

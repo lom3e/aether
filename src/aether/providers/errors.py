@@ -8,8 +8,9 @@ being coupled to provider-specific SDK exceptions.
 
 from __future__ import annotations
 
+from aether.errors import ProviderError as BaseProviderError
 
-class ProviderError(Exception):
+class ProviderError(BaseProviderError):
     """
     Base class for all provider-related errors.
 

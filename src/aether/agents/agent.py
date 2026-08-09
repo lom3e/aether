@@ -14,6 +14,8 @@ from aether.skills.skill import Skill
 from aether.providers.base import AIProvider
 from aether.providers.types import Message
 from aether.tools.registry import ToolRegistry
+from aether.core.safety import RuntimeSafetyPolicy
+from aether.planning.observation import ObservationFactory
 
 from aether.planning.compiler import BasicPlanCompiler, PlanCompiler
 from aether.planning.planner import BasePlanner, BasicPlanner
@@ -54,6 +56,8 @@ class Agent:
         planner: BasePlanner | None = None,
         plan_compiler: PlanCompiler | None = None,
         plan_validator: PlanValidator | None = None,
+        runtime_safety_policy: RuntimeSafetyPolicy | None = None,
+        observation_factory: ObservationFactory | None = None,
     ):
         self.id = agent_id or self._build_id(name)
         self.name = name
@@ -61,9 +65,12 @@ class Agent:
         self.provider = provider
         self.memory = memory
         self.memory_manager = memory_manager
+        
+        self.runtime_safety_policy = runtime_safety_policy or RuntimeSafetyPolicy(max_cognitive_cycles=30, max_replans=5)
+        self.observation_factory = observation_factory or ObservationFactory()
 
         self.skill_registry = skill_registry
-        self.tool_registry = tool_registry
+        self.tool_registry = tool_registry or ToolRegistry()
         self.lifecycle = AgentLifecycle()
         self.skills: list[Skill] = []
         self.tools: list[str] = []
@@ -109,6 +116,8 @@ class Agent:
         
         try:
             while True:
+                self.runtime_safety_policy.before_cycle()
+                
                 cognitive_plan = planner.generate_plan(goal, exec_context)
                 
                 decision = None
@@ -133,7 +142,11 @@ class Agent:
                                 error=f"Plan validation failed: {decision.reasoning}",
                                 metadata=metadata,
                             )
+                        self.runtime_safety_policy.before_replan()
+                        self.runtime_safety_policy.after_cycle()
                         continue  # regenerate the plan
+                
+                self.runtime_safety_policy.reset_replans()
                 
                 for step_idx, step in enumerate(cognitive_plan.steps):
                     # Compilation: CognitivePlan -> engine.ExecutionPlan
@@ -142,19 +155,26 @@ class Agent:
                     unit_results = self.execution_engine.run(engine_plan, exec_context)
                     
                     is_error = engine_plan.has_failures
-                    result_text = "\\n".join(str(r.output or r.error) for r in unit_results) if unit_results else "Step evaluated."
                     
-                    obs = Observation(
+                    if not unit_results:
+                        payload = "Step evaluated."
+                    elif len(unit_results) == 1:
+                        payload = unit_results[0].output if unit_results[0].output is not None else unit_results[0].error
+                    else:
+                        payload = [r.output if r.output is not None else r.error for r in unit_results]
+                    
+                    obs = self.observation_factory.create(
                         plan_id=cognitive_plan.plan_id,
                         step_id=f"step-{step_idx}",
                         action_taken=str(step),
-                        result=result_text,
+                        payload=payload,
                         is_error=is_error
                     )
                     
                     decision = planner.evaluate(obs, goal, cognitive_plan)
                     
                     if decision.action == DecisionAction.REPLAN:
+                        self.runtime_safety_policy.before_replan()
                         break  # Break the step loop to regenerate the plan
                     elif decision.action == DecisionAction.FINISH:
                         break  # Goal achieved
@@ -167,6 +187,8 @@ class Agent:
                     # Plan exhausted successfully
                     self.lifecycle.complete()
                     return ExecutionResult(success=True, output="Plan completed successfully.", metadata=metadata)
+                
+                self.runtime_safety_policy.after_cycle()
                     
         except Exception as exc:
             self.lifecycle.fail()

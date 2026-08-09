@@ -1,5 +1,5 @@
-from aether.agents.agent import Agent
-from aether.providers.base import AIProvider
+from aether import Agent
+from aether.providers import AIProvider
 
 
 class DemoProvider(AIProvider):

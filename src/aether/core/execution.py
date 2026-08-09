@@ -7,9 +7,12 @@ from uuid import uuid4
 import json
 from aether.agents.lifecycle import AgentLifecycleState
 from aether.memory.base import Memory
-from aether.skills.registry import SkillRegistry
-from aether.skills.skill import Skill
-from aether.tools.registry import ToolRegistry
+from typing import TYPE_CHECKING, Any
+
+if TYPE_CHECKING:
+    from aether.skills.registry import SkillRegistry
+    from aether.skills.skill import Skill
+    from aether.tools.registry import ToolRegistry
 
 
 @dataclass(slots=True)
@@ -82,8 +85,8 @@ class Task:
     Minimal work unit assigned to an agent.
     """
 
-    agent_name: str
     instruction: str
+    agent_name: str = "unknown"
     id: str = field(default_factory=lambda: uuid4().hex)
     metadata: dict[str, Any] = field(default_factory=dict)
 
