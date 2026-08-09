@@ -84,4 +84,25 @@ class TestProviderManager:
         assert isinstance(p1, MockProvider)
         assert isinstance(p2, DummyProvider)
 
+    def test_lazy_load_openai_missing(self) -> None:
+        manager = ProviderManager()
+        import aether.providers.openai_provider
+        aether.providers.openai_provider._HAS_OPENAI = False
+        with pytest.raises(ImportError, match="pip install openai"):
+            manager.get("openai")
+
+    def test_lazy_load_anthropic_missing(self) -> None:
+        manager = ProviderManager()
+        import aether.providers.anthropic_provider
+        aether.providers.anthropic_provider._HAS_ANTHROPIC = False
+        with pytest.raises(ImportError, match="pip install anthropic"):
+            manager.get("anthropic")
+
+    def test_lazy_load_gemini_missing(self) -> None:
+        manager = ProviderManager()
+        import aether.providers.gemini_provider
+        aether.providers.gemini_provider._HAS_GEMINI = False
+        with pytest.raises(ImportError, match="pip install google-genai"):
+            manager.get("gemini")
+
 

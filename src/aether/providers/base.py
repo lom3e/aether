@@ -11,10 +11,10 @@ from __future__ import annotations
 
 from abc import ABC, abstractmethod
 
-from typing import Any
+from typing import Any, AsyncIterator, Iterator
 
 from aether.providers.capabilities import ProviderCapabilities
-from aether.providers.types import Message, ProviderConfig, ProviderResponse
+from aether.providers.types import Message, ProviderConfig, ProviderResponse, ProviderStreamChunk
 
 
 class AIProvider(ABC):
@@ -77,3 +77,59 @@ class AIProvider(ABC):
             RateLimitError: If the provider throttles requests.
             TimeoutError: If the request exceeds the configured timeout.
         """
+
+    async def agenerate(
+        self,
+        messages: list[Message],
+        tools: list[dict[str, Any]] | None = None,
+        output_schema: Any | None = None,
+    ) -> ProviderResponse:
+        """
+        Asynchronously generate a response from an AI model.
+        
+        By default, this wraps the synchronous `generate` method using `asyncio.to_thread`
+        to preserve backward compatibility for custom providers. Providers with native
+        async support should override this method.
+        """
+        import asyncio
+        return await asyncio.to_thread(self.generate, messages, tools, output_schema)
+
+    def generate_stream(
+        self,
+        messages: list[Message],
+        tools: list[dict[str, Any]] | None = None,
+        output_schema: Any | None = None,
+    ) -> Iterator[ProviderStreamChunk]:
+        """
+        Generate a response stream from an AI model.
+        
+        By default, this falls back to calling `generate` and yielding the entire
+        response as a single chunk to preserve backward compatibility. Providers
+        with native streaming support should override this method.
+        """
+        response = self.generate(messages, tools, output_schema)
+        yield ProviderStreamChunk(
+            text=response.content,
+            finish_reason=response.finish_reason,
+            usage=response.usage,
+        )
+
+    async def agenerate_stream(
+        self,
+        messages: list[Message],
+        tools: list[dict[str, Any]] | None = None,
+        output_schema: Any | None = None,
+    ) -> AsyncIterator[ProviderStreamChunk]:
+        """
+        Asynchronously generate a response stream from an AI model.
+        
+        By default, this falls back to calling `agenerate` and yielding the entire
+        response as a single chunk. Providers with native async streaming support
+        should override this method.
+        """
+        response = await self.agenerate(messages, tools, output_schema)
+        yield ProviderStreamChunk(
+            text=response.content,
+            finish_reason=response.finish_reason,
+            usage=response.usage,
+        )

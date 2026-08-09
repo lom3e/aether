@@ -60,3 +60,19 @@ class ProviderResponse:
     finish_reason: str = "stop"
     message: Message | None = None
 
+
+@dataclass
+class ProviderStreamChunk:
+    """
+    A single chunk yielded during a streaming generation.
+    
+    Attributes:
+        text: The text content delta for this chunk.
+        finish_reason: Why the stream stopped (usually only present in the final chunk).
+        usage: Token usage statistics (usually only present in the final chunk).
+    """
+
+    text: str
+    finish_reason: str | None = None
+    usage: dict[str, int] | None = None
+

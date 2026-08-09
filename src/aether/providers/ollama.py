@@ -30,7 +30,8 @@ import json
 import urllib.error
 import urllib.request
 import uuid
-from typing import Any
+import asyncio
+from typing import Any, AsyncIterator, Iterator
 
 from aether.providers.base import AIProvider
 from aether.providers.errors import (
@@ -39,7 +40,7 @@ from aether.providers.errors import (
     RateLimitError,
 )
 from aether.providers.errors import TimeoutError as ProviderTimeoutError
-from aether.providers.types import Message, ProviderConfig, ProviderResponse
+from aether.providers.types import Message, ProviderConfig, ProviderResponse, ProviderStreamChunk
 from aether.providers.capabilities import ProviderCapabilities
 from aether.core.execution import ToolCall
 
@@ -106,6 +107,130 @@ class OllamaProvider(AIProvider):
         """
         payload = self._build_payload(messages, tools, output_schema)
         return self._send(payload)
+
+    async def agenerate(
+        self,
+        messages: list[Message],
+        tools: list[dict[str, Any]] | None = None,
+        output_schema: Any | None = None,
+    ) -> ProviderResponse:
+        return await asyncio.to_thread(self.generate, messages, tools, output_schema)
+
+    def generate_stream(
+        self,
+        messages: list[Message],
+        tools: list[dict[str, Any]] | None = None,
+        output_schema: Any | None = None,
+    ) -> Iterator[ProviderStreamChunk]:
+        payload = self._build_payload(messages, tools, output_schema)
+        payload["stream"] = True
+        body = json.dumps(payload).encode("utf-8")
+        req = urllib.request.Request(
+            self._endpoint,
+            data=body,
+            headers={"Content-Type": "application/json"},
+            method="POST",
+        )
+        
+        try:
+            with urllib.request.urlopen(req, timeout=self.config.timeout) as resp:
+                for line in resp:
+                    if not line:
+                        continue
+                    chunk = self._parse_stream_line(line)
+                    if chunk:
+                        yield chunk
+        except urllib.error.HTTPError as exc:
+            try:
+                self._handle_http_error(exc)
+            finally:
+                exc.close()
+        except TimeoutError as exc:
+            raise ProviderTimeoutError(
+                f"Request to {self._endpoint} timed out after {self.config.timeout}s",
+                provider="ollama",
+            ) from exc
+        except (urllib.error.URLError, OSError) as exc:
+            raise ProviderConnectionError(
+                f"Could not connect to Ollama at {self._base_url}. "
+                "Ensure Ollama is running: https://ollama.ai",
+                provider="ollama",
+            ) from exc
+
+    async def agenerate_stream(
+        self,
+        messages: list[Message],
+        tools: list[dict[str, Any]] | None = None,
+        output_schema: Any | None = None,
+    ) -> AsyncIterator[ProviderStreamChunk]:
+        payload = self._build_payload(messages, tools, output_schema)
+        payload["stream"] = True
+        body = json.dumps(payload).encode("utf-8")
+        req = urllib.request.Request(
+            self._endpoint,
+            data=body,
+            headers={"Content-Type": "application/json"},
+            method="POST",
+        )
+
+        try:
+            # Open connection in a thread
+            resp = await asyncio.to_thread(urllib.request.urlopen, req, timeout=self.config.timeout)
+            
+            try:
+                while True:
+                    # Read line in a thread to avoid blocking the event loop for the whole stream
+                    line = await asyncio.to_thread(resp.readline)
+                    if not line:
+                        break
+                    chunk = self._parse_stream_line(line)
+                    if chunk:
+                        yield chunk
+            finally:
+                await asyncio.to_thread(resp.close)
+                
+        except urllib.error.HTTPError as exc:
+            try:
+                self._handle_http_error(exc)
+            finally:
+                exc.close()
+        except TimeoutError as exc:
+            raise ProviderTimeoutError(
+                f"Request to {self._endpoint} timed out after {self.config.timeout}s",
+                provider="ollama",
+            ) from exc
+        except (urllib.error.URLError, OSError) as exc:
+            raise ProviderConnectionError(
+                f"Could not connect to Ollama at {self._base_url}. "
+                "Ensure Ollama is running: https://ollama.ai",
+                provider="ollama",
+            ) from exc
+
+    def _parse_stream_line(self, line: bytes) -> ProviderStreamChunk | None:
+        try:
+            data = json.loads(line.decode("utf-8"))
+        except json.JSONDecodeError:
+            return None
+            
+        message = data.get("message", {})
+        content = message.get("content", "")
+        done = data.get("done", False)
+        
+        usage = None
+        if done:
+            usage = {}
+            if "prompt_eval_count" in data:
+                usage["prompt_tokens"] = data["prompt_eval_count"]
+            if "eval_count" in data:
+                usage["completion_tokens"] = data["eval_count"]
+            if usage:
+                usage["total_tokens"] = usage.get("prompt_tokens", 0) + usage.get("completion_tokens", 0)
+                
+        return ProviderStreamChunk(
+            text=content,
+            finish_reason="stop" if done else None,
+            usage=usage,
+        )
 
     def _build_payload(
         self,

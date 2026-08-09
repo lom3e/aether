@@ -7,6 +7,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [v1.1.0] - Async & Streaming Provider Layer
+
+### Added
+- **Async Provider API**: `agenerate()` method in `AIProvider` for fully asynchronous generation.
+- **Streaming API**: `generate_stream()` and `agenerate_stream()` in `AIProvider` to stream incremental responses using the new `ProviderStreamChunk` dataclass.
+- **Ollama Async/Streaming**: Native support for asynchronous text generation and streaming in `OllamaProvider`.
+- **Optional Cloud Providers**: Integrations for `OpenAIProvider`, `AnthropicProvider`, and `GeminiProvider` (via `google-genai`).
+- **Lazy Provider Loading**: `ProviderManager` now gracefully intercepts cloud provider names, loading them lazily and providing clear installation instructions if the SDKs are missing.
+- **Backward Compatibility**: Seamless fallback mechanisms ensure custom synchronous providers and legacy synchronous execution continue to work unmodified.
+
 ## [v1.0.0]
 
 ### Added

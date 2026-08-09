@@ -56,6 +56,10 @@ class ProviderManager:
     def get(self, name: str, config: ProviderConfig | None = None) -> AIProvider:
         """
         Instantiate and return the provider registered under ``name``.
+        
+        If a well-known optional provider (e.g. 'openai', 'anthropic', 'gemini')
+        is requested but not explicitly registered, it will be lazily loaded.
+        If its required SDK is missing, a clear ImportError will be raised.
 
         Args:
             name: Provider alias to resolve.
@@ -66,8 +70,25 @@ class ProviderManager:
 
         Raises:
             ProviderNotFoundError: If no provider is registered under ``name``.
+            ImportError: If a well-known provider is requested but its SDK is missing.
         """
         cls = self._registry.get(name)
+        
+        if cls is None:
+            # Lazy load well-known optional providers
+            if name == "openai":
+                from aether.providers.openai_provider import OpenAIProvider
+                cls = OpenAIProvider
+                self._registry[name] = cls
+            elif name == "anthropic":
+                from aether.providers.anthropic_provider import AnthropicProvider
+                cls = AnthropicProvider
+                self._registry[name] = cls
+            elif name == "gemini":
+                from aether.providers.gemini_provider import GeminiProvider
+                cls = GeminiProvider
+                self._registry[name] = cls
+                
         if cls is None:
             available = ", ".join(self._registry) or "(none)"
             raise ProviderNotFoundError(
@@ -75,7 +96,6 @@ class ProviderManager:
                 provider=name,
             )
         return cls(config)
-
     def registered_names(self) -> list[str]:
         """Return the sorted list of registered provider names."""
         return sorted(self._registry)
