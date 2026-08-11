@@ -7,6 +7,26 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [v1.2.0] - Executable Skill System
+
+### Added
+- **Executable Skills**: Skills are now real, executable units — not just metadata. Each skill is a directory with a `skill.yaml` manifest and a Python module that registers tools.
+- **`skill.yaml` Manifest**: Machine-readable manifest format with strict validation: `id` (slug), `name`, `version` (semver), `description`, `entrypoint` (module + function), `permissions`, and `tools`.
+- **`SkillLoader`**: New loader that handles directory loading, ZIP archives, tar.gz archives, and `.aether-skill` packages. Separate from the existing `LocalSkillPackageLoader` — no breaking changes.
+- **Dynamic Tool Binding**: Skills expose a `register(registry, context)` entrypoint. `SkillLoader` dynamically imports the module and calls it, binding tools into the `ToolRegistry`. Uses `importlib.util.spec_from_file_location` with unique namespacing to prevent collisions.
+- **`SkillPermissionPolicy`**: Runtime policy that gates skill loading before any code is imported. Supports explicit allow/deny sets, `allow_all()`, and `deny_all()` factory methods.
+- **`Agent.load_skill(path)`**: New agent method that loads a skill from a directory or archive, registers its tools in the agent's `ToolRegistry`, and makes them available in the ReAct loop — all in one call.
+- **`LoadedSkill`**: Value object returned by `SkillLoader` and `Agent.load_skill()`, containing the `Skill` descriptor, list of registered tool names, and source path.
+- **Archive Security**: Path traversal protection on all archive extractions. Absolute paths and `..` entries are rejected before extraction begins.
+- **`SkillError` Hierarchy**: New exceptions in `aether.errors`: `SkillError`, `SkillManifestNotFoundError`, `InvalidSkillManifestError`, `InvalidSkillPackageError`, `SkillPermissionDeniedError`, `SkillToolBindingError`.
+- **`examples/skills/hello-skill/`**: A minimal, runnable example skill with no external dependencies.
+- **`examples/7_skill_loading.py`**: End-to-end skill loading demo covering direct loading, `Agent.load_skill()`, and permission policy.
+
+### Unchanged
+- All v1.0.0 and v1.1.0 public APIs (`Skill`, `SkillRegistry`, `SkillPackage`, `LocalSkillPackageLoader`, `ExecutionPolicy`, `Agent.execute()`, `Agent.achieve()`, all providers) are fully preserved.
+
+---
+
 ## [v1.1.0] - Async & Streaming Provider Layer
 
 ### Added

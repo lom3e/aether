@@ -141,7 +141,116 @@ Aether ships with:
 | `MockProvider` | Deterministic responses for testing |
 | `ResilientProvider` | Decorator adding retry with exponential backoff |
 
+Optional cloud providers (install the SDK separately):
+
+| Provider | SDK |
+|----------|-----|
+| `OpenAIProvider` | `pip install openai` |
+| `AnthropicProvider` | `pip install anthropic` |
+| `GeminiProvider` | `pip install google-genai` |
+
 Custom providers implement the `AIProvider` interface.
+
+## Skills
+
+Skills are reusable, executable capability units that can extend any agent with new tools.
+
+Each skill is a directory (or archive) with a `skill.yaml` manifest and a Python module
+that registers tools into the agent's `ToolRegistry`.
+
+### Skill Structure
+
+```text
+my-skill/
+├── skill.yaml
+└── tools/
+    ├── __init__.py
+    └── hello.py
+```
+
+```yaml
+# skill.yaml
+id: hello-skill
+name: Hello Skill
+version: 1.0.0
+description: A greeting skill.
+
+entrypoint:
+  module: tools.hello
+  function: register
+
+permissions: []
+
+tools:
+  - name: say_hello
+    description: Greets the user by name.
+```
+
+```python
+# tools/hello.py
+from aether.tools.base import Tool, ToolExecutionContext
+
+class SayHelloTool(Tool):
+    name = "say_hello"
+    description = "Greets the user by name."
+
+    def execute(self, input_data: str, context: ToolExecutionContext | None = None) -> str:
+        return f"Hello, {input_data}!"
+
+def register(registry, context: dict) -> None:
+    registry.register(SayHelloTool())
+```
+
+### Loading a Skill
+
+```python
+from aether import Agent
+from aether.providers import MockProvider
+
+agent = Agent(name="SkillBot", provider=MockProvider())
+
+# Load skill from a directory — tools are registered automatically.
+loaded = agent.load_skill("path/to/my-skill")
+print(loaded.registered_tools)  # ['say_hello']
+
+# The tool is now available directly in the registry.
+result = agent.tool_registry.execute("say_hello", "World")
+print(result)  # Hello, World!
+```
+
+Skills can also be loaded from archives:
+
+```python
+loaded = agent.load_skill("my-skill.zip")
+loaded = agent.load_skill("my-skill.tar.gz")
+loaded = agent.load_skill("my-skill.aether-skill")
+```
+
+### Permission Policy
+
+Control which permissions a skill may request:
+
+```python
+from aether.skills import SkillPermissionPolicy
+
+# Block specific permissions (skill code is never imported if blocked).
+policy = SkillPermissionPolicy(denied={"filesystem.write"})
+loaded = agent.load_skill("path/to/skill", permission_policy=policy)
+```
+
+### Direct Skill Loader
+
+For finer control, use `SkillLoader` directly:
+
+```python
+from aether.skills import SkillLoader, SkillPermissionPolicy
+from aether.tools.registry import ToolRegistry
+
+registry = ToolRegistry()
+loader = SkillLoader(permission_policy=SkillPermissionPolicy.allow_all())
+loaded = loader.from_directory("path/to/my-skill", registry)
+```
+
 
 ## Runtime Safety
 
@@ -171,6 +280,7 @@ See the [`examples/`](examples/) directory:
 | `4_goal_agent.py` | Goal-driven cognitive execution |
 | `5_structured_output.py` | Structured observation handling |
 | `6_agent_delegation.py` | Multi-agent delegation via CognitiveAgentTool |
+| `7_skill_loading.py` | Loading executable skills with `Agent.load_skill()` |
 
 ## Documentation
 
@@ -187,7 +297,7 @@ pytest tests/ -q -W error
 
 ## Project Status
 
-**v1.0.0** — First stable release.
+**v1.2.0** — Executable Skill System. Skills are now loadable, executable units with dynamic tool binding, permission policies, and archive support.
 
 ## License
 

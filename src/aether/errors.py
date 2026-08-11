@@ -31,3 +31,35 @@ class DelegationError(ExecutionError):
 class AetherFatalError(AetherError):
     """Raised for unrecoverable framework errors."""
     pass
+
+
+# ── Skill Errors ────────────────────────────────────────────────────────────
+
+class SkillError(AetherError):
+    """Base class for all Skill-related errors."""
+    pass
+
+
+class SkillManifestNotFoundError(SkillError):
+    """Raised when a skill.yaml manifest cannot be found in the skill source."""
+    pass
+
+
+class InvalidSkillManifestError(SkillError):
+    """Raised when a skill.yaml manifest is malformed or fails validation."""
+    pass
+
+
+class InvalidSkillPackageError(SkillError):
+    """Raised when a skill archive is corrupt, invalid, or has an unsupported format."""
+    pass
+
+
+class SkillPermissionDeniedError(SkillError):
+    """Raised when a skill requests a permission that the active policy does not allow."""
+    pass
+
+
+class SkillToolBindingError(SkillError):
+    """Raised when a skill's register() function fails to bind tools correctly."""
+    pass

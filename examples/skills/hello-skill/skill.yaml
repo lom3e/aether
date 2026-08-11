@@ -1,0 +1,14 @@
+id: hello-skill
+name: Hello Skill
+version: 1.0.0
+description: A minimal example skill for Aether — registers a greeting tool.
+
+entrypoint:
+  module: tools.hello
+  function: register
+
+permissions: []
+
+tools:
+  - name: say_hello
+    description: Greets the user by name.

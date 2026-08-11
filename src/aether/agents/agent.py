@@ -450,6 +450,60 @@ class Agent:
         self.assign_skill(skill)
         return skill
 
+    def load_skill(
+        self,
+        path: str,
+        *,
+        permission_policy: object | None = None,
+    ) -> object:
+        """
+        Load an executable skill from a directory or archive and activate it.
+
+        This is the primary entry point for Milestone 1.2 skill loading.
+
+        The skill's ``register(registry, context)`` entrypoint is called, its
+        tools are bound into this agent's :attr:`tool_registry`, its names are
+        added to :attr:`tools`, and the :class:`~aether.skills.skill.Skill`
+        descriptor is added to :attr:`skills`.
+
+        Parameters:
+            path: Path to a skill directory or archive
+                (``.zip``, ``.tar.gz``, or ``.aether-skill``).
+            permission_policy: Optional
+                :class:`~aether.skills.policy.SkillPermissionPolicy`.
+                Defaults to ``allow_all``.
+
+        Returns:
+            :class:`~aether.skills.loaded.LoadedSkill`
+
+        Raises:
+            :class:`~aether.errors.SkillManifestNotFoundError`: ``skill.yaml`` missing.
+            :class:`~aether.errors.InvalidSkillManifestError`: manifest invalid.
+            :class:`~aether.errors.SkillPermissionDeniedError`: permission blocked.
+            :class:`~aether.errors.SkillToolBindingError`: ``register()`` failed.
+            :class:`~aether.errors.InvalidSkillPackageError`: archive corrupt.
+        """
+        from pathlib import Path as _Path
+        from aether.skills.loader import SkillLoader
+
+        p = _Path(path)
+        loader = SkillLoader(permission_policy=permission_policy)
+
+        if p.is_dir():
+            loaded = loader.from_directory(p, self.tool_registry)
+        else:
+            loaded = loader.from_package(p, self.tool_registry)
+
+        # Register the Skill descriptor on the Agent.
+        self.assign_skill(loaded.skill)
+
+        # Make the tools visible in the ReAct loop by name.
+        for tool_name in loaded.registered_tools:
+            if tool_name not in self.tools:
+                self.tools.append(tool_name)
+
+        return loaded
+
     @staticmethod
     def _build_id(name: str) -> str:
         return name.strip().lower().replace(" ", "-")
