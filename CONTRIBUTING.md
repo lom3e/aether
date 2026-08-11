@@ -10,7 +10,7 @@ To set up a local development environment:
 
 1. **Clone the repository**
    ```bash
-   git clone https://github.com/aether-ai/aether.git
+   git clone https://github.com/lom3e/aether.git
    cd aether
    ```
 

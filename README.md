@@ -21,7 +21,7 @@ Aether provides a complete cognitive loop — from goal decomposition to plan ex
 Requires **Python 3.11+**.
 
 ```bash
-git clone https://github.com/aether-ai/aether.git
+git clone https://github.com/lom3e/aether.git
 cd aether
 pip install -e .
 ```
