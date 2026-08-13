@@ -167,7 +167,7 @@ class Team:
 
         start_ms = int(time.time() * 1000)
         task = Task(
-            instruction=self._enrich_with_knowledge(task_instruction),
+            instruction=task_instruction,
             agent_name=entry.name,
         )
 
@@ -245,27 +245,6 @@ class Team:
     # Knowledge injection
     # ------------------------------------------------------------------
 
-    def _enrich_with_knowledge(self, instruction: str) -> str:
-        """
-        Prepend relevant knowledge chunks to the task instruction so that
-        the entry agent (and indirectly, delegated agents) can reference them.
-        """
-        if self.knowledge is None:
-            return instruction
-
-        chunks = self.knowledge.search(instruction, limit=5)
-        if not chunks:
-            return instruction
-
-        context_parts = [c.content for c in chunks]
-        context_block = "\n---\n".join(context_parts)
-
-        return (
-            f"{instruction}\n\n"
-            f"---\n"
-            f"Contesto dalla knowledge base:\n{context_block}\n"
-            f"---"
-        )
 
     # ------------------------------------------------------------------
     # Assembly
@@ -316,6 +295,14 @@ class Team:
             # We store in metadata so the agent can use it on _build_messages
             if system_prompt:
                 agent.metadata["system_prompt"] = system_prompt
+
+            # ---- Knowledge Tool ----
+            if self.knowledge:
+                from aether.knowledge.tool import create_knowledge_tool
+                knowledge_tool = create_knowledge_tool(self.knowledge)
+                agent.tool_registry.register(knowledge_tool)
+                if knowledge_tool.name not in agent.tools:
+                    agent.tools.append(knowledge_tool.name)
 
             # Load skills if configured
             for skill_path in agent_config.skills:

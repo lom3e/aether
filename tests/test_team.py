@@ -379,30 +379,3 @@ class TestTeamAssembly:
 # Team knowledge injection
 # ---------------------------------------------------------------------------
 
-class TestTeamKnowledge:
-    def test_knowledge_injected_into_task(self):
-        """When knowledge store has matching content, it's prepended to the task."""
-        from aether.knowledge.store import KnowledgeStore
-        from aether.knowledge.chunk import KnowledgeChunk
-
-        store = KnowledgeStore(":memory:")
-        store.add(KnowledgeChunk(
-            content="GDPR compliance requires data controllers to implement appropriate safeguards.",
-            source="gdpr.md",
-        ))
-
-        config = TeamConfig(
-            agents=[AgentConfig(name="agent", role="assistant")]
-        )
-        team = Team(config, knowledge_store=store)
-
-        enriched = team._enrich_with_knowledge("Tell me about GDPR")
-        assert "GDPR" in enriched
-        assert "knowledge base" in enriched.lower() or "Contesto" in enriched
-
-    def test_no_knowledge_task_unchanged(self):
-        config = TeamConfig(agents=[AgentConfig(name="a")])
-        team = Team(config)  # no knowledge_store, no knowledge_path
-        original = "My task"
-        enriched = team._enrich_with_knowledge(original)
-        assert enriched == original
