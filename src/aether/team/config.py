@@ -65,6 +65,7 @@ class AgentConfig:
     instructions: str = ""
     relationships: list[Relationship] = field(default_factory=list)
     skills: list[str] = field(default_factory=list)
+    provider: str | None = None
     model: str | None = None
     metadata: dict = field(default_factory=dict)
 

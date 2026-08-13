@@ -51,9 +51,18 @@ class OpenAIProvider(AIProvider):
         
         self._model = self.config.model or "gpt-4o"
         
+        import os
+        
         kwargs = {}
-        if self.config.api_key:
-            kwargs["api_key"] = self.config.api_key
+        api_key = self.config.api_key or os.environ.get("OPENAI_API_KEY")
+        if api_key:
+            kwargs["api_key"] = api_key
+        else:
+            raise AuthenticationError(
+                "No API key provided. Set ProviderConfig(api_key=...) or OPENAI_API_KEY environment variable.",
+                provider="openai"
+            )
+            
         if self.config.base_url:
             kwargs["base_url"] = self.config.base_url
         if self.config.max_retries is not None:

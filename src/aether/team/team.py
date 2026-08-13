@@ -358,7 +358,26 @@ class Team:
 
     def _provider_for(self, agent_config: AgentConfig) -> AIProvider | None:
         """Return the appropriate provider for this agent."""
-        return self.provider  # MVP: all agents share the same provider
+        provider_name = agent_config.provider or self.config.default_provider
+        model_name = agent_config.model or self.config.default_model
+
+        if not hasattr(self, "_provider_manager"):
+            from aether.providers.manager import ProviderManager
+            self._provider_manager = ProviderManager()
+
+        try:
+            # If a pre-instantiated provider was passed and no agent-specific override exists, use it
+            if not agent_config.provider and not agent_config.model and self.provider:
+                return self.provider
+
+            # Otherwise, use ProviderManager to resolve the specific provider/model
+            from aether.providers.types import ProviderConfig
+            p_config = ProviderConfig(model=model_name) if model_name else None
+            return self._provider_manager.get(provider_name, config=p_config)
+        except Exception as e:
+            if self.verbose:
+                print(f"[Team] Warning: could not resolve provider '{provider_name}' for agent '{agent_config.name}': {e}")
+            return self.provider
 
     def _system_prompt_for(self, agent_config: AgentConfig) -> str:
         """Build the system prompt for this agent."""

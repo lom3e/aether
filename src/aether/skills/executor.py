@@ -11,6 +11,7 @@ from aether.skills.registry import SkillRegistry
 from aether.skills.result import SkillResult, SkillExecutionStatus
 from aether.skills.skill import Skill
 from aether.engine.units import UnitType
+from aether.core.interrupts import AgentInterrupt
 
 
 @dataclass(slots=True)
@@ -57,6 +58,8 @@ class SkillExecutor:
                 error_type="ValidationError",
                 start_time=start_time,
             )
+        except AgentInterrupt:
+            raise
         except Exception as exc:
             self.hooks.on_error(resolved_skill, context, exc)
             return self._build_failure_result(

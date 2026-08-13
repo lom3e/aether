@@ -107,8 +107,14 @@ class TeamLoader:
         # ------------------------------------------------------------------
         name = team_section.get("name", "aether-team")
         knowledge_path = team_section.get("knowledge") or team_section.get("knowledge_path")
-        default_provider = team_section.get("provider", "openai")
-        default_model = team_section.get("model")
+        raw_default_provider = team_section.get("provider", "openai")
+        if isinstance(raw_default_provider, dict):
+            default_provider = raw_default_provider.get("name", "openai")
+            default_model = raw_default_provider.get("model", team_section.get("model"))
+        else:
+            default_provider = raw_default_provider
+            default_model = team_section.get("model")
+
         team_metadata = {
             k: v for k, v in team_section.items()
             if k not in ("name", "knowledge", "knowledge_path", "provider", "model")
@@ -127,7 +133,15 @@ class TeamLoader:
 
             agent_role = raw_agent.get("role", "assistant")
             instructions = raw_agent.get("instructions", "")
+            raw_provider = raw_agent.get("provider")
             model = raw_agent.get("model")
+            
+            if isinstance(raw_provider, dict):
+                provider_name = raw_provider.get("name")
+                model = raw_provider.get("model", model)
+            else:
+                provider_name = raw_provider
+
             skills = raw_agent.get("skills") or []
             if isinstance(skills, str):
                 skills = [skills]
@@ -157,7 +171,7 @@ class TeamLoader:
                                 ))
 
             # Known keys — everything else goes to metadata
-            known = {"name", "role", "instructions", "model", "skills", "relationships"}
+            known = {"name", "role", "instructions", "model", "provider", "skills", "relationships"}
             agent_metadata = {k: v for k, v in raw_agent.items() if k not in known}
 
             agents.append(AgentConfig(
@@ -166,6 +180,7 @@ class TeamLoader:
                 instructions=instructions,
                 relationships=relationships,
                 skills=skills,
+                provider=provider_name,
                 model=model,
                 metadata=agent_metadata,
             ))

@@ -6,6 +6,7 @@ from dataclasses import dataclass
 from aether.engine.result import UnitExecutionResult, UnitExecutionStatus
 from aether.engine.units import UnitType
 from aether.tools.base import Tool, ToolExecutionContext
+from aether.core.interrupts import AgentInterrupt
 
 
 @dataclass(slots=True)
@@ -43,6 +44,8 @@ class ToolExecutor:
                     "agent_name": context.agent_name if context else None,
                 }
             )
+        except AgentInterrupt:
+            raise
         except Exception as exc:
             execution_time_ms = (time.perf_counter() - start_time) * 1000
             return UnitExecutionResult(

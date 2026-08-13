@@ -46,9 +46,17 @@ class GeminiProvider(AIProvider):
         
         self._model = self.config.model or "gemini-2.5-flash"
         
+        import os
+        
         kwargs = {}
-        if self.config.api_key:
-            kwargs["api_key"] = self.config.api_key
+        api_key = self.config.api_key or os.environ.get("GEMINI_API_KEY") or os.environ.get("GOOGLE_API_KEY")
+        if api_key:
+            kwargs["api_key"] = api_key
+        else:
+            raise AuthenticationError(
+                "No API key provided. Set ProviderConfig(api_key=...) or GEMINI_API_KEY environment variable.",
+                provider="gemini"
+            )
             
         self._client = genai.Client(**kwargs)
 
