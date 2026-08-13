@@ -91,12 +91,14 @@ class Team:
         *,
         knowledge_store: KnowledgeStore | None = None,
         agent_store: Any | None = None,
+        conversation_db_path: str | None = None,
         feed: ActivityFeed | None = None,
         verbose: bool = False,
     ) -> None:
         self.config = config
         self.provider = provider
         self.verbose = verbose
+        self.conversation_db_path = conversation_db_path
 
         # ---- Knowledge ----
         self.knowledge: KnowledgeStore | None = knowledge_store
@@ -283,11 +285,19 @@ class Team:
                 self.agent_store.save(identity)
                 agent_id = identity.id
 
+            memory_manager = None
+            if agent_id and self.conversation_db_path:
+                from aether.memory.persistent_conversation import PersistentConversationMemory
+                from aether.memory.manager import MemoryManager
+                conv_mem = PersistentConversationMemory(db_path=self.conversation_db_path, agent_id=agent_id)
+                memory_manager = MemoryManager(conversation_memory=conv_mem)
+
             agent = Agent(
                 agent_id=agent_id,
                 name=agent_config.name,
                 role=agent_config.role,
                 provider=provider,
+                memory_manager=memory_manager,
                 events=self.emitter,
                 verbose=self.verbose,
             )
