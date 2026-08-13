@@ -64,7 +64,26 @@ class AgentTool(Tool):
             },
         )
 
+        source_agent = context.agent_name if context else "unknown"
+        if getattr(self._agent, "events", None):
+            from aether.coordination.events import AgentEvent, EventType
+            self._agent.events.emit(AgentEvent(
+                event_type=EventType.TASK_DELEGATED,
+                agent_name=source_agent,
+                task_id=sub_task.id,
+                metadata={"target_agent": self._agent.name, "instruction": input_data}
+            ))
+
         result = self._agent.execute(sub_task)
+
+        if getattr(self._agent, "events", None):
+            from aether.coordination.events import AgentEvent, EventType
+            self._agent.events.emit(AgentEvent(
+                event_type=EventType.TASK_COMPLETED,
+                agent_name=self._agent.name,
+                task_id=sub_task.id,
+                metadata={"output": result.output, "target_agent": source_agent}
+            ))
 
         if result.success:
             return result.output or ""

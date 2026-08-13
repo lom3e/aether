@@ -106,9 +106,25 @@ class ActivityFeed:
             return self._line(agent, f"avviato{preview}", style="dim")
 
         if event.event_type == EventType.TASK_DELEGATED:
-            instruction = meta.get("instruction", "")
-            preview = f'"{instruction[:50]}"' if instruction else ""
-            return self._line(agent, f"→ delega {preview}", style="arrow")
+            target = meta.get("target_agent", "someone")
+            return self._line(agent, f"→ delega a {target.capitalize()}", style="arrow")
+
+        if event.event_type == EventType.TOOL_CALLED:
+            tool_name = meta.get("tool_name", "")
+            return self._line(agent, f"🔎 Usa {tool_name}...", style="dim")
+
+        if event.event_type == EventType.TOOL_COMPLETED:
+            tool_name = meta.get("tool_name", "")
+            output = str(meta.get("output", ""))
+            
+            # Simple heuristic for search_knowledge
+            if tool_name == "search_knowledge" and "Trovat" in output:
+                return self._line(agent, f"✓ Risultati trovati", style="success")
+            elif tool_name == "AgentTool":
+                # Handled by delegation
+                return None
+            else:
+                return self._line(agent, f"✓ {tool_name} completato", style="success")
 
         if event.event_type == EventType.TASK_COMPLETED:
             output = meta.get("output", "")

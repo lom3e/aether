@@ -4,7 +4,8 @@ from dataclasses import replace
 from typing import Any
 
 from aether.agents.lifecycle import AgentLifecycle, AgentLifecycleState
-from aether.core.execution import ExecutionContext, ExecutionResult, Task
+from aether.core.execution import ExecutionContext, ExecutionResult, ExecutionSession, ExecutionStatus, Task
+from aether.core.interrupts import AgentInterrupt
 from aether.engine.core import ExecutionEngine
 from aether.memory.base import Memory
 from aether.memory.manager import MemoryManager
@@ -58,9 +59,13 @@ class Agent:
         plan_validator: PlanValidator | None = None,
         runtime_safety_policy: RuntimeSafetyPolicy | None = None,
         observation_factory: ObservationFactory | None = None,
+        events: EventEmitter | None = None,
+        verbose: bool = False,
     ):
         self.id = agent_id or self._build_id(name)
         self.name = name
+        self.verbose = verbose
+        self.events = events
         self.role = role
         self.provider = provider
         self.memory = memory
@@ -75,6 +80,7 @@ class Agent:
         self.skills: list[Skill] = []
         self.tools: list[str] = []
         self.metadata: dict[str, Any] = {}
+        self.sessions: dict[str, Any] = {}  # ExecutionSession mapping
         self.max_turns = max_turns
         self.max_tool_calls = max_tool_calls
         self.max_total_tokens = max_total_tokens
@@ -110,49 +116,123 @@ class Agent:
         )
         exec_context.agent_state = self.lifecycle.state
         
+        session = ExecutionSession.create(goal=goal, context=exec_context)
+        self.sessions[session.id] = session
+        
+        return self._run_session(session)
+
+    def resume(self, session_id: str, response: Any) -> ExecutionResult:
+        """
+        Resumes an interrupted execution session with the human's response.
+        """
+        if session_id not in self.sessions:
+            return ExecutionResult(
+                success=False,
+                error=f"Session {session_id} not found.",
+                status=ExecutionStatus.FAILED
+            )
+            
+        session = self.sessions[session_id]
+        if not session.interrupt:
+            return ExecutionResult(
+                success=False,
+                error=f"Session {session_id} is not interrupted.",
+                status=ExecutionStatus.FAILED
+            )
+            
+        human_obs = self.observation_factory.create(
+            plan_id=session.cognitive_plan.plan_id if session.cognitive_plan else "unknown",
+            step_id=f"step-{session.step_idx}",
+            action_taken=f"Interrupted Action (Type: {session.interrupt.type})",
+            payload=f"Human Response: {response}",
+            is_error=False
+        )
+        
+        planner = self.planner or BasicPlanner(provider=self.provider)
+        decision = planner.evaluate(human_obs, session.goal, session.cognitive_plan)
+        
+        session.interrupt = None
+        self.runtime_safety_policy.unpause()
+        
+        if getattr(self, "verbose", False):
+            print(f"[{self.name}] RESUMING session {session_id} with human response: {response}")
+        
+        if decision.action == DecisionAction.REPLAN:
+            self.runtime_safety_policy.before_replan()
+            session.cognitive_plan = None
+        elif decision.action == DecisionAction.FINISH:
+            self.lifecycle.complete()
+            return ExecutionResult(success=True, output=decision.reasoning, metadata=session.metadata)
+        elif decision.action == DecisionAction.CONTINUE:
+            session.step_idx += 1
+            
+        return self._run_session(session)
+
+    def _run_session(self, session: ExecutionSession) -> ExecutionResult:
+        goal = session.goal
+        exec_context = session.context
         planner = self.planner or BasicPlanner(provider=self.provider)
         plan_compiler = self.plan_compiler or BasicPlanCompiler()
-        metadata: dict[str, Any] = {"agent_name": self.name, "goal_description": goal.description}
+        metadata: dict[str, Any] = {"agent_name": self.name, "goal_description": goal.description, "session_id": session.id}
+        session.metadata = metadata
         
         try:
             while True:
-                self.runtime_safety_policy.before_cycle()
-                
-                cognitive_plan = planner.generate_plan(goal, exec_context)
+                if not session.cognitive_plan:
+                    self.runtime_safety_policy.before_cycle()
+                    
+                    if getattr(self, "verbose", False):
+                        print(f"[{self.name}] PLANNING goal: {goal.description}")
+                    
+                    cognitive_plan = planner.generate_plan(goal, exec_context)
+                    session.cognitive_plan = cognitive_plan
+                    session.step_idx = 0
+                    
+                    if self.plan_validator:
+                        validation = self.plan_validator.validate(cognitive_plan)
+                        if not validation.is_valid:
+                            decision = planner.evaluate_validation_result(
+                                validation, goal, cognitive_plan
+                            )
+                            if decision.action != DecisionAction.REPLAN:
+                                self.lifecycle.complete()
+                                return ExecutionResult(
+                                    success=False,
+                                    error=f"Plan validation failed: {decision.reasoning}",
+                                    metadata=metadata,
+                                )
+                            self.runtime_safety_policy.before_replan()
+                            self.runtime_safety_policy.after_cycle()
+                            session.cognitive_plan = None
+                            continue  # regenerate the plan
+                    
+                    self.runtime_safety_policy.reset_replans()
                 
                 decision = None
                 
-                if self.plan_validator:
-                    validation = self.plan_validator.validate(cognitive_plan)
-                    if not validation.is_valid:
-                        # Delegate the decision back to the Planner.
-                        # The Agent must NOT create a Decision autonomously: it is an
-                        # orchestrator, not a cognitive reasoner.
-                        # evaluate_validation_result() is a distinct entry-point from
-                        # evaluate(), which handles post-execution Observations.
-                        decision = planner.evaluate_validation_result(
-                            validation, goal, cognitive_plan
-                        )
-                        # The only supported pre-execution action is REPLAN: return
-                        # a failure result for FINISH/CONTINUE to avoid a silent loop.
-                        if decision.action != DecisionAction.REPLAN:
-                            self.lifecycle.complete()
-                            return ExecutionResult(
-                                success=False,
-                                error=f"Plan validation failed: {decision.reasoning}",
-                                metadata=metadata,
-                            )
-                        self.runtime_safety_policy.before_replan()
-                        self.runtime_safety_policy.after_cycle()
-                        continue  # regenerate the plan
-                
-                self.runtime_safety_policy.reset_replans()
-                
-                for step_idx, step in enumerate(cognitive_plan.steps):
-                    # Compilation: CognitivePlan -> engine.ExecutionPlan
-                    engine_plan = plan_compiler.compile(cognitive_plan, exec_context)
+                start_idx = session.step_idx
+                for step_idx in range(start_idx, len(session.cognitive_plan.steps)):
+                    session.step_idx = step_idx
+                    step = session.cognitive_plan.steps[step_idx]
+                    
+                    if getattr(self, "verbose", False):
+                        print(f"[{self.name}] STEP {step_idx + 1}/{len(session.cognitive_plan.steps)}: {step}")
+                    
+                    engine_plan = plan_compiler.compile(session.cognitive_plan, exec_context)
                         
-                    unit_results = self.execution_engine.run(engine_plan, exec_context)
+                    try:
+                        unit_results = self.execution_engine.run(engine_plan, exec_context)
+                    except AgentInterrupt as interrupt:
+                        if getattr(self, "verbose", False):
+                            print(f"[{self.name}] INTERRUPTED: {interrupt.type} - {getattr(interrupt, 'message', str(interrupt))}")
+                        self.runtime_safety_policy.pause()
+                        session.interrupt = interrupt
+                        return ExecutionResult(
+                            success=False,
+                            status=ExecutionStatus.INTERRUPTED,
+                            interrupt=interrupt,
+                            metadata=metadata,
+                        )
                     
                     is_error = engine_plan.has_failures
                     
@@ -164,22 +244,27 @@ class Agent:
                         payload = [r.output if r.output is not None else r.error for r in unit_results]
                     
                     obs = self.observation_factory.create(
-                        plan_id=cognitive_plan.plan_id,
+                        plan_id=session.cognitive_plan.plan_id,
                         step_id=f"step-{step_idx}",
                         action_taken=str(step),
                         payload=payload,
                         is_error=is_error
                     )
                     
-                    decision = planner.evaluate(obs, goal, cognitive_plan)
+                    decision = planner.evaluate(obs, goal, session.cognitive_plan)
                     
                     if decision.action == DecisionAction.REPLAN:
+                        if getattr(self, "verbose", False):
+                            print(f"[{self.name}] REPLAN triggered: {decision.reasoning}")
                         self.runtime_safety_policy.before_replan()
+                        session.cognitive_plan = None
                         break  # Break the step loop to regenerate the plan
                     elif decision.action == DecisionAction.FINISH:
                         break  # Goal achieved
                         
                 if decision and decision.action == DecisionAction.FINISH:
+                    if getattr(self, "verbose", False):
+                        print(f"[{self.name}] FINISH: {decision.reasoning}")
                     self.lifecycle.complete()
                     return ExecutionResult(success=True, output=decision.reasoning, metadata=metadata)
                     
@@ -206,7 +291,17 @@ class Agent:
         The ExecutionEngine orchestrates skill/tool execution.
         """
         self.lifecycle.start()
-        metadata: dict[str, Any] = {"task_id": task.id, "agent_name": self.name}
+        metadata: dict[str, Any] = {"task_id": task.id, "agent_name": self.name, "instruction": task.instruction}
+        
+        if getattr(self, "events", None):
+            from aether.coordination.events import AgentEvent, EventType
+            self.events.emit(AgentEvent(
+                event_type=EventType.AGENT_STARTED,
+                agent_name=self.name,
+                task_id=task.id,
+                metadata=metadata
+            ))
+
         try:
             exec_context = context or self._build_context(task)
             exec_context.agent_state = self.lifecycle.state
@@ -368,11 +463,36 @@ class Agent:
 
                 tool_calls_count += len(calls_to_execute)
 
+                if getattr(self, "verbose", False):
+                    print(f"[{self.name}] TOOL CALLS: {[c.tool_name for c in calls_to_execute]}")
+
+                if getattr(self, "events", None):
+                    from aether.coordination.events import AgentEvent, EventType
+                    for call in calls_to_execute:
+                        self.events.emit(AgentEvent(
+                            event_type=EventType.TOOL_CALLED,
+                            agent_name=self.name,
+                            task_id=task.id,
+                            metadata={"tool_name": call.tool_name, "arguments": call.arguments}
+                        ))
+
                 # Dynamic tool execution by ExecutionEngine
                 tool_results = self.execution_engine.execute_tool_calls(calls_to_execute, agent_context)
 
                 # Append results as system/tool messages
                 for res in tool_results:
+                    if getattr(self, "events", None):
+                        from aether.coordination.events import AgentEvent, EventType
+                        # Find the original tool call to get the tool name
+                        original_call = next((c for c in calls_to_execute if c.call_id == res.call_id), None)
+                        tool_name = original_call.tool_name if original_call else "unknown_tool"
+                        self.events.emit(AgentEvent(
+                            event_type=EventType.TOOL_COMPLETED,
+                            agent_name=self.name,
+                            task_id=task.id,
+                            metadata={"tool_name": tool_name, "output": res.output if res.success else res.error}
+                        ))
+
                     msg_res = Message(
                         role="tool",
                         content=res.output if res.success else (res.error or "Tool failed."),

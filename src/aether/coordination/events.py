@@ -12,6 +12,8 @@ class EventType(Enum):
     TASK_DELEGATED = "task_delegated"
     TASK_COMPLETED = "task_completed"
     AGENT_FAILED = "agent_failed"
+    TOOL_CALLED = "tool_called"
+    TOOL_COMPLETED = "tool_completed"
 
 
 @dataclass(slots=True)

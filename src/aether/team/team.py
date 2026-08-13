@@ -288,6 +288,7 @@ class Team:
                 name=agent_config.name,
                 role=agent_config.role,
                 provider=provider,
+                events=self.emitter,
                 verbose=self.verbose,
             )
 
@@ -329,26 +330,31 @@ class Team:
             if source_agent is None:
                 continue
 
-            for target_name in agent_config.delegates_to():
-                target_agent = self._agents.get(target_name)
+            for rel in agent_config.relationships:
+                target_agent = self._agents.get(rel.target)
                 if target_agent is None:
-                    continue
+                    raise ValueError(
+                        f"Relationship target '{rel.target}' not found in team. "
+                        f"Agent '{agent_config.name}' cannot fulfill '{rel.type}' relationship."
+                    )
+                
+                if rel.type == "delegates_to":
+                    target_config = self.config.get_agent(rel.target)
+                    description = (
+                        f"Delegate to {target_agent.name} ({target_agent.role}). "
+                        + (target_config.instructions if target_config else "")
+                    ).strip()
 
-                target_config = self.config.get_agent(target_name)
-                description = (
-                    f"Delegate to {target_agent.name} ({target_agent.role}). "
-                    + (target_config.instructions if target_config else "")
-                ).strip()
+                    agent_tool = AgentTool(agent=target_agent)
+                    agent_tool.description = description  # override default description
 
-                agent_tool = AgentTool(agent=target_agent)
-                agent_tool.description = description  # override default description
-
-                # Only register if not already present
-                try:
-                    source_agent.tool_registry.register(agent_tool)
-                    source_agent.tools.append(agent_tool.name)
-                except ValueError:
-                    pass  # already registered
+                    # Only register if not already present
+                    try:
+                        source_agent.tool_registry.register(agent_tool)
+                        if agent_tool.name not in source_agent.tools:
+                            source_agent.tools.append(agent_tool.name)
+                    except ValueError:
+                        pass  # already registered
 
     def _provider_for(self, agent_config: AgentConfig) -> AIProvider | None:
         """Return the appropriate provider for this agent."""
