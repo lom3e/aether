@@ -180,9 +180,15 @@ def _cmd_run(args) -> None:
         knowledge = KnowledgeStore(kb_path)
 
     from aether.team.team import Team
+    from aether.agents.identity import AgentStore
+
+    # Load agent store
+    agent_store_path = team_yaml.parent / ".aether" / "identity.db"
+    agent_store_path.parent.mkdir(parents=True, exist_ok=True)
+    agent_store = AgentStore(agent_store_path)
 
     try:
-        team = Team(config, provider=provider, knowledge_store=knowledge)
+        team = Team(config, provider=provider, knowledge_store=knowledge, agent_store=agent_store)
     except Exception as exc:
         print(f"Error building team: {exc}", file=sys.stderr)
         sys.exit(1)

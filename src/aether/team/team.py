@@ -90,6 +90,7 @@ class Team:
         provider: AIProvider | None = None,
         *,
         knowledge_store: KnowledgeStore | None = None,
+        agent_store: Any | None = None,
         feed: ActivityFeed | None = None,
         verbose: bool = False,
     ) -> None:
@@ -101,6 +102,9 @@ class Team:
         self.knowledge: KnowledgeStore | None = knowledge_store
         if self.knowledge is None and config.knowledge_path:
             self.knowledge = self._build_knowledge(config.knowledge_path)
+            
+        # ---- Identity Store ----
+        self.agent_store = agent_store
 
         # ---- Event infrastructure ----
         self.emitter = EventEmitter()
@@ -284,7 +288,24 @@ class Team:
             provider = self._provider_for(agent_config)
             system_prompt = self._system_prompt_for(agent_config)
 
+            # ---- Identity Management ----
+            agent_id = None
+            if self.agent_store:
+                from aether.agents.identity import AgentIdentity
+                identity = self.agent_store.load_by_name(agent_config.name)
+                
+                now = __import__("time").time()
+                if identity:
+                    identity.role = agent_config.role
+                    identity.last_active = now
+                else:
+                    identity = AgentIdentity.create(name=agent_config.name, role=agent_config.role)
+                
+                self.agent_store.save(identity)
+                agent_id = identity.id
+
             agent = Agent(
+                agent_id=agent_id,
                 name=agent_config.name,
                 role=agent_config.role,
                 provider=provider,
