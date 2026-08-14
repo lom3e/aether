@@ -51,6 +51,7 @@ aether = [
     "presets/builtin/**/*.yaml",
     "presets/builtin/**/*.md",
     "presets/builtin/**/*.json",
+    "server/static/**/*",
 ]
 
 
