@@ -36,7 +36,7 @@ async def test_base_agenerate_stream_fallback():
     stream = []
     async for chunk in provider.agenerate_stream([Message(role="user", content="hi")]):
         stream.append(chunk)
-        
+
     assert len(stream) == 1
     assert stream[0].text == "legacy sync response"
     assert stream[0].finish_reason == "stop"

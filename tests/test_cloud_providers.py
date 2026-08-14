@@ -15,7 +15,7 @@ def mock_sdk_presence(monkeypatch):
     if not hasattr(op, "OpenAI"):
         monkeypatch.setattr(op, "OpenAI", MagicMock(create=True), raising=False)
         monkeypatch.setattr(op, "AsyncOpenAI", MagicMock(create=True), raising=False)
-    
+
     monkeypatch.setattr(ap, "_HAS_ANTHROPIC", True)
     if not hasattr(ap, "Anthropic"):
         monkeypatch.setattr(ap, "Anthropic", MagicMock(create=True), raising=False)
@@ -29,7 +29,7 @@ def mock_sdk_presence(monkeypatch):
 
 def test_openai_provider_generate():
     from aether.providers.openai_provider import OpenAIProvider
-    
+
     mock_client = MagicMock()
     mock_choice = MagicMock()
     mock_choice.message.content = "mocked openai"
@@ -42,20 +42,20 @@ def test_openai_provider_generate():
     mock_resp.usage.total_tokens = 10
     mock_resp.model = "gpt-4o"
     mock_client.chat.completions.create.return_value = mock_resp
-    
+
     with patch("aether.providers.openai_provider.OpenAI", return_value=mock_client), \
          patch("aether.providers.openai_provider.AsyncOpenAI"):
-         
+
         provider = OpenAIProvider(ProviderConfig(api_key="test"))
         resp = provider.generate([Message(role="user", content="hi")])
-        
+
         assert resp.content == "mocked openai"
         assert resp.usage["total_tokens"] == 10
         assert resp.model == "gpt-4o"
 
 def test_anthropic_provider_generate():
     from aether.providers.anthropic_provider import AnthropicProvider
-    
+
     mock_client = MagicMock()
     mock_block = MagicMock()
     mock_block.type = "text"
@@ -67,18 +67,18 @@ def test_anthropic_provider_generate():
     mock_resp.model = "claude"
     mock_resp.stop_reason = "stop"
     mock_client.messages.create.return_value = mock_resp
-    
+
     with patch("aether.providers.anthropic_provider.Anthropic", return_value=mock_client), \
          patch("aether.providers.anthropic_provider.AsyncAnthropic"):
-         
+
         provider = AnthropicProvider(ProviderConfig(api_key="test"))
         resp = provider.generate([Message(role="user", content="hi")])
-        
+
         assert resp.content == "mocked anthropic"
 
 def test_gemini_provider_generate():
     from aether.providers.gemini_provider import GeminiProvider
-    
+
     mock_client = MagicMock()
     mock_resp = MagicMock()
     mock_resp.text = "mocked gemini"
@@ -90,9 +90,9 @@ def test_gemini_provider_generate():
     mock_cand.finish_reason = "STOP"
     mock_resp.candidates = [mock_cand]
     mock_client.models.generate_content.return_value = mock_resp
-    
+
     with patch("aether.providers.gemini_provider.genai.Client", return_value=mock_client):
         provider = GeminiProvider(ProviderConfig(api_key="test"))
         resp = provider.generate([Message(role="user", content="hi")])
-        
+
         assert resp.content == "mocked gemini"

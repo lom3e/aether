@@ -215,7 +215,7 @@ def test_coordinator_error_handling() -> None:
         def capabilities(self):
             from aether.providers.capabilities import ProviderCapabilities
             return ProviderCapabilities()
-    
+
         def __init__(self):
             super().__init__(config=None)
 

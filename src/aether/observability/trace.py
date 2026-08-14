@@ -78,12 +78,12 @@ class RuntimeTrace:
             elif event.event_type == "ERROR":
                 error_count += 1
 
-        # NOTE: Duration/Tokens will be calculated dynamically if/when start/end events 
-        # or specific metadata are present. Since we start with minimal events, 
+        # NOTE: Duration/Tokens will be calculated dynamically if/when start/end events
+        # or specific metadata are present. Since we start with minimal events,
         # these will rely on metadata attributes for now if provided.
-        # This is a naive implementation that can be expanded when specific provider/tool 
+        # This is a naive implementation that can be expanded when specific provider/tool
         # events are added.
-        
+
         # As an example of duration calculation (naively looking for the first and last event timestamps):
         total_duration_ms = 0.0
         if len(self.events) >= 2:

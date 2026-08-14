@@ -24,8 +24,8 @@ class BasePlanner(ABC):
 
     @abstractmethod
     def generate_plan(
-        self, 
-        goal: Goal, 
+        self,
+        goal: Goal,
         context: ExecutionContext,
         output_schema: Any | None = None
     ) -> CognitivePlan:
@@ -85,8 +85,8 @@ class BasicPlanner(BasePlanner):
     """
 
     def generate_plan(
-        self, 
-        goal: Goal, 
+        self,
+        goal: Goal,
         context: ExecutionContext,
         output_schema: Any | None = None
     ) -> CognitivePlan:
@@ -111,7 +111,7 @@ class BasicPlanner(BasePlanner):
             "Please outline the primary step to take."
         )
         response = self.provider.generate([Message(role="user", content=prompt)], output_schema=output_schema)
-        
+
         # In this basic planner, we treat the entire response as a single cognitive step
         step = response.content if response.content else goal.description
 
@@ -132,7 +132,7 @@ class BasicPlanner(BasePlanner):
                 action=DecisionAction.REPLAN,
                 reasoning=f"Encountered an error: {observation.result}"
             )
-        
+
         # In a more advanced planner, we would check if there are remaining steps
         # or if the goal's success criteria are actually met.
         # For this minimal implementation, if the step succeeds, we finish.

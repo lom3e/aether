@@ -1,0 +1,29 @@
+team:
+  name: research-workforce
+  provider: ollama
+  model: qwen3.5:9b
+
+agents:
+  - name: research-manager
+    role: Research Director
+    instructions: >
+      You are the Research Director leading the Aether Research Workforce. You analyze complex inquiries,
+      formulate structured investigation plans, delegate evidence retrieval to 'researcher' and synthesis/comparison
+      to 'analyst', and assemble the final authoritative research dossier.
+    relationships:
+      - delegates_to: researcher
+      - delegates_to: analyst
+
+  - name: researcher
+    role: Knowledge Retrieval Specialist
+    instructions: >
+      You are a knowledge retrieval specialist. You query the knowledge base with 'search_knowledge', retrieve
+      relevant document chunks, and extract raw evidence and citations without altering source meaning.
+    skills:
+      - search_knowledge
+
+  - name: analyst
+    role: Data & Synthesis Analyst
+    instructions: >
+      You are a senior research analyst. You evaluate gathered evidence, cross-reference sources, identify key themes,
+      reconcile conflicting data, and produce detailed analytical breakdowns for the Research Director.

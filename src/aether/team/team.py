@@ -44,6 +44,7 @@ import sys
 import time
 from pathlib import Path
 from typing import Any
+from uuid import uuid4
 
 from aether.agents.agent import Agent
 from aether.agents.registry import AgentRegistry
@@ -104,7 +105,7 @@ class Team:
         self.knowledge: KnowledgeStore | None = knowledge_store
         if self.knowledge is None and config.knowledge_path:
             self.knowledge = self._build_knowledge(config.knowledge_path)
-            
+
         # ---- Identity Store ----
         self.agent_store = agent_store
 
@@ -140,7 +141,7 @@ class Team:
     # Public API
     # ------------------------------------------------------------------
 
-    def run(self, task_instruction: str) -> ExecutionResult:
+    def run(self, task_instruction: str, session_id: str | None = None) -> ExecutionResult:
         """
         Run *task_instruction* through the team.
 
@@ -171,6 +172,7 @@ class Team:
         task = Task(
             instruction=task_instruction,
             agent_name=entry.name,
+            id=session_id or uuid4().hex,
         )
 
         try:
@@ -231,7 +233,10 @@ class Team:
             return result
 
     def _prompt_human(self, interrupt: AgentInterrupt) -> str:
-        """Prompt the user for input on stdin."""
+        """Prompt the user for input."""
+        if hasattr(self, "interactive_provider") and self.interactive_provider:
+            return self.interactive_provider(interrupt)
+
         msg = getattr(interrupt, "message", str(interrupt))
         if isinstance(interrupt, RequireApproval):
             prompt = f"\n[ Approva ] Digita 'si'/'yes' per approvare, altro per rifiutare: "
@@ -274,14 +279,14 @@ class Team:
             if self.agent_store:
                 from aether.agents.identity import AgentIdentity
                 identity = self.agent_store.load_by_name(agent_config.name)
-                
+
                 now = __import__("time").time()
                 if identity:
                     identity.role = agent_config.role
                     identity.last_active = now
                 else:
                     identity = AgentIdentity.create(name=agent_config.name, role=agent_config.role)
-                
+
                 self.agent_store.save(identity)
                 agent_id = identity.id
 
@@ -347,7 +352,7 @@ class Team:
                         f"Relationship target '{rel.target}' not found in team. "
                         f"Agent '{agent_config.name}' cannot fulfill '{rel.type}' relationship."
                     )
-                
+
                 if rel.type == "delegates_to":
                     target_config = self.config.get_agent(rel.target)
                     description = (
@@ -382,7 +387,25 @@ class Team:
 
             # Otherwise, use ProviderManager to resolve the specific provider/model
             from aether.providers.types import ProviderConfig
-            p_config = ProviderConfig(model=model_name) if model_name else None
+
+            # Check for explicit timeout override at agent level or team level
+            timeout_val = None
+            if hasattr(agent_config, "metadata") and isinstance(agent_config.metadata, dict):
+                timeout_val = agent_config.metadata.get("timeout") or agent_config.metadata.get("provider_timeout")
+            if timeout_val is None and hasattr(self.config, "metadata") and isinstance(self.config.metadata, dict):
+                timeout_val = self.config.metadata.get("timeout") or self.config.metadata.get("provider_timeout")
+                if timeout_val is None:
+                    prov_map = self.config.metadata.get("provider_timeouts") or {}
+                    if isinstance(prov_map, dict):
+                        timeout_val = prov_map.get(provider_name)
+
+            if timeout_val is not None:
+                try:
+                    timeout_val = float(timeout_val)
+                except (ValueError, TypeError):
+                    timeout_val = None
+
+            p_config = ProviderConfig(model=model_name, timeout=timeout_val)
             return self._provider_manager.get(provider_name, config=p_config)
         except Exception as e:
             if self.verbose:

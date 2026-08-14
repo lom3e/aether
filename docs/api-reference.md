@@ -59,11 +59,11 @@ The structured output from the observation layer returned to the planner.
 ```python
 class Observation:
     def __init__(
-        self, 
-        plan_id: str, 
-        step_id: str, 
-        action_taken: str, 
-        result: Any, 
+        self,
+        plan_id: str,
+        step_id: str,
+        action_taken: str,
+        result: Any,
         is_error: bool = False,
         metadata: dict | None = None
     )
@@ -124,8 +124,8 @@ Configuration dataclass for providers.
 ```python
 class ProviderConfig:
     def __init__(
-        self, 
-        model: str = "llama3", 
+        self,
+        model: str = "llama3",
         base_url: str = "http://localhost:11434",
         temperature: float = 0.0,
         max_tokens: int | None = None,
@@ -155,10 +155,10 @@ A decorator that wraps any `AIProvider` to provide exponential backoff on transi
 ```python
 class ResilientProvider(AIProvider):
     def __init__(
-        self, 
-        provider: AIProvider, 
-        max_retries: int = 3, 
-        base_delay: float = 1.0, 
+        self,
+        provider: AIProvider,
+        max_retries: int = 3,
+        base_delay: float = 1.0,
         max_delay: float = 10.0
     )
 ```
@@ -178,8 +178,8 @@ Enforces bounds on the cognitive loop to prevent runaway agents.
 ```python
 class RuntimeSafetyPolicy:
     def __init__(
-        self, 
-        max_cognitive_cycles: int = 30, 
+        self,
+        max_cognitive_cycles: int = 30,
         max_replans: int = 5,
         deadline: Deadline | None = None
     )

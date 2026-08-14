@@ -1,8 +1,8 @@
 # Aether — Post-v1.0 Strategic Architecture & Product Roadmap (Refined Assessment)
 
-**Document Status:** Final Strategic Architectural Roadmap  
-**Baseline Version:** `v1.0.0` (`a2a30b7690253a25fe516d7bf5c4f5da764f4b83`)  
-**Target Horizon:** `v2.0.0` & Ecosystem Readiness  
+**Document Status:** Final Strategic Architectural Roadmap
+**Baseline Version:** `v1.0.0` (`a2a30b7690253a25fe516d7bf5c4f5da764f4b83`)
+**Target Horizon:** `v2.0.0` & Ecosystem Readiness
 
 ---
 

@@ -67,6 +67,8 @@ class OllamaProvider(AIProvider):
        (e.g., to 120.0s or more) when running large models locally.
     """
 
+    DEFAULT_TIMEOUT: float = 120.0
+
     def __init__(self, config: ProviderConfig | None = None) -> None:
         super().__init__(config)
         self._base_url = (self.config.base_url or _DEFAULT_BASE_URL).rstrip("/")
@@ -131,7 +133,7 @@ class OllamaProvider(AIProvider):
             headers={"Content-Type": "application/json"},
             method="POST",
         )
-        
+
         try:
             with urllib.request.urlopen(req, timeout=self.config.timeout) as resp:
                 for line in resp:
@@ -176,7 +178,7 @@ class OllamaProvider(AIProvider):
         try:
             # Open connection in a thread
             resp = await asyncio.to_thread(urllib.request.urlopen, req, timeout=self.config.timeout)
-            
+
             try:
                 while True:
                     # Read line in a thread to avoid blocking the event loop for the whole stream
@@ -188,7 +190,7 @@ class OllamaProvider(AIProvider):
                         yield chunk
             finally:
                 await asyncio.to_thread(resp.close)
-                
+
         except urllib.error.HTTPError as exc:
             try:
                 self._handle_http_error(exc)
@@ -211,11 +213,11 @@ class OllamaProvider(AIProvider):
             data = json.loads(line.decode("utf-8"))
         except json.JSONDecodeError:
             return None
-            
+
         message = data.get("message", {})
         content = message.get("content", "")
         done = data.get("done", False)
-        
+
         usage = None
         if done:
             usage = {}
@@ -225,7 +227,7 @@ class OllamaProvider(AIProvider):
                 usage["completion_tokens"] = data["eval_count"]
             if usage:
                 usage["total_tokens"] = usage.get("prompt_tokens", 0) + usage.get("completion_tokens", 0)
-                
+
         return ProviderStreamChunk(
             text=content,
             finish_reason="stop" if done else None,
@@ -263,11 +265,11 @@ class OllamaProvider(AIProvider):
             payload.setdefault("options", {})["num_predict"] = self.config.max_tokens
         if self.config.temperature != 0.7:  # Only include if non-default
             payload.setdefault("options", {})["temperature"] = self.config.temperature
-        
+
         # Disabilita esplicitamente il thinking mode per supportare modelli moderni
         # in modo trasparente e restituire solo la risposta finale.
         payload["think"] = False
-        
+
         if output_schema is not None:
             if hasattr(output_schema, "model_json_schema"):
                 payload["format"] = output_schema.model_json_schema()
@@ -275,7 +277,7 @@ class OllamaProvider(AIProvider):
                 payload["format"] = output_schema
             else:
                 payload["format"] = "json"
-        
+
         return payload
 
     def _send(self, payload: dict[str, Any]) -> ProviderResponse:
@@ -308,6 +310,18 @@ class OllamaProvider(AIProvider):
             ) from exc
 
         return self._parse_response(raw)
+
+    def get_available_models(self) -> list[str]:
+        """Fetch available models from the local Ollama instance."""
+        tags_url = f"{self._base_url}/api/tags"
+        req = urllib.request.Request(tags_url, method="GET")
+        try:
+            with urllib.request.urlopen(req, timeout=self.config.timeout) as resp:
+                raw = json.loads(resp.read().decode("utf-8"))
+                models = raw.get("models", [])
+                return [m.get("name") for m in models if m.get("name")]
+        except Exception:
+            return []
 
     def _handle_http_error(self, exc: urllib.error.HTTPError) -> None:
         if exc.code == 401:

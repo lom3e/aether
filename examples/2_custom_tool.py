@@ -5,15 +5,15 @@ from aether.providers import MockProvider
 
 class WeatherTool(Tool):
     """A custom tool to get the current weather."""
-    
+
     @property
     def name(self) -> str:
         return "get_weather"
-        
+
     @property
     def description(self) -> str:
         return "Get the current weather for a specific city."
-        
+
     def to_json_schema(self) -> dict:
         return {
             "type": "function",
@@ -29,7 +29,7 @@ class WeatherTool(Tool):
                 }
             }
         }
-        
+
     def execute(self, arguments: str, context: ToolExecutionContext) -> str:
         try:
             args = json.loads(arguments)
@@ -44,9 +44,9 @@ def main():
         def generate(self, messages, tools=None, output_schema=None):
             from aether.providers import ProviderResponse, Message
             import uuid
-            
+
             from aether.core.execution import ToolCall
-            
+
             # If it's the first turn, return a tool call
             if len(messages) < 3:
                 return ProviderResponse(
@@ -71,16 +71,16 @@ def main():
             )
 
     provider = ToolCallerMock()
-    
+
     agent = Agent(name="WeatherBot", provider=provider)
     # Register the tool
     agent.tools.append("get_weather")
     # Add to execution engine registry
     agent.tool_registry.register(WeatherTool())
-    
+
     task = Task(instruction="What is the weather in Rome?")
     print(f"Task: {task.instruction}")
-    
+
     result = agent.execute(task)
     if result.success:
         print(f"Result: {result.output}")

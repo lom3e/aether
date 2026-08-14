@@ -4,7 +4,7 @@ An `ExecutionPlan` represents a compiled sequence of executable actions (executi
 
 ## Purpose
 
-The introduction of `ExecutionPlan` solves a key architectural problem: it separates **planning** (deciding what actions to take) from **execution** (carrying out those actions). 
+The introduction of `ExecutionPlan` solves a key architectural problem: it separates **planning** (deciding what actions to take) from **execution** (carrying out those actions).
 
 By establishing a declarative plan:
 1.  **Dry-Runs**: The framework can inspect or validate a plan before executing it.

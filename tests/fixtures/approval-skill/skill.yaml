@@ -1,0 +1,14 @@
+id: approval-skill
+name: Approval Skill
+version: 1.0.0
+description: Deterministic test skill that exercises the HITL interrupt path.
+
+entrypoint:
+  module: tools.approval
+  function: register
+
+permissions: []
+
+tools:
+  - name: approval_tool
+    description: Requests a human approval before continuing.

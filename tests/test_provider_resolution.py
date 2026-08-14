@@ -27,12 +27,12 @@ def mock_manager(monkeypatch):
     manager.register("openai", DummyOpenAI)
     manager.register("anthropic", DummyAnthropic)
     manager.register("ollama", DummyOllama)
-    
+
     # We monkeypatch the import inside _provider_for
     # But since it creates it dynamically, we can just patch ProviderManager class
     def mock_init(self):
         self._registry = manager._registry
-        
+
     monkeypatch.setattr(ProviderManager, "__init__", mock_init)
     return manager
 
@@ -45,7 +45,7 @@ def test_provider_resolution_global_fallback(mock_manager):
     )
     team = Team(config)
     agent = team.get_agent("manager")
-    
+
     assert isinstance(agent.provider, DummyOpenAI)
     assert agent.provider.config.model == "gpt-4o"
 
@@ -59,7 +59,7 @@ def test_provider_resolution_agent_override(mock_manager):
     )
     team = Team(config)
     agent = team.get_agent("manager")
-    
+
     assert isinstance(agent.provider, DummyAnthropic)
     assert agent.provider.config.model == "claude-sonnet"
 
@@ -75,17 +75,17 @@ def test_provider_resolution_mixed_agents(mock_manager):
         ]
     )
     team = Team(config)
-    
+
     manager = team.get_agent("manager")
     researcher = team.get_agent("researcher")
     writer = team.get_agent("writer")
-    
+
     assert isinstance(manager.provider, DummyAnthropic)
     assert manager.provider.config.model == "claude-sonnet"
-    
+
     assert isinstance(researcher.provider, DummyOllama)
     assert researcher.provider.config.model == "qwen3"
-    
+
     assert isinstance(writer.provider, DummyOpenAI)
     assert writer.provider.config.model == "gpt-4o"
 
@@ -112,16 +112,16 @@ agents:
 """
     file_path = tmp_path / "team.yaml"
     file_path.write_text(yaml_content)
-    
+
     config = TeamLoader.from_yaml(file_path)
-    
+
     assert config.default_provider == "openai"
     assert config.default_model == "gpt-4o"
-    
+
     manager = config.get_agent("manager")
     assert manager.provider == "anthropic"
     assert manager.model == "claude-sonnet"
-    
+
     researcher = config.get_agent("researcher")
     assert researcher.provider == "ollama"
     assert researcher.model == "qwen3"
@@ -139,12 +139,12 @@ agents:
 """
     file_path = tmp_path / "team.yaml"
     file_path.write_text(yaml_content)
-    
+
     config = TeamLoader.from_yaml(file_path)
-    
+
     assert config.default_provider == "ollama"
     assert config.default_model == "llama3"
-    
+
     worker = config.get_agent("worker")
     assert worker.provider is None
     assert worker.model is None
@@ -157,9 +157,9 @@ def test_provider_resolution_invalid_provider_fallback(mock_manager):
         default_provider="openai",
         agents=[AgentConfig(name="manager", provider="unknown_provider")]
     )
-    
+
     fallback_provider = DummyOllama()
     team = Team(config, provider=fallback_provider)
-    
+
     agent = team.get_agent("manager")
     assert agent.provider is fallback_provider

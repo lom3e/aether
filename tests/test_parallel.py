@@ -95,37 +95,37 @@ def test_parallel_execution_timing() -> None:
     """
     registry = AgentRegistry()
     timing_provider = TimingProvider(delay=0.3)
-    
+
     agent_a = Agent(name="AgentA", role="worker", provider=timing_provider)
     agent_b = Agent(name="AgentB", role="worker", provider=timing_provider)
     agent_c = Agent(name="AgentC", role="worker", provider=timing_provider)
-    
+
     registry.register(agent_a)
     registry.register(agent_b)
     registry.register(agent_c)
-    
+
     coordinator = Coordinator(registry=registry)
-    
+
     delegations = [
         {"agent_name": "AgentA", "instruction": "Task A"},
         {"agent_name": "AgentB", "instruction": "Task B"},
         {"agent_name": "AgentC", "instruction": "Task C"},
     ]
-    
+
     start_wall = time.time()
     results = coordinator.delegate_parallel(delegations)
     end_wall = time.time()
-    
+
     assert len(results) == 3
     for r in results:
         assert r.success is True
         assert r.output == "timing complete"
-        
+
     # Check execution duration: sequentially it would be >= 0.9s
     # Concurrently it should be ~0.3s (plus thread overhead, definitely < 0.6s)
     total_time = end_wall - start_wall
     assert total_time < 0.6, f"Execution was too slow: {total_time:.2f}s"
-    
+
     # Check start times: they should be within 50ms of each other
     start_times = timing_provider.start_times
     assert len(start_times) == 3
@@ -143,12 +143,12 @@ def test_parallel_timeout() -> None:
     slow_provider = TimingProvider(delay=1.0)
     agent = Agent(name="SlowAgent", role="worker", provider=slow_provider)
     registry.register(agent)
-    
+
     coordinator = Coordinator(registry=registry)
     delegations = [{"agent_name": "SlowAgent", "instruction": "Wait long"}]
-    
+
     results = coordinator.delegate_parallel(delegations, timeout=0.1)
-    
+
     assert len(results) == 1
     assert results[0].success is False
     assert "timed out" in results[0].error
@@ -162,14 +162,14 @@ def test_parallel_retry_success() -> None:
     retry_provider = RetryFailingProvider(fail_count=2)
     agent = Agent(name="RetryAgent", role="worker", provider=retry_provider)
     registry.register(agent)
-    
+
     coordinator = Coordinator(registry=registry)
     delegations = [{"agent_name": "RetryAgent", "instruction": "Try again"}]
-    
+
     # Max retries = 3 means 3 attempts total. It fails 2 times, then succeeds on attempt 3.
     policy = RetryPolicy(max_retries=3, backoff_factor=0.01)
     results = coordinator.delegate_parallel(delegations, retry_policy=policy)
-    
+
     assert len(results) == 1
     assert results[0].success is True
     assert results[0].output == "success after retries"
@@ -183,26 +183,26 @@ def test_parallel_retry_failure() -> None:
     retry_provider = RetryFailingProvider(fail_count=3)
     agent = Agent(name="FailingRetryAgent", role="worker", provider=retry_provider)
     registry.register(agent)
-    
+
     coordinator = Coordinator(registry=registry)
     delegations = [{"agent_name": "FailingRetryAgent", "instruction": "Fail anyway"}]
-    
+
     # Max retries = 2. Attempts 1 & 2 fail. Attempt 3 won't happen.
     policy = RetryPolicy(max_retries=2, backoff_factor=0.01)
     results = coordinator.delegate_parallel(delegations, retry_policy=policy)
-    
+
     assert len(results) == 1
     assert results[0].success is False
     assert "Simulated failure 2" in results[0].error
 
 
-def test_semantic_memory_thread_safety() -> None:
+def test_semantic_memory_thread_safety(tmp_path: Path) -> None:
     """
     Concurrently write, search, and clear SemanticMemory to verify SQLite lock protection.
     """
-    mem = SemanticMemory()
+    mem = SemanticMemory(db_path=str(tmp_path / "test_sem_thread.db"))
     errors: list[Exception] = []
-    
+
     def worker() -> None:
         try:
             for _ in range(50):
@@ -216,13 +216,13 @@ def test_semantic_memory_thread_safety() -> None:
                     mem.clear()
         except Exception as exc:
             errors.append(exc)
-            
+
     threads = [threading.Thread(target=worker) for _ in range(10)]
     for t in threads:
         t.start()
     for t in threads:
         t.join()
-        
+
     assert len(errors) == 0, f"Concurrent database exceptions: {errors}"
 
 
@@ -234,21 +234,21 @@ def test_task_id_isolation() -> None:
     timing_provider = TimingProvider(delay=0.1)
     agent_a = Agent(name="AgentA", role="worker", provider=timing_provider)
     agent_b = Agent(name="AgentB", role="worker", provider=timing_provider)
-    
+
     registry.register(agent_a)
     registry.register(agent_b)
-    
+
     tracker = TaskTracker()
     coordinator = Coordinator(registry=registry, tracker=tracker)
-    
+
     delegations = [
         {"agent_name": "AgentA", "instruction": "Task A"},
         {"agent_name": "AgentB", "instruction": "Task B"},
     ]
-    
+
     results = coordinator.delegate_parallel(delegations)
     assert len(results) == 2
-    
+
     records = tracker.get_children(None)
     assert len(records) == 2
     assert records[0].task_id != records[1].task_id

@@ -48,6 +48,20 @@ class RuntimeSafetyPolicy:
 
         self._current_cycles = 0
         self._current_replans = 0
+        self._pause_time: float | None = None
+
+    def pause(self) -> None:
+        """Pauses the execution timer so that time spent waiting for interrupts is not counted."""
+        if self._pause_time is None:
+            self._pause_time = time.time()
+
+    def unpause(self) -> None:
+        """Unpauses the execution timer and adjusts the deadline."""
+        if self._pause_time is not None and self.deadline:
+            paused_duration = time.time() - self._pause_time
+            # Adjust deadline timestamp forward by the paused duration
+            self.deadline = Deadline(timestamp=self.deadline.timestamp + paused_duration)
+        self._pause_time = None
 
     def before_cycle(self) -> None:
         """Called at the beginning of each cognitive cycle."""
@@ -70,7 +84,7 @@ class RuntimeSafetyPolicy:
             raise RuntimeSafetyError(
                 f"Maximum replan attempts ({self.max_replans}) exceeded."
             )
-            
+
     def reset_replans(self) -> None:
         """Called when a successful action occurs, resetting the replan counter."""
         self._current_replans = 0

@@ -25,13 +25,42 @@ class MemoryManager:
         """
         Load historical messages and inject relevant semantic memories into the AgentContext.
         """
+        system_msg = next((m for m in context.messages if m.role == "system"), None)
+        incoming_non_system = [m for m in context.messages if m.role != "system"]
+
         # 1. Load conversation history if it exists for this session/task
         history = self.conversation_memory.get_messages(context.task.id)
         if history:
-            context.messages = list(history)
+            if not system_msg:
+                system_msg = next((m for m in history if m.role == "system"), None)
+
+            # Prior dialogue turns (user, assistant, tool), filtering out prior injected memory facts
+            past_messages = [
+                m for m in history
+                if not (m.role == "system" and m.content.startswith("Informazioni di contesto recuperate dalla memoria:"))
+                and m.role != "system"
+            ]
+
+            # Avoid duplicating incoming messages if already present at the end of history
+            new_messages = []
+            for inc in incoming_non_system:
+                if not past_messages or past_messages[-1].content != inc.content or past_messages[-1].role != inc.role:
+                    new_messages.append(inc)
+
+            combined_messages: list[Message] = []
+            if system_msg:
+                combined_messages.append(system_msg)
+            combined_messages.extend(past_messages)
+            combined_messages.extend(new_messages)
+            context.messages = combined_messages
+        else:
+            combined_messages = []
+            if system_msg:
+                combined_messages.append(system_msg)
+            combined_messages.extend(incoming_non_system)
+            context.messages = combined_messages
 
         # 2. Search and inject relevant facts from semantic memory
-        # We query using the task instruction
         facts = self.semantic_memory.search(context.task.instruction, limit=3)
         if facts:
             facts_str = "\n".join(f"- {doc.content}" for doc in facts)

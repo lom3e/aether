@@ -11,6 +11,7 @@ from aether.skills.skill import Skill
 from aether.tools.base import ToolExecutionContext
 from aether.tools.executor import ToolExecutor
 from aether.tools.registry import ToolRegistry
+from aether.core.interrupts import AgentInterrupt
 
 
 @dataclass(slots=True)
@@ -96,6 +97,10 @@ class ExecutionEngine:
                         error=res.error or "Tool execution failed.",
                         success=False,
                     ))
+            except AgentInterrupt:
+                # HITL is control flow, not a failed tool result. Preserve the
+                # interrupt so Agent can suspend the session and resume it later.
+                raise
             except Exception as e:
                 results.append(ToolResult(
                     call_id=call.call_id,

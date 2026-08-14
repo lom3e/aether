@@ -154,7 +154,7 @@ class TestOllamaProviderAsync:
 class TestOllamaProviderStreaming:
     def test_generate_stream(self) -> None:
         messages = [Message(role="user", content="stream")]
-        
+
         # Simulate multi-line JSON stream response
         chunks = [
             json.dumps({"model": "llama3", "message": {"content": "Hel"}, "done": False}),
@@ -162,16 +162,16 @@ class TestOllamaProviderStreaming:
             json.dumps({"model": "llama3", "message": {"content": ""}, "done": True, "eval_count": 2, "prompt_eval_count": 1}),
         ]
         response_bytes = b"\n".join(c.encode("utf-8") for c in chunks)
-        
+
         mock_resp = _mock_urlopen(response_bytes)
-        
+
         # We need mock_resp to yield lines when iterated
         mock_resp.__iter__.return_value = (c.encode("utf-8") + b"\n" for c in chunks)
-        
+
         with patch("urllib.request.urlopen", return_value=mock_resp):
             provider = OllamaProvider()
             stream = list(provider.generate_stream(messages))
-            
+
         assert len(stream) == 3
         assert stream[0].text == "Hel"
         assert stream[0].finish_reason is None
@@ -183,36 +183,36 @@ class TestOllamaProviderStreaming:
     @pytest.mark.asyncio
     async def test_agenerate_stream(self) -> None:
         messages = [Message(role="user", content="stream async")]
-        
+
         chunks = [
             json.dumps({"model": "llama3", "message": {"content": "async "}, "done": False}),
             json.dumps({"model": "llama3", "message": {"content": "stream"}, "done": True}),
         ]
-        
+
         class AsyncMockResponse:
             def __init__(self, chunks):
                 self.lines = [c.encode("utf-8") + b"\n" for c in chunks]
                 self.index = 0
-            
+
             def readline(self):
                 if self.index < len(self.lines):
                     line = self.lines[self.index]
                     self.index += 1
                     return line
                 return b""
-                
+
             def close(self):
                 pass
-                
+
         mock_resp = AsyncMockResponse(chunks)
-        
+
         # Patch urlopen to return the mock object
         with patch("urllib.request.urlopen", return_value=mock_resp):
             provider = OllamaProvider()
             stream = []
             async for chunk in provider.agenerate_stream(messages):
                 stream.append(chunk)
-                
+
         assert len(stream) == 2
         assert stream[0].text == "async "
         assert stream[1].text == "stream"
@@ -270,7 +270,7 @@ class TestOllamaProviderIntegration:
         model = os.environ.get("OLLAMA_MODEL")
         if not model:
             pytest.skip("OLLAMA_MODEL not set, skipping integration test")
-            
+
         provider = OllamaProvider(ProviderConfig(model=model, max_tokens=32))
         response = provider.generate([
             Message(role="system", content="Reply in one word only."),

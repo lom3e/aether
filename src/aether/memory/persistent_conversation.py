@@ -19,7 +19,7 @@ class PersistentConversationMemory(ConversationMemory):
         if self.db_path == ":memory:":
             import uuid
             self.db_path = f"file:memdb_conv_{uuid.uuid4().hex}?mode=memory&cache=shared"
-            
+
         self.agent_id = agent_id
         self._init_db()
 
@@ -70,7 +70,7 @@ class PersistentConversationMemory(ConversationMemory):
                         )
                 except Exception:
                     pass
-            
+
             messages.append(Message(
                 role=row["role"],
                 content=row["content"],
@@ -115,7 +115,7 @@ class PersistentConversationMemory(ConversationMemory):
                     "DELETE FROM conversation_history WHERE agent_id = ? AND session_id = ?",
                     (self.agent_id, session_id)
                 )
-                
+
                 import time
                 timestamp = time.time()
                 for message in messages:
@@ -129,7 +129,7 @@ class PersistentConversationMemory(ConversationMemory):
                                 "arguments": tc.arguments
                             })
                         tool_calls_json = json.dumps(tc_list)
-                    
+
                     conn.execute(
                         """
                         INSERT INTO conversation_history (agent_id, session_id, role, content, tool_calls, timestamp)
@@ -138,7 +138,7 @@ class PersistentConversationMemory(ConversationMemory):
                         (self.agent_id, session_id, message.role, message.content, tool_calls_json, timestamp)
                     )
                     timestamp += 0.000001 # to preserve strict chronological insertion order if needed
-                
+
                 conn.execute("COMMIT")
             except Exception:
                 conn.execute("ROLLBACK")

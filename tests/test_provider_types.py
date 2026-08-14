@@ -34,7 +34,7 @@ class TestProviderConfig:
         assert cfg.model is None
         assert cfg.temperature == 0.7
         assert cfg.max_tokens is None
-        assert cfg.timeout == 30.0
+        assert cfg.timeout is None
         assert cfg.max_retries == 3
 
     def test_custom_values(self) -> None:

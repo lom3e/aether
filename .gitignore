@@ -117,3 +117,12 @@ local_settings.py
 # AI agent instructions
 AGENTS.md
 .vexp/
+
+# --- Aether Local Workspace Data & Artifacts ---
+data/
+*.db
+*.db-journal
+scratch/
+ui/node_modules/
+ui/dist/
+.aether/

@@ -7,6 +7,47 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [v1.3.0-alpha-workforce] - 2026-08-14
+
+### Major Milestone: The AI Workforce Platform Alpha
+
+This release transforms Aether from an agent execution library into a complete, local-first **AI Workforce Platform** with a modern visual workspace, multi-agent coordination, scoped knowledge retrieval, persistent memory, and official starter presets.
+
+### Added
+- **AI Workforce Architecture & Team Orchestration**:
+  - `Team` and `TeamConfig` abstractions managing multi-agent workforces with declarative delegation relationships (`delegates_to`).
+  - Per-agent provider and model configuration (e.g. mix local Ollama models with OpenAI, Anthropic, or Gemini in the same workforce).
+  - `AgentIdentity` subsystem with persistent persona memory stored in SQLite (`data/identity.db`).
+- **Knowledge as a Tool & Scoped Knowledge Bases**:
+  - `KnowledgeStore` powered by local SQLite full-text search with automatic document chunking and ingestion.
+  - Automatic `search_knowledge` tool generation for agents with knowledge permissions.
+  - Clear architectural separation between **System Knowledge** (🔒 official preinstalled platform documentation, read-only) and **Workspace Knowledge** (private user documents: PDF, Markdown, TXT, CSV).
+- **Multiple Persistent Conversations**:
+  - `ConversationStore` (`data/conversations.db`) supporting multiple concurrent conversation threads with lifecycle states (`active`, `completed`, `waiting`, `interrupted`, `failed`), timestamps, and agent involvement tracking.
+  - `PersistentConversationMemory` isolating multi-turn context per agent and session across application restarts.
+- **Human-in-the-Loop (HITL) & Interruptible Execution**:
+  - `RequireApproval` and `RequireInput` interrupt primitives for pause/resume cognitive loops.
+  - `ExecutionEngine` suspends execution and resumes seamlessly upon receiving user input.
+  - Safety timer pausing: `RuntimeSafetyPolicy` pauses deadline timers during human review.
+- **Local-First Web UI (`aether ui`)**:
+  - Single-command launch (`aether ui`) serving the FastAPI backend and compiled React single-page application at `http://localhost:8000`.
+  - **Workforce Presence**: Real-time status indicators for all agents (`● Working`, `○ Idle`, `⚠ Waiting for Approval`).
+  - **Humanized Activity Feed**: Real-time operational narrative describing agent cognitive steps, tool calls, and delegations in plain English/Italian.
+  - **Command Palette (`⌘K` / `Ctrl+K`)**: Quick navigation, theme/language toggling, and conversation search.
+  - **Internationalization (i18n)**: Full native support for **English** and **Italiano** with browser auto-detection.
+  - **Refined Design System**: Focused, minimal aesthetic with Dark (Obsidian) and Light (Paper) modes.
+  - Zero raw YAML editing required for normal users: Onboarding, preset installation, provider configuration, and agent inspection all available directly in the UI.
+- **Official Starter Presets**:
+  - `starter-workforce`: 3-agent team (`manager` $\rightarrow$ `researcher` $\rightarrow$ `writer`).
+  - `research-workforce`: Deep-dive research team (`research-manager` $\rightarrow$ `researcher` $\rightarrow$ `analyst`).
+  - `aether-core-knowledge`: Official platform documentation pre-packaged and auto-indexed.
+- **Provider Hardening & Ollama Optimization**:
+  - `120.0s` default timeout for `OllamaProvider` ensuring local LLMs (e.g. `qwen3.5:9b`) complete multi-turn synthesis without false timeouts.
+  - Strict isolation preserving `30.0s` default timeout for cloud providers (`openai`, `anthropic`, `gemini`, `mock`).
+  - Granular per-provider and per-agent timeout configuration in `aether.yaml`, `team.yaml`, and UI Settings.
+
+---
+
 ## [v1.2.0] - Executable Skill System
 
 ### Added

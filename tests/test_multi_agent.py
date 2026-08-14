@@ -15,7 +15,7 @@ from aether.agents.agent import Agent
 from aether.agents.registry import AgentRegistry
 from aether.core.communication import (
     AgentMessage,
-    
+
     DelegationError,
     MessageType,
 )
@@ -260,7 +260,7 @@ def test_agent_tool_context_isolation() -> None:
         def capabilities(self):
             from aether.providers.capabilities import ProviderCapabilities
             return ProviderCapabilities()
-    
+
         def __init__(self):
             super().__init__(config=None)
 
@@ -306,7 +306,7 @@ def test_agent_tool_child_error_handling() -> None:
         def capabilities(self):
             from aether.providers.capabilities import ProviderCapabilities
             return ProviderCapabilities()
-    
+
         def __init__(self):
             super().__init__(config=None)
 

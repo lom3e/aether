@@ -181,7 +181,7 @@ def test_from_directory_tool_callable(tmp_path: Path) -> None:
 
 
 def test_from_directory_registers_multiple_tools(tmp_path: Path) -> None:
-    yaml = MINIMAL_YAML.replace("tools:\n  - name: my_tool\n    description: Does something.", 
+    yaml = MINIMAL_YAML.replace("tools:\n  - name: my_tool\n    description: Does something.",
                                  "tools:\n  - name: tool_a\n  - name: tool_b")
     skill_dir = _make_skill_dir(tmp_path, yaml=yaml, tool_code=MULTI_TOOL_CODE)
     registry = ToolRegistry()

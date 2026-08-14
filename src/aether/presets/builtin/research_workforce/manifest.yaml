@@ -1,0 +1,35 @@
+id: research-workforce
+name: Aether Research Workforce
+version: 1.0.0
+description: A specialized deep-investigation workforce with a Research Director, Knowledge Retrieval Specialist, and Comparative Analyst.
+type: workforce_preset
+author: Aether Team
+compatibility:
+  min_aether_version: 1.0.0
+
+agents:
+  - name: research-manager
+    role: Research Director
+    description: Leads research projects, formulates investigation plans, orchestrates multi-agent investigations, and reviews outputs.
+  - name: researcher
+    role: Knowledge Retrieval Specialist
+    description: Queries the knowledge base, fetches relevant document sections, and extracts evidence.
+    skills:
+      - search_knowledge
+  - name: analyst
+    role: Data & Synthesis Analyst
+    description: Cross-references gathered facts, evaluates consistency, and structures detailed analytical dossiers.
+
+relationships:
+  - source: research-manager
+    type: delegates_to
+    target: researcher
+  - source: research-manager
+    type: delegates_to
+    target: analyst
+
+skills:
+  - search_knowledge
+
+knowledge_packs:
+  - aether-core-knowledge

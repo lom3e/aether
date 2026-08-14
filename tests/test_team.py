@@ -171,15 +171,15 @@ class TestTeamLoaderFromDict:
         with pytest.raises(ValueError, match="must be a list"):
             TeamLoader.from_dict({"agents": "not-a-list"})
 
-    def test_agent_without_name_skipped(self):
+    def test_agent_without_name_is_rejected(self):
         data = {
             "agents": [
                 {"name": "valid"},
-                {"role": "no-name"},  # no name — should be skipped
+                {"role": "no-name"},  # no name — malformed configuration
             ]
         }
-        config = TeamLoader.from_dict(data)
-        assert len(config.agents) == 1
+        with pytest.raises(ValueError, match="non-empty name"):
+            TeamLoader.from_dict(data)
 
 
 class TestTeamLoaderFromYaml:
@@ -378,4 +378,3 @@ class TestTeamAssembly:
 # ---------------------------------------------------------------------------
 # Team knowledge injection
 # ---------------------------------------------------------------------------
-

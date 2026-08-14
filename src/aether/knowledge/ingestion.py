@@ -237,6 +237,7 @@ class DocumentIngester:
         *,
         source_name: str | None = None,
         recursive: bool = True,
+        scope: str = "workspace",
     ) -> int:
         """
         Ingest a file, directory, or raw text string into the store.
@@ -251,6 +252,8 @@ class DocumentIngester:
             source isn't a path).
         recursive:
             When *source* is a directory, whether to walk subdirectories.
+        scope:
+            Knowledge scope ('workspace' or 'system').
 
         Returns
         -------
@@ -260,43 +263,43 @@ class DocumentIngester:
         path = Path(source) if isinstance(source, (str, Path)) else None
 
         if path and path.is_dir():
-            return self._ingest_directory(path, recursive=recursive)
+            return self._ingest_directory(path, recursive=recursive, scope=scope)
         if path and path.is_file():
-            return self._ingest_file(path, source_name=source_name)
+            return self._ingest_file(path, source_name=source_name, scope=scope)
         if isinstance(source, str) and not Path(source).exists():
             # Treat as raw text
             label = source_name or "<inline>"
-            return self._ingest_text(source, label)
+            return self._ingest_text(source, label, scope=scope)
         return 0
 
-    def ingest_text(self, text: str, source_name: str) -> int:
+    def ingest_text(self, text: str, source_name: str, scope: str = "workspace") -> int:
         """
         Ingest a raw text string with an explicit source label.
 
         Returns the number of chunks added.
         """
-        return self._ingest_text(text, source_name)
+        return self._ingest_text(text, source_name, scope=scope)
 
     # ------------------------------------------------------------------
     # Internal helpers
     # ------------------------------------------------------------------
 
-    def _ingest_directory(self, directory: Path, *, recursive: bool) -> int:
+    def _ingest_directory(self, directory: Path, *, recursive: bool, scope: str = "workspace") -> int:
         total = 0
         pattern = "**/*" if recursive else "*"
         for path in sorted(directory.glob(pattern)):
             if path.is_file():
-                total += self._ingest_file(path)
+                total += self._ingest_file(path, scope=scope)
         return total
 
-    def _ingest_file(self, path: Path, *, source_name: str | None = None) -> int:
+    def _ingest_file(self, path: Path, *, source_name: str | None = None, scope: str = "workspace") -> int:
         text = _read_file(path)
         if text is None:
             return 0  # unsupported format — skip silently
         label = source_name or str(path)
-        return self._ingest_text(text, label)
+        return self._ingest_text(text, label, scope=scope)
 
-    def _ingest_text(self, text: str, source: str) -> int:
+    def _ingest_text(self, text: str, source: str, scope: str = "workspace") -> int:
         """Chunk *text* and add all chunks to the store."""
         raw_chunks = _split_into_chunks(
             text,
@@ -311,6 +314,7 @@ class DocumentIngester:
                 content=chunk_text,
                 source=source,
                 chunk_index=idx,
+                scope=scope,
             )
             for idx, chunk_text in enumerate(raw_chunks)
         ]

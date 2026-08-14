@@ -96,7 +96,12 @@ class TeamLoader:
         This is the canonical parser: ``from_yaml`` delegates here after
         loading the YAML.
         """
+        if not isinstance(data, dict):
+            raise ValueError("team.yaml must contain a mapping at the top level")
+
         team_section = data.get("team", {})
+        if not isinstance(team_section, dict):
+            raise ValueError("'team' must be a mapping in team.yaml")
         agents_section = data.get("agents", [])
 
         if not isinstance(agents_section, list):
@@ -114,6 +119,8 @@ class TeamLoader:
         else:
             default_provider = raw_default_provider
             default_model = team_section.get("model")
+        if not isinstance(default_provider, str) or not default_provider.strip():
+            raise ValueError("team.provider must be a non-empty string")
 
         team_metadata = {
             k: v for k, v in team_section.items()
@@ -126,16 +133,16 @@ class TeamLoader:
         agents: list[AgentConfig] = []
         for raw_agent in agents_section:
             if not isinstance(raw_agent, dict):
-                continue
-            agent_name = raw_agent.get("name", "")
+                raise ValueError("Each entry in 'agents' must be a mapping")
+            agent_name = str(raw_agent.get("name", "")).strip()
             if not agent_name:
-                continue
+                raise ValueError("Each agent must have a non-empty name")
 
             agent_role = raw_agent.get("role", "assistant")
             instructions = raw_agent.get("instructions", "")
             raw_provider = raw_agent.get("provider")
             model = raw_agent.get("model")
-            
+
             if isinstance(raw_provider, dict):
                 provider_name = raw_provider.get("name")
                 model = raw_provider.get("model", model)
@@ -145,6 +152,8 @@ class TeamLoader:
             skills = raw_agent.get("skills") or []
             if isinstance(skills, str):
                 skills = [skills]
+            elif not isinstance(skills, list):
+                raise ValueError(f"Agent '{agent_name}' skills must be a list")
 
             # Relationships — support multiple notations:
             #   relationships:
@@ -153,22 +162,28 @@ class TeamLoader:
             #       target: writer                (explicit)
             relationships: list[Relationship] = []
             raw_rels = raw_agent.get("relationships") or []
+            if not isinstance(raw_rels, list):
+                raise ValueError(f"Agent '{agent_name}' relationships must be a list")
             for rel in raw_rels:
-                if isinstance(rel, dict):
-                    # Explicit: { type: ..., target: ... }
-                    if "type" in rel and "target" in rel:
+                if not isinstance(rel, dict):
+                    raise ValueError(f"Agent '{agent_name}' contains an invalid relationship")
+                # Explicit: { type: ..., target: ... }
+                if "type" in rel and "target" in rel:
+                    if not isinstance(rel["type"], str) or not isinstance(rel["target"], str):
+                        raise ValueError(f"Agent '{agent_name}' contains an invalid relationship")
+                    relationships.append(Relationship(
+                        type=rel["type"].strip(),
+                        target=rel["target"].strip(),
+                    ))
+                else:
+                    # Shorthand: { delegates_to: "agent_name" }
+                    for rel_type, target in rel.items():
+                        if not isinstance(rel_type, str) or not isinstance(target, str) or not target.strip():
+                            raise ValueError(f"Agent '{agent_name}' contains an invalid relationship")
                         relationships.append(Relationship(
-                            type=rel["type"],
-                            target=rel["target"],
+                            type=rel_type.strip(),
+                            target=target.strip(),
                         ))
-                    else:
-                        # Shorthand: { delegates_to: "agent_name" }
-                        for rel_type, target in rel.items():
-                            if isinstance(target, str):
-                                relationships.append(Relationship(
-                                    type=rel_type,
-                                    target=target,
-                                ))
 
             # Known keys — everything else goes to metadata
             known = {"name", "role", "instructions", "model", "provider", "skills", "relationships"}
@@ -224,6 +239,8 @@ class TeamLoader:
                 raw["instructions"] = agent.instructions
             if agent.model:
                 raw["model"] = agent.model
+            if agent.provider:
+                raw["provider"] = agent.provider
             if agent.skills:
                 raw["skills"] = agent.skills
             if agent.relationships:
@@ -235,3 +252,11 @@ class TeamLoader:
             data["agents"].append(raw)
 
         return yaml.dump(data, default_flow_style=False, allow_unicode=True)
+
+    @staticmethod
+    def to_yaml(config: TeamConfig, path: str | Path) -> None:
+        """
+        Serialize a :class:`TeamConfig` and write it to the specified path.
+        """
+        yaml_str = TeamLoader.to_yaml_str(config)
+        Path(path).write_text(yaml_str, encoding="utf-8")

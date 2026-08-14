@@ -8,6 +8,7 @@ from aether.providers.base import AIProvider
 from aether.providers.errors import ProviderNotFoundError
 from aether.providers.manager import ProviderManager
 from aether.providers.mock import MockProvider
+from aether.providers.ollama import OllamaProvider
 from aether.providers.types import Message, ProviderConfig, ProviderResponse
 
 
@@ -15,6 +16,7 @@ class DummyProvider(AIProvider):
     @property
     def capabilities(self):
         from aether.providers.capabilities import ProviderCapabilities
+
         return ProviderCapabilities()
 
     """Minimal provider for tests."""
@@ -87,6 +89,7 @@ class TestProviderManager:
     def test_lazy_load_openai_missing(self) -> None:
         manager = ProviderManager()
         import aether.providers.openai_provider
+
         aether.providers.openai_provider._HAS_OPENAI = False
         with pytest.raises(ImportError, match="pip install openai"):
             manager.get("openai")
@@ -94,6 +97,7 @@ class TestProviderManager:
     def test_lazy_load_anthropic_missing(self) -> None:
         manager = ProviderManager()
         import aether.providers.anthropic_provider
+
         aether.providers.anthropic_provider._HAS_ANTHROPIC = False
         with pytest.raises(ImportError, match="pip install anthropic"):
             manager.get("anthropic")
@@ -101,8 +105,16 @@ class TestProviderManager:
     def test_lazy_load_gemini_missing(self) -> None:
         manager = ProviderManager()
         import aether.providers.gemini_provider
+
         aether.providers.gemini_provider._HAS_GEMINI = False
         with pytest.raises(ImportError, match="pip install google-genai"):
             manager.get("gemini")
 
+    def test_well_known_local_providers_are_resolved_lazily(self) -> None:
+        manager = ProviderManager()
 
+        mock_provider = manager.get("mock", config=ProviderConfig(model="mock-model"))
+        ollama_provider = manager.get("ollama", config=ProviderConfig(model="local-model"))
+
+        assert isinstance(mock_provider, MockProvider)
+        assert isinstance(ollama_provider, OllamaProvider)

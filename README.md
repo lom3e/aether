@@ -1,304 +1,180 @@
 # Aether
 
-Aether is an AI agent framework for building goal-driven agents that reason, plan, use tools, and collaborate through structured delegation.
+**Aether** is an open platform for building, coordinating, and running autonomous **AI Workforces**.
 
-Aether provides a complete cognitive loop — from goal decomposition to plan execution — with built-in safety constraints, structured observation, and a clean provider abstraction. It runs locally with no external dependencies beyond Python 3.11+.
+It provides a complete cognitive runtime — from goal decomposition and multi-agent delegation to structured tool calling and persistent memory — paired with a quiet, focused web workspace and local-first architecture.
 
-## Key Features
+Aether runs 100% locally with **Ollama** or seamlessly connects to cloud providers (**OpenAI**, **Anthropic**, **Gemini**).
 
-- **Goal-driven agents** — Assign high-level goals; agents plan, execute, and adapt
-- **Tool system** — Define custom tools with JSON Schema; agents call them dynamically
-- **Multi-agent delegation** — Agents delegate sub-goals to child agents via `CognitiveAgentTool`
-- **Provider abstraction** — Swap LLM backends (Ollama, custom) without changing agent code
-- **Runtime safety** — Configurable limits on cycles, replans, and deadlines
-- **Structured observations** — Execution results preserved as typed data, not flattened strings
-- **Resilient providers** — Automatic retry with exponential backoff for transient failures
-- **Unified error model** — Single `AetherError` hierarchy for consistent error handling
-- **Zero external dependencies** — Built entirely on the Python standard library
+---
 
-## Installation
+## ⚡️ Quick Start
 
-Requires **Python 3.11+**.
-
+### 1. Launch the Web Interface (Primary Experience)
 ```bash
+# Clone and install
 git clone https://github.com/lom3e/aether.git
 cd aether
 pip install -e .
+
+# Launch Aether Workspace
+aether ui
+```
+Open **`http://localhost:8000`** in your browser.
+
+- **1-Click Presets**: Select an official starter pack (e.g. **Aether Starter Workforce**).
+- **Configure Model**: Connect to your local Ollama instance (`qwen3.5:9b`, `llama3.2`) or cloud API keys.
+- **Knowledge Base**: Upload private company documents (PDF, Markdown, TXT, CSV) or explore preinstalled official System Knowledge.
+- **Interactive Chat**: Assign complex tasks to your workforce. Observe real-time agent presence, operational activity feeds, and approve HITL safety checkpoints.
+- **Zero YAML or terminal required for everyday use.**
+
+---
+
+## 🏛️ Architecture & Core Concepts
+
+```
+┌──────────────────────────────────────────────────────────┐
+│                   Aether Web Workspace                   │
+│   (Conversations • Agent Presence • Activity Feed • HITL) │
+└────────────────────────────┬─────────────────────────────┘
+                             │ REST / WebSocket
+┌────────────────────────────▼─────────────────────────────┐
+│                    Aether Workspace                      │
+│   (aether.yaml • Scoped Knowledge • SQLite Persistence)  │
+└────────────────────────────┬─────────────────────────────┘
+                             │
+┌────────────────────────────▼─────────────────────────────┐
+│                     Aether Runtime                       │
+│    (Team • Multi-Agent Delegation • Cognitive Loop)      │
+└────────────┬───────────────────────────────┬─────────────┘
+             │                               │
+┌────────────▼─────────────┐   ┌─────────────▼─────────────┐
+│     Knowledge Engine     │   │      Provider Engine      │
+│  (System vs Workspace)   │   │  (Ollama / Cloud / Mock)  │
+└──────────────────────────┘   └───────────────────────────┘
 ```
 
-## Quickstart
+- **Aether Runtime** — The execution engine coordinating autonomous cognitive loops, goal decomposition, tool calling, and Human-in-the-Loop (HITL) safety interrupts.
+- **Aether Workspace** — The user's isolated local workspace containing configurations (`aether.yaml`), active teams (`teams/`), and local SQLite persistence (`data/`).
+- **Aether Presets** — Ready-made workforce templates (`starter-workforce`, `research-workforce`) deployable with 1-click.
+- **System Knowledge** — Official built-in platform documentation (🔒 read-only) pre-indexed into SQLite.
+- **Workspace Knowledge** — Private user/company documents (PDF, Markdown, TXT, CSV) indexed locally with full-text semantic search.
+- **Aether UI** — The primary visual workspace experience with multi-conversation management, workforce presence, and humanized activity feeds.
+- **Aether CLI** — Secondary command-line interface for power users, scripting, and CI/CD pipelines (`aether run`, `aether team status`).
+
+---
+
+## 🚦 Status & Feature Roadmap
+
+| Capability | Status | Description |
+|---|:---:|---|
+| **Autonomous Cognitive Loop** | **IMPLEMENTED** | Planning, ReAct reasoning, structured tool execution, adaptive replanning |
+| **Multi-Agent Delegation** | **IMPLEMENTED** | Hierarchical delegation (`delegates_to`) via `CognitiveAgentTool` |
+| **Agent Identity & Memory** | **IMPLEMENTED** | Persistent persona identities & cross-session memory in SQLite |
+| **Scoped Knowledge Base** | **IMPLEMENTED** | Isolated System (built-in) vs. Workspace (user documents) indexing |
+| **Multiple Conversations** | **IMPLEMENTED** | Persistent multi-turn chat threads, timestamps, and status tracking |
+| **Human-in-the-Loop (HITL)** | **IMPLEMENTED** | `RequireApproval` and `RequireInput` interactive interrupt cards |
+| **Ollama Hardening** | **IMPLEMENTED** | Default 120s timeout for local models + cloud provider isolation |
+| **Visual Web Workspace** | **ALPHA** | Single-page UI (`aether ui`), presence bar, natural activity feed, i18n (EN/IT) |
+| **Official Presets** | **ALPHA** | Built-in `starter-workforce` and `research-workforce` packs |
+| **Token Streaming in UI** | **PLANNED** | Real-time incremental token rendering in web chat |
+| **Community Marketplace** | **FUTURE** | Remote catalog for publishing and sharing custom agent packs |
+
+---
+
+## 💻 Python SDK & Programmatic Usage
+
+For developers building agent applications directly in Python:
 
 ### Basic Agent
-
 ```python
 from aether import Agent, Task
 from aether.providers import MockProvider
 
 agent = Agent(name="Assistant", provider=MockProvider())
-result = agent.execute(Task(instruction="Hello, can you help me?"))
+result = agent.execute(Task(instruction="Analyze the user request."))
 
 print(result.output)
 ```
 
-### Agent with Tools
-
+### Multi-Agent Workforce in Python
 ```python
-import json
-from aether import Agent, Goal
-from aether.tools import Tool, ToolExecutionContext
-from aether.providers import OllamaProvider, ProviderConfig
+from aether.team.config import TeamConfig, AgentConfig
+from aether.team.team import Team
+from aether.providers.ollama import OllamaProvider
 
-# 1. Define a custom tool
-class CalculatorTool(Tool):
-    name = "calculator"
-    description = "Adds two numbers."
-
-    def to_json_schema(self) -> dict:
-        return {
-            "type": "function",
-            "function": {
-                "name": self.name,
-                "description": self.description,
-                "parameters": {
-                    "type": "object",
-                    "properties": {
-                        "a": {"type": "integer"},
-                        "b": {"type": "integer"}
-                    },
-                    "required": ["a", "b"]
-                }
-            }
-        }
-
-    def execute(self, arguments: str, context: ToolExecutionContext) -> str:
-        args = json.loads(arguments)
-        return str(args["a"] + args["b"])
-
-# 2. Create the agent with a local Ollama provider
-provider = OllamaProvider(ProviderConfig(model="llama3.2"))
-agent = Agent(name="MathBot", provider=provider)
-
-# 3. Register the tool
-agent.tools.append("calculator")
-agent.tool_registry.register(CalculatorTool())
-
-# 4. Assign a goal and let the agent achieve it
-goal = Goal(description="Calculate 42 + 58 and tell me the result.")
-result = agent.achieve(goal)
-
-if result.success:
-    print("Result:", result.output)
-else:
-    print("Failed:", result.error)
-```
-
-### Multi-Agent Delegation
-
-```python
-from aether import Agent
-from aether.tools import CognitiveAgentTool
-from aether.providers import MockProvider
-
-# Create a child agent
-child = Agent(name="Researcher", provider=MockProvider())
-
-# Create a parent agent and connect via CognitiveAgentTool
-parent = Agent(name="Manager", provider=MockProvider())
-delegation_tool = CognitiveAgentTool(agent=child)
-parent.tools.append(delegation_tool.name)
-parent.tool_registry.register(delegation_tool)
-```
-
-## Public API
-
-```python
-# Core
-from aether import Agent, Task, Goal, Observation
-
-# Tools
-from aether.tools import Tool, ToolRegistry, CognitiveAgentTool
-
-# Providers
-from aether.providers import (
-    AIProvider, OllamaProvider, MockProvider, ResilientProvider,
-    ProviderConfig, Message, ProviderResponse
+config = TeamConfig(
+    name="research-team",
+    default_provider="ollama",
+    default_model="qwen3.5:9b",
+    agents=[
+        AgentConfig(
+            name="manager",
+            role="Workforce Coordinator",
+            instructions="Coordinate research and delegate to specialists.",
+            delegates_to=["researcher"]
+        ),
+        AgentConfig(
+            name="researcher",
+            role="Research Analyst",
+            instructions="Search knowledge and summarize facts.",
+            skills=["search_knowledge"]
+        )
+    ]
 )
 
-# Errors
-from aether.errors import (
-    AetherError, PlanningError, ExecutionError,
-    ProviderError, RuntimeSafetyError
-)
+team = Team(config=config)
+result = team.run("What are the key findings in our knowledge base?")
+print(result.output)
 ```
 
-## Providers
+---
 
-Aether ships with:
+## 🖥️ Command-Line Interface (CLI)
 
-| Provider | Description |
-|----------|-------------|
-| `OllamaProvider` | Local LLM via [Ollama](https://ollama.ai) HTTP API |
-| `MockProvider` | Deterministic responses for testing |
-| `ResilientProvider` | Decorator adding retry with exponential backoff |
-
-Optional cloud providers (install the SDK separately):
-
-| Provider | SDK |
-|----------|-----|
-| `OpenAIProvider` | `pip install openai` |
-| `AnthropicProvider` | `pip install anthropic` |
-| `GeminiProvider` | `pip install google-genai` |
-
-Custom providers implement the `AIProvider` interface.
-
-## Skills
-
-Skills are reusable, executable capability units that can extend any agent with new tools.
-
-Each skill is a directory (or archive) with a `skill.yaml` manifest and a Python module
-that registers tools into the agent's `ToolRegistry`.
-
-### Skill Structure
-
-```text
-my-skill/
-├── skill.yaml
-└── tools/
-    ├── __init__.py
-    └── hello.py
-```
-
-```yaml
-# skill.yaml
-id: hello-skill
-name: Hello Skill
-version: 1.0.0
-description: A greeting skill.
-
-entrypoint:
-  module: tools.hello
-  function: register
-
-permissions: []
-
-tools:
-  - name: say_hello
-    description: Greets the user by name.
-```
-
-```python
-# tools/hello.py
-from aether.tools.base import Tool, ToolExecutionContext
-
-class SayHelloTool(Tool):
-    name = "say_hello"
-    description = "Greets the user by name."
-
-    def execute(self, input_data: str, context: ToolExecutionContext | None = None) -> str:
-        return f"Hello, {input_data}!"
-
-def register(registry, context: dict) -> None:
-    registry.register(SayHelloTool())
-```
-
-### Loading a Skill
-
-```python
-from aether import Agent
-from aether.providers import MockProvider
-
-agent = Agent(name="SkillBot", provider=MockProvider())
-
-# Load skill from a directory — tools are registered automatically.
-loaded = agent.load_skill("path/to/my-skill")
-print(loaded.registered_tools)  # ['say_hello']
-
-# The tool is now available directly in the registry.
-result = agent.tool_registry.execute("say_hello", "World")
-print(result)  # Hello, World!
-```
-
-Skills can also be loaded from archives:
-
-```python
-loaded = agent.load_skill("my-skill.zip")
-loaded = agent.load_skill("my-skill.tar.gz")
-loaded = agent.load_skill("my-skill.aether-skill")
-```
-
-### Permission Policy
-
-Control which permissions a skill may request:
-
-```python
-from aether.skills import SkillPermissionPolicy
-
-# Block specific permissions (skill code is never imported if blocked).
-policy = SkillPermissionPolicy(denied={"filesystem.write"})
-loaded = agent.load_skill("path/to/skill", permission_policy=policy)
-```
-
-### Direct Skill Loader
-
-For finer control, use `SkillLoader` directly:
-
-```python
-from aether.skills import SkillLoader, SkillPermissionPolicy
-from aether.tools.registry import ToolRegistry
-
-registry = ToolRegistry()
-loader = SkillLoader(permission_policy=SkillPermissionPolicy.allow_all())
-loaded = loader.from_directory("path/to/my-skill", registry)
-```
-
-
-## Runtime Safety
-
-Agents are protected by `RuntimeSafetyPolicy`:
-
-```python
-from aether.core import RuntimeSafetyPolicy, Deadline
-
-policy = RuntimeSafetyPolicy(
-    max_cognitive_cycles=30,
-    max_replans=5,
-    deadline=Deadline.from_timeout(120.0),
-)
-
-agent = Agent(name="SafeBot", provider=provider, runtime_safety_policy=policy)
-```
-
-## Examples
-
-See the [`examples/`](examples/) directory:
-
-| Example | Description |
-|---------|-------------|
-| `1_basic_agent.py` | Minimal agent with MockProvider |
-| `2_custom_tool.py` | Custom tool registration and execution |
-| `3_local_provider.py` | Using OllamaProvider with a local LLM |
-| `4_goal_agent.py` | Goal-driven cognitive execution |
-| `5_structured_output.py` | Structured observation handling |
-| `6_agent_delegation.py` | Multi-agent delegation via CognitiveAgentTool |
-| `7_skill_loading.py` | Loading executable skills with `Agent.load_skill()` |
-
-## Documentation
-
-- [Architecture](docs/architecture.md) — System design and component boundaries
-- [API Reference](docs/api-reference.md) — Complete public API documentation
-- [Changelog](CHANGELOG.md) — Version history
-
-## Testing
+The CLI provides power-user access to the same local workspace configuration:
 
 ```bash
-pip install pytest
-pytest tests/ -q -W error
+# Run a task through the active team
+aether run "Summarize recent quarterly reports"
+
+# Inspect active team and agents
+aether team status
+
+# Search the local knowledge base
+aether knowledge search "robotics"
+
+# Ingest new documents
+aether knowledge add ./my-documents/
 ```
 
-## Project Status
+---
 
-**v1.2.0** — Executable Skill System. Skills are now loadable, executable units with dynamic tool binding, permission policies, and archive support.
+## 📦 AI Providers & Models
 
-## License
+Aether supports both offline local models and cloud providers:
 
-See [LICENSE](LICENSE) for details.
+- **Ollama (Local)**: `qwen3.5:9b`, `llama3.2`, `mistral`, `deepseek-r1` (Zero data leaves your machine).
+- **OpenAI**: `gpt-4o`, `gpt-4o-mini`, `o1`, `o3-mini` (`pip install openai`).
+- **Anthropic**: `claude-3-5-sonnet-20241022`, `claude-3-haiku` (`pip install anthropic`).
+- **Google Gemini**: `gemini-1.5-pro`, `gemini-1.5-flash` (`pip install google-genai`).
+
+---
+
+## 🧪 Testing & Validation
+
+Run the test suite:
+```bash
+# Run 440+ backend tests
+pytest
+
+# Build and validate frontend SPA
+npm --prefix ui run build
+```
+
+---
+
+## 📄 License & Contributing
+
+- **License**: MIT License — see [LICENSE](LICENSE) for details.
+- **Contributions**: Open-source contributions are welcome! Please read [CONTRIBUTING.md](CONTRIBUTING.md).

@@ -116,7 +116,7 @@ class ActivityFeed:
         if event.event_type == EventType.TOOL_COMPLETED:
             tool_name = meta.get("tool_name", "")
             output = str(meta.get("output", ""))
-            
+
             # Simple heuristic for search_knowledge
             if tool_name == "search_knowledge" and "Trovat" in output:
                 return self._line(agent, f"✓ Risultati trovati", style="success")

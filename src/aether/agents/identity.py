@@ -25,7 +25,7 @@ class AgentIdentity:
         safe_name = "".join(c if c.isalnum() else "_" for c in name).lower()
         suffix = uuid.uuid4().hex[:8]
         agent_id = f"agent_{safe_name}_{suffix}"
-        
+
         now = time.time()
         return cls(
             id=agent_id,
@@ -69,7 +69,7 @@ class AgentStore:
 
     def save(self, identity: AgentIdentity) -> None:
         """
-        Save or update an agent's identity. 
+        Save or update an agent's identity.
         If the name already exists, updates the role and last_active, preserving id and created_at.
         """
         with self._get_connection() as conn:
@@ -91,10 +91,10 @@ class AgentStore:
                 "SELECT id, name, role, created_at, last_active FROM agents WHERE name = ?",
                 (name,)
             ).fetchone()
-            
+
             if row is None:
                 return None
-                
+
             return AgentIdentity(
                 id=row["id"],
                 name=row["name"],
@@ -110,10 +110,10 @@ class AgentStore:
                 "SELECT id, name, role, created_at, last_active FROM agents WHERE id = ?",
                 (agent_id,)
             ).fetchone()
-            
+
             if row is None:
                 return None
-                
+
             return AgentIdentity(
                 id=row["id"],
                 name=row["name"],
@@ -128,7 +128,7 @@ class AgentStore:
             rows = conn.execute(
                 "SELECT id, name, role, created_at, last_active FROM agents ORDER BY name"
             ).fetchall()
-            
+
             return [
                 AgentIdentity(
                     id=row["id"],

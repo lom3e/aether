@@ -26,12 +26,12 @@ def test_backward_compatibility():
         raise OldProviderError("test", provider="mock")
     except ProviderError:
         pass  # Expected
-        
+
     try:
         raise OldRuntimeSafetyError("test")
     except RuntimeSafetyError:
         pass  # Expected
-        
+
     try:
         raise OldDelegationError("test")
     except DelegationError:

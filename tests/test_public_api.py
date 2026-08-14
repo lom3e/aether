@@ -5,7 +5,7 @@ def test_public_api_exports():
     from aether.engine import ExecutionEngine, ExecutionResult
     from aether.providers import AIProvider, OllamaProvider, ResilientProvider
     from aether.errors import PlanningError, ExecutionError, ProviderError, RuntimeSafetyError
-    
+
     assert Agent is not None
     assert Goal is not None
     assert Tool is not None

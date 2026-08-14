@@ -68,13 +68,13 @@ def test_context_propagation():
 def test_isolation():
     """Test 3: Isolation - Parent and Child memories remain separate"""
     from aether.memory.conversation import ConversationMemory
-    
+
     parent = Agent("Parent", memory=ConversationMemory())
     child = Agent("Child", memory=ConversationMemory())
-    
+
     parent.memory.add_message("session", {"content": "parent_msg"})
     child.memory.add_message("session", {"content": "child_msg"})
-    
+
     # Tool execution shouldn't merge them
     tool = CognitiveAgentTool(agent=child)
     # Just asserting they are distinct objects is sufficient for this check
@@ -84,15 +84,15 @@ def test_isolation():
 def test_loop_protection():
     """Test 4: Delegation loop protection"""
     child = MockChildAgent("ChildA")
-    
+
     # Simulate a deep chain where ChildA is already present
     chain_ctx = DelegationContext(current_agent="Parent", chain=["Parent", "ChildA", "ChildB"])
-    
+
     tool = CognitiveAgentTool(agent=child, delegation_context=chain_ctx)
-    
+
     req = DelegationRequest(goal_description="Infinite loop")
     result = tool.execute(req.__dict__)
-    
+
     assert result.success is False
     assert "Circular delegation detected" in result.metadata["error"]
 
@@ -101,9 +101,9 @@ def test_legacy_compatibility():
     """Test 5: Legacy AgentTool continues to work with Task and execute()"""
     child = MockChildAgent("ChildA", expected_output="Legacy Done")
     legacy_tool = AgentTool(agent=child)
-    
+
     result_str = legacy_tool.execute("Legacy Task")
-    
+
     assert result_str == "Legacy Done"
     assert child.received_task is not None
     assert child.received_task.instruction == "Legacy Task"

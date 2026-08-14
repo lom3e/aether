@@ -35,7 +35,7 @@ class ProviderConfig:
     model: str | None = None
     temperature: float = 0.7
     max_tokens: int | None = None
-    timeout: float = 30.0
+    timeout: float | None = None
     max_retries: int = 3
 
 
@@ -65,7 +65,7 @@ class ProviderResponse:
 class ProviderStreamChunk:
     """
     A single chunk yielded during a streaming generation.
-    
+
     Attributes:
         text: The text content delta for this chunk.
         finish_reason: Why the stream stopped (usually only present in the final chunk).

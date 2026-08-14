@@ -63,18 +63,18 @@ def test_agent_preserves_dict_payload():
     provider = MockProvider()
     planner = MockPlanner()
     validator = MockValidator()
-    
+
     mock_dict = {"files_changed": ["a.py"], "tests_passed": True}
     engine = MockExecutionEngine(mock_results=(
         create_mock_result(mock_dict),
     ))
-    
+
     agent = Agent(name="Test", provider=provider, planner=planner, plan_validator=validator)
     agent.execution_engine = engine  # override engine
-    
+
     goal = Goal(description="test dict")
     agent.achieve(goal)
-    
+
     assert len(planner.observations) == 1
     obs = planner.observations[0]
     assert obs.result == mock_dict
@@ -84,18 +84,18 @@ def test_agent_preserves_delegation_result_payload():
     provider = MockProvider()
     planner = MockPlanner()
     validator = MockValidator()
-    
+
     mock_obj = DelegationResult(status="success", data={"key": "value"})
     engine = MockExecutionEngine(mock_results=(
         create_mock_result(mock_obj),
     ))
-    
+
     agent = Agent(name="Test", provider=provider, planner=planner, plan_validator=validator)
     agent.execution_engine = engine  # override engine
-    
+
     goal = Goal(description="test obj")
     agent.achieve(goal)
-    
+
     assert len(planner.observations) == 1
     obs = planner.observations[0]
     assert obs.result == mock_obj
@@ -105,17 +105,17 @@ def test_agent_preserves_string_payload_legacy():
     provider = MockProvider()
     planner = MockPlanner()
     validator = MockValidator()
-    
+
     engine = MockExecutionEngine(mock_results=(
         create_mock_result("task completato"),
     ))
-    
+
     agent = Agent(name="Test", provider=provider, planner=planner, plan_validator=validator)
     agent.execution_engine = engine  # override engine
-    
+
     goal = Goal(description="test string")
     agent.achieve(goal)
-    
+
     assert len(planner.observations) == 1
     obs = planner.observations[0]
     assert obs.result == "task completato"
@@ -125,18 +125,18 @@ def test_agent_preserves_multiple_results_as_list():
     provider = MockProvider()
     planner = MockPlanner()
     validator = MockValidator()
-    
+
     engine = MockExecutionEngine(mock_results=(
         create_mock_result("out1"),
         create_mock_result("out2"),
     ))
-    
+
     agent = Agent(name="Test", provider=provider, planner=planner, plan_validator=validator)
     agent.execution_engine = engine  # override engine
-    
+
     goal = Goal(description="test multiple")
     agent.achieve(goal)
-    
+
     assert len(planner.observations) == 1
     obs = planner.observations[0]
     assert obs.result == ["out1", "out2"]

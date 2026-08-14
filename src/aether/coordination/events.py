@@ -37,5 +37,11 @@ class EventEmitter:
 
     def emit(self, event: AgentEvent) -> None:
         if event.event_type in self._listeners:
-            for listener in self._listeners[event.event_type]:
+            for listener in tuple(self._listeners[event.event_type]):
                 listener(event)
+
+    def off(self, event_type: EventType, callback: Callable[[AgentEvent], None]) -> None:
+        """Remove a listener without failing if it was already removed."""
+        listeners = self._listeners.get(event_type)
+        if listeners and callback in listeners:
+            listeners.remove(callback)

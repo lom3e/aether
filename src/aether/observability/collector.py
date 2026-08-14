@@ -25,11 +25,11 @@ class TraceCollector:
         with self._lock:
             if trace_id not in self._traces:
                 return None
-            
+
             # Create a shallow copy of the list inside the lock to ensure safety,
             # but avoid keeping the lock during the tuple creation or subsequent processing.
             events = list(self._traces[trace_id])
-            
+
         return RuntimeTrace(
             trace_id=trace_id,
             events=tuple(events)

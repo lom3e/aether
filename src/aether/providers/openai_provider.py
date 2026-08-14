@@ -48,11 +48,11 @@ class OpenAIProvider(AIProvider):
                 "Please install it via 'pip install openai' to use OpenAIProvider."
             )
         super().__init__(config)
-        
+
         self._model = self.config.model or "gpt-4o"
-        
+
         import os
-        
+
         kwargs = {}
         api_key = self.config.api_key or os.environ.get("OPENAI_API_KEY")
         if api_key:
@@ -62,14 +62,14 @@ class OpenAIProvider(AIProvider):
                 "No API key provided. Set ProviderConfig(api_key=...) or OPENAI_API_KEY environment variable.",
                 provider="openai"
             )
-            
+
         if self.config.base_url:
             kwargs["base_url"] = self.config.base_url
         if self.config.max_retries is not None:
             kwargs["max_retries"] = self.config.max_retries
         if self.config.timeout:
             kwargs["timeout"] = self.config.timeout
-            
+
         self._client = OpenAI(**kwargs)
         self._aclient = AsyncOpenAI(**kwargs)
 
@@ -136,7 +136,7 @@ class OpenAIProvider(AIProvider):
                 kwargs["max_completion_tokens"] = self.config.max_tokens
             else:
                 kwargs["max_tokens"] = self.config.max_tokens
-                
+
         if self.config.temperature != 0.7:
             # o1 models do not support temperature currently
             if not (self._model.startswith("o1") or self._model.startswith("o3")):
@@ -235,7 +235,7 @@ class OpenAIProvider(AIProvider):
                     continue
                 choice = chunk.choices[0]
                 text = choice.delta.content or ""
-                
+
                 # OpenAI sends usage in the last chunk or a separate chunk if requested,
                 # but for simplicity we capture finish_reason.
                 yield ProviderStreamChunk(
@@ -259,7 +259,7 @@ class OpenAIProvider(AIProvider):
                     continue
                 choice = chunk.choices[0]
                 text = choice.delta.content or ""
-                
+
                 yield ProviderStreamChunk(
                     text=text,
                     finish_reason=choice.finish_reason,

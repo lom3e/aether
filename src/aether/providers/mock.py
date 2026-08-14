@@ -9,8 +9,6 @@ from __future__ import annotations
 
 from typing import Any
 
-from typing import Any
-
 from aether.providers.base import AIProvider
 from aether.providers.types import Message, ProviderConfig, ProviderResponse
 from aether.providers.capabilities import ProviderCapabilities
@@ -54,16 +52,31 @@ class MockProvider(AIProvider):
         Returns:
             ProviderResponse with mock content and zero-cost usage metadata.
         """
-        user_messages = [m for m in messages if m.role == "user"]
-        last_user = user_messages[-1].content if user_messages else "empty"
+        if self.responses and self._current_index < len(self.responses):
+            content = self.responses[self._current_index]
+            self._current_index += 1
+            import json
+            from aether.core.execution import ToolCall
 
-        content = f"Mock response: {last_user}"
-        msg = Message(role="assistant", content=content)
+            tool_calls = []
+            if content.startswith('{"name"'):
+                try:
+                    data = json.loads(content)
+                    tool_calls = [ToolCall(call_id="mock-id", tool_name=data["name"], arguments=data["arguments"])]
+                    content = ""
+                except json.JSONDecodeError:
+                    pass
+        else:
+            user_messages = [m for m in messages if m.role == "user"]
+            last_user = user_messages[-1].content if user_messages else "empty"
+            content = f"Mock response: {last_user}"
+            tool_calls = []
+
+        msg = Message(role="assistant", content=content, tool_calls=tool_calls)
         return ProviderResponse(
             content=content,
             model=self.MOCK_MODEL,
             usage={"prompt_tokens": 0, "completion_tokens": 0, "total_tokens": 0},
-            finish_reason="stop",
+            finish_reason="stop" if not tool_calls else "tool_calls",
             message=msg,
         )
-

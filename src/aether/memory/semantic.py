@@ -15,11 +15,33 @@ class SemanticMemory(BaseMemoryStore):
     Provides simple keyword-matching document retrieval.
     """
 
-    def __init__(self, db_path: str = ":memory:") -> None:
+    def __init__(self, db_path: str | None = None) -> None:
+        import os
+        using_default_path = db_path is None
+        if db_path is None:
+            db_path = os.path.expanduser("~/.aether/memory.db")
+            os.makedirs(os.path.dirname(db_path), exist_ok=True)
+
         self.db_path = db_path
         self._conn = sqlite3.connect(self.db_path, check_same_thread=False)
         self._lock = threading.Lock()
-        self._init_db()
+        try:
+            self._init_db()
+            # A read-only SQLite file can still allow CREATE IF NOT EXISTS.
+            # Probe a real write so failures happen during initialization.
+            with self._conn:
+                self._conn.execute("CREATE TABLE IF NOT EXISTS _aether_write_probe (id INTEGER PRIMARY KEY)")
+                self._conn.execute("INSERT INTO _aether_write_probe DEFAULT VALUES")
+                self._conn.execute("DELETE FROM _aether_write_probe")
+        except sqlite3.OperationalError:
+            self._conn.close()
+            if not using_default_path:
+                raise
+            # The global default is a convenience. A locked-down installation
+            # must still be able to run; explicit db paths remain strict.
+            self.db_path = ":memory:"
+            self._conn = sqlite3.connect(self.db_path, check_same_thread=False)
+            self._init_db()
 
     def _init_db(self) -> None:
         self._conn.execute(
@@ -59,7 +81,9 @@ class SemanticMemory(BaseMemoryStore):
         if not query:
             return []
 
-        query_words = set(query.lower().split())
+        import re
+        tokens = [w.lower() for w in re.findall(r"\w+", query)]
+        query_words = {w for w in tokens if len(w) > 2} or set(tokens)
         if not query_words:
             return []
 
@@ -71,11 +95,13 @@ class SemanticMemory(BaseMemoryStore):
 
         for row in rows:
             doc_id, content, meta_str, ts_str = row
-            content_lower = content.lower()
+            content_words = set(re.findall(r"\w+", content.lower()))
 
-
-            # Simple word-level overlap
-            match_count = sum(1 for w in query_words if w in content_lower)
+            # Token/stem-level overlap (avoid single/two letter noise)
+            match_count = sum(
+                1 for w in query_words
+                if any(w == cw or (len(w) >= 3 and len(cw) >= 3 and (w in cw or cw in w)) for cw in content_words)
+            )
 
             if match_count > 0:
                 doc = MemoryDocument(
@@ -120,5 +146,3 @@ class SemanticMemory(BaseMemoryStore):
 
     def __exit__(self, exc_type: Any, exc_val: Any, exc_tb: Any) -> None:
         self.close()
-
-

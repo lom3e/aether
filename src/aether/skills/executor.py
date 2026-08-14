@@ -34,9 +34,9 @@ class SkillExecutor:
         try:
             resolved_skill = self.validate(skill, context)
             self.hooks.before_execute(resolved_skill, context)
-            
+
             execution_time_ms = (time.perf_counter() - start_time) * 1000
-            
+
             result = SkillResult(
                 status=SkillExecutionStatus.SUCCESS,
                 unit_id=resolved_skill.skill_id,
@@ -51,8 +51,8 @@ class SkillExecutor:
         except ValueError as exc:
             self.hooks.on_error(resolved_skill, context, exc)
             return self._build_failure_result(
-                resolved_skill, 
-                context, 
+                resolved_skill,
+                context,
                 str(exc),
                 status=SkillExecutionStatus.VALIDATION_FAILED,
                 error_type="ValidationError",
@@ -92,9 +92,9 @@ class SkillExecutor:
         return self.registry.resolve_skill(skill)
 
     def _build_failure_result(
-        self, 
-        skill: Skill, 
-        context: ExecutionContext, 
+        self,
+        skill: Skill,
+        context: ExecutionContext,
         error: str,
         status: SkillExecutionStatus = SkillExecutionStatus.FAILED,
         error_type: str | None = None,

@@ -66,14 +66,14 @@ def test_agent_executes_tool():
 def test_agent_executes_tool_failure():
     registry = ToolRegistry()
     registry.register(DummyTool())
-    
+
     agent = Agent(name="Tool Agent", tool_registry=registry)
     task = Task(
-        agent_name="Tool Agent", 
-        instruction="Hello", 
+        agent_name="Tool Agent",
+        instruction="Hello",
         metadata={"tool_name": "dummy_tool", "tool_input": "fail"}
     )
-    
+
     result = agent.execute(task)
     assert result.success is False
     assert "Tool failed" in result.error

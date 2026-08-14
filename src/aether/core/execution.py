@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
+from enum import StrEnum
 from typing import Any
 from uuid import uuid4
 
@@ -13,6 +14,7 @@ if TYPE_CHECKING:
     from aether.skills.registry import SkillRegistry
     from aether.skills.skill import Skill
     from aether.tools.registry import ToolRegistry
+    from aether.core.interrupts import AgentInterrupt
 
 
 @dataclass(slots=True)
@@ -109,6 +111,12 @@ class ExecutionContext:
     metadata: dict[str, Any] = field(default_factory=dict)
 
 
+class ExecutionStatus(StrEnum):
+    COMPLETED = "completed"
+    FAILED = "failed"
+    INTERRUPTED = "interrupted"
+
+
 @dataclass(slots=True)
 class ExecutionResult:
     """
@@ -119,6 +127,35 @@ class ExecutionResult:
     output: str | None = None
     error: str | None = None
     metadata: dict[str, Any] = field(default_factory=dict)
+    status: ExecutionStatus = ExecutionStatus.COMPLETED
+    interrupt: AgentInterrupt | None = None
+
+    def __post_init__(self):
+        # Backward compatibility: automatically set status if not provided explicitly
+        if not self.success and self.status == ExecutionStatus.COMPLETED:
+            self.status = ExecutionStatus.FAILED
+
+
+@dataclass(slots=True)
+class ExecutionSession:
+    """
+    State of an active or suspended cognitive loop execution.
+    """
+    id: str
+    goal: Any  # Actually Goal, but avoiding cyclic imports here
+    context: ExecutionContext
+    cognitive_plan: Any | None = None
+    step_idx: int = 0
+    interrupt: AgentInterrupt | None = None
+    metadata: dict[str, Any] = field(default_factory=dict)
+
+    @classmethod
+    def create(cls, goal: Any, context: ExecutionContext) -> ExecutionSession:
+        return cls(
+            id=uuid4().hex,
+            goal=goal,
+            context=context,
+        )
 
 
 @dataclass(slots=True)
@@ -157,4 +194,3 @@ class AgentContext(ExecutionContext):
             metadata=context.metadata,
             messages=messages or [],
         )
-

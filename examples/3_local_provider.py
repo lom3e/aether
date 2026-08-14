@@ -7,12 +7,12 @@ def main():
     # Since this is an example, we use a try-except to handle cases where Ollama is not running.
     from aether.providers import ProviderConfig
     provider = OllamaProvider(ProviderConfig(model="llama3.2"))
-    
+
     agent = Agent(name="LocalBot", provider=provider)
-    
+
     task = Task(instruction="Why is the sky blue? Answer in one short sentence.")
     print(f"Task: {task.instruction}")
-    
+
     try:
         print("Sending request to local Ollama instance...")
         result = agent.execute(task)

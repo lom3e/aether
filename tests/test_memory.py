@@ -111,9 +111,9 @@ def test_semantic_memory_sqlite(tmp_path) -> None:
     assert len(store.search("fruit")) == 0
 
 
-def test_memory_manager_orchestration() -> None:
+def test_memory_manager_orchestration(tmp_path: Path) -> None:
     conv_store = ConversationMemory()
-    sem_store = SemanticMemory()
+    sem_store = SemanticMemory(db_path=str(tmp_path / "sem.db"))
     manager = MemoryManager(conversation_memory=conv_store, semantic_memory=sem_store)
 
     # Add facts to semantic memory
@@ -146,6 +146,38 @@ def test_memory_manager_orchestration() -> None:
     assert saved_history[-1].content == "Aether is written in Python."
 
 
+def test_memory_manager_multiturn_preserves_new_user_message(tmp_path: Path) -> None:
+    conv_store = ConversationMemory()
+    sem_store = SemanticMemory(db_path=str(tmp_path / "sem.db"))
+    manager = MemoryManager(conversation_memory=conv_store, semantic_memory=sem_store)
+
+    # Turn 1
+    task1 = Task(agent_name="Assistant", instruction="What is Aether?", id="session_turn")
+    ctx1 = AgentContext.from_context(ExecutionContext(task=task1, agent_name="Assistant"))
+    ctx1.messages = [
+        Message(role="system", content="You are a helpful assistant."),
+        Message(role="user", content="What is Aether?"),
+    ]
+    manager.load_context(ctx1)
+    ctx1.messages.append(Message(role="assistant", content="Aether is an AI platform."))
+    manager.persist_context(ctx1)
+
+    # Turn 2 in same session
+    task2 = Task(agent_name="Assistant", instruction="What is your role?", id="session_turn")
+    ctx2 = AgentContext.from_context(ExecutionContext(task=task2, agent_name="Assistant"))
+    ctx2.messages = [
+        Message(role="system", content="You are a helpful assistant."),
+        Message(role="user", content="What is your role?"),
+    ]
+    manager.load_context(ctx2)
+
+    # History from turn 1 must be present AND the new user prompt for turn 2 must be preserved at the end
+    user_messages = [m.content for m in ctx2.messages if m.role == "user"]
+    assert user_messages == ["What is Aether?", "What is your role?"]
+    assert ctx2.messages[-1].content == "What is your role?"
+    assert ctx2.messages[-2].content == "Aether is an AI platform."
+
+
 class DummyProvider(AIProvider):
     @property
     def capabilities(self):
@@ -156,9 +188,9 @@ class DummyProvider(AIProvider):
         return ProviderResponse(content="Dummy answer", model="dummy", finish_reason="stop")
 
 
-def test_agent_integration() -> None:
+def test_agent_integration(tmp_path: Path) -> None:
     conv_store = ConversationMemory()
-    sem_store = SemanticMemory()
+    sem_store = SemanticMemory(db_path=str(tmp_path / "sem.db"))
     manager = MemoryManager(conversation_memory=conv_store, semantic_memory=sem_store)
 
     manager.add_fact("User's favourite color is blue.")
@@ -182,8 +214,8 @@ def test_agent_integration() -> None:
     assert any("favourite color is blue" in sm for sm in system_messages)
 
 
-def test_semantic_memory_close_and_destructor() -> None:
-    store = SemanticMemory()
+def test_semantic_memory_close_and_destructor(tmp_path: Path) -> None:
+    store = SemanticMemory(db_path=str(tmp_path / "sem.db"))
     store.add(MemoryDocument(content="Some content"))
     store.close()
     # Should not raise exception on delete even when already closed

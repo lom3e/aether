@@ -35,12 +35,12 @@ class BasicPlanCompiler(PlanCompiler):
             units=[],
             metadata={"cognitive_plan_id": plan.plan_id}
         )
-        
+
         # In a basic scenario, we attach the available skills to the execution plan.
         # Future implementations will parse specific ToolUnit/SkillUnit calls based on
         # the intent described in plan.steps.
         if context.skills:
             for skill in context.skills:
                 engine_plan.units.append(SkillUnit(skill=skill))
-                
+
         return engine_plan

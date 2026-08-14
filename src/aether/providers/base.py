@@ -31,6 +31,8 @@ class AIProvider(ABC):
                 ...
     """
 
+    DEFAULT_TIMEOUT: float = 30.0
+
     def __init__(self, config: ProviderConfig | None = None) -> None:
         """
         Initialize the provider with an optional configuration.
@@ -40,6 +42,8 @@ class AIProvider(ABC):
                     with all default values if not provided.
         """
         self.config = config or ProviderConfig()
+        if getattr(self.config, "timeout", None) is None:
+            self.config.timeout = self.DEFAULT_TIMEOUT
 
     @property
     @abstractmethod
@@ -86,7 +90,7 @@ class AIProvider(ABC):
     ) -> ProviderResponse:
         """
         Asynchronously generate a response from an AI model.
-        
+
         By default, this wraps the synchronous `generate` method using `asyncio.to_thread`
         to preserve backward compatibility for custom providers. Providers with native
         async support should override this method.
@@ -102,7 +106,7 @@ class AIProvider(ABC):
     ) -> Iterator[ProviderStreamChunk]:
         """
         Generate a response stream from an AI model.
-        
+
         By default, this falls back to calling `generate` and yielding the entire
         response as a single chunk to preserve backward compatibility. Providers
         with native streaming support should override this method.
@@ -122,7 +126,7 @@ class AIProvider(ABC):
     ) -> AsyncIterator[ProviderStreamChunk]:
         """
         Asynchronously generate a response stream from an AI model.
-        
+
         By default, this falls back to calling `agenerate` and yielding the entire
         response as a single chunk. Providers with native async streaming support
         should override this method.
@@ -133,3 +137,17 @@ class AIProvider(ABC):
             finish_reason=response.finish_reason,
             usage=response.usage,
         )
+
+    def get_available_models(self) -> list[str]:
+        """
+        Fetch a list of available models for this provider, if supported.
+        By default, returns an empty list.
+        """
+        return []
+
+    async def aget_available_models(self) -> list[str]:
+        """
+        Asynchronously fetch a list of available models.
+        """
+        import asyncio
+        return await asyncio.to_thread(self.get_available_models)

@@ -44,7 +44,7 @@ class CognitiveAgentTool(Tool):
                     input_data = {"goal_description": input_data}
             except Exception:
                 input_data = {"goal_description": input_data}
-                
+
         # 1. Parse and validate DelegationRequest
         try:
             req = DelegationRequest(**input_data)

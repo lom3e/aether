@@ -8,35 +8,35 @@ Aether is built around a robust, decoupled architecture separating cognitive rea
 
 ## 1. High-Level Overview
 
-The Aether framework relies on a primary cognitive loop coordinated by the `Agent`. The loop follows a **Plan → Execute → Observe → Decide** pattern. 
+The Aether framework relies on a primary cognitive loop coordinated by the `Agent`. The loop follows a **Plan → Execute → Observe → Decide** pattern.
 
 ### The Cognitive Loop
 
 ```mermaid
 flowchart TD
     A[Agent] -->|achieve(goal)| B(Planner)
-    
+
     subgraph Cognitive Layer
     B -->|Generates| C[CognitivePlan]
     C --> D[PlanCompiler]
     end
-    
+
     subgraph Execution Layer
     D -->|Translates to| E[ExecutionPlan]
     E --> F[ExecutionEngine]
     F -->|Dispatches| G[Tool / Skill]
     G -->|Returns| H[ExecutionResult]
     end
-    
+
     subgraph Observation Layer
     H --> I[ObservationFactory]
     I -->|Transforms to| J[Observation]
     end
-    
+
     J -->|Feedback to| B
     B -->|Evaluates| K[PlanValidator]
     K -->|Produces| L{Decision}
-    
+
     L -->|FINISH| M[Agent returns Result]
     L -->|CONTINUE| B
     L -->|FAIL| M
@@ -51,7 +51,7 @@ Aether strictly enforces the following architectural boundaries.
 ### 2.1 The Agent (Orchestrator)
 **Class**: `aether.Agent`
 
-The `Agent` is the core orchestrator. It manages the agent's identity, memory, tool registries, and the runtime safety policy. 
+The `Agent` is the core orchestrator. It manages the agent's identity, memory, tool registries, and the runtime safety policy.
 - **What it does**: Initializes the cognitive loop (`achieve()`), manages the `ExecutionContext`, and bridges the Cognitive Layer with the Execution Layer.
 - **What it does NOT do**: The `Agent` contains **no** provider-specific logic, **no** cognitive heuristics (delegated to Planner), and **no** tool dispatch logic (delegated to ExecutionEngine).
 

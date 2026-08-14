@@ -20,17 +20,17 @@ def test_agent_identity_create():
 
 def test_agent_store_create_load():
     store = AgentStore(":memory:")
-    
+
     identity = AgentIdentity.create(name="alice", role="coordinator")
     store.save(identity)
-    
+
     loaded_by_name = store.load_by_name("alice")
     assert loaded_by_name is not None
     assert loaded_by_name.id == identity.id
     assert loaded_by_name.name == "alice"
     assert loaded_by_name.role == "coordinator"
     assert loaded_by_name.created_at == identity.created_at
-    
+
     loaded_by_id = store.load(identity.id)
     assert loaded_by_id is not None
     assert loaded_by_id.name == "alice"
@@ -39,47 +39,47 @@ def test_agent_store_create_load():
 def test_agent_store_persistence():
     with tempfile.NamedTemporaryFile(suffix=".db", delete=False) as f:
         db_path = f.name
-        
+
     try:
         # First instance creates and saves
         store1 = AgentStore(db_path)
         identity1 = AgentIdentity.create(name="eve", role="spy")
         store1.save(identity1)
-        
+
         # Second instance loads
         store2 = AgentStore(db_path)
         loaded = store2.load_by_name("eve")
-        
+
         assert loaded is not None
         assert loaded.id == identity1.id
         assert loaded.created_at == identity1.created_at
-        
+
     finally:
         Path(db_path).unlink(missing_ok=True)
 
 
 def test_agent_store_update_preserves_created_at():
     store = AgentStore(":memory:")
-    
+
     # Create initial
     identity = AgentIdentity.create(name="charlie", role="dev")
     original_id = identity.id
     original_created = identity.created_at
     store.save(identity)
-    
+
     time.sleep(0.01)
-    
+
     # Create a new identity object with the same name, pretending it's a new run
     new_identity = AgentIdentity.create(name="charlie", role="lead dev")
     assert new_identity.created_at > original_created
     assert new_identity.id != original_id
-    
+
     # Saving it should UPDATE the existing one based on the unique name
     # Wait, the save() method does ON CONFLICT(name) DO UPDATE SET role=excluded.role...
     # It will use the OLD id and OLD created_at in the DB, but update role and last_active.
     # Let's save the new identity object:
     store.save(new_identity)
-    
+
     # Reload from store
     loaded = store.load_by_name("charlie")
     assert loaded is not None
@@ -97,11 +97,11 @@ def test_agent_store_nonexistent():
 
 def test_agent_store_list_multiple():
     store = AgentStore(":memory:")
-    
+
     store.save(AgentIdentity.create("zack", "worker"))
     store.save(AgentIdentity.create("alice", "lead"))
     store.save(AgentIdentity.create("bob", "dev"))
-    
+
     identities = store.list()
     assert len(identities) == 3
     # Should be ordered by name

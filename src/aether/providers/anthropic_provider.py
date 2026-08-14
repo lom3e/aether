@@ -47,19 +47,28 @@ class AnthropicProvider(AIProvider):
                 "Please install it via 'pip install anthropic' to use AnthropicProvider."
             )
         super().__init__(config)
-        
+
         self._model = self.config.model or "claude-3-5-sonnet-latest"
-        
+
+        import os
+
         kwargs = {}
-        if self.config.api_key:
-            kwargs["api_key"] = self.config.api_key
+        api_key = self.config.api_key or os.environ.get("ANTHROPIC_API_KEY")
+        if api_key:
+            kwargs["api_key"] = api_key
+        else:
+            raise AuthenticationError(
+                "No API key provided. Set ProviderConfig(api_key=...) or ANTHROPIC_API_KEY environment variable.",
+                provider="anthropic"
+            )
+
         if self.config.base_url:
             kwargs["base_url"] = self.config.base_url
         if self.config.max_retries is not None:
             kwargs["max_retries"] = self.config.max_retries
         if self.config.timeout:
             kwargs["timeout"] = self.config.timeout
-            
+
         self._client = Anthropic(**kwargs)
         self._aclient = AsyncAnthropic(**kwargs)
 
@@ -106,7 +115,7 @@ class AnthropicProvider(AIProvider):
             "model": self._model,
             "messages": user_msgs,
         }
-        
+
         if system_msg:
             kwargs["system"] = system_msg.strip()
 
@@ -122,7 +131,7 @@ class AnthropicProvider(AIProvider):
 
         # Anthropic requires max_tokens
         kwargs["max_tokens"] = self.config.max_tokens or 4096
-                
+
         if self.config.temperature != 0.7:
             kwargs["temperature"] = self.config.temperature
 
@@ -144,7 +153,7 @@ class AnthropicProvider(AIProvider):
     def _parse_response(self, response: Any) -> ProviderResponse:
         content = ""
         tool_calls = None
-        
+
         for block in response.content:
             if block.type == "text":
                 content += block.text

@@ -83,7 +83,7 @@ def test_agent_loop_max_turns_protection() -> None:
         def capabilities(self):
             from aether.providers.capabilities import ProviderCapabilities
             return ProviderCapabilities()
-    
+
         def generate(self, messages, tools=None, output_schema=None) -> ProviderResponse:
             tc = ToolCall(
                 call_id="call_inf",
@@ -125,7 +125,7 @@ def test_agent_loop_max_tool_calls_protection() -> None:
         def capabilities(self):
             from aether.providers.capabilities import ProviderCapabilities
             return ProviderCapabilities()
-    
+
         def generate(self, messages, tools=None, output_schema=None) -> ProviderResponse:
             tc1 = ToolCall(call_id="call1", tool_name="dummy_tool", arguments={"input_data": "1"})
             tc2 = ToolCall(call_id="call2", tool_name="dummy_tool", arguments={"input_data": "2"})
@@ -163,7 +163,7 @@ def test_agent_loop_max_tokens_protection() -> None:
         def capabilities(self):
             from aether.providers.capabilities import ProviderCapabilities
             return ProviderCapabilities()
-    
+
         def generate(self, messages, tools=None, output_schema=None) -> ProviderResponse:
             return ProviderResponse(
                 content="Too long",

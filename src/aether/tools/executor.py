@@ -13,24 +13,24 @@ from aether.core.interrupts import AgentInterrupt
 class ToolExecutor:
     """
     Tool-level execution foundation.
-    
+
     The executor wraps the tool execution to provide a standardized Result contract,
     error handling, and execution timing.
     """
-    
+
     def execute(
-        self, 
-        tool: Tool, 
-        input_data: str, 
+        self,
+        tool: Tool,
+        input_data: str,
         context: ToolExecutionContext | None = None
     ) -> UnitExecutionResult:
         start_time = time.perf_counter()
-        
+
         try:
             output = tool.execute(input_data, context)
-            
+
             execution_time_ms = (time.perf_counter() - start_time) * 1000
-            
+
             return UnitExecutionResult(
                 unit_id=tool.name,
                 unit_name=tool.name,

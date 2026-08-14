@@ -28,7 +28,7 @@ class CharacterBudget(ObservationBudget):
 
     def enforce(self, payload: Any) -> tuple[Any, bool]:
         is_structured = isinstance(payload, (dict, list))
-        
+
         # Convert payload to string to measure characters
         if isinstance(payload, str):
             text = payload
@@ -84,7 +84,7 @@ class ObservationFactory:
         metadata: dict[str, Any] = {}
         if was_truncated:
             metadata["truncated"] = True
-            
+
             # Try to guess original size for technical metadata
             if isinstance(payload, str):
                 metadata["original_size"] = len(payload)

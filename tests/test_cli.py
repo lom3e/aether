@@ -17,6 +17,19 @@ def run_cli(*args, cwd=None) -> subprocess.CompletedProcess:
     )
 
 
+def run_cli_with_env(*args, cwd=None, env=None) -> subprocess.CompletedProcess:
+    process_env = os.environ.copy()
+    if env:
+        process_env.update(env)
+    return subprocess.run(
+        [sys.executable, "-m", "aether.cli.main"] + list(args),
+        capture_output=True,
+        text=True,
+        cwd=cwd or os.getcwd(),
+        env=process_env,
+    )
+
+
 class TestCliInit:
     def test_init_creates_project_structure(self):
         with tempfile.TemporaryDirectory() as tmpdir:
@@ -25,10 +38,11 @@ class TestCliInit:
 
             assert result.returncode == 0, result.stderr
             assert os.path.exists(project_path)
-            assert os.path.exists(os.path.join(project_path, "team.yaml"))
+            assert os.path.exists(os.path.join(project_path, "teams", "default.yaml"))
+            assert os.path.exists(os.path.join(project_path, "aether.yaml"))
             assert os.path.exists(os.path.join(project_path, "README.md"))
             assert os.path.exists(os.path.join(project_path, "knowledge"))
-            assert os.path.exists(os.path.join(project_path, ".aether"))
+            assert os.path.exists(os.path.join(project_path, "data"))
 
     def test_init_team_yaml_contains_agents(self):
         with tempfile.TemporaryDirectory() as tmpdir:
@@ -36,25 +50,25 @@ class TestCliInit:
             result = run_cli("init", project_path)
             assert result.returncode == 0
 
-            team_yaml = Path(project_path) / "team.yaml"
+            team_yaml = Path(project_path) / "teams" / "default.yaml"
             content = team_yaml.read_text()
             assert "agents:" in content
-            assert "coordinator" in content
-            assert "analyst" in content
+            assert "manager" in content
+            assert "researcher" in content
 
     def test_init_current_dir(self):
         """aether init without a name initializes in current directory."""
         with tempfile.TemporaryDirectory() as tmpdir:
             result = run_cli("init", cwd=tmpdir)
             assert result.returncode == 0
-            assert (Path(tmpdir) / "team.yaml").exists()
+            assert (Path(tmpdir) / "teams" / "default.yaml").exists()
 
     def test_init_with_ollama_provider(self):
         with tempfile.TemporaryDirectory() as tmpdir:
             project_path = os.path.join(tmpdir, "ollama_team")
             result = run_cli("init", project_path, "--provider", "ollama")
             assert result.returncode == 0
-            content = (Path(project_path) / "team.yaml").read_text()
+            content = (Path(project_path) / "teams" / "default.yaml").read_text()
             assert "ollama" in content
 
     def test_init_nonempty_dir_fails(self):
@@ -162,13 +176,32 @@ agents:
             result = run_cli("team", "status", cwd=tmpdir)
             assert result.returncode == 1
 
+    def test_team_status_uses_explicit_workspace_environment(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            (root / "teams").mkdir()
+            (root / "aether.yaml").write_text(
+                "version: '1.0'\nworkspace:\n  name: selected\n  default_team: selected\n"
+            )
+            (root / "teams" / "selected.yaml").write_text(
+                "team:\n  name: selected\n  provider: mock\nagents:\n  - name: worker\n    role: worker\n"
+            )
+
+            result = run_cli_with_env(
+                "team", "status", cwd=tmpdir, env={"AETHER_WORKSPACE": tmpdir}
+            )
+
+            assert result.returncode == 0, result.stderr
+            assert "Team: selected" in result.stdout
+            assert "worker" in result.stdout
+
 
 class TestCliRun:
     def test_run_without_team_yaml_fails(self):
         with tempfile.TemporaryDirectory() as tmpdir:
             result = run_cli("run", "Do something", cwd=tmpdir)
             assert result.returncode == 1
-            assert "team.yaml" in result.stderr.lower() or "team.yaml" in result.stdout
+            assert "team configuration 'default' not found" in result.stderr.lower()
 
     def test_run_with_missing_api_key_fails_gracefully(self):
         """Without an API key, run should fail with a clear message, not a traceback."""
@@ -192,3 +225,4 @@ agents:
             )
             assert result.returncode == 1
             assert "OPENAI_API_KEY" in result.stderr or "OPENAI_API_KEY" in result.stdout
+            assert "Traceback" not in result.stderr

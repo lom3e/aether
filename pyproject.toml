@@ -5,18 +5,61 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "aether-core"
-version = "1.2.0"
+version = "1.3.0"
 description = "The core engine for Aether AI agents platform"
+readme = "README.md"
 requires-python = ">=3.11"
+authors = [
+    { name = "Matteo", email = "aether@lmlabs.it" }
+]
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "Intended Audience :: Developers",
+    "License :: OSI Approved :: MIT License",
+    "Operating System :: OS Independent",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+]
+dependencies = [
+    "python-multipart>=0.0.9",
+    "fastapi>=0.100.0",
+    "uvicorn>=0.23.0",
+    "websockets>=11.0",
+    "pyyaml>=6.0",
+]
 
+[project.optional-dependencies]
+openai = ["openai>=1.0.0"]
+anthropic = ["anthropic>=0.30.0"]
+gemini = ["google-genai>=0.1.0"]
+all = ["openai>=1.0.0", "anthropic>=0.30.0", "google-genai>=0.1.0"]
+
+[project.urls]
+Homepage = "https://github.com/lom3e/aether"
+Repository = "https://github.com/lom3e/aether.git"
+"Bug Tracker" = "https://github.com/lom3e/aether/issues"
+
+[project.scripts]
+aether = "aether.cli.main:main"
 
 [tool.setuptools.packages.find]
 where = ["src"]
+
+[tool.setuptools.package-data]
+aether = [
+    "presets/builtin/**/*.yaml",
+    "presets/builtin/**/*.md",
+    "presets/builtin/**/*.json",
+]
 
 
 [tool.pytest.ini_options]
 pythonpath = [
     "src"
+]
+testpaths = [
+    "tests"
 ]
 markers = [
     "integration: marks tests that require external services (e.g., Ollama server). Deselect with '-m not integration'.",

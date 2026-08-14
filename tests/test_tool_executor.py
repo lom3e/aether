@@ -10,7 +10,7 @@ from aether.tools.executor import ToolExecutor
 
 class DummyTool(Tool):
     name = "dummy_tool"
-    
+
     def execute(self, input_data: str, context: ToolExecutionContext | None = None) -> str:
         if input_data == "fail":
             raise ValueError("Intentional failure")
@@ -21,9 +21,9 @@ def test_tool_executor_success():
     executor = ToolExecutor()
     tool = DummyTool()
     context = ToolExecutionContext(agent_name="test_agent", task_id="t1")
-    
+
     result = executor.execute(tool, "hello", context)
-    
+
     assert result.success is True
     assert result.status == UnitExecutionStatus.SUCCESS
     assert result.unit_id == "dummy_tool"
@@ -39,9 +39,9 @@ def test_tool_executor_success():
 def test_tool_executor_failure():
     executor = ToolExecutor()
     tool = DummyTool()
-    
+
     result = executor.execute(tool, "fail")
-    
+
     assert result.success is False
     assert result.status == UnitExecutionStatus.FAILED
     assert result.error == "Intentional failure"

@@ -48,6 +48,6 @@ class RuntimeDiagnostics:
         trace = self.collector.get_trace(trace_id)
         if not trace:
             raise ValueError(f"Trace not found for trace_id: {trace_id}")
-        
+
         with open(path, "w", encoding="utf-8") as f:
             f.write(trace.to_json())

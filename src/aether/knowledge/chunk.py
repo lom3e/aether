@@ -32,6 +32,7 @@ class KnowledgeChunk:
     chunk_index: int = 0
     id: str = field(default_factory=lambda: uuid4().hex)
     metadata: dict = field(default_factory=dict)
+    scope: str = "workspace"
     created_at: datetime = field(default_factory=lambda: datetime.now(timezone.utc))
 
     def __repr__(self) -> str:

@@ -43,11 +43,11 @@ class GeminiProvider(AIProvider):
                 "Please install it via 'pip install google-genai' to use GeminiProvider."
             )
         super().__init__(config)
-        
+
         self._model = self.config.model or "gemini-2.5-flash"
-        
+
         import os
-        
+
         kwargs = {}
         api_key = self.config.api_key or os.environ.get("GEMINI_API_KEY") or os.environ.get("GOOGLE_API_KEY")
         if api_key:
@@ -57,7 +57,7 @@ class GeminiProvider(AIProvider):
                 "No API key provided. Set ProviderConfig(api_key=...) or GEMINI_API_KEY environment variable.",
                 provider="gemini"
             )
-            
+
         self._client = genai.Client(**kwargs)
 
     @property
@@ -74,10 +74,10 @@ class GeminiProvider(AIProvider):
         tools: list[dict[str, Any]] | None = None,
         output_schema: Any | None = None,
     ) -> dict[str, Any]:
-        
+
         system_instructions = []
         contents = []
-        
+
         for m in messages:
             if m.role == "system":
                 system_instructions.append(m.content)
@@ -91,19 +91,19 @@ class GeminiProvider(AIProvider):
                             name=tc.tool_name,
                             args=tc.arguments,
                         ))
-                
+
                 role = "user" if m.role == "user" else "model"
                 contents.append(genai_types.Content(role=role, parts=parts))
 
         config_kwargs: dict[str, Any] = {}
-        
+
         if system_instructions:
             config_kwargs["system_instruction"] = "\n".join(system_instructions)
 
         if tools:
-            # We assume tools are provided as simple dicts (similar to OpenAI function specs) 
-            # and we need to wrap them in Gemini format. A more robust implementation would 
-            # deeply map OpenAI schemas to Gemini schemas, but for basic usage we can use 
+            # We assume tools are provided as simple dicts (similar to OpenAI function specs)
+            # and we need to wrap them in Gemini format. A more robust implementation would
+            # deeply map OpenAI schemas to Gemini schemas, but for basic usage we can use
             # dict representations if supported, or transform them manually.
             # `google-genai` accepts lists of dicts directly in many cases, but to be safe:
             gemini_tools = []
@@ -123,7 +123,7 @@ class GeminiProvider(AIProvider):
 
         if self.config.max_tokens is not None:
             config_kwargs["max_output_tokens"] = self.config.max_tokens
-                
+
         if self.config.temperature != 0.7:
             config_kwargs["temperature"] = self.config.temperature
 
@@ -131,10 +131,10 @@ class GeminiProvider(AIProvider):
             "model": self._model,
             "contents": contents,
         }
-        
+
         if config_kwargs:
             kwargs["config"] = genai_types.GenerateContentConfig(**config_kwargs)
-            
+
         return kwargs
 
     def _handle_error(self, exc: Exception) -> Exception:
@@ -149,7 +149,7 @@ class GeminiProvider(AIProvider):
 
     def _parse_response(self, response: Any) -> ProviderResponse:
         content = response.text or ""
-        
+
         tool_calls = None
         if hasattr(response, "function_calls") and response.function_calls:
             tool_calls = []
