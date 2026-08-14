@@ -200,23 +200,27 @@ def _cmd_ui(args) -> None:
     import subprocess
     import threading
     import sys
+    import webbrowser
     from pathlib import Path
 
     print("Starting Aether Workspace UI...")
 
     ui_dir = Path(__file__).parent.parent.parent.parent / "ui"
-    if (ui_dir / "package.json").exists():
-        print("Development mode detected. Starting Vite...")
+    if (ui_dir / "package.json").exists() and not (ui_dir / "dist" / "index.html").exists():
         def start_vite():
-            subprocess.run(["npm", "run", "dev"], cwd=ui_dir, stdout=subprocess.DEVNULL)
+            try:
+                subprocess.run(["npm", "run", "dev"], cwd=ui_dir, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+            except Exception:
+                pass
         threading.Thread(target=start_vite, daemon=True).start()
-        print("UI available at http://localhost:5173")
-    else:
-        print("UI available at http://localhost:8000")
-        import webbrowser
-        threading.Timer(1.5, lambda: webbrowser.open("http://localhost:8000")).start()
 
-    uvicorn.run("aether.server.app:app", host="0.0.0.0", port=8000, reload=True)
+    print("\n  ► Aether UI running at: http://localhost:8000\n")
+    try:
+        threading.Timer(1.2, lambda: webbrowser.open("http://localhost:8000")).start()
+    except Exception:
+        pass
+
+    uvicorn.run("aether.server.app:app", host="0.0.0.0", port=8000, reload=False)
 
 def _cmd_knowledge_add(args) -> None:
     path = Path(args.path)

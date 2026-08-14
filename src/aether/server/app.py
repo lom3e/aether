@@ -65,9 +65,15 @@ async def startup_event():
 app.include_router(api_router, prefix="/api")
 app.include_router(ws_router)
 
-# Mount UI static files if they exist
-# In development with Vite, we will run Vite server on port 5173 and proxy to 8000
-# But for production fallback:
-ui_path = Path(__file__).parent.parent.parent.parent / "ui" / "dist"
-if ui_path.exists():
-    app.mount("/", StaticFiles(directory=ui_path, html=True), name="ui")
+# Mount UI static files if available
+ui_candidates = [
+    Path(os.environ.get("AETHER_UI_DIR", "")) if os.environ.get("AETHER_UI_DIR") else None,
+    Path(__file__).parent / "static",
+    Path(__file__).parent.parent.parent.parent / "ui" / "dist",
+    Path.cwd() / "ui" / "dist",
+]
+
+for ui_path in ui_candidates:
+    if ui_path and ui_path.exists() and (ui_path / "index.html").exists():
+        app.mount("/", StaticFiles(directory=ui_path, html=True), name="ui")
+        break

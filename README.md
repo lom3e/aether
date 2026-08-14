@@ -10,23 +10,171 @@ Aether runs 100% locally with **Ollama** or seamlessly connects to cloud provide
 
 ## ⚡️ Quick Start
 
-### 1. Launch the Web Interface (Primary Experience)
-```bash
-# Clone and install
-git clone https://github.com/lom3e/aether.git
-cd aether
-pip install -e .
+### Prerequisites
+* **Python 3.11+** (compatible with Python 3.11, 3.12, 3.13, 3.14). Verify with:
+  ```bash
+  python3 --version
+  ```
 
-# Launch Aether Workspace
+---
+
+### Option A: Standard Installation (Recommended)
+
+#### macOS / Linux
+```bash
+# 1. Create and activate a virtual environment
+python3 -m venv .venv
+source .venv/bin/activate
+
+# 2. Install Aether
+python3 -m pip install --upgrade pip
+python3 -m pip install aether-core
+
+# 3. Launch the Web UI
 aether ui
 ```
-Open **`http://localhost:8000`** in your browser.
 
-- **1-Click Presets**: Select an official starter pack (e.g. **Aether Starter Workforce**).
-- **Configure Model**: Connect to your local Ollama instance (`qwen3.5:9b`, `llama3.2`) or cloud API keys.
-- **Knowledge Base**: Upload private company documents (PDF, Markdown, TXT, CSV) or explore preinstalled official System Knowledge.
-- **Interactive Chat**: Assign complex tasks to your workforce. Observe real-time agent presence, operational activity feeds, and approve HITL safety checkpoints.
-- **Zero YAML or terminal required for everyday use.**
+#### Windows (PowerShell)
+```powershell
+# 1. Create and activate a virtual environment
+python -m venv .venv
+.venv\Scripts\Activate.ps1
+
+# 2. Install Aether
+python -m pip install --upgrade pip
+python -m pip install aether-core
+
+# 3. Launch the Web UI
+aether ui
+```
+
+---
+
+### Option B: Developer / Contributor Setup
+
+If you want to contribute or modify Aether's source code:
+
+```bash
+# 1. Clone the repository
+git clone https://github.com/lom3e/aether.git
+cd aether
+
+# 2. Create and activate virtual environment
+python3 -m venv .venv
+source .venv/bin/activate       # On Windows: .venv\Scripts\Activate.ps1
+
+# 3. Install in editable mode
+python3 -m pip install --upgrade pip
+python3 -m pip install -e .
+
+# 4. Launch the Web UI
+aether ui
+```
+
+---
+
+## 🚀 First Run Guide (Zero YAML)
+
+When you run `aether ui`, the application starts a local server and automatically opens **`http://localhost:8000`** in your default web browser.
+
+```
+Install Aether  ──►  aether ui  ──►  Browser opens http://localhost:8000
+                                              │
+┌─────────────────────────────────────────────┘
+▼
+1. Create Workspace  ──►  2. Choose Preset  ──►  3. Configure Model  ──►  4. Start Chat
+  (e.g. "My Company")      ("Starter Workforce")    (Ollama / OpenAI / etc.)  (Observe Activity)
+```
+
+1. **Create Workspace**: Give your workspace a name (e.g. `Acme Labs`).
+2. **Choose Preset**: Select an official starter pack (e.g. **Aether Starter Workforce** with Manager, Researcher, and Writer).
+3. **Configure Provider**: Select your local Ollama model or enter your cloud API key (OpenAI, Anthropic, Gemini).
+4. **Knowledge Base**: Explore preinstalled official System Knowledge or upload private company documents (PDF, Markdown, TXT, CSV) under Workspace Knowledge.
+5. **Assign Tasks**: Open Chat and assign a goal to the workforce. Observe real-time agent presence, operational activity feeds, and approve HITL safety checkpoints.
+
+> **Note**: An everyday user never needs to touch a terminal or edit raw YAML files.
+
+---
+
+## 🦙 Local AI with Ollama (Optional)
+
+Aether is designed to run 100% locally and privately without sending any data to the cloud.
+
+1. **Install Ollama**: Download and install Ollama from [ollama.com](https://ollama.com).
+2. **Pull a Recommended Model**:
+   ```bash
+   ollama pull qwen3.5:9b
+   ```
+   *(Alternative models: `llama3.2`, `mistral`, `deepseek-r1:8b`)*
+3. **Verify Ollama is Running**:
+   * If you have the Ollama desktop app open, it is already running in the background.
+   * If running on a headless server: `ollama serve`.
+4. **Select in Aether UI**: In the Aether Settings or during onboarding, select **Ollama** as provider and `qwen3.5:9b` as model. Aether automatically uses an optimized 120s timeout for local reasoning.
+
+---
+
+## 🛑 How to Stop Aether
+
+To stop the Aether server, press **`Ctrl + C`** in the terminal window where `aether ui` is running.
+
+All workspace state, agent identities, conversations, and knowledge indexes are persisted in local SQLite databases under `data/` and will be restored immediately when you launch `aether ui` again.
+
+---
+
+## 🔧 Troubleshooting
+
+### `python3: command not found` or `python: command not found`
+* **macOS**: Install Python via Homebrew (`brew install python`) or download from [python.org](https://www.python.org/downloads/).
+* **Ubuntu/Debian**: Run `sudo apt update && sudo apt install python3 python3-venv python3-pip`.
+* **Windows**: Download from [python.org](https://www.python.org/downloads/) and ensure you check **"Add Python to PATH"** during installation.
+
+### `pip: command not found`
+Always invoke pip via your active Python executable instead of calling `pip` directly:
+```bash
+python3 -m pip install --upgrade pip
+# On Windows:
+python -m pip install --upgrade pip
+```
+
+### `aether: command not found`
+This means your virtual environment is not currently active in your terminal shell.
+1. Activate your virtual environment:
+   ```bash
+   source .venv/bin/activate       # On Windows: .venv\Scripts\Activate.ps1
+   ```
+2. Or run the CLI directly through the Python module:
+   ```bash
+   python3 -m aether.cli.main ui
+   ```
+
+### Python Version Incompatible
+Aether requires **Python >= 3.11**. Check your version:
+```bash
+python3 --version
+```
+If your system default is Python 3.10 or older, install Python 3.11+ and create your virtual environment with:
+```bash
+python3.11 -m venv .venv
+source .venv/bin/activate
+```
+
+### Port 8000 Already in Use
+If port 8000 is occupied by another application:
+* **macOS/Linux**: Find and terminate the conflicting process:
+  ```bash
+  lsof -i :8000
+  kill -9 <PID>
+  ```
+* **Windows**:
+  ```powershell
+  netstat -ano | findstr :8000
+  taskkill /PID <PID> /F
+  ```
+
+### Ollama Not Reachable
+1. Check if Ollama is accessible at `http://localhost:11434` in your browser.
+2. If not running, start it by opening the Ollama application or running `ollama serve`.
+3. Verify your downloaded models with `ollama list`.
 
 ---
 
@@ -101,7 +249,6 @@ print(result.output)
 ```python
 from aether.team.config import TeamConfig, AgentConfig
 from aether.team.team import Team
-from aether.providers.ollama import OllamaProvider
 
 config = TeamConfig(
     name="research-team",
