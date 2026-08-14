@@ -18,7 +18,7 @@ Aether runs 100% locally with **Ollama** or seamlessly connects to cloud provide
 
 ---
 
-### Option A: Standard Installation (Recommended)
+### Option A: Install from GitHub (Recommended)
 
 #### macOS / Linux
 ```bash
@@ -26,9 +26,9 @@ Aether runs 100% locally with **Ollama** or seamlessly connects to cloud provide
 python3 -m venv .venv
 source .venv/bin/activate
 
-# 2. Install Aether
+# 2. Install Aether Alpha
 python3 -m pip install --upgrade pip
-python3 -m pip install aether-core
+python3 -m pip install "git+https://github.com/lom3e/aether.git"
 
 # 3. Launch the Web UI
 aether ui
@@ -40,9 +40,9 @@ aether ui
 python -m venv .venv
 .venv\Scripts\Activate.ps1
 
-# 2. Install Aether
+# 2. Install Aether Alpha
 python -m pip install --upgrade pip
-python -m pip install aether-core
+python -m pip install "git+https://github.com/lom3e/aether.git"
 
 # 3. Launch the Web UI
 aether ui
