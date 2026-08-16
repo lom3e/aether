@@ -204,7 +204,7 @@ export function AdaptableWork() {
               </div>
 
               <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
-                {activeCategory.teamMembers.map((member, idx) => (
+                {activeCategory.teamMembers.map((member: { name: string; role: string }, idx: number) => (
                   <div
                     key={idx}
                     style={{

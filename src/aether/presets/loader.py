@@ -28,9 +28,12 @@ class PresetLoader:
                 self.search_paths.append(builtin_dir)
 
             # 2. Local workspace/project presets folder if present
-            cwd_presets = Path.cwd() / "presets"
-            if cwd_presets.exists() and cwd_presets not in self.search_paths:
-                self.search_paths.append(cwd_presets)
+            try:
+                cwd_presets = Path.cwd() / "presets"
+                if cwd_presets.exists() and cwd_presets not in self.search_paths:
+                    self.search_paths.append(cwd_presets)
+            except Exception:
+                pass
 
     def list_presets(self) -> list[PresetManifest]:
         """Discover and return all valid preset manifests in search paths."""

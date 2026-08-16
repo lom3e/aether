@@ -183,7 +183,7 @@ export function Sidebar({
   });
 
   return (
-    <div style={{
+    <aside className="sidebar" style={{
       width: collapsed ? '68px' : '260px',
       height: '100vh',
       borderRight: '1px solid hsl(var(--border))',
@@ -228,16 +228,19 @@ export function Sidebar({
                 width: '26px',
                 height: '26px',
                 borderRadius: '6px',
-                backgroundColor: 'hsl(var(--primary))',
+                backgroundColor: 'hsl(var(--primary)/0.12)',
                 display: 'flex',
                 alignItems: 'center',
                 justifyContent: 'center',
-                color: 'hsl(var(--primary-fg))',
-                fontWeight: 700,
-                fontSize: '13px',
                 flexShrink: 0
               }}>
-                {(workspaceName || 'A')[0].toUpperCase()}
+                <img
+                  src={isDark ? "/brand/logo_bianco.svg" : "/brand/logo_viola.svg"}
+                  alt="Aether Logo"
+                  width="18"
+                  height="18"
+                  style={{ width: '18px', height: '18px', display: 'block' }}
+                />
               </div>
               <div style={{ overflow: 'hidden', textAlign: 'left' }}>
                 <div style={{ fontSize: '13px', fontWeight: 600, color: 'hsl(var(--fg))', whiteSpace: 'nowrap', textOverflow: 'ellipsis', overflow: 'hidden', display: 'flex', alignItems: 'center', gap: '4px' }}>
@@ -255,17 +258,21 @@ export function Sidebar({
                 width: '32px',
                 height: '32px',
                 borderRadius: '8px',
-                backgroundColor: 'hsl(var(--primary))',
+                backgroundColor: 'hsl(var(--primary)/0.12)',
                 display: 'flex',
                 alignItems: 'center',
                 justifyContent: 'center',
-                color: 'hsl(var(--primary-fg))',
-                fontWeight: 700,
                 cursor: 'pointer'
               }}
               onClick={() => setCollapsed(false)}
             >
-              {(workspaceName || 'A')[0].toUpperCase()}
+              <img
+                src={isDark ? "/brand/logo_bianco.svg" : "/brand/logo_viola.svg"}
+                alt="Aether Logo"
+                width="20"
+                height="20"
+                style={{ width: '20px', height: '20px', display: 'block' }}
+              />
             </div>
           )}
 
@@ -474,18 +481,33 @@ export function Sidebar({
                         title={conv.title || 'Untitled Task'}
                       >
                         <div style={{ display: 'flex', alignItems: 'center', gap: '8px', overflow: 'hidden' }}>
-                          <MessageSquare size={13} className={isActive ? 'text-primary' : 'text-muted'} />
+                          <MessageSquare size={13} className={isActive ? 'text-primary' : (conv.unread ? 'text-primary' : 'text-muted')} />
                           {!collapsed && (
-                            <span style={{ textOverflow: 'ellipsis', overflow: 'hidden', whiteSpace: 'nowrap' }}>
+                            <span style={{ textOverflow: 'ellipsis', overflow: 'hidden', whiteSpace: 'nowrap', fontWeight: conv.unread && !isActive ? 600 : 400 }}>
                               {conv.title || 'Untitled Task'}
                             </span>
                           )}
                         </div>
 
                         {!collapsed && !isHovered && !isMenuOpen && (
-                          <span style={{ fontSize: '10px', color: 'hsl(var(--muted-fg))', flexShrink: 0 }}>
-                            {formatRelativeTime(conv.updated_at)}
-                          </span>
+                          <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+                            {conv.unread && !isActive && (
+                              <span
+                                className="unread-dot"
+                                style={{
+                                  width: '6px',
+                                  height: '6px',
+                                  borderRadius: '50%',
+                                  backgroundColor: 'hsl(var(--primary))',
+                                  boxShadow: '0 0 6px hsl(var(--primary)/0.6)',
+                                  flexShrink: 0
+                                }}
+                              />
+                            )}
+                            <span style={{ fontSize: '10px', color: 'hsl(var(--muted-fg))', flexShrink: 0 }}>
+                              {formatRelativeTime(conv.updated_at)}
+                            </span>
+                          </div>
                         )}
                       </button>
                     )}
@@ -689,6 +711,6 @@ export function Sidebar({
           </button>
         )}
       </div>
-    </div>
+    </aside>
   );
 }

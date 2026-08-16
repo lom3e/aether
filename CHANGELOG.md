@@ -7,6 +7,35 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [v1.3.2] - 2026-08-16
+
+### Minor Release: Chat UX, Workforce Persistence, Official Presets & UI Polish
+
+This release polishes the Chat UX, fixes first-message conversation creation lifecycle, adds full markdown rendering with interactive code copy and tables, introduces two new official workforce presets (`developer-workforce` and `business-operations-workforce`), enhances real-time workforce activity persistence, and guarantees background task resilience across navigation.
+
+### Added
+- **Two Official Workforce Presets**:
+  - **Developer Workforce (`developer-workforce`)**: Software engineering team composed of Lead Architect, Backend Engineer, Frontend Specialist, and Code Reviewer.
+  - **Business Operations Workforce (`business-operations-workforce`)**: Operational & strategy team composed of Operations Director, Market & Financial Analyst, Process & SOP Specialist, and Compliance & Quality Auditor.
+- **Dedicated Markdown & Code Block Renderer (`MarkdownRenderer.tsx`)**:
+  - Full support for Markdown tables, numbered/bulleted lists, blockquotes, headings, bold/italic, inline code, and fenced code blocks with language badge and one-click copy button.
+  - Sanitizes raw HTML elements (`<br>`, `<hr>`).
+- **Workforce Activity UX & Technical Drawer (`ActivityFeed.tsx`)**:
+  - Clear, humanized Italian phase updates showing exactly which agent is actively thinking or delegating.
+  - Integrated collapsible technical event drawer for raw logs.
+  - Full activity persistence in SQLite (`conversation_activities`) and recovery upon navigating back.
+- **Draft Mode & First-Message Atomic Persistence**:
+  - Clicking "+ New Task" enters clean draft mode (`activeConversationId = null`) without writing empty records to SQLite.
+  - Sending the first message immediately creates the conversation record with a smart temporary title, persists the user message, and registers the session.
+  - Unread conversation indicator dot (`●`) in sidebar and Home table for background completions.
+- **Task Lifecycle & Interruption State**:
+  - Stopping an active task immediately transitions status to `interrupted` and appends an explicit interruption event in the timeline.
+  - WebSocket disconnections preserve running background tasks until completion, failure, or explicit cancellation.
+- **Website Context & Theme Infrastructure**:
+  - Added `@/lib/theme-context`, `@/lib/logo-context`, and `@/lib/i18n/context` supporting dynamic theme toggling, custom logo switching, and bilingual English/Italian localization.
+
+---
+
 ## [v1.3.1] - 2026-08-16
 
 ### Patch Release: Official Website, Vector Brand System & UI Polish

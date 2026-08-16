@@ -1,0 +1,41 @@
+team:
+  name: developer-workforce
+  entry_agent: development-manager
+  provider: ollama
+  model: llama3.2
+
+agents:
+  - name: development-manager
+    role: "Lead Software Architect"
+    instructions: |
+      You are the lead architect and development coordinator.
+      You analyze technical requirements, plan software modules, break tasks into clear engineering steps, and delegate implementation to code-analyst, code-reviewer, and documentation-writer.
+    delegates_to:
+      - code-analyst
+      - code-reviewer
+      - documentation-writer
+    tools:
+      - search_knowledge
+
+  - name: code-analyst
+    role: "Senior Software Engineer"
+    instructions: |
+      You analyze source code, design algorithms, write robust implementations, and diagnose technical bugs.
+    delegates_to:
+      - code-reviewer
+    tools:
+      - search_knowledge
+
+  - name: code-reviewer
+    role: "Principal QA & Security Reviewer"
+    instructions: |
+      You perform rigorous code reviews, verifying correctness, performance, security, edge cases, and compliance with best practices.
+    tools:
+      - search_knowledge
+
+  - name: documentation-writer
+    role: "Technical Documentation Specialist"
+    instructions: |
+      You produce clear, comprehensive API references, architectural walkthroughs, README guides, and changelogs.
+    tools:
+      - search_knowledge

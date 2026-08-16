@@ -72,13 +72,10 @@ function MainApp() {
       .then(data => {
         if (Array.isArray(data)) {
           setConversations(data);
-          if (!activeConversationId && data.length > 0) {
-            setActiveConversationId(data[0].id);
-          }
         }
       })
       .catch(console.error);
-  }, [activeConversationId]);
+  }, []);
 
   const fetchWorkspace = useCallback(() => {
     fetch(apiUrl('/api/workspace'))
@@ -102,22 +99,9 @@ function MainApp() {
     fetchWorkspace();
   }, [fetchWorkspace]);
 
-  const handleNewConversation = async () => {
-    try {
-      const res = await fetch(apiUrl('/api/conversations'), {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ title: 'New Task' })
-      });
-      if (res.ok) {
-        const newConv = await res.json();
-        setConversations(prev => [newConv, ...prev]);
-        setActiveConversationId(newConv.id);
-        setCurrentView('chat');
-      }
-    } catch (err) {
-      console.error('Failed to create conversation', err);
-    }
+  const handleNewConversation = () => {
+    setActiveConversationId(null);
+    setCurrentView('chat');
   };
 
   // Keyboard Shortcuts: Cmd+K, Cmd+N, Cmd+Shift+W, Esc
@@ -154,9 +138,26 @@ function MainApp() {
     setViewParams(params);
   };
 
-  const handleSelectConversation = (id: string) => {
+  const handleSelectConversation = (id: string, tempTitle?: string) => {
     setActiveConversationId(id);
     setCurrentView('chat');
+    setConversations(prev => {
+      const exists = prev.some(c => c.id === id);
+      if (!exists && tempTitle) {
+        return [
+          {
+            id,
+            title: tempTitle,
+            status: 'active',
+            updated_at: new Date().toISOString(),
+            last_message: tempTitle,
+            unread: false,
+          },
+          ...prev,
+        ];
+      }
+      return prev.map(c => c.id === id ? { ...c, unread: false } : c);
+    });
   };
 
   const handleDeleteConversation = async (id: string) => {
@@ -236,6 +237,7 @@ function MainApp() {
           <Chat
             conversationId={activeConversationId}
             onNewConversation={handleNewConversation}
+            onSelectConversation={handleSelectConversation}
             onConversationUpdated={fetchConversations}
           />
         )}

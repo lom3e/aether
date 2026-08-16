@@ -1,0 +1,41 @@
+id: business-operations-workforce
+name: Business Operations Workforce
+version: 1.0.0
+description: Autonomous multi-agent business operations team featuring market intelligence, quantitative analysis, workflow optimization, and executive communication.
+type: workforce_preset
+author: Aether Team
+compatibility:
+  min_aether_version: 1.0.0
+
+agents:
+  - name: operations-manager
+    role: Operations Director & Strategy Lead
+    description: Oversees operational workflows, aligns deliverables with strategic objectives, and coordinates cross-functional execution.
+  - name: research-specialist
+    role: Market & Industry Research Specialist
+    description: Researches competitive landscapes, industry trends, benchmarks, and synthesizes secondary source findings.
+    skills:
+      - search_knowledge
+  - name: operations-analyst
+    role: Business Operations & Quantitative Analyst
+    description: Models unit economics, identifies operational bottlenecks, and evaluates efficiency opportunities.
+  - name: communication-specialist
+    role: Executive Communication & Deliverable Specialist
+    description: Formats executive briefings, pitch decks, client communications, and stakeholder presentations.
+
+relationships:
+  - source: operations-manager
+    type: delegates_to
+    target: research-specialist
+  - source: operations-manager
+    type: delegates_to
+    target: operations-analyst
+  - source: operations-manager
+    type: delegates_to
+    target: communication-specialist
+
+skills:
+  - search_knowledge
+
+knowledge_packs:
+  - aether-core-knowledge

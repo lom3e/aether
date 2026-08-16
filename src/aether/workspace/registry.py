@@ -356,9 +356,16 @@ agents:
         if _is_protected_path(ws_path):
             raise WorkspaceError(f"Cannot delete protected system directory: {ws_path}")
 
-        # Delete workspace folder
+        # Delete workspace folder safely
         if ws_path.exists():
-            shutil.rmtree(ws_path, ignore_errors=True)
+            if (ws_path / ".git").exists():
+                # Project repository: only remove workspace metadata and sqlite files
+                aether_sub = ws_path / ".aether"
+                if aether_sub.exists():
+                    shutil.rmtree(aether_sub, ignore_errors=True)
+                (ws_path / "aether.yaml").unlink(missing_ok=True)
+            else:
+                shutil.rmtree(ws_path, ignore_errors=True)
 
         # Remove from registry
         data = cls.load_registry()

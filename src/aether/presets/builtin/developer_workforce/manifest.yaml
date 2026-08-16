@@ -1,0 +1,41 @@
+id: developer-workforce
+name: Developer Workforce
+version: 1.0.0
+description: Autonomous multi-agent engineering team featuring architecture planning, deep code analysis, strict quality reviews, and documentation.
+type: workforce_preset
+author: Aether Team
+compatibility:
+  min_aether_version: 1.0.0
+
+agents:
+  - name: development-manager
+    role: Technical Lead & System Architect
+    description: Leads the engineering workflow, decomposes technical specifications, oversees architecture, and synthesizes deliverables.
+  - name: code-analyst
+    role: Senior Software Engineer & Code Analyst
+    description: Analyzes source code, proposes refactors, inspects dependency graphs, and implements algorithm solutions.
+    skills:
+      - search_knowledge
+  - name: code-reviewer
+    role: Quality Assurance & Code Review Specialist
+    description: Conducts thorough pull request reviews, identifies security vulnerabilities, edge cases, and performance regressions.
+  - name: documentation-writer
+    role: Technical Documentation Specialist
+    description: Generates clean API documentation, architectural decision records (ADRs), guides, and changelogs.
+
+relationships:
+  - source: development-manager
+    type: delegates_to
+    target: code-analyst
+  - source: development-manager
+    type: delegates_to
+    target: code-reviewer
+  - source: development-manager
+    type: delegates_to
+    target: documentation-writer
+
+skills:
+  - search_knowledge
+
+knowledge_packs:
+  - aether-core-knowledge

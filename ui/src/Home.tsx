@@ -176,14 +176,27 @@ export function Home({ navigate, workspaceName, onNewTask, onSelectConversation,
                       style={{ cursor: 'pointer' }}
                     >
                       <td>
-                        <div style={{ display: 'flex', alignItems: 'center', gap: '8px', fontWeight: 500 }}>
-                          <MessageSquare size={16} className="text-muted" />
+                        <div style={{ display: 'flex', alignItems: 'center', gap: '8px', fontWeight: conv.unread ? 600 : 500 }}>
+                          <MessageSquare size={16} className={conv.unread ? 'text-primary' : 'text-muted'} />
                           <span>{conv.title || 'Untitled Task'}</span>
+                          {conv.unread && (
+                            <span
+                              className="unread-dot"
+                              style={{
+                                width: '7px',
+                                height: '7px',
+                                borderRadius: '50%',
+                                backgroundColor: 'hsl(var(--primary))',
+                                display: 'inline-block',
+                                boxShadow: '0 0 6px hsl(var(--primary)/0.6)'
+                              }}
+                            />
+                          )}
                         </div>
                       </td>
                       <td>
-                        <span className={`badge ${conv.status === 'completed' ? 'badge-success' : (conv.status === 'waiting' ? 'badge-warning' : 'badge-primary')}`}>
-                          {conv.status || 'Active'}
+                        <span className={`badge ${conv.status === 'completed' ? 'badge-success' : (conv.status === 'interrupted' ? 'badge-warning' : (conv.status === 'waiting' ? 'badge-warning' : 'badge-primary'))}`}>
+                          {conv.status === 'interrupted' ? 'Interrotto' : (conv.status || 'Active')}
                         </span>
                       </td>
                       <td className="text-muted" style={{ fontSize: '12px' }}>

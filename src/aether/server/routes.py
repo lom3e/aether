@@ -1241,7 +1241,18 @@ async def get_conversation(request: Request, conv_id: str):
     conv = ws.conversations.get(conv_id)
     if not conv:
         raise HTTPException(status_code=404, detail="Conversation not found")
+    ws.conversations.mark_read(conv_id)
+    conv["unread"] = False
     return conv
+
+
+@router.post("/conversations/{conv_id}/read")
+async def mark_conversation_read(request: Request, conv_id: str):
+    ws = request.app.state.workspace
+    if not ws:
+        raise HTTPException(status_code=500, detail="Workspace not initialized")
+    ws.conversations.mark_read(conv_id)
+    return {"status": "ok", "conv_id": conv_id, "unread": False}
 
 
 @router.patch("/conversations/{conv_id}")

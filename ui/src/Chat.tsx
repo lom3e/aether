@@ -1,7 +1,7 @@
 import { useState, useEffect, useRef, useContext } from 'react';
 import { Send, Sparkles, Square } from 'lucide-react';
 import { ToastContext } from './toast';
-import { apiUrl, apiError } from './api';
+import { apiUrl } from './api';
 import { useTranslation } from './i18n';
 import { WorkforcePresence } from './WorkforcePresence';
 import { MessageItem, type ChatMessage } from './MessageItem';
@@ -10,12 +10,14 @@ import { ActivityFeed, type ActivityItem } from './ActivityFeed';
 interface ChatProps {
   conversationId: string | null;
   onNewConversation?: () => void;
+  onSelectConversation?: (id: string, tempTitle?: string) => void;
   onConversationUpdated: () => void;
 }
 
-export function Chat({ conversationId, onConversationUpdated }: ChatProps) {
+export function Chat({ conversationId, onSelectConversation, onConversationUpdated }: ChatProps) {
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [activities, setActivities] = useState<ActivityItem[]>([]);
+  const [taskStatus, setTaskStatus] = useState<string>('active');
   const [input, setInput] = useState('');
   const [loading, setLoading] = useState(false);
   const [teamInfo, setTeamInfo] = useState<{ name: string; agents: any[] }>({ name: 'Workforce', agents: [] });
@@ -43,11 +45,13 @@ export function Chat({ conversationId, onConversationUpdated }: ChatProps) {
       .catch(console.error);
   }, []);
 
-  // Load conversation messages from SQLite when conversationId changes
+  // Load conversation messages and persisted activities from SQLite when conversationId changes
   useEffect(() => {
     if (!conversationId) {
       setMessages([]);
       setActivities([]);
+      setTaskStatus('active');
+      setLoading(false);
       return;
     }
 
@@ -56,13 +60,21 @@ export function Chat({ conversationId, onConversationUpdated }: ChatProps) {
       .then(data => {
         if (data && data.messages) {
           setMessages(data.messages);
+          setActivities(data.activities || []);
+          setTaskStatus(data.status || 'completed');
+          setLoading(data.status === 'active' && data.messages.length > 0);
         } else {
           setMessages([]);
+          setActivities([]);
+          setTaskStatus('active');
+          setLoading(false);
         }
-        setActivities([]);
       })
       .catch(() => {
         setMessages([]);
+        setActivities([]);
+        setTaskStatus('active');
+        setLoading(false);
       });
   }, [conversationId]);
 
@@ -77,8 +89,12 @@ export function Chat({ conversationId, onConversationUpdated }: ChatProps) {
         const data = JSON.parse(event.data);
 
         if (data.type === 'task_started') {
-          setLoading(true);
-          setActiveAgents(['manager']);
+          if (!data.session_id || data.session_id === conversationId) {
+            setLoading(true);
+            setTaskStatus('active');
+            setActiveAgents(['manager']);
+          }
+          onConversationUpdated();
         } else if (data.type === 'activity') {
           const newAct: ActivityItem = {
             id: String(Date.now() + Math.random()),
@@ -94,65 +110,78 @@ export function Chat({ conversationId, onConversationUpdated }: ChatProps) {
             setActiveAgents(prev => Array.from(new Set([...prev, data.agent])));
           }
         } else if (data.type === 'interrupt') {
-          setWaitingAgent(data.agent || 'manager');
-          const interruptMsg: ChatMessage = {
-            id: data.interrupt_id || String(Date.now()),
-            role: 'assistant',
-            agent_name: data.agent || 'Workforce Coordinator',
-            content: data.message || '',
-            interrupt: {
-              type: data.interrupt_type || 'approval',
-              message: data.message || '',
-              interrupt_id: data.interrupt_id
-            }
-          };
-          setMessages(prev => [...prev, interruptMsg]);
-        } else if (data.type === 'task_completed') {
-          setLoading(false);
-          setActiveAgents([]);
-          setWaitingAgent(null);
-
-          if (conversationId) {
-            fetch(apiUrl(`/api/conversations/${conversationId}`))
-              .then(res => res.json())
-              .then(convData => {
-                if (convData && convData.messages) {
-                  setMessages(convData.messages);
-                }
-              })
-              .catch(console.error);
-          } else if (data.content) {
-            const botMsg: ChatMessage = {
-              id: String(Date.now()),
+          if (!data.session_id || data.session_id === conversationId) {
+            setWaitingAgent(data.agent || 'manager');
+            const interruptMsg: ChatMessage = {
+              id: data.interrupt_id || String(Date.now()),
               role: 'assistant',
-              agent_name: data.agent || 'Manager',
-              content: data.content,
-              created_at: new Date().toISOString()
+              agent_name: data.agent || 'Workforce Coordinator',
+              content: data.message || '',
+              interrupt: {
+                type: data.interrupt_type || 'approval',
+                message: data.message || '',
+                interrupt_id: data.interrupt_id
+              }
             };
-            setMessages(prev => [...prev, botMsg]);
+            setMessages(prev => [...prev, interruptMsg]);
+          }
+        } else if (data.type === 'task_completed') {
+          if (!data.session_id || data.session_id === conversationId) {
+            setLoading(false);
+            setTaskStatus(data.success ? 'completed' : 'failed');
+            setActiveAgents([]);
+            setWaitingAgent(null);
+
+            if (conversationId) {
+              fetch(apiUrl(`/api/conversations/${conversationId}`))
+                .then(res => res.json())
+                .then(convData => {
+                  if (convData && convData.messages) {
+                    setMessages(convData.messages);
+                    if (convData.activities) setActivities(convData.activities);
+                  }
+                })
+                .catch(console.error);
+            } else if (data.content) {
+              const botMsg: ChatMessage = {
+                id: String(Date.now()),
+                role: 'assistant',
+                agent_name: data.agent || 'Manager',
+                content: data.content,
+                created_at: new Date().toISOString()
+              };
+              setMessages(prev => [...prev, botMsg]);
+            }
           }
           onConversationUpdated();
         } else if (data.type === 'task_stopped') {
-          setLoading(false);
-          setActiveAgents([]);
-          setWaitingAgent(null);
-          showToast('Task execution stopped by user.', 'info');
-          if (conversationId) {
-            fetch(apiUrl(`/api/conversations/${conversationId}`))
-              .then(res => res.json())
-              .then(convData => {
-                if (convData && convData.messages) {
-                  setMessages(convData.messages);
-                }
-              })
-              .catch(console.error);
+          if (!data.session_id || data.session_id === conversationId) {
+            setLoading(false);
+            setTaskStatus('interrupted');
+            setActiveAgents([]);
+            setWaitingAgent(null);
+            showToast('Task execution stopped by user.', 'info');
+            if (conversationId) {
+              fetch(apiUrl(`/api/conversations/${conversationId}`))
+                .then(res => res.json())
+                .then(convData => {
+                  if (convData) {
+                    if (convData.messages) setMessages(convData.messages);
+                    if (convData.activities) setActivities(convData.activities);
+                  }
+                })
+                .catch(console.error);
+            }
           }
           onConversationUpdated();
         } else if (data.type === 'error') {
-          setLoading(false);
-          setActiveAgents([]);
-          setWaitingAgent(null);
-          showToast(data.message || 'Task encountered an error.', 'error');
+          if (!data.session_id || data.session_id === conversationId) {
+            setLoading(false);
+            setTaskStatus('failed');
+            setActiveAgents([]);
+            setWaitingAgent(null);
+            showToast(data.message || 'Task encountered an error.', 'error');
+          }
         }
       } catch (err) {
         console.error('Error processing WebSocket message:', err);
@@ -179,6 +208,12 @@ export function Chat({ conversationId, onConversationUpdated }: ChatProps) {
     const userPrompt = input.trim();
     setInput('');
 
+    // Generate atomic session ID if in draft mode
+    const activeId = conversationId || ('conv_' + Date.now().toString(36) + '_' + Math.random().toString(36).substring(2, 8));
+
+    const cleanLine = userPrompt.split('\n')[0].trim().replace(/^[#*\-–—\d.\s]+/, '');
+    const tempTitle = cleanLine.length > 45 ? cleanLine.slice(0, 42) + '...' : (cleanLine || 'New Task');
+
     const userMsg: ChatMessage = {
       id: String(Date.now()),
       role: 'user',
@@ -188,12 +223,17 @@ export function Chat({ conversationId, onConversationUpdated }: ChatProps) {
     setMessages(prev => [...prev, userMsg]);
     setActivities([]);
     setLoading(true);
+    setTaskStatus('active');
+
+    if (!conversationId && onSelectConversation) {
+      onSelectConversation(activeId, tempTitle);
+    }
 
     if (socketRef.current && socketRef.current.readyState === WebSocket.OPEN) {
       socketRef.current.send(JSON.stringify({
         type: 'run_task',
         content: userPrompt,
-        session_id: conversationId || undefined
+        session_id: activeId
       }));
     } else {
       showToast('Connecting to workforce server...', 'info');
@@ -202,7 +242,7 @@ export function Chat({ conversationId, onConversationUpdated }: ChatProps) {
 
   const handleStopTask = () => {
     if (socketRef.current && socketRef.current.readyState === WebSocket.OPEN) {
-      socketRef.current.send(JSON.stringify({ type: 'stop' }));
+      socketRef.current.send(JSON.stringify({ type: 'stop', session_id: conversationId || undefined }));
     }
   };
 
@@ -210,7 +250,8 @@ export function Chat({ conversationId, onConversationUpdated }: ChatProps) {
     if (socketRef.current && socketRef.current.readyState === WebSocket.OPEN) {
       socketRef.current.send(JSON.stringify({
         type: 'interrupt_response',
-        content: response
+        content: response,
+        session_id: conversationId || undefined
       }));
       setWaitingAgent(null);
     }
@@ -248,21 +289,20 @@ export function Chat({ conversationId, onConversationUpdated }: ChatProps) {
         }
         setActivities([]);
         setLoading(true);
+        setTaskStatus('active');
 
         if (socketRef.current && socketRef.current.readyState === WebSocket.OPEN) {
           socketRef.current.send(JSON.stringify({
-            type: 'run_task',
-            content: newContent,
+            type: 'retry_user',
             session_id: conversationId,
-            skip_save_user: true
+            message_id: targetId,
+            content: newContent
           }));
         }
-      } else {
-        const err = await apiError(res, 'Failed to edit message.');
-        showToast(err.message, 'error');
       }
-    } catch (err: any) {
-      showToast(err.message || 'Failed to edit message', 'error');
+    } catch (err) {
+      console.error('Failed to edit message', err);
+      showToast('Failed to edit message', 'error');
     }
   };
 
@@ -270,25 +310,35 @@ export function Chat({ conversationId, onConversationUpdated }: ChatProps) {
     if (!conversationId) return;
 
     try {
-      const res = await fetch(apiUrl(`/api/conversations/${conversationId}/messages/${messageId}`), {
+      let targetId = messageId;
+      const checkRes = await fetch(apiUrl(`/api/conversations/${conversationId}`));
+      if (checkRes.ok) {
+        const convData = await checkRes.json();
+        if (convData && convData.messages && convData.messages.length > 0) {
+          const match = convData.messages.find((m: any) => m.id === messageId);
+          if (!match) {
+            const userMsgMatch = convData.messages.find((m: any) => m.role === 'user');
+            if (userMsgMatch) {
+              targetId = userMsgMatch.id;
+            }
+          }
+        }
+      }
+
+      const res = await fetch(apiUrl(`/api/conversations/${conversationId}/messages/${targetId}`), {
         method: 'DELETE'
       });
-
       if (res.ok) {
         const updatedConv = await res.json();
         if (updatedConv && updatedConv.messages) {
           setMessages(updatedConv.messages);
-        } else {
-          setMessages([]);
         }
-        showToast('Message deleted.', 'info');
         onConversationUpdated();
-      } else {
-        const err = await apiError(res, 'Failed to delete message.');
-        showToast(err.message, 'error');
+        showToast('Message deleted.', 'info');
       }
-    } catch (err: any) {
-      showToast(err.message || 'Failed to delete message', 'error');
+    } catch (err) {
+      console.error('Failed to delete message', err);
+      showToast('Failed to delete message', 'error');
     }
   };
 
@@ -296,73 +346,74 @@ export function Chat({ conversationId, onConversationUpdated }: ChatProps) {
     handleEditMessage(messageId, content);
   };
 
-  const handleRetryResponse = (assistantMessageId: string) => {
-    const idx = messages.findIndex(m => m.id === assistantMessageId);
-    if (idx > 0) {
-      const prevUserMsg = messages[idx - 1];
-      if (prevUserMsg && prevUserMsg.role === 'user') {
-        handleEditMessage(prevUserMsg.id, prevUserMsg.content);
-      }
+  const handleRetryResponse = () => {
+    if (!conversationId) return;
+    setActivities([]);
+    setLoading(true);
+    setTaskStatus('active');
+
+    if (socketRef.current && socketRef.current.readyState === WebSocket.OPEN) {
+      socketRef.current.send(JSON.stringify({
+        type: 'retry_response',
+        session_id: conversationId
+      }));
     }
   };
 
   const handleKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
-    if ((e.key === 'Enter' && !e.shiftKey) || ((e.metaKey || e.ctrlKey) && e.key === 'Enter')) {
+    if (e.key === 'Enter' && !e.shiftKey) {
       e.preventDefault();
       handleSend();
     }
   };
 
-  return (
-    <div style={{ flex: 1, display: 'flex', flexDirection: 'column', height: '100vh', overflow: 'hidden' }}>
-      {/* Top Header with Presence */}
-      <div className="top-header">
-        <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
-          <div className="top-header-title">
-            <Sparkles size={18} className="text-primary" />
-            <span>AI Workforce Chat</span>
-          </div>
-        </div>
+  const hasMessages = messages.length > 0;
 
-        <WorkforcePresence
-          teamName={teamInfo.name}
-          agents={teamInfo.agents}
-          activeAgents={activeAgents}
-          waitingAgent={waitingAgent}
-        />
-      </div>
+  return (
+    <div style={{ display: 'flex', flexDirection: 'column', height: '100%', backgroundColor: 'hsl(var(--bg))' }}>
+      {/* Top Presence Bar */}
+      <WorkforcePresence
+        teamName={teamInfo.name}
+        agents={teamInfo.agents}
+        activeAgents={activeAgents}
+        waitingAgent={waitingAgent}
+      />
 
       {/* Messages Scroll Area */}
-      <div style={{ flex: 1, overflowY: 'auto', display: 'flex', flexDirection: 'column' }}>
-        {messages.length === 0 && !loading ? (
+      <div style={{ flex: 1, overflowY: 'auto', padding: '24px 0', display: 'flex', flexDirection: 'column' }}>
+        {!hasMessages ? (
+          /* Empty / Draft Welcome State */
           <div style={{
-            flex: 1,
+            maxWidth: '680px',
+            margin: 'auto',
+            textAlign: 'center',
+            padding: '40px 20px',
             display: 'flex',
             flexDirection: 'column',
-            alignItems: 'center',
-            justifyContent: 'center',
-            padding: '32px',
-            textAlign: 'center'
+            alignItems: 'center'
           }}>
             <div style={{
               width: '56px',
               height: '56px',
               borderRadius: '16px',
-              backgroundColor: 'hsl(var(--primary)/0.1)',
+              backgroundColor: 'hsl(var(--primary)/0.12)',
               display: 'flex',
               alignItems: 'center',
               justifyContent: 'center',
               color: 'hsl(var(--primary))',
-              marginBottom: '18px'
+              marginBottom: '20px'
             }}>
               <Sparkles size={28} />
             </div>
-            <h2 style={{ fontSize: '20px', marginBottom: '8px' }}>{t('emptyChatTitle')}</h2>
-            <p className="text-muted" style={{ maxWidth: '460px', fontSize: '14px', marginBottom: '24px' }}>
-              {t('emptyChatSubtitle')}
+
+            <h2 style={{ fontSize: '24px', fontWeight: 600, marginBottom: '8px' }}>
+              {t('emptyChatTitle')}
+            </h2>
+            <p className="text-muted" style={{ fontSize: '14px', maxWidth: '480px', marginBottom: '28px', lineHeight: 1.5 }}>
+              Ask a question, request complex analysis, or delegate tasks to your autonomous AI workforce.
             </p>
 
-            <div style={{ display: 'flex', gap: '10px', flexWrap: 'wrap', justifyContent: 'center', maxWidth: '600px' }}>
+            <div style={{ display: 'flex', flexWrap: 'wrap', gap: '8px', justifyContent: 'center', maxWidth: '540px' }}>
               <button
                 className="btn btn-secondary"
                 onClick={() => setInput('Spiegami come funziona la separazione tra System Knowledge e Workspace Knowledge in Aether.')}
@@ -397,10 +448,10 @@ export function Chat({ conversationId, onConversationUpdated }: ChatProps) {
               />
             ))}
 
-            {/* Live Activities Stream */}
+            {/* Activities Stream (Persisted & Live) */}
             {activities.length > 0 && (
               <div style={{ padding: '0 24px' }}>
-                <ActivityFeed activities={activities} isLive={loading} />
+                <ActivityFeed activities={activities} isLive={loading} taskStatus={taskStatus} />
               </div>
             )}
 
@@ -468,23 +519,24 @@ export function Chat({ conversationId, onConversationUpdated }: ChatProps) {
             <div style={{ display: 'flex', gap: '8px', alignItems: 'center' }}>
               {loading ? (
                 <button
+                  type="button"
                   className="btn btn-destructive"
-                  style={{ padding: '6px 14px', fontSize: '13px' }}
+                  style={{ height: '34px', padding: '0 14px', gap: '6px' }}
                   onClick={handleStopTask}
-                  title="Stop Task"
                 >
-                  <Square size={13} />
+                  <Square size={13} fill="currentColor" />
                   <span>Stop</span>
                 </button>
               ) : (
                 <button
+                  type="button"
                   className="btn btn-primary"
-                  style={{ padding: '6px 14px', fontSize: '13px' }}
-                  onClick={handleSend}
+                  style={{ height: '34px', padding: '0 16px', gap: '6px' }}
                   disabled={!input.trim()}
+                  onClick={handleSend}
                 >
-                  <Send size={14} />
                   <span>{t('runTask')}</span>
+                  <Send size={13} />
                 </button>
               )}
             </div>

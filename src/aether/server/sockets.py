@@ -1,9 +1,8 @@
-"""WebSocket transport for the local workforce chat."""
-
 from __future__ import annotations
 
 import asyncio
 import json
+import logging
 import queue
 from typing import Any
 from uuid import uuid4
@@ -12,11 +11,12 @@ from fastapi import APIRouter, WebSocket, WebSocketDisconnect
 
 from aether.coordination.events import AgentEvent, EventType
 
+logger = logging.getLogger(__name__)
 router = APIRouter()
 
 
 @router.websocket("/ws/chat")
-async def websocket_endpoint(websocket: WebSocket):
+async def websocket_endpoint(websocket: WebSocket) -> None:
     await websocket.accept()
     app = websocket.app
     workspace = getattr(app.state, "workspace", None)
@@ -25,43 +25,66 @@ async def websocket_endpoint(websocket: WebSocket):
         await websocket.close(code=1011)
         return
 
-    # Each socket owns a runtime instance. This prevents two browser windows
-    # from overwriting the shared Team.interactive_provider callback.
+    # Track all active sockets on app.state
+    if not hasattr(app.state, "chat_sockets"):
+        app.state.chat_sockets = set()
+    app.state.chat_sockets.add(websocket)
+
+    if not hasattr(app.state, "active_tasks"):
+        app.state.active_tasks = {}
+    if not hasattr(app.state, "hitl_queues"):
+        app.state.hitl_queues = {}
+
     try:
-        active_team_name = getattr(app.state, "active_team_name", None)
-        team = workspace.load_team(active_team_name)
+        team = getattr(app.state, "team", None)
+        if team is None:
+            active_team_name = getattr(app.state, "active_team_name", None)
+            team = workspace.load_team(active_team_name)
     except Exception as exc:
         await websocket.send_json({"type": "error", "message": f"Unable to load team: {exc}"})
         await websocket.close(code=1011)
         return
 
     loop = asyncio.get_running_loop()
-    hitl_queue: queue.Queue[Any] = queue.Queue()
-    disconnect_sentinel = object()
-    active_task: asyncio.Task[None] | None = None
     active_session_id: str | None = None
 
-    def schedule(payload: dict[str, Any]) -> None:
-        """Forward a worker-thread event to the socket without blocking it."""
+    def broadcast(payload: dict[str, Any]) -> None:
+        """Broadcast payload to all connected WebSocket clients safely."""
         if loop.is_closed():
             return
 
-        async def send() -> None:
-            try:
-                await websocket.send_json(payload)
-            except (RuntimeError, WebSocketDisconnect):
-                pass
+        async def send_all() -> None:
+            dead_sockets = set()
+            for ws in list(app.state.chat_sockets):
+                try:
+                    await ws.send_json(payload)
+                except Exception:
+                    dead_sockets.add(ws)
+            for ws in dead_sockets:
+                app.state.chat_sockets.discard(ws)
 
-        asyncio.run_coroutine_threadsafe(send(), loop)
+        asyncio.run_coroutine_threadsafe(send_all(), loop)
 
     def feed_handler(event: AgentEvent) -> None:
         safe_metadata = {
             key: value
             for key, value in (event.metadata or {}).items()
-            if key in {"tool_name", "target_agent", "duration_ms"}
+            if key in {"tool_name", "target_agent", "duration_ms", "instruction", "query", "arguments"}
         }
-        schedule({
+        if active_session_id:
+            try:
+                workspace.conversations.add_activity(
+                    conv_id=active_session_id,
+                    agent=event.agent_name,
+                    activity_type=event.event_type.value,
+                    metadata=safe_metadata,
+                )
+            except Exception:
+                pass
+
+        broadcast({
             "type": "activity",
+            "session_id": active_session_id,
             "event": event.event_type.value,
             "agent": event.agent_name,
             "task_id": event.task_id,
@@ -75,27 +98,34 @@ async def websocket_endpoint(websocket: WebSocket):
     def hitl_handler(interrupt: Any) -> str:
         message = getattr(interrupt, "message", "Input required")
         kind = "approval" if interrupt.__class__.__name__ == "RequireApproval" else "input"
+        interrupt_id = getattr(interrupt, "id", None) or uuid4().hex
+
+        session_key = active_session_id or "default"
+        if session_key not in app.state.hitl_queues:
+            app.state.hitl_queues[session_key] = queue.Queue()
+
+        hitl_q: queue.Queue[Any] = app.state.hitl_queues[session_key]
+
         if active_session_id:
             try:
                 workspace.conversations.update(active_session_id, status="waiting")
             except Exception:
                 pass
-        schedule({
+
+        broadcast({
             "type": "interrupt",
-            "interrupt_id": getattr(interrupt, "id", None),
+            "interrupt_id": interrupt_id,
             "session_id": active_session_id,
             "interrupt_type": kind,
             "message": message,
         })
-        response = hitl_queue.get()
-        if response is disconnect_sentinel:
-            raise RuntimeError("Human interaction disconnected.")
+
+        response = hitl_q.get()
         return str(response)
 
     team.interactive_provider = hitl_handler
 
     async def run_task(content: str, session_id: str, skip_save_user: bool = False) -> None:
-        nonlocal active_task, active_session_id
         try:
             if not skip_save_user:
                 try:
@@ -111,6 +141,8 @@ async def websocket_endpoint(websocket: WebSocket):
                 workspace.conversations.update(session_id, status="active")
             except Exception:
                 pass
+
+            broadcast({"type": "task_started", "session_id": session_id})
 
             result = await asyncio.to_thread(team.run, content, session_id)
             agent_name = (result.metadata or {}).get("agent_name")
@@ -134,7 +166,7 @@ async def websocket_endpoint(websocket: WebSocket):
             except Exception:
                 pass
 
-            await websocket.send_json({
+            broadcast({
                 "type": "task_completed",
                 "session_id": session_id,
                 "success": result.success,
@@ -149,11 +181,19 @@ async def websocket_endpoint(websocket: WebSocket):
                     status="interrupted",
                     last_message="Execution stopped by user",
                 )
+                workspace.conversations.add_activity(
+                    conv_id=session_id,
+                    agent="Workforce",
+                    activity_type="task_interrupted",
+                    message="Attività interrotta dall'utente",
+                    metadata={"status": "interrupted"},
+                )
             except Exception:
                 pass
-            await websocket.send_json({
+            broadcast({
                 "type": "task_stopped",
                 "session_id": session_id,
+                "status": "interrupted",
                 "message": "Task stopped by user.",
             })
             raise
@@ -162,10 +202,12 @@ async def websocket_endpoint(websocket: WebSocket):
                 workspace.conversations.update(session_id, status="failed", last_message=str(exc)[:120])
             except Exception:
                 pass
-            await websocket.send_json({"type": "error", "message": str(exc).splitlines()[0][:500]})
+            broadcast({"type": "error", "session_id": session_id, "message": str(exc).splitlines()[0][:500]})
         finally:
-            active_task = None
-            active_session_id = None
+            if hasattr(app.state, "active_tasks"):
+                app.state.active_tasks.pop(session_id, None)
+            if hasattr(app.state, "hitl_queues"):
+                app.state.hitl_queues.pop(session_id, None)
 
     try:
         while True:
@@ -180,45 +222,76 @@ async def websocket_endpoint(websocket: WebSocket):
                 await websocket.send_json({"type": "error", "message": "Message must be a JSON object."})
                 continue
 
-            message_type = message.get("type")
+            msg_type = message.get("type")
 
-            if message_type == "run_task":
+            if msg_type == "run_task":
                 content = message.get("content")
-                if not isinstance(content, str) or not content.strip():
-                    await websocket.send_json({"type": "error", "message": "Task content cannot be empty."})
+                if not content or not isinstance(content, str) or not content.strip():
+                    await websocket.send_json({"type": "error", "message": "Content cannot be empty."})
                     continue
-                if active_task and not active_task.done():
-                    await websocket.send_json({"type": "error", "message": "A task is already running in this session."})
-                    continue
+
                 session_id = message.get("session_id") or uuid4().hex
-                if not isinstance(session_id, str) or not session_id.strip() or len(session_id) > 128:
-                    await websocket.send_json({"type": "error", "message": "Session ID is invalid."})
+                active_session_id = session_id
+
+                task = asyncio.create_task(run_task(content.strip(), session_id))
+                app.state.active_tasks[session_id] = task
+
+            elif msg_type == "retry_user":
+                message_id = message.get("message_id")
+                content = message.get("content")
+                session_id = message.get("session_id")
+                if not session_id or not message_id or not content:
+                    await websocket.send_json({"type": "error", "message": "session_id, message_id, and content required for retry_user"})
                     continue
-                active_session_id = session_id.strip()
-                skip_save_user = bool(message.get("skip_save_user", False))
-                await websocket.send_json({"type": "task_started", "session_id": active_session_id})
-                active_task = asyncio.create_task(run_task(content.strip(), active_session_id, skip_save_user))
 
-            elif message_type in ("stop", "stop_task"):
-                if active_task and not active_task.done():
-                    active_task.cancel()
-                    await websocket.send_json({"type": "task_stopping", "session_id": active_session_id})
-                else:
-                    await websocket.send_json({"type": "error", "message": "No task is currently running."})
+                active_session_id = session_id
+                workspace.conversations.edit_message(session_id, message_id, content, truncate_after=True)
+                task = asyncio.create_task(run_task(content.strip(), session_id, skip_save_user=True))
+                app.state.active_tasks[session_id] = task
 
-            elif message_type == "interrupt_response":
-                if active_task and not active_task.done():
-                    hitl_queue.put(message.get("content", ""))
-                else:
-                    await websocket.send_json({"type": "error", "message": "No task is waiting for input."})
-            else:
-                await websocket.send_json({"type": "error", "message": "Unsupported message type."})
+            elif msg_type == "retry_response":
+                session_id = message.get("session_id")
+                if not session_id:
+                    await websocket.send_json({"type": "error", "message": "session_id required for retry_response"})
+                    continue
+
+                conv = workspace.conversations.get(session_id)
+                if not conv or not conv.get("messages"):
+                    await websocket.send_json({"type": "error", "message": "No conversation found to retry response."})
+                    continue
+
+                msgs = conv["messages"]
+                user_msgs = [m for m in msgs if m["role"] == "user"]
+                if not user_msgs:
+                    await websocket.send_json({"type": "error", "message": "No user message found to retry response."})
+                    continue
+
+                last_user_msg = user_msgs[-1]
+                workspace.conversations.edit_message(session_id, last_user_msg["id"], last_user_msg["content"], truncate_after=True)
+                active_session_id = session_id
+                task = asyncio.create_task(run_task(last_user_msg["content"], session_id, skip_save_user=True))
+                app.state.active_tasks[session_id] = task
+
+            elif msg_type == "interrupt_response":
+                session_id = message.get("session_id") or "default"
+                response = message.get("response", "")
+                if session_id in app.state.hitl_queues:
+                    app.state.hitl_queues[session_id].put(response)
+
+            elif msg_type == "stop":
+                target_id = message.get("session_id")
+                if target_id and target_id in app.state.active_tasks:
+                    app.state.active_tasks[target_id].cancel()
+                elif active_session_id and active_session_id in app.state.active_tasks:
+                    app.state.active_tasks[active_session_id].cancel()
+                elif app.state.active_tasks:
+                    # Cancel all active tasks if none specified
+                    for t in list(app.state.active_tasks.values()):
+                        t.cancel()
 
     except WebSocketDisconnect:
-        hitl_queue.put(disconnect_sentinel)
-        if active_task and not active_task.done():
-            active_task.cancel()
+        pass
     finally:
-        team.interactive_provider = None
+        app.state.chat_sockets.discard(websocket)
         for event_type in subscribed_events:
             team.emitter.off(event_type, feed_handler)

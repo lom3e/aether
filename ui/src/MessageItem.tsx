@@ -1,6 +1,7 @@
 import { useState } from 'react';
 import { Bot, User, Copy, Check, ShieldAlert, CheckCircle2, RotateCw, Edit2, Trash2 } from 'lucide-react';
 import { useTranslation } from './i18n';
+import { MarkdownRenderer } from './MarkdownRenderer';
 
 export interface ChatMessage {
   id: string;
@@ -57,152 +58,6 @@ export function MessageItem({
 
   const isUser = message.role === 'user';
   const agentName = message.agent_name || (isUser ? 'User' : 'Workforce');
-
-  // Simple clean markdown parser for code blocks, headers, lists, and bold text
-  const renderFormattedContent = (content: string) => {
-    if (!content) return null;
-
-    const lines = content.split('\n');
-    const elements: any[] = [];
-    let inCodeBlock = false;
-    let codeLanguage = '';
-    let codeBuffer: string[] = [];
-
-    lines.forEach((line, idx) => {
-      if (line.startsWith('```')) {
-        if (!inCodeBlock) {
-          inCodeBlock = true;
-          codeLanguage = line.slice(3).trim() || 'text';
-          codeBuffer = [];
-        } else {
-          inCodeBlock = false;
-          const codeText = codeBuffer.join('\n');
-          elements.push(
-            <div key={`code-${idx}`} style={{
-              margin: '12px 0',
-              borderRadius: 'var(--radius)',
-              overflow: 'hidden',
-              border: '1px solid hsl(var(--border))',
-              backgroundColor: 'hsl(var(--card))'
-            }}>
-              <div style={{
-                display: 'flex',
-                alignItems: 'center',
-                justifyContent: 'space-between',
-                padding: '6px 12px',
-                backgroundColor: 'hsl(var(--muted))',
-                fontSize: '11px',
-                fontFamily: 'var(--font-mono)',
-                color: 'hsl(var(--muted-fg))',
-                borderBottom: '1px solid hsl(var(--border))'
-              }}>
-                <span>{codeLanguage}</span>
-                <button
-                  className="btn btn-ghost"
-                  style={{ padding: '2px 6px', fontSize: '11px' }}
-                  onClick={() => navigator.clipboard.writeText(codeText)}
-                >
-                  <Copy size={12} /> Copy
-                </button>
-              </div>
-              <pre style={{
-                padding: '12px',
-                margin: 0,
-                fontSize: '12.5px',
-                fontFamily: 'var(--font-mono)',
-                overflowX: 'auto',
-                lineHeight: 1.5,
-                color: 'hsl(var(--fg))'
-              }}>
-                <code>{codeText}</code>
-              </pre>
-            </div>
-          );
-        }
-        return;
-      }
-
-      if (inCodeBlock) {
-        codeBuffer.push(line);
-        return;
-      }
-
-      // Headers
-      if (line.startsWith('### ')) {
-        elements.push(<h4 key={idx} style={{ margin: '14px 0 6px', fontSize: '15px', fontWeight: 600 }}>{line.slice(4)}</h4>);
-      } else if (line.startsWith('## ')) {
-        elements.push(<h3 key={idx} style={{ margin: '18px 0 8px', fontSize: '17px', fontWeight: 600 }}>{line.slice(3)}</h3>);
-      } else if (line.startsWith('# ')) {
-        elements.push(<h2 key={idx} style={{ margin: '22px 0 10px', fontSize: '19px', fontWeight: 700 }}>{line.slice(2)}</h2>);
-      } else if (line.startsWith('* ') || line.startsWith('- ')) {
-        // Bullet list
-        elements.push(
-          <div key={idx} style={{ display: 'flex', gap: '8px', margin: '4px 0 4px 12px' }}>
-            <span style={{ color: 'hsl(var(--primary))' }}>•</span>
-            <span style={{ flex: 1 }}>{renderInlineMarkdown(line.slice(2))}</span>
-          </div>
-        );
-      } else if (/^\d+\.\s/.test(line)) {
-        // Numbered list
-        const match = line.match(/^(\d+)\.\s(.*)/);
-        if (match) {
-          elements.push(
-            <div key={idx} style={{ display: 'flex', gap: '8px', margin: '4px 0 4px 12px' }}>
-              <span style={{ fontWeight: 600, color: 'hsl(var(--muted-fg))', minWidth: '18px' }}>{match[1]}.</span>
-              <span style={{ flex: 1 }}>{renderInlineMarkdown(match[2])}</span>
-            </div>
-          );
-        }
-      } else if (line.startsWith('> ')) {
-        // Blockquote
-        elements.push(
-          <blockquote key={idx} style={{
-            borderLeft: '3px solid hsl(var(--primary))',
-            paddingLeft: '12px',
-            margin: '8px 0',
-            color: 'hsl(var(--muted-fg))',
-            fontStyle: 'italic'
-          }}>
-            {renderInlineMarkdown(line.slice(2))}
-          </blockquote>
-        );
-      } else if (line.trim() === '') {
-        elements.push(<div key={idx} style={{ height: '8px' }} />);
-      } else {
-        elements.push(
-          <p key={idx} style={{ margin: '4px 0', lineHeight: 1.6 }}>
-            {renderInlineMarkdown(line)}
-          </p>
-        );
-      }
-    });
-
-    return elements;
-  };
-
-  const renderInlineMarkdown = (text: string) => {
-    // Bold **text**
-    const parts = text.split(/(\*\*.*?\*\*|`.*?`)/g);
-    return parts.map((part, i) => {
-      if (part.startsWith('**') && part.endsWith('**')) {
-        return <strong key={i}>{part.slice(2, -2)}</strong>;
-      }
-      if (part.startsWith('`') && part.endsWith('`')) {
-        return (
-          <code key={i} style={{
-            backgroundColor: 'hsl(var(--muted))',
-            padding: '2px 5px',
-            borderRadius: '4px',
-            fontFamily: 'var(--font-mono)',
-            fontSize: '12px'
-          }}>
-            {part.slice(1, -1)}
-          </code>
-        );
-      }
-      return part;
-    });
-  };
 
   return (
     <div style={{
@@ -378,7 +233,7 @@ export function MessageItem({
           </div>
         ) : (
           <div style={{ fontSize: '14px', color: 'hsl(var(--fg))' }}>
-            {renderFormattedContent(message.content)}
+            <MarkdownRenderer content={message.content} />
           </div>
         )}
 
