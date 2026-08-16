@@ -24,28 +24,18 @@ def test_00_ensure_workspace_ready(browser_context):
     page.goto(BASE_URL)
     page.wait_for_timeout(1000)
 
-    # If onboarding is displayed, complete it
-    if page.locator(".onboarding-card").is_visible():
-        name_input = page.locator("input[placeholder*='Aether Operations Hub']").first
-        if name_input.is_visible():
-            name_input.fill("Aether Acceptance Workspace")
-
-        dev_card = page.locator(".card:has-text('Developer Workforce')").first
-        if dev_card.is_visible():
-            dev_card.click()
-
-        page.locator("button:has-text('Continue')").first.click()
+    create_ws_btn = page.locator("button:has-text('+ Create workspace'), button:has-text('+ Crea workspace')").first
+    if create_ws_btn.is_visible():
+        create_ws_btn.click()
         page.wait_for_timeout(500)
 
-        init_btn = page.locator("button:has-text('Initialize Workspace')").first
-        if init_btn.is_visible():
-            init_btn.click()
+    name_input = page.locator("input[placeholder*='Acme Robotics'], input[placeholder*='Aether Operations Hub']").first
+    if name_input.is_visible():
+        name_input.fill("Aether Acceptance Workspace")
+        create_btn = page.locator("button:has-text('Create & Open Workspace'), button:has-text('Initialize Workspace')").first
+        if create_btn.is_visible():
+            create_btn.click()
             page.wait_for_timeout(2000)
-
-        launch_btn = page.locator("button:has-text('Launch Aether Workspace')").first
-        if launch_btn.is_visible():
-            launch_btn.click()
-            page.wait_for_timeout(1000)
 
     # Main sidebar must be visible
     page.wait_for_selector(".sidebar", timeout=10000)

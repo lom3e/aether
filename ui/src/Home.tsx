@@ -5,6 +5,7 @@ import {
 } from 'lucide-react';
 import { apiUrl } from './api';
 import { useTranslation } from './i18n';
+import { useTheme } from './theme';
 
 interface HomeProps {
   navigate: (view: string) => void;
@@ -12,18 +13,73 @@ interface HomeProps {
   onNewTask: () => void;
   onSelectConversation: (id: string) => void;
   conversations: any[];
+  onOpenWorkspaceModal?: () => void;
 }
 
-export function Home({ navigate, workspaceName, onNewTask, onSelectConversation, conversations }: HomeProps) {
+export function Home({
+  navigate,
+  workspaceName,
+  onNewTask,
+  onSelectConversation,
+  conversations,
+  onOpenWorkspaceModal,
+}: HomeProps) {
   const [workspaceData, setWorkspaceData] = useState<any>(null);
   const { t } = useTranslation();
+  const { isDark } = useTheme();
 
   useEffect(() => {
+    if (!workspaceName) {
+      setWorkspaceData(null);
+      return;
+    }
     fetch(apiUrl('/api/workspace'))
       .then(res => res.json())
       .then(data => setWorkspaceData(data))
       .catch(console.error);
-  }, []);
+  }, [workspaceName]);
+
+  // If no workspace exists or is active, show the explicit no-workspace empty state
+  if (!workspaceName) {
+    return (
+      <div style={{ flex: 1, overflowY: 'auto', display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '40px 24px' }}>
+        <div className="card" style={{ maxWidth: '520px', width: '100%', padding: '44px 36px', textAlign: 'center', boxShadow: '0 12px 36px rgba(0,0,0,0.08)' }}>
+          <div style={{
+            width: '64px',
+            height: '64px',
+            borderRadius: '16px',
+            backgroundColor: 'hsl(var(--primary)/0.12)',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            margin: '0 auto 20px',
+          }}>
+            <img
+              src={isDark ? "/brand/logo_bianco.svg" : "/brand/logo_viola.svg"}
+              alt="Aether"
+              width="36"
+              height="36"
+              style={{ display: 'block' }}
+            />
+          </div>
+          <h2 style={{ fontSize: '22px', fontWeight: 700, marginBottom: '10px', color: 'hsl(var(--fg))' }}>
+            {t('createFirstWorkspace')}
+          </h2>
+          <p className="text-muted" style={{ fontSize: '14px', lineHeight: 1.6, marginBottom: '28px', maxWidth: '420px', margin: '0 auto 28px' }}>
+            {t('noActiveWorkspaceDesc')}
+          </p>
+          <button
+            className="btn btn-primary"
+            style={{ padding: '10px 24px', fontSize: '14px', margin: '0 auto', display: 'inline-flex', alignItems: 'center', gap: '8px' }}
+            onClick={onOpenWorkspaceModal ? onOpenWorkspaceModal : () => navigate('settings')}
+          >
+            <Plus size={16} />
+            <span>{t('createWorkspaceBtn')}</span>
+          </button>
+        </div>
+      </div>
+    );
+  }
 
   const agents = workspaceData?.agents || [];
   const knowledgeChunks = workspaceData?.knowledge_chunks || 0;
@@ -36,7 +92,7 @@ export function Home({ navigate, workspaceName, onNewTask, onSelectConversation,
           <div style={{ display: 'flex', alignItems: 'center', gap: '10px', marginBottom: '8px' }}>
             <h1 style={{ fontSize: '26px' }}>{t('homeWelcome')}</h1>
             <span className="badge badge-primary" style={{ fontSize: '12px', padding: '3px 8px' }}>
-              {workspaceName || 'Aether Labs'}
+              {workspaceName}
             </span>
           </div>
           <p className="text-muted" style={{ fontSize: '15px', maxWidth: '640px' }}>

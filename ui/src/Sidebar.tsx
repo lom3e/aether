@@ -235,7 +235,7 @@ export function Sidebar({
                 flexShrink: 0
               }}>
                 <img
-                  src={isDark ? "/brand/logo_bianco.svg" : "/brand/logo_viola.svg"}
+                  src={isDark ? "/brand/logo_bianco.svg" : "/brand/logo_nero.svg"}
                   alt="Aether Logo"
                   width="18"
                   height="18"
@@ -244,11 +244,11 @@ export function Sidebar({
               </div>
               <div style={{ overflow: 'hidden', textAlign: 'left' }}>
                 <div style={{ fontSize: '13px', fontWeight: 600, color: 'hsl(var(--fg))', whiteSpace: 'nowrap', textOverflow: 'ellipsis', overflow: 'hidden', display: 'flex', alignItems: 'center', gap: '4px' }}>
-                  <span>{workspaceName || 'Aether Labs'}</span>
+                  <span>{workspaceName || (language === 'it' ? 'Nessun workspace' : 'No workspace')}</span>
                   <ChevronDown size={12} className="text-muted" />
                 </div>
                 <div style={{ fontSize: '10px', color: 'hsl(var(--muted-fg))', letterSpacing: '0.04em' }}>
-                  AI WORKFORCE
+                  {workspaceName ? 'AI WORKFORCE' : (language === 'it' ? 'CLICCA PER CREARE' : 'CLICK TO CREATE')}
                 </div>
               </div>
             </button>
@@ -267,7 +267,7 @@ export function Sidebar({
               onClick={() => setCollapsed(false)}
             >
               <img
-                src={isDark ? "/brand/logo_bianco.svg" : "/brand/logo_viola.svg"}
+                src={isDark ? "/brand/logo_bianco.svg" : "/brand/logo_nero.svg"}
                 alt="Aether Logo"
                 width="20"
                 height="20"
@@ -306,25 +306,31 @@ export function Sidebar({
                 Workspaces
               </div>
               <div style={{ maxHeight: '180px', overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: '2px' }}>
-                {allWorkspaces.map(ws => (
-                  <button
-                    key={ws.id || ws.path}
-                    className={`btn btn-ghost ${ws.is_active ? 'active' : ''}`}
-                    style={{
-                      width: '100%',
-                      justifyContent: 'space-between',
-                      padding: '6px 8px',
-                      fontSize: '12px',
-                      borderRadius: '6px'
-                    }}
-                    onClick={() => handleSwitchWorkspace(ws)}
-                  >
-                    <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                      {ws.name}
-                    </span>
-                    {ws.is_active && <Check size={13} className="text-primary" />}
-                  </button>
-                ))}
+                {allWorkspaces.length === 0 ? (
+                  <div style={{ fontSize: '11px', color: 'hsl(var(--muted-fg))', padding: '6px 8px' }}>
+                    {language === 'it' ? 'Nessun workspace salvato' : 'No workspaces saved'}
+                  </div>
+                ) : (
+                  allWorkspaces.map(ws => (
+                    <button
+                      key={ws.id || ws.path}
+                      className={`btn btn-ghost ${ws.is_active ? 'active' : ''}`}
+                      style={{
+                        width: '100%',
+                        justifyContent: 'space-between',
+                        padding: '6px 8px',
+                        fontSize: '12px',
+                        borderRadius: '6px'
+                      }}
+                      onClick={() => handleSwitchWorkspace(ws)}
+                    >
+                      <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                        {ws.name}
+                      </span>
+                      {ws.is_active && <Check size={13} className="text-primary" />}
+                    </button>
+                  ))
+                )}
               </div>
 
               <div style={{ height: '1px', backgroundColor: 'hsl(var(--border))', margin: '4px 0' }} />
@@ -359,7 +365,13 @@ export function Sidebar({
           <button
             className="btn btn-primary"
             style={{ width: '100%', padding: collapsed ? '8px' : '8px 12px', fontSize: '13px' }}
-            onClick={onNewConversation}
+            onClick={() => {
+              if (!workspaceName) {
+                if (onOpenWorkspaceModal) onOpenWorkspaceModal('create');
+              } else {
+                onNewConversation();
+              }
+            }}
             title={t('newTask')}
           >
             <Plus size={15} />

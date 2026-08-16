@@ -1,8 +1,9 @@
 import { useState, useEffect, useRef, useContext } from 'react';
-import { Send, Sparkles, Square } from 'lucide-react';
+import { Send, Sparkles, Square, Plus } from 'lucide-react';
 import { ToastContext } from './toast';
 import { apiUrl } from './api';
 import { useTranslation } from './i18n';
+import { useTheme } from './theme';
 import { WorkforcePresence } from './WorkforcePresence';
 import { MessageItem, type ChatMessage } from './MessageItem';
 import { ActivityFeed, type ActivityItem } from './ActivityFeed';
@@ -12,9 +13,17 @@ interface ChatProps {
   onNewConversation?: () => void;
   onSelectConversation?: (id: string, tempTitle?: string) => void;
   onConversationUpdated: () => void;
+  hasWorkspace?: boolean;
+  onOpenWorkspaceModal?: () => void;
 }
 
-export function Chat({ conversationId, onSelectConversation, onConversationUpdated }: ChatProps) {
+export function Chat({
+  conversationId,
+  onSelectConversation,
+  onConversationUpdated,
+  hasWorkspace = true,
+  onOpenWorkspaceModal,
+}: ChatProps) {
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [activities, setActivities] = useState<ActivityItem[]>([]);
   const [taskStatus, setTaskStatus] = useState<string>('active');
@@ -28,7 +37,8 @@ export function Chat({ conversationId, onSelectConversation, onConversationUpdat
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const showToast = useContext(ToastContext);
-  const { t } = useTranslation();
+  const { t, language } = useTranslation();
+  const { isDark } = useTheme();
 
   // Load team info
   useEffect(() => {
@@ -203,6 +213,10 @@ export function Chat({ conversationId, onSelectConversation, onConversationUpdat
   }, [messages, activities, loading]);
 
   const handleSend = () => {
+    if (!hasWorkspace) {
+      if (onOpenWorkspaceModal) onOpenWorkspaceModal();
+      return;
+    }
     if (!input.trim() || loading) return;
 
     const userPrompt = input.trim();
@@ -381,7 +395,53 @@ export function Chat({ conversationId, onSelectConversation, onConversationUpdat
 
       {/* Messages Scroll Area */}
       <div style={{ flex: 1, overflowY: 'auto', padding: '24px 0', display: 'flex', flexDirection: 'column' }}>
-        {!hasMessages ? (
+        {!hasWorkspace ? (
+          /* No Active Workspace Warning */
+          <div style={{
+            maxWidth: '520px',
+            margin: 'auto',
+            textAlign: 'center',
+            padding: '40px 24px',
+            display: 'flex',
+            flexDirection: 'column',
+            alignItems: 'center'
+          }}>
+            <div style={{
+              width: '60px',
+              height: '60px',
+              borderRadius: '16px',
+              backgroundColor: 'hsl(var(--primary)/0.12)',
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              marginBottom: '20px'
+            }}>
+              <img
+                src={isDark ? "/brand/logo_bianco.svg" : "/brand/logo_viola.svg"}
+                alt="Aether"
+                width="34"
+                height="34"
+                style={{ display: 'block' }}
+              />
+            </div>
+
+            <h2 style={{ fontSize: '22px', fontWeight: 700, marginBottom: '8px', color: 'hsl(var(--fg))' }}>
+              {t('firstCreateWorkspace')}
+            </h2>
+            <p className="text-muted" style={{ fontSize: '14px', maxWidth: '440px', marginBottom: '24px', lineHeight: 1.6 }}>
+              {t('firstCreateWorkspaceDesc')}
+            </p>
+
+            <button
+              className="btn btn-primary"
+              style={{ padding: '10px 22px', fontSize: '14px', display: 'inline-flex', alignItems: 'center', gap: '8px' }}
+              onClick={onOpenWorkspaceModal}
+            >
+              <Plus size={16} />
+              <span>{language === 'it' ? '+ Crea workspace' : '+ Create workspace'}</span>
+            </button>
+          </div>
+        ) : !hasMessages ? (
           /* Empty / Draft Welcome State */
           <div style={{
             maxWidth: '680px',
@@ -497,12 +557,12 @@ export function Chat({ conversationId, onSelectConversation, onConversationUpdat
               boxShadow: 'none',
               fontSize: '14px'
             }}
-            placeholder={t('chatInputPlaceholder')}
+            placeholder={!hasWorkspace ? (language === 'it' ? 'Prima crea uno workspace per poter inviare messaggi...' : 'Create a workspace first to send messages...') : t('chatInputPlaceholder')}
             value={input}
             onChange={e => setInput(e.target.value)}
             onKeyDown={handleKeyDown}
             rows={2}
-            disabled={loading}
+            disabled={!hasWorkspace || loading}
           />
 
           <div style={{
@@ -532,11 +592,11 @@ export function Chat({ conversationId, onSelectConversation, onConversationUpdat
                   type="button"
                   className="btn btn-primary"
                   style={{ height: '34px', padding: '0 16px', gap: '6px' }}
-                  disabled={!input.trim()}
                   onClick={handleSend}
+                  disabled={!hasWorkspace || !input.trim()}
                 >
-                  <span>{t('runTask')}</span>
                   <Send size={13} />
+                  <span>{t('runTask')}</span>
                 </button>
               )}
             </div>

@@ -7,6 +7,31 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [v1.3.3] - 2026-08-16
+
+### Patch Release: Official UI Branding & Explicit No-Workspace Empty State
+
+This release completes the visual and architectural branding integration across the Aether UI application, serves the official favicon and page title, and introduces an explicit, safe empty state when no active workspace exists.
+
+### Added
+- **Official Browser Tab Title & Favicon**:
+  - Web application title updated from generic `ui` to `Aether`.
+  - Official vector favicon (`/brand/favicon.svg`) mounted and served for all web app requests.
+- **Theme-Aware Vector Branding Integration**:
+  - Replaced hardcoded React SVGs with official vector brand assets across Sidebar, Onboarding, and Workspace Empty State.
+  - `logo_nero.svg` rendered in Light mode; `logo_bianco.svg` rendered in Dark mode.
+- **Explicit 'No Active Workspace' Lifecycle & Safety**:
+  - Home view renders a clean empty state card prompting users to create their first workspace (`Crea il tuo primo workspace` / `Create your first workspace`) with `[ + Crea workspace ]` CTA.
+  - Chat view displays a blocking banner (`Prima crea uno workspace` / `First create a workspace`), disables input prompt area and run buttons, and guards against uninitialized executions.
+  - Sidebar workspace switcher displays `Nessun workspace` / `No workspace` instead of false defaults.
+  - Endpoints (`/api/workspace`, `/api/workspace/home`, `/api/workspaces`, `/ws/chat`) handle 0 workspaces cleanly without 500 errors.
+  - Deleting the last active workspace resets app state to `None` cleanly without residual stale records.
+- **Comprehensive Regression Test Suite**:
+  - `tests/test_no_workspace_lifecycle.py`: unit & API lifecycle tests for zero-workspace states (Cases A–F).
+  - `tests/test_e2e_no_workspace_and_branding.py`: Playwright browser automation verifying title, favicon, and empty-state transitions.
+
+---
+
 ## [v1.3.2] - 2026-08-16
 
 ### Minor Release: Chat UX, Workforce Persistence, Official Presets & UI Polish

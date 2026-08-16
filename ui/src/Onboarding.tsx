@@ -1,6 +1,7 @@
 import { useState, useEffect } from 'react';
 import { ArrowRight, CheckCircle2, Users, BookOpen, Layers } from 'lucide-react';
 import { apiError, apiUrl } from './api';
+import { useTheme } from './theme';
 
 interface PresetItem {
   id: string;
@@ -23,6 +24,7 @@ export function Onboarding({ onComplete }: { onComplete: () => void }) {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
   const [availableModels, setAvailableModels] = useState<string[]>([]);
+  const { isDark } = useTheme();
 
   useEffect(() => {
     fetch(apiUrl('/api/presets'))
@@ -102,7 +104,7 @@ export function Onboarding({ onComplete }: { onComplete: () => void }) {
         {/* Brand Header */}
         <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '28px' }}>
           <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
-            <img src="/brand/logo_viola.svg" alt="Aether" width="28" height="28" style={{ height: '28px', width: 'auto', display: 'block' }} />
+            <img src={isDark ? "/brand/logo_bianco.svg" : "/brand/logo_nero.svg"} alt="Aether" width="28" height="28" style={{ height: '28px', width: 'auto', display: 'block' }} />
             <span style={{ fontWeight: 700, fontSize: '16px', letterSpacing: '0.06em', color: 'hsl(var(--fg))' }}>AETHER</span>
           </div>
 

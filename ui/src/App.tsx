@@ -3,7 +3,6 @@ import { Sidebar } from './Sidebar';
 import { Chat } from './Chat';
 import { Agents } from './Agents';
 import { Knowledge } from './Knowledge';
-import { Onboarding } from './Onboarding';
 import { Settings } from './Settings';
 import { Teams } from './Teams';
 import { Home } from './Home';
@@ -52,7 +51,7 @@ function ToastProvider({ children }: { children: any }) {
 function MainApp() {
   const [currentView, setCurrentView] = useState('home');
   const [viewParams, setViewParams] = useState<any>(null);
-  const [workspaceName, setWorkspaceName] = useState('Aether Labs');
+  const [workspaceName, setWorkspaceName] = useState('');
   const [isInitialized, setIsInitialized] = useState<boolean | null>(null);
 
   // Conversations State
@@ -81,17 +80,23 @@ function MainApp() {
     fetch(apiUrl('/api/workspace'))
       .then(res => res.json())
       .then(data => {
-        if (data.name) {
+        if (data && data.name) {
           setWorkspaceName(data.name);
           setIsInitialized(true);
           fetchConversations();
         } else {
+          setWorkspaceName('');
           setIsInitialized(false);
+          setConversations([]);
+          setActiveConversationId(null);
         }
       })
       .catch(err => {
         console.error("Failed to load workspace info", err);
+        setWorkspaceName('');
         setIsInitialized(false);
+        setConversations([]);
+        setActiveConversationId(null);
       });
   }, [fetchConversations]);
 
@@ -108,14 +113,18 @@ function MainApp() {
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
       // Cmd+K -> Command Palette
-      if ((e.metaKey || e.ctrlKey) && e.key === 'k') {
+      if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 'k') {
         e.preventDefault();
         setIsCommandPaletteOpen(prev => !prev);
       }
       // Cmd+N -> New Conversation
       if ((e.metaKey || e.ctrlKey) && !e.shiftKey && e.key.toLowerCase() === 'n') {
         e.preventDefault();
-        handleNewConversation();
+        if (!workspaceName) {
+          handleOpenWorkspaceModal('create');
+        } else {
+          handleNewConversation();
+        }
       }
       // Cmd+Shift+W -> Workspace Modal
       if ((e.metaKey || e.ctrlKey) && e.shiftKey && e.key.toLowerCase() === 'w') {
@@ -131,7 +140,7 @@ function MainApp() {
     };
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
-  }, []);
+  }, [workspaceName]);
 
   const navigate = (view: string, params: any = null) => {
     setCurrentView(view);
@@ -197,14 +206,12 @@ function MainApp() {
   if (isInitialized === null) {
     return (
       <div className="app-container" style={{ display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-        <div style={{ fontSize: '14px', color: 'hsl(var(--muted-fg))' }}>Loading Aether Workspace...</div>
+        <div style={{ fontSize: '14px', color: 'hsl(var(--muted-fg))' }}>Loading Aether...</div>
       </div>
     );
   }
 
-  if (isInitialized === false) {
-    return <Onboarding onComplete={fetchWorkspace} />;
-  }
+  const hasWorkspace = Boolean(workspaceName && isInitialized);
 
   return (
     <div className="app-container">
@@ -231,6 +238,7 @@ function MainApp() {
             onNewTask={handleNewConversation}
             onSelectConversation={handleSelectConversation}
             conversations={conversations}
+            onOpenWorkspaceModal={() => handleOpenWorkspaceModal('create')}
           />
         )}
         {currentView === 'chat' && (
@@ -239,6 +247,8 @@ function MainApp() {
             onNewConversation={handleNewConversation}
             onSelectConversation={handleSelectConversation}
             onConversationUpdated={fetchConversations}
+            hasWorkspace={hasWorkspace}
+            onOpenWorkspaceModal={() => handleOpenWorkspaceModal('create')}
           />
         )}
         {currentView === 'agents' && <Agents navigate={navigate} />}

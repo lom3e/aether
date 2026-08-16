@@ -567,10 +567,17 @@ async def get_workspace(request: Request):
 
 @router.get("/workspace/home")
 async def get_workspace_home(request: Request):
-    ws = request.app.state.workspace
-    team = request.app.state.team
-    if not ws:
-        raise HTTPException(status_code=500, detail="Workspace not initialized")
+    ws = getattr(request.app.state, "workspace", None)
+    team = getattr(request.app.state, "team", None)
+    if not ws or not ws.config_path.exists():
+        return {
+            "workspace_name": "",
+            "active_team": None,
+            "agent_count": 0,
+            "team_count": 0,
+            "knowledge_count": 0,
+            "recent_tasks": []
+        }
 
     agent_count = len(team.config.agents) if team else 0
     knowledge_count = len(team.knowledge.list_documents()) if team and team.knowledge else 0
@@ -581,12 +588,12 @@ async def get_workspace_home(request: Request):
         team_count = 1
 
     return {
-        "workspace_name": _workspace_display_name(ws) if ws.config_path else "Unknown",
+        "workspace_name": _workspace_display_name(ws) if ws.config_path else "",
         "active_team": team.config.name if team else None,
         "agent_count": agent_count,
         "team_count": team_count,
         "knowledge_count": knowledge_count,
-        "recent_tasks": [] # TODO: implement from history
+        "recent_tasks": []
     }
 
 @router.get("/agents")
@@ -1113,6 +1120,7 @@ async def delete_workspace_endpoint(request: Request, ws_id: str):
                     request.app.state.team = None
             else:
                 request.app.state.workspace = None
+                request.app.state.workspace_root = None
                 request.app.state.team = None
                 request.app.state.active_team_name = None
 
@@ -1225,7 +1233,7 @@ async def list_conversations(
 async def create_conversation(request: Request, data: CreateConversationPayload):
     ws = request.app.state.workspace
     if not ws:
-        raise HTTPException(status_code=500, detail="Workspace not initialized")
+        raise HTTPException(status_code=400, detail="No active workspace. Create a workspace first.")
     team = request.app.state.team
     team_name = data.team_name or (team.config.name if team else None)
     agents = [a.name for a in team.agents()] if team else []

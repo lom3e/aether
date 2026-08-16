@@ -154,6 +154,12 @@ export const translations = {
     loading: 'Loading...',
     success: 'Success',
     error: 'Error',
+    noActiveWorkspace: 'No Active Workspace',
+    noActiveWorkspaceDesc: 'Create your first workspace to configure your AI workforce, providers, and start working.',
+    createFirstWorkspace: 'Create your first workspace',
+    createWorkspaceBtn: '+ Create workspace',
+    firstCreateWorkspace: 'First create a workspace',
+    firstCreateWorkspaceDesc: 'No active workspace found. Create a workspace before assigning goals to the workforce.',
   },
   it: {
     // Navigation
@@ -306,6 +312,12 @@ export const translations = {
     loading: 'Caricamento...',
     success: 'Operazione riuscita',
     error: 'Errore',
+    noActiveWorkspace: 'Nessun Workspace Attivo',
+    noActiveWorkspaceDesc: 'Crea il tuo primo workspace per configurare la tua squadra AI, i provider e iniziare a lavorare.',
+    createFirstWorkspace: 'Crea il tuo primo workspace',
+    createWorkspaceBtn: '+ Crea workspace',
+    firstCreateWorkspace: 'Prima crea un workspace',
+    firstCreateWorkspaceDesc: 'Nessun workspace attivo. Crea prima uno workspace per iniziare ad assegnare task alla workforce.',
   }
 };
 

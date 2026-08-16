@@ -24,39 +24,53 @@ app.add_middleware(
 @app.on_event("startup")
 async def startup_event():
     configured_root = os.environ.get("AETHER_WORKSPACE")
-    if not configured_root and not (Path.cwd() / "aether.yaml").exists():
-        global_cfg = Path.home() / ".aether" / "config.json"
-        if global_cfg.exists():
-            try:
-                import json
-                with open(global_cfg, "r", encoding="utf-8") as f:
-                    cfg_data = json.load(f)
-                    last_active = cfg_data.get("active_workspace")
-                    if last_active and Path(last_active).exists() and (Path(last_active) / "aether.yaml").exists():
-                        configured_root = last_active
-            except Exception:
-                pass
+    if not configured_root:
+        if (Path.cwd() / "aether.yaml").exists():
+            configured_root = str(Path.cwd())
+        else:
+            global_cfg = Path.home() / ".aether" / "config.json"
+            if global_cfg.exists():
+                try:
+                    import json
+                    with open(global_cfg, "r", encoding="utf-8") as f:
+                        cfg_data = json.load(f)
+                        last_active = cfg_data.get("active_workspace")
+                        if last_active and Path(last_active).exists() and (Path(last_active) / "aether.yaml").exists():
+                            configured_root = last_active
+                except Exception:
+                    pass
 
-    ws_root = Path(configured_root).expanduser() if configured_root else Path.cwd()
-    app.state.workspace_root = ws_root.resolve()
+            if not configured_root:
+                from aether.workspace.registry import WorkspaceRegistry
+                workspaces = WorkspaceRegistry.list_workspaces()
+                if workspaces:
+                    configured_root = workspaces[0]["path"]
+
+    if not configured_root:
+        app.state.workspace = None
+        app.state.workspace_root = None
+        app.state.team = None
+        app.state.active_team_name = None
+        return
+
+    ws_root = Path(configured_root).expanduser().resolve()
+    app.state.workspace_root = ws_root
 
     try:
         ws = Workspace(ws_root)
         if not ws.config_path.exists():
-            # Not initialized yet, start with None
             app.state.workspace = None
+            app.state.workspace_root = None
             app.state.team = None
             app.state.active_team_name = None
             return
 
         app.state.workspace = ws
-        # Pre-load the default team to have it ready
         try:
             team = ws.load_team()
             app.state.team = team
             app.state.active_team_name = ws.config.get("workspace", {}).get("default_team", "default")
 
-            # Ensure knowledge is loaded
             if Path(ws.knowledge_db_path).exists():
                 from aether.knowledge.store import KnowledgeStore
                 team.knowledge = KnowledgeStore(ws.knowledge_db_path)
@@ -67,6 +81,7 @@ async def startup_event():
     except Exception as e:
         print(f"Error initializing workspace: {e}")
         app.state.workspace = None
+        app.state.workspace_root = None
         app.state.team = None
         app.state.active_team_name = None
 
