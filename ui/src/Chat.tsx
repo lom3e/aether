@@ -557,7 +557,7 @@ export function Chat({
               boxShadow: 'none',
               fontSize: '14px'
             }}
-            placeholder={!hasWorkspace ? (language === 'it' ? 'Prima crea uno workspace per poter inviare messaggi...' : 'Create a workspace first to send messages...') : t('chatInputPlaceholder')}
+            placeholder={!hasWorkspace ? (language === 'it' ? 'Prima crea un workspace per poter inviare messaggi...' : 'Create a workspace first to send messages...') : t('chatInputPlaceholder')}
             value={input}
             onChange={e => setInput(e.target.value)}
             onKeyDown={handleKeyDown}

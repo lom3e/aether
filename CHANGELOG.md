@@ -22,7 +22,7 @@ This release completes the visual and architectural branding integration across 
   - `logo_nero.svg` rendered in Light mode; `logo_bianco.svg` rendered in Dark mode.
 - **Explicit 'No Active Workspace' Lifecycle & Safety**:
   - Home view renders a clean empty state card prompting users to create their first workspace (`Crea il tuo primo workspace` / `Create your first workspace`) with `[ + Crea workspace ]` CTA.
-  - Chat view displays a blocking banner (`Prima crea uno workspace` / `First create a workspace`), disables input prompt area and run buttons, and guards against uninitialized executions.
+  - Chat view displays a blocking banner (`Prima crea un workspace` / `First create a workspace`), disables input prompt area and run buttons, and guards against uninitialized executions.
   - Sidebar workspace switcher displays `Nessun workspace` / `No workspace` instead of false defaults.
   - Endpoints (`/api/workspace`, `/api/workspace/home`, `/api/workspaces`, `/ws/chat`) handle 0 workspaces cleanly without 500 errors.
   - Deleting the last active workspace resets app state to `None` cleanly without residual stale records.
