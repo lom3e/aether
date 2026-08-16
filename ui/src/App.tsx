@@ -10,6 +10,7 @@ import { Home } from './Home';
 import { Marketplace } from './Marketplace';
 import { AgentProfile } from './AgentProfile';
 import { CommandPalette } from './CommandPalette';
+import { WorkspaceModal } from './WorkspaceModal';
 import { ToastContext } from './toast';
 import { LanguageProvider } from './i18n';
 import { ThemeProvider } from './theme';
@@ -57,7 +58,11 @@ function MainApp() {
   // Conversations State
   const [conversations, setConversations] = useState<any[]>([]);
   const [activeConversationId, setActiveConversationId] = useState<string | null>(null);
+
+  // Modals & Palettes
   const [isCommandPaletteOpen, setIsCommandPaletteOpen] = useState(false);
+  const [isWorkspaceModalOpen, setIsWorkspaceModalOpen] = useState(false);
+  const [workspaceModalMode, setWorkspaceModalMode] = useState<'create' | 'manage'>('create');
 
   const showToast = useContext(ToastContext);
 
@@ -97,23 +102,6 @@ function MainApp() {
     fetchWorkspace();
   }, [fetchWorkspace]);
 
-  // Global Command+K shortcut
-  useEffect(() => {
-    const handleKeyDown = (e: KeyboardEvent) => {
-      if ((e.metaKey || e.ctrlKey) && e.key === 'k') {
-        e.preventDefault();
-        setIsCommandPaletteOpen(prev => !prev);
-      }
-    };
-    window.addEventListener('keydown', handleKeyDown);
-    return () => window.removeEventListener('keydown', handleKeyDown);
-  }, []);
-
-  const navigate = (view: string, params: any = null) => {
-    setCurrentView(view);
-    setViewParams(params);
-  };
-
   const handleNewConversation = async () => {
     try {
       const res = await fetch(apiUrl('/api/conversations'), {
@@ -130,6 +118,40 @@ function MainApp() {
     } catch (err) {
       console.error('Failed to create conversation', err);
     }
+  };
+
+  // Keyboard Shortcuts: Cmd+K, Cmd+N, Cmd+Shift+W, Esc
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      // Cmd+K -> Command Palette
+      if ((e.metaKey || e.ctrlKey) && e.key === 'k') {
+        e.preventDefault();
+        setIsCommandPaletteOpen(prev => !prev);
+      }
+      // Cmd+N -> New Conversation
+      if ((e.metaKey || e.ctrlKey) && !e.shiftKey && e.key.toLowerCase() === 'n') {
+        e.preventDefault();
+        handleNewConversation();
+      }
+      // Cmd+Shift+W -> Workspace Modal
+      if ((e.metaKey || e.ctrlKey) && e.shiftKey && e.key.toLowerCase() === 'w') {
+        e.preventDefault();
+        setWorkspaceModalMode('manage');
+        setIsWorkspaceModalOpen(prev => !prev);
+      }
+      // Esc -> Close modals
+      if (e.key === 'Escape') {
+        setIsCommandPaletteOpen(false);
+        setIsWorkspaceModalOpen(false);
+      }
+    };
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, []);
+
+  const navigate = (view: string, params: any = null) => {
+    setCurrentView(view);
+    setViewParams(params);
   };
 
   const handleSelectConversation = (id: string) => {
@@ -160,6 +182,17 @@ function MainApp() {
     }
   };
 
+  const handleOpenWorkspaceModal = (mode: 'create' | 'manage') => {
+    setWorkspaceModalMode(mode);
+    setIsWorkspaceModalOpen(true);
+  };
+
+  const handleWorkspaceSwitched = () => {
+    setActiveConversationId(null);
+    setCurrentView('home');
+    fetchWorkspace();
+  };
+
   if (isInitialized === null) {
     return (
       <div className="app-container" style={{ display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
@@ -184,6 +217,9 @@ function MainApp() {
         onNewConversation={handleNewConversation}
         onDeleteConversation={handleDeleteConversation}
         onOpenCommandPalette={() => setIsCommandPaletteOpen(true)}
+        onOpenWorkspaceModal={handleOpenWorkspaceModal}
+        onRefreshConversations={fetchConversations}
+        onWorkspaceSwitched={handleWorkspaceSwitched}
       />
 
       <div className="main-content">
@@ -207,7 +243,7 @@ function MainApp() {
         {currentView === 'agent' && <AgentProfile name={viewParams} navigate={navigate} />}
         {currentView === 'teams' && <Teams />}
         {currentView === 'knowledge' && <Knowledge />}
-        {currentView === 'settings' && <Settings />}
+        {currentView === 'settings' && <Settings onWorkspaceSwitched={handleWorkspaceSwitched} />}
         {currentView === 'marketplace' && <Marketplace />}
       </div>
 
@@ -218,6 +254,13 @@ function MainApp() {
         onNewConversation={handleNewConversation}
         conversations={conversations}
         onSelectConversation={handleSelectConversation}
+      />
+
+      <WorkspaceModal
+        isOpen={isWorkspaceModalOpen}
+        onClose={() => setIsWorkspaceModalOpen(false)}
+        onWorkspaceSwitched={handleWorkspaceSwitched}
+        initialMode={workspaceModalMode}
       />
     </div>
   );

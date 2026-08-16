@@ -55,8 +55,6 @@ async def websocket_endpoint(websocket: WebSocket):
         asyncio.run_coroutine_threadsafe(send(), loop)
 
     def feed_handler(event: AgentEvent) -> None:
-        # Only operational metadata crosses the UI boundary. In particular,
-        # do not expose tool arguments, raw outputs, or internal reasoning.
         safe_metadata = {
             key: value
             for key, value in (event.metadata or {}).items()
@@ -96,15 +94,20 @@ async def websocket_endpoint(websocket: WebSocket):
 
     team.interactive_provider = hitl_handler
 
-    async def run_task(content: str, session_id: str) -> None:
+    async def run_task(content: str, session_id: str, skip_save_user: bool = False) -> None:
         nonlocal active_task, active_session_id
         try:
+            if not skip_save_user:
+                try:
+                    workspace.conversations.add_message(
+                        conv_id=session_id,
+                        role="user",
+                        content=content,
+                    )
+                except Exception:
+                    pass
+
             try:
-                workspace.conversations.add_message(
-                    conv_id=session_id,
-                    role="user",
-                    content=content,
-                )
                 workspace.conversations.update(session_id, status="active")
             except Exception:
                 pass
@@ -140,6 +143,19 @@ async def websocket_endpoint(websocket: WebSocket):
                 "agent": agent_name,
             })
         except asyncio.CancelledError:
+            try:
+                workspace.conversations.update(
+                    conv_id=session_id,
+                    status="interrupted",
+                    last_message="Execution stopped by user",
+                )
+            except Exception:
+                pass
+            await websocket.send_json({
+                "type": "task_stopped",
+                "session_id": session_id,
+                "message": "Task stopped by user.",
+            })
             raise
         except Exception as exc:
             try:
@@ -179,8 +195,16 @@ async def websocket_endpoint(websocket: WebSocket):
                     await websocket.send_json({"type": "error", "message": "Session ID is invalid."})
                     continue
                 active_session_id = session_id.strip()
+                skip_save_user = bool(message.get("skip_save_user", False))
                 await websocket.send_json({"type": "task_started", "session_id": active_session_id})
-                active_task = asyncio.create_task(run_task(content.strip(), active_session_id))
+                active_task = asyncio.create_task(run_task(content.strip(), active_session_id, skip_save_user))
+
+            elif message_type in ("stop", "stop_task"):
+                if active_task and not active_task.done():
+                    active_task.cancel()
+                    await websocket.send_json({"type": "task_stopping", "session_id": active_session_id})
+                else:
+                    await websocket.send_json({"type": "error", "message": "No task is currently running."})
 
             elif message_type == "interrupt_response":
                 if active_task and not active_task.done():

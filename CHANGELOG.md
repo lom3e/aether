@@ -7,6 +7,31 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [v1.3.1] - 2026-08-16
+
+### Patch Release: Official Website, Vector Brand System & UI Polish
+
+This release introduces the official marketing website, integrates the official SVG vector branding across all surfaces, and polishes the local Aether UI onboarding experience.
+
+### Added
+- **Official Marketing Website (`website/`)**:
+  - Full-featured, responsive product website built with Next.js 16 (App Router), Turbopack, and vanilla CSS design tokens.
+  - Cinematic scroll-driven narrative and 3-moment parallax storytelling.
+  - Interactive product workflow explorer across 8 professional domains.
+  - Dual theme support (Default warm off-white Light Mode + Graphite Near-Black Dark Mode).
+  - Complete native bilingual support (English and Italiano).
+- **Official Vector Branding (`website/public/brand/` & `ui/public/brand/`)**:
+  - Integrated official SVGs: `logo_nero.svg`, `logo_bianco.svg`, `logo_viola.svg`, `logo_viola_con_scritta.svg`, `scritta_AETHER.svg`, `favicon.svg`.
+  - Responsive, theme-aware brand lockups with organic hover micro-interactions and touch feedback.
+  - Unified **Aether Violet** brand accent palette across all primary CTAs, indicators, and canvas nodes.
+- **Aether UI Onboarding & Layout Polish (`ui/` & `src/aether/server/static/`)**:
+  - Centered elevated modal card design for the initial workspace setup wizard.
+  - Fixed missing CSS container rules and undefined token fallbacks.
+  - Modernized preset selection cards with agent capability tags and violet active states.
+  - Bundled updated static assets directly into `aether-core`.
+
+---
+
 ## [v1.3.0-alpha-workforce] - 2026-08-14
 
 ### Major Milestone: The AI Workforce Platform Alpha

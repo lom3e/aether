@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { Bot, User, Copy, Check, ShieldAlert, CheckCircle2, RotateCw } from 'lucide-react';
+import { Bot, User, Copy, Check, ShieldAlert, CheckCircle2, RotateCw, Edit2, Trash2 } from 'lucide-react';
 import { useTranslation } from './i18n';
 
 export interface ChatMessage {
@@ -20,17 +20,39 @@ interface MessageItemProps {
   message: ChatMessage;
   onInterruptResponse?: (response: string) => void;
   onRetry?: (content: string) => void;
+  onEditMessage?: (messageId: string, newContent: string) => void;
+  onDeleteMessage?: (messageId: string) => void;
+  onRetryResponse?: (messageId: string) => void;
 }
 
-export function MessageItem({ message, onInterruptResponse, onRetry }: MessageItemProps) {
+export function MessageItem({
+  message,
+  onInterruptResponse,
+  onRetry,
+  onEditMessage,
+  onDeleteMessage,
+  onRetryResponse
+}: MessageItemProps) {
   const [copied, setCopied] = useState(false);
   const [inputText, setInputText] = useState('');
+  const [isEditing, setIsEditing] = useState(false);
+  const [editContent, setEditContent] = useState(message.content);
+  const [isConfirmingDelete, setIsConfirmingDelete] = useState(false);
+
   const { t } = useTranslation();
 
   const handleCopy = () => {
     navigator.clipboard.writeText(message.content);
     setCopied(true);
     setTimeout(() => setCopied(false), 2000);
+  };
+
+  const handleSaveEdit = () => {
+    if (!editContent.trim()) return;
+    setIsEditing(false);
+    if (onEditMessage) {
+      onEditMessage(message.id, editContent.trim());
+    }
   };
 
   const isUser = message.role === 'user';
@@ -159,24 +181,20 @@ export function MessageItem({ message, onInterruptResponse, onRetry }: MessageIt
   };
 
   const renderInlineMarkdown = (text: string) => {
-    // Process **bold**, *italic*, `code`, and [sources]
-    const parts = text.split(/(\*\*.*?\*\*|\*.*?\*|`.*?`)/g);
+    // Bold **text**
+    const parts = text.split(/(\*\*.*?\*\*|`.*?`)/g);
     return parts.map((part, i) => {
       if (part.startsWith('**') && part.endsWith('**')) {
-        return <strong key={i} style={{ fontWeight: 600 }}>{part.slice(2, -2)}</strong>;
-      }
-      if (part.startsWith('*') && part.endsWith('*')) {
-        return <em key={i}>{part.slice(1, -1)}</em>;
+        return <strong key={i}>{part.slice(2, -2)}</strong>;
       }
       if (part.startsWith('`') && part.endsWith('`')) {
         return (
           <code key={i} style={{
-            fontFamily: 'var(--font-mono)',
-            fontSize: '12px',
+            backgroundColor: 'hsl(var(--muted))',
             padding: '2px 5px',
             borderRadius: '4px',
-            backgroundColor: 'hsl(var(--muted))',
-            color: 'hsl(var(--primary))'
+            fontFamily: 'var(--font-mono)',
+            fontSize: '12px'
           }}>
             {part.slice(1, -1)}
           </code>
@@ -190,11 +208,12 @@ export function MessageItem({ message, onInterruptResponse, onRetry }: MessageIt
     <div style={{
       display: 'flex',
       gap: '14px',
-      padding: '20px 24px',
-      borderBottom: '1px solid hsl(var(--border)/0.5)',
-      backgroundColor: isUser ? 'hsl(var(--card)/0.3)' : 'transparent',
-      transition: 'background-color 0.15s ease'
+      padding: '16px 24px',
+      borderBottom: '1px solid hsl(var(--border)/0.4)',
+      backgroundColor: isUser ? 'hsl(var(--bg))' : 'hsl(var(--card))',
+      position: 'relative'
     }}>
+      {/* Avatar */}
       <div style={{
         width: '32px',
         height: '32px',
@@ -212,6 +231,7 @@ export function MessageItem({ message, onInterruptResponse, onRetry }: MessageIt
       </div>
 
       <div style={{ flex: 1, minWidth: 0 }}>
+        {/* Header with Title and Actions */}
         <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '6px' }}>
           <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
             <span style={{ fontWeight: 600, fontSize: '13px', color: 'hsl(var(--fg))' }}>
@@ -230,31 +250,137 @@ export function MessageItem({ message, onInterruptResponse, onRetry }: MessageIt
           </div>
 
           <div style={{ display: 'flex', alignItems: 'center', gap: '4px' }}>
+            {/* Copy button */}
             <button
               className="btn btn-ghost"
-              style={{ padding: '4px 8px', fontSize: '12px' }}
+              style={{ padding: '3px 6px', fontSize: '11px' }}
               onClick={handleCopy}
               title={t('copyText')}
             >
-              {copied ? <Check size={14} className="text-primary" /> : <Copy size={14} />}
-              <span style={{ fontSize: '11px' }}>{copied ? t('copied') : t('copyText')}</span>
+              {copied ? <Check size={13} className="text-primary" /> : <Copy size={13} />}
+              <span>{copied ? t('copied') : ''}</span>
             </button>
-            {isUser && onRetry && (
+
+            {/* User Message Actions: Edit & Delete */}
+            {isUser && !isEditing && (
+              <>
+                <button
+                  className="btn btn-ghost"
+                  style={{ padding: '3px 6px', fontSize: '11px' }}
+                  onClick={() => {
+                    setIsEditing(true);
+                    setEditContent(message.content);
+                  }}
+                  title="Edit prompt"
+                >
+                  <Edit2 size={13} />
+                </button>
+
+                <button
+                  className="btn btn-ghost"
+                  style={{ padding: '3px 6px', fontSize: '11px' }}
+                  onClick={() => {
+                    if (onRetry) onRetry(message.content);
+                  }}
+                  title={t('retry')}
+                >
+                  <RotateCw size={13} />
+                </button>
+
+                <button
+                  className="btn btn-ghost"
+                  style={{ padding: '3px 6px', fontSize: '11px', color: 'hsl(var(--destructive))' }}
+                  onClick={() => setIsConfirmingDelete(true)}
+                  title="Delete message"
+                >
+                  <Trash2 size={13} />
+                </button>
+              </>
+            )}
+
+            {/* Assistant Actions: Retry response */}
+            {!isUser && onRetryResponse && (
               <button
                 className="btn btn-ghost"
-                style={{ padding: '4px 8px', fontSize: '12px' }}
-                onClick={() => onRetry(message.content)}
-                title={t('retry')}
+                style={{ padding: '3px 6px', fontSize: '11px' }}
+                onClick={() => onRetryResponse(message.id)}
+                title="Retry response"
               >
-                <RotateCw size={14} />
+                <RotateCw size={13} />
               </button>
             )}
           </div>
         </div>
 
-        <div style={{ fontSize: '14px', color: 'hsl(var(--fg))' }}>
-          {renderFormattedContent(message.content)}
-        </div>
+        {/* Inline Delete Confirmation */}
+        {isConfirmingDelete ? (
+          <div style={{
+            padding: '10px 14px',
+            margin: '8px 0',
+            backgroundColor: 'hsl(var(--destructive)/0.08)',
+            border: '1px solid hsl(var(--destructive)/0.3)',
+            borderRadius: '6px',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'space-between',
+            gap: '12px'
+          }}>
+            <span style={{ fontSize: '12.5px', color: 'hsl(var(--destructive))' }}>
+              Delete this message and subsequent responses?
+            </span>
+            <div style={{ display: 'flex', gap: '8px' }}>
+              <button
+                className="btn btn-secondary"
+                style={{ padding: '4px 10px', fontSize: '12px' }}
+                onClick={() => setIsConfirmingDelete(false)}
+              >
+                Cancel
+              </button>
+              <button
+                className="btn btn-destructive"
+                style={{ padding: '4px 10px', fontSize: '12px' }}
+                onClick={() => {
+                  setIsConfirmingDelete(false);
+                  if (onDeleteMessage) onDeleteMessage(message.id);
+                }}
+              >
+                Delete
+              </button>
+            </div>
+          </div>
+        ) : isEditing ? (
+          /* Inline Editor */
+          <div style={{ margin: '8px 0', display: 'flex', flexDirection: 'column', gap: '8px' }}>
+            <textarea
+              data-testid="inline-edit-textarea"
+              className="form-textarea"
+              style={{ minHeight: '80px', fontSize: '13.5px', padding: '10px 12px' }}
+              value={editContent}
+              onChange={e => setEditContent(e.target.value)}
+              autoFocus
+            />
+            <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '8px' }}>
+              <button
+                className="btn btn-secondary"
+                style={{ padding: '4px 12px', fontSize: '12px' }}
+                onClick={() => setIsEditing(false)}
+              >
+                Cancel
+              </button>
+              <button
+                className="btn btn-primary"
+                style={{ padding: '4px 12px', fontSize: '12px' }}
+                onClick={handleSaveEdit}
+              >
+                Save & Resend
+              </button>
+            </div>
+          </div>
+        ) : (
+          <div style={{ fontSize: '14px', color: 'hsl(var(--fg))' }}>
+            {renderFormattedContent(message.content)}
+          </div>
+        )}
 
         {/* HITL Interactive Card */}
         {message.interrupt && onInterruptResponse && (

@@ -1,7 +1,7 @@
 import { useState, useEffect, useRef, useContext } from 'react';
-import { Send, Sparkles, RotateCw } from 'lucide-react';
+import { Send, Sparkles, Square } from 'lucide-react';
 import { ToastContext } from './toast';
-import { apiUrl } from './api';
+import { apiUrl, apiError } from './api';
 import { useTranslation } from './i18n';
 import { WorkforcePresence } from './WorkforcePresence';
 import { MessageItem, type ChatMessage } from './MessageItem';
@@ -24,6 +24,7 @@ export function Chat({ conversationId, onConversationUpdated }: ChatProps) {
 
   const socketRef = useRef<WebSocket | null>(null);
   const messagesEndRef = useRef<HTMLDivElement>(null);
+  const textareaRef = useRef<HTMLTextAreaElement>(null);
   const showToast = useContext(ToastContext);
   const { t } = useTranslation();
 
@@ -89,7 +90,6 @@ export function Chat({ conversationId, onConversationUpdated }: ChatProps) {
           };
           setActivities(prev => [...prev, newAct]);
 
-          // Update active agents in presence bar
           if (data.agent && !activeAgents.includes(data.agent)) {
             setActiveAgents(prev => Array.from(new Set([...prev, data.agent])));
           }
@@ -112,7 +112,16 @@ export function Chat({ conversationId, onConversationUpdated }: ChatProps) {
           setActiveAgents([]);
           setWaitingAgent(null);
 
-          if (data.content) {
+          if (conversationId) {
+            fetch(apiUrl(`/api/conversations/${conversationId}`))
+              .then(res => res.json())
+              .then(convData => {
+                if (convData && convData.messages) {
+                  setMessages(convData.messages);
+                }
+              })
+              .catch(console.error);
+          } else if (data.content) {
             const botMsg: ChatMessage = {
               id: String(Date.now()),
               role: 'assistant',
@@ -121,6 +130,22 @@ export function Chat({ conversationId, onConversationUpdated }: ChatProps) {
               created_at: new Date().toISOString()
             };
             setMessages(prev => [...prev, botMsg]);
+          }
+          onConversationUpdated();
+        } else if (data.type === 'task_stopped') {
+          setLoading(false);
+          setActiveAgents([]);
+          setWaitingAgent(null);
+          showToast('Task execution stopped by user.', 'info');
+          if (conversationId) {
+            fetch(apiUrl(`/api/conversations/${conversationId}`))
+              .then(res => res.json())
+              .then(convData => {
+                if (convData && convData.messages) {
+                  setMessages(convData.messages);
+                }
+              })
+              .catch(console.error);
           }
           onConversationUpdated();
         } else if (data.type === 'error') {
@@ -175,6 +200,12 @@ export function Chat({ conversationId, onConversationUpdated }: ChatProps) {
     }
   };
 
+  const handleStopTask = () => {
+    if (socketRef.current && socketRef.current.readyState === WebSocket.OPEN) {
+      socketRef.current.send(JSON.stringify({ type: 'stop' }));
+    }
+  };
+
   const handleInterruptResponse = (response: string) => {
     if (socketRef.current && socketRef.current.readyState === WebSocket.OPEN) {
       socketRef.current.send(JSON.stringify({
@@ -185,8 +216,98 @@ export function Chat({ conversationId, onConversationUpdated }: ChatProps) {
     }
   };
 
+  const handleEditMessage = async (messageId: string, newContent: string) => {
+    if (!conversationId) return;
+
+    try {
+      let targetId = messageId;
+      const checkRes = await fetch(apiUrl(`/api/conversations/${conversationId}`));
+      if (checkRes.ok) {
+        const convData = await checkRes.json();
+        if (convData && convData.messages && convData.messages.length > 0) {
+          const match = convData.messages.find((m: any) => m.id === messageId);
+          if (!match) {
+            const userMsgMatch = convData.messages.find((m: any) => m.role === 'user');
+            if (userMsgMatch) {
+              targetId = userMsgMatch.id;
+            }
+          }
+        }
+      }
+
+      const res = await fetch(apiUrl(`/api/conversations/${conversationId}/messages/${targetId}`), {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ content: newContent, truncate_after: true })
+      });
+
+      if (res.ok) {
+        const updatedConv = await res.json();
+        if (updatedConv && updatedConv.messages) {
+          setMessages(updatedConv.messages);
+        }
+        setActivities([]);
+        setLoading(true);
+
+        if (socketRef.current && socketRef.current.readyState === WebSocket.OPEN) {
+          socketRef.current.send(JSON.stringify({
+            type: 'run_task',
+            content: newContent,
+            session_id: conversationId,
+            skip_save_user: true
+          }));
+        }
+      } else {
+        const err = await apiError(res, 'Failed to edit message.');
+        showToast(err.message, 'error');
+      }
+    } catch (err: any) {
+      showToast(err.message || 'Failed to edit message', 'error');
+    }
+  };
+
+  const handleDeleteMessage = async (messageId: string) => {
+    if (!conversationId) return;
+
+    try {
+      const res = await fetch(apiUrl(`/api/conversations/${conversationId}/messages/${messageId}`), {
+        method: 'DELETE'
+      });
+
+      if (res.ok) {
+        const updatedConv = await res.json();
+        if (updatedConv && updatedConv.messages) {
+          setMessages(updatedConv.messages);
+        } else {
+          setMessages([]);
+        }
+        showToast('Message deleted.', 'info');
+        onConversationUpdated();
+      } else {
+        const err = await apiError(res, 'Failed to delete message.');
+        showToast(err.message, 'error');
+      }
+    } catch (err: any) {
+      showToast(err.message || 'Failed to delete message', 'error');
+    }
+  };
+
+  const handleRetryUser = (messageId: string, content: string) => {
+    handleEditMessage(messageId, content);
+  };
+
+  const handleRetryResponse = (assistantMessageId: string) => {
+    const idx = messages.findIndex(m => m.id === assistantMessageId);
+    if (idx > 0) {
+      const prevUserMsg = messages[idx - 1];
+      if (prevUserMsg && prevUserMsg.role === 'user') {
+        handleEditMessage(prevUserMsg.id, prevUserMsg.content);
+      }
+    }
+  };
+
   const handleKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
-    if (e.key === 'Enter' && !e.shiftKey) {
+    if ((e.key === 'Enter' && !e.shiftKey) || ((e.metaKey || e.ctrlKey) && e.key === 'Enter')) {
       e.preventDefault();
       handleSend();
     }
@@ -269,7 +390,10 @@ export function Chat({ conversationId, onConversationUpdated }: ChatProps) {
                 key={msg.id || i}
                 message={msg}
                 onInterruptResponse={handleInterruptResponse}
-                onRetry={(content) => { setInput(content); }}
+                onRetry={(content) => handleRetryUser(msg.id, content)}
+                onEditMessage={handleEditMessage}
+                onDeleteMessage={handleDeleteMessage}
+                onRetryResponse={handleRetryResponse}
               />
             ))}
 
@@ -310,6 +434,7 @@ export function Chat({ conversationId, onConversationUpdated }: ChatProps) {
           flexDirection: 'column'
         }}>
           <textarea
+            ref={textareaRef}
             className="form-textarea"
             style={{
               border: 'none',
@@ -337,18 +462,32 @@ export function Chat({ conversationId, onConversationUpdated }: ChatProps) {
             borderTop: '1px solid hsl(var(--border)/0.3)'
           }}>
             <div style={{ fontSize: '11px', color: 'hsl(var(--muted-fg))' }}>
-              Press <kbd style={{ padding: '2px 4px', background: 'hsl(var(--muted))', borderRadius: '3px' }}>Enter</kbd> to run, <kbd style={{ padding: '2px 4px', background: 'hsl(var(--muted))', borderRadius: '3px' }}>Shift+Enter</kbd> for newline
+              Press <kbd style={{ padding: '2px 4px', background: 'hsl(var(--muted))', borderRadius: '3px' }}>Enter</kbd> to send, <kbd style={{ padding: '2px 4px', background: 'hsl(var(--muted))', borderRadius: '3px' }}>Shift+Enter</kbd> for newline
             </div>
 
-            <button
-              className="btn btn-primary"
-              style={{ padding: '6px 14px' }}
-              onClick={handleSend}
-              disabled={!input.trim() || loading}
-            >
-              {loading ? <RotateCw size={14} className="spin" /> : <Send size={14} />}
-              <span>{t('runTask')}</span>
-            </button>
+            <div style={{ display: 'flex', gap: '8px', alignItems: 'center' }}>
+              {loading ? (
+                <button
+                  className="btn btn-destructive"
+                  style={{ padding: '6px 14px', fontSize: '13px' }}
+                  onClick={handleStopTask}
+                  title="Stop Task"
+                >
+                  <Square size={13} />
+                  <span>Stop</span>
+                </button>
+              ) : (
+                <button
+                  className="btn btn-primary"
+                  style={{ padding: '6px 14px', fontSize: '13px' }}
+                  onClick={handleSend}
+                  disabled={!input.trim()}
+                >
+                  <Send size={14} />
+                  <span>{t('runTask')}</span>
+                </button>
+              )}
+            </div>
           </div>
         </div>
       </div>

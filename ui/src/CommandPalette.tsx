@@ -1,7 +1,7 @@
 import { useState, useEffect, useRef } from 'react';
 import {
   Search, Plus, MessageSquare, Bot, Users, Database, Settings, ShoppingBag,
-  Moon, Sun, Globe, X, Sparkles, ArrowRight
+  Moon, Sun, Globe, X, Sparkles, ArrowRight, Layers
 } from 'lucide-react';
 import { useTranslation } from './i18n';
 import { useTheme } from './theme';
@@ -42,9 +42,15 @@ export function CommandPalette({
   const defaultActions = [
     {
       id: 'new_task',
-      label: t('cmdNewTask'),
+      label: `${t('cmdNewTask')} (⌘N)`,
       icon: <Plus size={16} className="text-primary" />,
       run: () => { onNewConversation(); onClose(); }
+    },
+    {
+      id: 'switch_workspace',
+      label: 'Switch Workspace (⌘⇧W)',
+      icon: <Layers size={16} className="text-primary" />,
+      run: () => { onNavigate('settings'); onClose(); }
     },
     {
       id: 'go_home',

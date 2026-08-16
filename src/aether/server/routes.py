@@ -938,6 +938,241 @@ async def update_team(request: Request, team_name: str, data: TeamPayload):
 
 
 # ------------------------------------------------------------------
+# Workspaces Management API
+# ------------------------------------------------------------------
+
+class CreateWorkspacePayload(BaseModel):
+    name: str = Field(min_length=1, max_length=120)
+    description: str = Field(default="", max_length=500)
+    preset_id: str | None = Field(default="starter-workforce")
+    provider: str | None = Field(default="ollama")
+    model: str | None = Field(default="qwen3.5:9b")
+    api_key: str | None = None
+    target_dir: str | None = None
+
+
+class SwitchWorkspacePayload(BaseModel):
+    workspace_id: str | None = None
+    path: str | None = None
+
+
+class UpdateWorkspacePayload(BaseModel):
+    name: str | None = Field(default=None, max_length=120)
+    description: str | None = Field(default=None, max_length=500)
+
+
+@router.get("/workspaces")
+async def list_all_workspaces(request: Request):
+    from aether.workspace.registry import WorkspaceRegistry
+    ws = getattr(request.app.state, "workspace", None)
+    active_root = ws.root if ws else None
+    return WorkspaceRegistry.list_workspaces(active_root=active_root)
+
+
+@router.post("/workspaces")
+async def create_new_workspace(request: Request, data: CreateWorkspacePayload):
+    from aether.workspace.registry import WorkspaceRegistry
+    try:
+        new_ws = WorkspaceRegistry.create_workspace(
+            name=data.name,
+            description=data.description,
+            preset_id=data.preset_id or "starter-workforce",
+            provider=data.provider or "ollama",
+            model=data.model or "qwen3.5:9b",
+            api_key=data.api_key,
+            target_dir=data.target_dir,
+        )
+        request.app.state.workspace = new_ws
+        request.app.state.workspace_root = new_ws.root
+        try:
+            request.app.state.team = new_ws.load_team()
+            request.app.state.active_team_name = new_ws.config.get("workspace", {}).get("default_team", "default")
+        except Exception:
+            request.app.state.team = None
+            request.app.state.active_team_name = None
+
+        return {
+            "status": "ok",
+            "workspace": WorkspaceRegistry.get_workspace_entry(new_ws.root),
+        }
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+
+@router.post("/workspaces/switch")
+async def switch_workspace(request: Request, data: SwitchWorkspacePayload):
+    from aether.workspace.registry import WorkspaceRegistry, _is_protected_path
+    from aether.workspace.workspace import Workspace
+
+    target_path: Path | None = None
+    if data.path:
+        target_path = Path(data.path).resolve()
+    elif data.workspace_id:
+        entry = WorkspaceRegistry.get_workspace_entry(data.workspace_id)
+        if entry:
+            target_path = Path(entry["path"]).resolve()
+
+    if not target_path or not target_path.exists() or not (target_path / "aether.yaml").exists() or _is_protected_path(target_path):
+        raise HTTPException(status_code=404, detail="Target workspace does not exist or is protected.")
+
+    try:
+        ws = Workspace(target_path)
+        request.app.state.workspace = ws
+        request.app.state.workspace_root = ws.root
+        try:
+            request.app.state.team = ws.load_team()
+            request.app.state.active_team_name = ws.config.get("workspace", {}).get("default_team", "default")
+        except Exception:
+            request.app.state.team = None
+            request.app.state.active_team_name = None
+
+        WorkspaceRegistry.register(ws.root)
+
+        # Persist active workspace in ~/.aether/config.json for automatic restoration on restart
+        try:
+            cfg_dir = Path.home() / ".aether"
+            cfg_dir.mkdir(parents=True, exist_ok=True)
+            cfg_file = cfg_dir / "config.json"
+            cfg_data = {}
+            if cfg_file.exists():
+                try:
+                    with open(cfg_file, "r", encoding="utf-8") as f:
+                        cfg_data = json.load(f)
+                except Exception:
+                    cfg_data = {}
+            cfg_data["active_workspace"] = str(ws.root)
+            tmp = cfg_file.with_suffix(".tmp")
+            with open(tmp, "w", encoding="utf-8") as f:
+                json.dump(cfg_data, f, indent=2)
+            tmp.replace(cfg_file)
+        except Exception:
+            pass
+
+        return {
+            "status": "ok",
+            "workspace": WorkspaceRegistry.get_workspace_entry(ws.root),
+        }
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=f"Failed to switch workspace: {e}")
+
+
+@router.patch("/workspaces/{ws_id}")
+async def update_workspace_details(request: Request, ws_id: str, data: UpdateWorkspacePayload):
+    from aether.workspace.registry import WorkspaceRegistry
+    from aether.workspace.workspace import Workspace
+
+    entry = WorkspaceRegistry.get_workspace_entry(ws_id)
+    if not entry:
+        raise HTTPException(status_code=404, detail="Workspace not found.")
+
+    ws_path = Path(entry["path"])
+    if not ws_path.exists():
+        raise HTTPException(status_code=404, detail="Workspace directory not found.")
+
+    try:
+        ws = Workspace(ws_path)
+        if data.name:
+            WorkspaceRegistry.rename_workspace(ws, data.name)
+            # Update app.state if active
+            current_ws = getattr(request.app.state, "workspace", None)
+            if current_ws and current_ws.root == ws.root:
+                request.app.state.workspace = ws
+
+        return {"status": "ok", "workspace": WorkspaceRegistry.get_workspace_entry(ws.root)}
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+
+@router.delete("/workspaces/{ws_id}")
+async def delete_workspace_endpoint(request: Request, ws_id: str):
+    from aether.workspace.registry import WorkspaceRegistry
+    from aether.workspace.workspace import Workspace
+
+    entry = WorkspaceRegistry.get_workspace_entry(ws_id)
+    if not entry:
+        raise HTTPException(status_code=404, detail="Workspace not found.")
+
+    ws_path = Path(entry["path"])
+    current_ws = getattr(request.app.state, "workspace", None)
+    is_active = (current_ws is not None and current_ws.root == ws_path)
+
+    try:
+        WorkspaceRegistry.delete_workspace(ws_id)
+
+        # If deleted active workspace, switch to another valid workspace or set to None
+        if is_active:
+            remaining = WorkspaceRegistry.list_workspaces()
+            if remaining:
+                next_ws = Workspace(Path(remaining[0]["path"]))
+                request.app.state.workspace = next_ws
+                request.app.state.workspace_root = next_ws.root
+                try:
+                    request.app.state.team = next_ws.load_team()
+                    request.app.state.active_team_name = next_ws.config.get("workspace", {}).get("default_team", "default")
+                except Exception:
+                    request.app.state.team = None
+            else:
+                request.app.state.workspace = None
+                request.app.state.team = None
+                request.app.state.active_team_name = None
+
+        return {"status": "ok"}
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+
+@router.get("/workspaces/current/stats")
+async def get_current_workspace_stats(request: Request):
+    from aether.workspace.registry import WorkspaceRegistry
+    ws = getattr(request.app.state, "workspace", None)
+    if not ws:
+        raise HTTPException(status_code=404, detail="No active workspace.")
+    return WorkspaceRegistry.get_storage_stats(ws)
+
+
+@router.post("/workspaces/current/clear-knowledge")
+async def clear_workspace_knowledge(request: Request):
+    ws, team = _runtime(request)
+    if not team or not team.knowledge:
+        return {"status": "ok", "cleared": 0}
+
+    # Delete all non-system documents
+    docs = team.knowledge.list_documents(scope="workspace")
+    count = 0
+    for doc in docs:
+        team.knowledge.delete_document(doc["id"])
+        count += 1
+
+    # Remove files from knowledge_dir
+    if ws.knowledge_dir.exists():
+        for f in ws.knowledge_dir.iterdir():
+            if f.is_file() and not f.name.startswith("."):
+                f.unlink(missing_ok=True)
+
+    return {"status": "ok", "cleared": count}
+
+
+@router.post("/workspaces/current/reset")
+async def reset_current_workspace(request: Request):
+    ws, team = _runtime(request)
+    # Clear conversations
+    if ws:
+        try:
+            with ws.conversations._get_connection() as conn:
+                conn.execute("DELETE FROM conversation_ui_messages")
+                conn.execute("DELETE FROM conversations")
+        except Exception:
+            pass
+
+    # Clear workspace knowledge
+    if team and team.knowledge:
+        for doc in team.knowledge.list_documents(scope="workspace"):
+            team.knowledge.delete_document(doc["id"])
+
+    return {"status": "ok"}
+
+
+# ------------------------------------------------------------------
 # Conversations API
 # ------------------------------------------------------------------
 
@@ -958,12 +1193,32 @@ class AddMessagePayload(BaseModel):
     metadata: dict[str, Any] = Field(default_factory=dict)
 
 
+class EditMessagePayload(BaseModel):
+    content: str = Field(min_length=1)
+    truncate_after: bool = Field(default=True)
+
+
+class ArchiveConversationPayload(BaseModel):
+    archived: bool = Field(default=True)
+
+
 @router.get("/conversations")
-async def list_conversations(request: Request, search: str | None = None, limit: int = 100):
+async def list_conversations(
+    request: Request,
+    search: str | None = None,
+    status: str | None = None,
+    include_archived: bool = False,
+    limit: int = 100,
+):
     ws = request.app.state.workspace
     if not ws:
         return []
-    return ws.conversations.list(search=search, limit=limit)
+    return ws.conversations.list(
+        search=search,
+        status=status,
+        include_archived=include_archived,
+        limit=limit,
+    )
 
 
 @router.post("/conversations")
@@ -1011,6 +1266,28 @@ async def delete_conversation(request: Request, conv_id: str):
     return {"status": "ok"}
 
 
+@router.post("/conversations/{conv_id}/archive")
+async def archive_conversation(request: Request, conv_id: str, data: ArchiveConversationPayload):
+    ws = request.app.state.workspace
+    if not ws:
+        raise HTTPException(status_code=500, detail="Workspace not initialized")
+    updated = ws.conversations.archive(conv_id, archived=data.archived)
+    if not updated:
+        raise HTTPException(status_code=404, detail="Conversation not found")
+    return updated
+
+
+@router.post("/conversations/{conv_id}/duplicate")
+async def duplicate_conversation(request: Request, conv_id: str):
+    ws = request.app.state.workspace
+    if not ws:
+        raise HTTPException(status_code=500, detail="Workspace not initialized")
+    new_conv = ws.conversations.duplicate(conv_id)
+    if not new_conv:
+        raise HTTPException(status_code=404, detail="Conversation not found")
+    return new_conv
+
+
 @router.post("/conversations/{conv_id}/messages")
 async def add_conversation_message(request: Request, conv_id: str, data: AddMessagePayload):
     ws = request.app.state.workspace
@@ -1024,3 +1301,34 @@ async def add_conversation_message(request: Request, conv_id: str, data: AddMess
         metadata=data.metadata,
     )
     return msg
+
+
+@router.patch("/conversations/{conv_id}/messages/{message_id}")
+async def edit_conversation_message(request: Request, conv_id: str, message_id: str, data: EditMessagePayload):
+    ws = request.app.state.workspace
+    if not ws:
+        raise HTTPException(status_code=500, detail="Workspace not initialized")
+    updated_conv = ws.conversations.edit_message(
+        conv_id=conv_id,
+        message_id=message_id,
+        new_content=data.content,
+        truncate_after=data.truncate_after,
+    )
+    if not updated_conv:
+        raise HTTPException(status_code=404, detail="Message or conversation not found")
+    return updated_conv
+
+
+@router.delete("/conversations/{conv_id}/messages/{message_id}")
+async def delete_conversation_message(request: Request, conv_id: str, message_id: str, truncate_after: bool = True):
+    ws = request.app.state.workspace
+    if not ws:
+        raise HTTPException(status_code=500, detail="Workspace not initialized")
+    updated_conv = ws.conversations.delete_message(
+        conv_id=conv_id,
+        message_id=message_id,
+        truncate_after=truncate_after,
+    )
+    if not updated_conv:
+        raise HTTPException(status_code=404, detail="Message or conversation not found")
+    return updated_conv

@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react';
-import { Sparkles, ArrowRight, CheckCircle2, Users, BookOpen } from 'lucide-react';
+import { ArrowRight, CheckCircle2, Users, BookOpen, Layers } from 'lucide-react';
 import { apiError, apiUrl } from './api';
 
 interface PresetItem {
@@ -98,28 +98,37 @@ export function Onboarding({ onComplete }: { onComplete: () => void }) {
 
   return (
     <div className="onboarding-wrap">
-      <div className="onboarding-card" style={{ maxWidth: step === 1 ? '700px' : '520px' }}>
-        <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '24px', color: 'hsl(var(--muted-foreground))', fontWeight: 600 }}>
-          <Sparkles size={20} className="text-primary" /> Aether
+      <div className="onboarding-card" style={{ maxWidth: step === 1 ? '720px' : '540px' }}>
+        {/* Brand Header */}
+        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '28px' }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+            <img src="/brand/logo_viola.svg" alt="Aether" width="28" height="28" style={{ height: '28px', width: 'auto', display: 'block' }} />
+            <span style={{ fontWeight: 700, fontSize: '16px', letterSpacing: '0.06em', color: 'hsl(var(--fg))' }}>AETHER</span>
+          </div>
+
+          <div className="onboarding-progress">
+            <div className={`progress-dot ${step === 1 ? 'active' : 'completed'}`} />
+            <div className={`progress-dot ${step === 2 ? 'active' : (step > 2 ? 'completed' : '')}`} />
+            <div className={`progress-dot ${step === 3 ? 'active' : (step > 3 ? 'completed' : '')}`} />
+          </div>
         </div>
 
-        <div className="onboarding-progress" style={{ marginBottom: '24px' }}>
-          <div className={`progress-dot ${step === 1 ? 'active' : 'completed'}`} />
-          <div className={`progress-dot ${step === 2 ? 'active' : (step > 2 ? 'completed' : '')}`} />
-          <div className={`progress-dot ${step === 3 ? 'active' : (step > 3 ? 'completed' : '')}`} />
-        </div>
-
+        {/* STEP 1: Workspace Name & Preset Selection */}
         {step === 1 && (
           <div className="fade-in">
-            <h1 style={{ marginBottom: '6px' }}>Welcome to Aether</h1>
-            <p className="text-muted" style={{ marginBottom: '24px' }}>Let's configure your AI workforce and workspace.</p>
+            <h1 style={{ fontSize: '24px', fontWeight: 700, marginBottom: '6px', color: 'hsl(var(--fg))' }}>
+              Welcome to Aether
+            </h1>
+            <p className="text-muted" style={{ fontSize: '14px', marginBottom: '26px' }}>
+              Configure your local workspace and choose an AI workforce starter preset.
+            </p>
 
             <div className="form-group">
-              <label className="form-label">Workspace Name</label>
+              <label className="form-label" style={{ fontWeight: 600 }}>Workspace Name</label>
               <input
                 type="text"
                 className="form-input"
-                placeholder="e.g. Acme Intelligence"
+                placeholder="e.g. Aether Operations Hub"
                 value={name}
                 onChange={e => setName(e.target.value)}
                 disabled={loading}
@@ -127,53 +136,60 @@ export function Onboarding({ onComplete }: { onComplete: () => void }) {
               />
             </div>
 
-            <div style={{ marginTop: '20px', marginBottom: '8px' }}>
+            <div style={{ marginTop: '22px', marginBottom: '8px' }}>
               <label className="form-label" style={{ fontWeight: 600 }}>Choose a Starter Workforce Preset</label>
-              <p className="text-muted" style={{ fontSize: '13px', marginBottom: '12px' }}>
-                Pre-configured multi-agent team with topological delegations and built-in official knowledge.
+              <p className="text-muted" style={{ fontSize: '13px', marginBottom: '14px' }}>
+                Pre-configured multi-agent team with coordination topology and built-in knowledge.
               </p>
 
-              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '12px' }}>
-                {presets.map(p => (
-                  <div
-                    key={p.id}
-                    className="card"
-                    onClick={() => setSelectedPreset(p.id)}
-                    style={{
-                      cursor: 'pointer',
-                      padding: '16px',
-                      borderRadius: '8px',
-                      border: selectedPreset === p.id ? '2px solid hsl(var(--primary))' : '1px solid hsl(var(--card-border))',
-                      backgroundColor: selectedPreset === p.id ? 'hsl(var(--primary)/0.05)' : 'hsl(var(--card-bg))',
-                      transition: 'all 0.15s ease-in-out',
-                    }}
-                  >
-                    <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '6px' }}>
-                      <strong style={{ fontSize: '15px' }}>{p.name}</strong>
-                      <span className="badge badge-primary" style={{ fontSize: '11px' }}>{p.agent_count} Agents</span>
-                    </div>
-                    <p className="text-muted" style={{ fontSize: '13px', lineHeight: 1.4, margin: '0 0 10px 0' }}>
-                      {p.description}
-                    </p>
-                    <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap' }}>
-                      {p.agents.slice(0, 3).map((a, i) => (
-                        <span key={i} className="badge" style={{ fontSize: '11px', background: 'hsl(var(--muted))' }}>
-                          {a.name}
+              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '14px' }}>
+                {presets.map(p => {
+                  const isSelected = selectedPreset === p.id;
+                  return (
+                    <div
+                      key={p.id}
+                      className="card"
+                      onClick={() => setSelectedPreset(p.id)}
+                      style={{
+                        cursor: 'pointer',
+                        padding: '18px',
+                        borderRadius: '12px',
+                        border: isSelected ? '2px solid hsl(var(--primary))' : '1px solid hsl(var(--border))',
+                        backgroundColor: isSelected ? 'hsl(var(--primary)/0.06)' : 'hsl(var(--card))',
+                        transition: 'all 0.18s ease-in-out',
+                        boxShadow: isSelected ? '0 4px 18px hsl(var(--primary)/0.12)' : 'none',
+                      }}
+                    >
+                      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '8px' }}>
+                        <strong style={{ fontSize: '15px', color: 'hsl(var(--fg))' }}>{p.name}</strong>
+                        <span className="badge badge-primary" style={{ fontSize: '11px', fontWeight: 600 }}>
+                          {p.agent_count} Agents
                         </span>
-                      ))}
+                      </div>
+                      <p className="text-muted" style={{ fontSize: '13px', lineHeight: 1.45, margin: '0 0 14px 0' }}>
+                        {p.description}
+                      </p>
+                      <div style={{ display: 'flex', gap: '6px', flexWrap: 'wrap' }}>
+                        {p.agents.slice(0, 3).map((a, i) => (
+                          <span key={i} className="badge" style={{ fontSize: '11px' }}>
+                            {a.name}
+                          </span>
+                        ))}
+                      </div>
                     </div>
-                  </div>
-                ))}
+                  );
+                })}
               </div>
             </div>
 
-            {error && <div className="text-error" style={{ color: 'hsl(var(--error))', marginTop: '16px', fontSize: '14px' }}>{error}</div>}
+            {error && <div className="text-error" style={{ color: 'hsl(var(--destructive))', marginTop: '16px', fontSize: '14px' }}>{error}</div>}
 
-            <div style={{ display: 'flex', justifyContent: 'flex-end', marginTop: '28px' }}>
+            <div style={{ display: 'flex', justifyContent: 'flex-end', marginTop: '30px' }}>
               <button
                 className="btn btn-primary"
                 onClick={handleNext}
                 disabled={!name.trim() || loading}
+                style={{ padding: '10px 22px', fontSize: '14px' }}
               >
                 Continue <ArrowRight size={16} />
               </button>
@@ -181,15 +197,18 @@ export function Onboarding({ onComplete }: { onComplete: () => void }) {
           </div>
         )}
 
+        {/* STEP 2: Configure AI Provider */}
         {step === 2 && (
           <div className="fade-in">
-            <h2 style={{ marginBottom: '8px' }}>Configure AI Provider</h2>
-            <p className="text-muted" style={{ marginBottom: '24px' }}>Select the provider and model that will power your workforce.</p>
+            <h2 style={{ fontSize: '22px', fontWeight: 700, marginBottom: '6px' }}>Configure AI Provider</h2>
+            <p className="text-muted" style={{ fontSize: '14px', marginBottom: '24px' }}>
+              Select the engine and model that will power your autonomous agents.
+            </p>
 
             <div className="form-group">
               <label className="form-label">Provider</label>
               <select className="form-select" value={provider} onChange={e => setProvider(e.target.value)} disabled={loading}>
-                <option value="ollama">Ollama (Local)</option>
+                <option value="ollama">Ollama (Local & Private)</option>
                 <option value="openai">OpenAI</option>
                 <option value="anthropic">Anthropic</option>
                 <option value="gemini">Google Gemini</option>
@@ -214,6 +233,7 @@ export function Onboarding({ onComplete }: { onComplete: () => void }) {
                   type="text"
                   className="form-input"
                   value={model}
+                  placeholder="e.g. qwen2.5:14b or llama3.3:70b"
                   onChange={e => setModel(e.target.value)}
                   disabled={loading}
                 />
@@ -234,14 +254,17 @@ export function Onboarding({ onComplete }: { onComplete: () => void }) {
               </div>
             )}
 
-            {error && <div className="text-error" style={{ color: 'hsl(var(--error))', marginBottom: '16px', fontSize: '14px' }}>{error}</div>}
+            {error && <div className="text-error" style={{ color: 'hsl(var(--destructive))', marginBottom: '16px', fontSize: '14px' }}>{error}</div>}
 
-            <div style={{ display: 'flex', justifyContent: 'space-between', marginTop: '28px' }}>
-              <button className="btn btn-ghost" onClick={handleBack} disabled={loading}>Back</button>
+            <div style={{ display: 'flex', justifyContent: 'space-between', marginTop: '30px' }}>
+              <button className="btn btn-secondary" onClick={handleBack} disabled={loading}>
+                Back
+              </button>
               <button
                 className="btn btn-primary"
                 onClick={handleFinishOnboarding}
                 disabled={loading}
+                style={{ padding: '10px 22px' }}
               >
                 {loading ? 'Initializing…' : 'Initialize Workspace'} <ArrowRight size={16} />
               </button>
@@ -249,21 +272,22 @@ export function Onboarding({ onComplete }: { onComplete: () => void }) {
           </div>
         )}
 
+        {/* STEP 3: Workspace Ready */}
         {step === 3 && (
           <div style={{ textAlign: 'center', animation: 'fadeIn 0.3s ease-out' }}>
-            <div style={{ width: '60px', height: '60px', borderRadius: '30px', backgroundColor: 'hsl(var(--success)/0.1)', color: 'hsl(var(--success))', display: 'flex', alignItems: 'center', justifyContent: 'center', margin: '0 auto 20px' }}>
-              <CheckCircle2 size={30} />
+            <div style={{ width: '64px', height: '64px', borderRadius: '32px', backgroundColor: 'hsl(var(--success)/0.12)', color: 'hsl(var(--success))', display: 'flex', alignItems: 'center', justifyContent: 'center', margin: '0 auto 20px' }}>
+              <CheckCircle2 size={32} />
             </div>
-            <h2 style={{ marginBottom: '8px' }}>Workspace Ready!</h2>
-            <p className="text-muted" style={{ marginBottom: '24px', fontSize: '14px', maxWidth: '380px', margin: '0 auto 24px' }}>
-              <strong>{name}</strong> has been initialized with <strong>{activePresetObj?.name || 'Starter Workforce'}</strong> and built-in official knowledge.
+            <h2 style={{ fontSize: '24px', fontWeight: 700, marginBottom: '8px' }}>Workspace Ready!</h2>
+            <p className="text-muted" style={{ marginBottom: '24px', fontSize: '14px', maxWidth: '420px', margin: '0 auto 24px', lineHeight: 1.5 }}>
+              <strong>{name}</strong> is now configured with <strong>{activePresetObj?.name || 'Starter Workforce'}</strong> and built-in system knowledge.
             </p>
 
-            <div className="card" style={{ textAlign: 'left', padding: '16px', marginBottom: '24px', backgroundColor: 'hsl(var(--card-bg))' }}>
-              <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '8px', fontSize: '13px', fontWeight: 600 }}>
+            <div className="card" style={{ textAlign: 'left', padding: '18px', marginBottom: '26px', borderRadius: '12px' }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '10px', fontSize: '13px', fontWeight: 600 }}>
                 <Users size={16} className="text-primary" /> Active Agents:
               </div>
-              <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap', marginBottom: '12px' }}>
+              <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap', marginBottom: '14px' }}>
                 {activePresetObj?.agents.map((a, i) => (
                   <span key={i} className="badge badge-primary" style={{ fontSize: '12px' }}>
                     {a.name} ({a.role})
@@ -271,13 +295,13 @@ export function Onboarding({ onComplete }: { onComplete: () => void }) {
                 ))}
               </div>
 
-              <div style={{ display: 'flex', alignItems: 'center', gap: '8px', fontSize: '13px', color: 'hsl(var(--muted-foreground))' }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '8px', fontSize: '13px', color: 'hsl(var(--muted-fg))' }}>
                 <BookOpen size={14} /> Official Aether System Knowledge pre-installed & indexed
               </div>
             </div>
 
-            <button className="btn btn-primary" onClick={onComplete} style={{ width: '100%', padding: '12px' }}>
-              Launch Aether Workforce
+            <button className="btn btn-primary" onClick={onComplete} style={{ width: '100%', padding: '12px', fontSize: '14px' }}>
+              <Layers size={16} /> Launch Aether Workspace
             </button>
           </div>
         )}

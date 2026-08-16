@@ -23,10 +23,20 @@ app.add_middleware(
 # Inizializza Workspace e lo inietta nell'app state
 @app.on_event("startup")
 async def startup_event():
-    # Workspace selection is explicit: a launcher may provide
-    # AETHER_WORKSPACE; otherwise the server owns the directory it was
-    # started in. Never silently open a stale global pointer here.
     configured_root = os.environ.get("AETHER_WORKSPACE")
+    if not configured_root and not (Path.cwd() / "aether.yaml").exists():
+        global_cfg = Path.home() / ".aether" / "config.json"
+        if global_cfg.exists():
+            try:
+                import json
+                with open(global_cfg, "r", encoding="utf-8") as f:
+                    cfg_data = json.load(f)
+                    last_active = cfg_data.get("active_workspace")
+                    if last_active and Path(last_active).exists() and (Path(last_active) / "aether.yaml").exists():
+                        configured_root = last_active
+            except Exception:
+                pass
+
     ws_root = Path(configured_root).expanduser() if configured_root else Path.cwd()
     app.state.workspace_root = ws_root.resolve()
 

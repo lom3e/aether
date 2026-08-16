@@ -1,14 +1,28 @@
 """
 ConversationStore — SQLite-backed persistence for multi-turn conversations and sessions.
+Supports full conversation lifecycle: creation, editing, deletion, archiving, duplication, and search.
 """
 from __future__ import annotations
 
 import json
+import re
 import sqlite3
 import uuid
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
+
+
+def generate_smart_title(content: str) -> str:
+    """Generate a clean, human-readable title from a prompt message."""
+    if not content or not content.strip():
+        return "New Task"
+    clean = content.strip().splitlines()[0].strip()
+    clean = re.sub(r"^[#\*\-–—\d\.\s]+", "", clean).strip()
+    if len(clean) > 48:
+        words = clean[:45].rsplit(" ", 1)
+        clean = (words[0] if len(words) > 1 else clean[:45]) + "..."
+    return clean.capitalize() if clean else "New Task"
 
 
 class ConversationStore:
@@ -58,11 +72,13 @@ class ConversationStore:
                 """
             )
             conn.execute("CREATE INDEX IF NOT EXISTS idx_conv_updated ON conversations(updated_at DESC)")
+            conn.execute("CREATE INDEX IF NOT EXISTS idx_conv_status ON conversations(status)")
             conn.execute("CREATE INDEX IF NOT EXISTS idx_msg_conv ON conversation_ui_messages(conversation_id, created_at ASC)")
+            conn.execute("CREATE INDEX IF NOT EXISTS idx_msg_content ON conversation_ui_messages(content)")
 
     def create(
         self,
-        title: str = "New Conversation",
+        title: str = "New Task",
         team_name: str | None = None,
         conv_id: str | None = None,
         status: str = "active",
@@ -94,30 +110,41 @@ class ConversationStore:
             "agents": agents or [],
         }
 
-    def list(self, search: str | None = None, limit: int = 100) -> list[dict[str, Any]]:
+    def list(
+        self,
+        search: str | None = None,
+        status: str | None = None,
+        include_archived: bool = False,
+        limit: int = 100,
+    ) -> list[dict[str, Any]]:
         with self._get_connection() as conn:
+            query_parts = []
+            params = []
+
+            if not include_archived and status != "archived":
+                query_parts.append("status != 'archived'")
+
+            if status:
+                query_parts.append("status = ?")
+                params.append(status)
+
             if search and search.strip():
-                pattern = f"%{search.strip()}%"
-                rows = conn.execute(
-                    """
-                    SELECT id, title, team_name, status, created_at, updated_at, last_message, agents
-                    FROM conversations
-                    WHERE title LIKE ? OR last_message LIKE ?
-                    ORDER BY updated_at DESC
-                    LIMIT ?
-                    """,
-                    (pattern, pattern, limit),
-                ).fetchall()
-            else:
-                rows = conn.execute(
-                    """
-                    SELECT id, title, team_name, status, created_at, updated_at, last_message, agents
-                    FROM conversations
-                    ORDER BY updated_at DESC
-                    LIMIT ?
-                    """,
-                    (limit,),
-                ).fetchall()
+                pat = f"%{search.strip()}%"
+                query_parts.append(
+                    "(title LIKE ? OR last_message LIKE ? OR id IN (SELECT conversation_id FROM conversation_ui_messages WHERE content LIKE ?))"
+                )
+                params.extend([pat, pat, pat])
+
+            where_clause = f"WHERE {' AND '.join(query_parts)}" if query_parts else ""
+            sql = f"""
+            SELECT id, title, team_name, status, created_at, updated_at, last_message, agents
+            FROM conversations
+            {where_clause}
+            ORDER BY updated_at DESC
+            LIMIT ?
+            """
+            params.append(limit)
+            rows = conn.execute(sql, params).fetchall()
 
         result = []
         for r in rows:
@@ -198,6 +225,32 @@ class ConversationStore:
 
         return self.get(conv_id)
 
+    def archive(self, conv_id: str, archived: bool = True) -> dict[str, Any] | None:
+        """Mark a conversation as archived or restore it to active/completed."""
+        status = "archived" if archived else "completed"
+        return self.update(conv_id, status=status)
+
+    def duplicate(self, conv_id: str) -> dict[str, Any] | None:
+        """Duplicate a conversation and its full message history."""
+        existing = self.get(conv_id)
+        if not existing:
+            return None
+        new_title = f"{existing['title']} (Copy)"
+        new_conv = self.create(
+            title=new_title,
+            team_name=existing.get("team_name"),
+            agents=existing.get("agents"),
+        )
+        for msg in existing.get("messages", []):
+            self.add_message(
+                conv_id=new_conv["id"],
+                role=msg["role"],
+                content=msg["content"],
+                agent_name=msg.get("agent_name"),
+                metadata=msg.get("metadata"),
+            )
+        return self.get(new_conv["id"])
+
     def delete(self, conv_id: str) -> bool:
         with self._get_connection() as conn:
             conn.execute("DELETE FROM conversation_ui_messages WHERE conversation_id = ?", (conv_id,))
@@ -217,11 +270,9 @@ class ConversationStore:
         meta_json = json.dumps(metadata or {})
 
         with self._get_connection() as conn:
-            # Ensure conversation exists
             existing = conn.execute("SELECT id, title, agents FROM conversations WHERE id = ?", (conv_id,)).fetchone()
             if not existing:
-                # Create default conversation with title snippet
-                title = content.splitlines()[0][:60].strip() or "New Task"
+                title = generate_smart_title(content)
                 agents_init = [agent_name] if agent_name else []
                 conn.execute(
                     """
@@ -231,7 +282,6 @@ class ConversationStore:
                     (conv_id, title, None, now, now, content[:120], json.dumps(agents_init)),
                 )
             else:
-                # Update agents set and last_message
                 curr_agents = []
                 try:
                     curr_agents = json.loads(existing["agents"] or "[]")
@@ -240,10 +290,9 @@ class ConversationStore:
                 if agent_name and agent_name not in curr_agents:
                     curr_agents.append(agent_name)
 
-                # Generate a meaningful title if currently default
                 current_title = existing["title"]
-                if current_title in ("New Task", "New Conversation") and role == "user":
-                    current_title = content.splitlines()[0][:60].strip() or current_title
+                if current_title in ("New Task", "New Conversation", "Nuovo Task") and role == "user":
+                    current_title = generate_smart_title(content)
 
                 conn.execute(
                     """
@@ -271,6 +320,80 @@ class ConversationStore:
             "created_at": now,
             "metadata": metadata or {},
         }
+
+    def edit_message(
+        self,
+        conv_id: str,
+        message_id: str,
+        new_content: str,
+        truncate_after: bool = True,
+    ) -> dict[str, Any] | None:
+        """Edit a message and invalidate subsequent future messages in that turn."""
+        now = datetime.now(timezone.utc).isoformat()
+        with self._get_connection() as conn:
+            msg = conn.execute(
+                "SELECT id, conversation_id, created_at, role FROM conversation_ui_messages WHERE id = ? AND conversation_id = ?",
+                (message_id, conv_id),
+            ).fetchone()
+            if not msg:
+                return None
+
+            msg_created_at = msg["created_at"]
+            conn.execute(
+                "UPDATE conversation_ui_messages SET content = ? WHERE id = ?",
+                (new_content, message_id),
+            )
+
+            if truncate_after:
+                conn.execute(
+                    "DELETE FROM conversation_ui_messages WHERE conversation_id = ? AND created_at > ?",
+                    (conv_id, msg_created_at),
+                )
+
+            conn.execute(
+                "UPDATE conversations SET last_message = ?, updated_at = ?, status = 'active' WHERE id = ?",
+                (new_content[:120], now, conv_id),
+            )
+
+        return self.get(conv_id)
+
+    def delete_message(
+        self,
+        conv_id: str,
+        message_id: str,
+        truncate_after: bool = True,
+    ) -> dict[str, Any] | None:
+        """Delete a message and optionally subsequent future turns."""
+        now = datetime.now(timezone.utc).isoformat()
+        with self._get_connection() as conn:
+            msg = conn.execute(
+                "SELECT id, created_at FROM conversation_ui_messages WHERE id = ? AND conversation_id = ?",
+                (message_id, conv_id),
+            ).fetchone()
+            if not msg:
+                return None
+
+            msg_created_at = msg["created_at"]
+            if truncate_after:
+                conn.execute(
+                    "DELETE FROM conversation_ui_messages WHERE conversation_id = ? AND created_at >= ?",
+                    (conv_id, msg_created_at),
+                )
+            else:
+                conn.execute("DELETE FROM conversation_ui_messages WHERE id = ?", (message_id,))
+
+            last_row = conn.execute(
+                "SELECT content FROM conversation_ui_messages WHERE conversation_id = ? ORDER BY created_at DESC LIMIT 1",
+                (conv_id,),
+            ).fetchone()
+            last_text = last_row["content"][:120] if last_row and last_row["content"] else ""
+
+            conn.execute(
+                "UPDATE conversations SET last_message = ?, updated_at = ? WHERE id = ?",
+                (last_text, now, conv_id),
+            )
+
+        return self.get(conv_id)
 
     def get_messages(self, conv_id: str) -> list[dict[str, Any]]:
         with self._get_connection() as conn:
