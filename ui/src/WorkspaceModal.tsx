@@ -11,6 +11,13 @@ interface WorkspaceModalProps {
   initialMode?: 'create' | 'manage';
 }
 
+const DEFAULT_MODELS: Record<string, string[]> = {
+  ollama: ['qwen3.5:9b', 'llama3.3:70b', 'llama3.2:3b', 'deepseek-r1:8b', 'mistral', 'phi4'],
+  openai: ['gpt-4o', 'gpt-4o-mini', 'o3-mini', 'gpt-4-turbo'],
+  anthropic: ['claude-3-5-sonnet-20241022', 'claude-3-5-haiku-20241022', 'claude-3-opus-20240229'],
+  gemini: ['gemini-2.0-flash', 'gemini-1.5-pro', 'gemini-1.5-flash'],
+};
+
 export function WorkspaceModal({
   isOpen,
   onClose,
@@ -27,6 +34,8 @@ export function WorkspaceModal({
   const [presetId, setPresetId] = useState('starter-workforce');
   const [provider, setProvider] = useState('ollama');
   const [model, setModel] = useState('qwen3.5:9b');
+  const [availableModels, setAvailableModels] = useState<string[]>(DEFAULT_MODELS.ollama);
+  const [isCustomModel, setIsCustomModel] = useState(false);
   const [apiKey, setApiKey] = useState('');
 
   // Rename / Delete State
@@ -39,6 +48,31 @@ export function WorkspaceModal({
   useEffect(() => {
     setMode(initialMode);
   }, [initialMode]);
+
+  useEffect(() => {
+    const fallback = DEFAULT_MODELS[provider] || [];
+    fetch(apiUrl(`/api/settings/provider/models?provider=${provider}`))
+      .then(res => res.json())
+      .then(data => {
+        if (data.models && data.models.length > 0) {
+          setAvailableModels(data.models);
+          if (!isCustomModel) {
+            setModel(data.default || data.models[0]);
+          }
+        } else {
+          setAvailableModels(fallback);
+          if (!isCustomModel) {
+            setModel(fallback[0] || '');
+          }
+        }
+      })
+      .catch(() => {
+        setAvailableModels(fallback);
+        if (!isCustomModel) {
+          setModel(fallback[0] || '');
+        }
+      });
+  }, [provider, isCustomModel]);
 
   const fetchWorkspaces = () => {
     fetch(apiUrl('/api/workspaces'))
@@ -336,12 +370,8 @@ export function WorkspaceModal({
                     className="form-select"
                     value={provider}
                     onChange={e => {
-                      const p = e.target.value;
-                      setProvider(p);
-                      if (p === 'ollama') setModel('qwen3.5:9b');
-                      else if (p === 'openai') setModel('gpt-4o');
-                      else if (p === 'anthropic') setModel('claude-3-5-sonnet-20241022');
-                      else if (p === 'gemini') setModel('gemini-2.0-flash');
+                      setProvider(e.target.value);
+                      setIsCustomModel(false);
                     }}
                   >
                     <option value="ollama">Ollama (Local)</option>
@@ -352,14 +382,52 @@ export function WorkspaceModal({
                 </div>
 
                 <div>
-                  <label className="form-label" style={{ fontWeight: 600, fontSize: '13px' }}>Model</label>
-                  <input
-                    type="text"
-                    className="form-input"
-                    value={model}
-                    onChange={e => setModel(e.target.value)}
-                    required
-                  />
+                  <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '6px' }}>
+                    <label className="form-label" style={{ fontWeight: 600, fontSize: '13px', margin: 0 }}>Model</label>
+                    <button
+                      type="button"
+                      className="btn btn-ghost"
+                      style={{ fontSize: '11px', padding: '1px 6px', height: 'auto', textDecoration: 'underline', color: 'hsl(var(--primary))' }}
+                      onClick={() => {
+                        if (isCustomModel) {
+                          setIsCustomModel(false);
+                          const list = availableModels.length > 0 ? availableModels : (DEFAULT_MODELS[provider] || []);
+                          setModel(list[0] || '');
+                        } else {
+                          setIsCustomModel(true);
+                        }
+                      }}
+                    >
+                      {isCustomModel ? 'Suggested list' : 'Custom model...'}
+                    </button>
+                  </div>
+                  {isCustomModel ? (
+                    <input
+                      type="text"
+                      className="form-input"
+                      value={model}
+                      placeholder="e.g. custom-model:latest"
+                      onChange={e => setModel(e.target.value)}
+                      required
+                    />
+                  ) : (
+                    <select
+                      className="form-select"
+                      value={model}
+                      onChange={e => {
+                        if (e.target.value === '__custom__') {
+                          setIsCustomModel(true);
+                        } else {
+                          setModel(e.target.value);
+                        }
+                      }}
+                    >
+                      {availableModels.map(m => (
+                        <option key={m} value={m}>{m}</option>
+                      ))}
+                      <option value="__custom__">+ Other / Custom model...</option>
+                    </select>
+                  )}
                 </div>
               </div>
 

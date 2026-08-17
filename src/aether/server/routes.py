@@ -437,11 +437,19 @@ async def get_provider_settings(request: Request):
         }
     }
 
+_CURATED_PROVIDER_MODELS: dict[str, list[str]] = {
+    "ollama": ["qwen3.5:9b", "llama3.3:70b", "llama3.2:3b", "deepseek-r1:8b", "mistral", "phi4"],
+    "openai": ["gpt-4o", "gpt-4o-mini", "o3-mini", "gpt-4-turbo"],
+    "anthropic": ["claude-3-5-sonnet-20241022", "claude-3-5-haiku-20241022", "claude-3-opus-20240229"],
+    "gemini": ["gemini-2.0-flash", "gemini-1.5-pro", "gemini-1.5-flash"],
+}
+
 @router.get("/settings/provider/models")
 async def get_provider_models(request: Request, provider: str):
     if provider not in _VALID_PROVIDERS:
         raise HTTPException(status_code=422, detail=f"Unsupported provider '{provider}'.")
 
+    curated = _CURATED_PROVIDER_MODELS.get(provider, [])
     from aether.providers.manager import ProviderManager
     from aether.providers.types import ProviderConfig
 
@@ -449,10 +457,11 @@ async def get_provider_models(request: Request, provider: str):
     try:
         provider_instance = manager.get(provider, config=ProviderConfig(timeout=5.0))
         models = await provider_instance.aget_available_models()
-        return {"models": models}
-    except Exception as e:
-        # If we can't fetch models (e.g. Ollama is down), just return empty list
-        return {"models": []}
+        if models:
+            return {"models": models, "default": models[0]}
+        return {"models": curated, "default": curated[0] if curated else ""}
+    except Exception:
+        return {"models": curated, "default": curated[0] if curated else ""}
 
 @router.post("/settings/provider")
 async def save_provider_settings(request: Request, data: ProviderSettings):

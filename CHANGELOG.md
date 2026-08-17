@@ -7,6 +7,29 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [v1.3.5] - 2026-08-17
+
+### Patch Release: Collapsed Sidebar Branding & Workspace Model Suggestions
+
+This release enhances the collapsed sidebar UX in the Aether UI web application, ensuring the official Aether vector logo remains crisp, uncompressed, and acts as the primary interactive control to re-expand the sidebar, and introduces intelligent, curated & live-discovered model suggestions when creating a workspace.
+
+### Added
+- **Collapsed Sidebar Brand Polish (`Sidebar.tsx`)**:
+  - Replaced crowded chevron and squished logo container with a dedicated 44×44 px centered interactive button.
+  - Logo maintains exact 26×26 px vector proportions (`object-fit: contain`) without distortion.
+  - Clicking the logo in collapsed mode immediately re-expands the sidebar to full width (260 px).
+  - Theme-aware vector SVG switching (`logo_nero.svg` on Light mode, `logo_bianco.svg` on Dark mode).
+- **Intelligent Provider Model Suggestions (`WorkspaceModal.tsx` & Backend `/api/settings/provider/models`)**:
+  - Model field is now an interactive dropdown with curated defaults and live local Ollama model discovery.
+  - Recommended model is pre-selected automatically upon provider change without requiring manual typing.
+  - Custom model toggle allows manual model inputs when needed.
+- **Automated E2E Tests (`test_e2e_no_workspace_and_branding.py`)**:
+  - Added `test_04_collapsed_sidebar_logo_and_reopen` verifying collapse, logo presence, and click-to-expand behavior.
+  - Added `test_05_theme_aware_collapsed_logo` verifying Light/Dark vector switching when collapsed.
+  - Added `test_06_workspace_modal_model_suggestions` verifying provider model dropdowns and custom input toggle.
+
+---
+
 ## [v1.3.3] - 2026-08-16
 
 ### Patch Release: Official UI Branding & Explicit No-Workspace Empty State

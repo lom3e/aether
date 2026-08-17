@@ -1,7 +1,7 @@
 import { useState, useEffect, useRef } from 'react';
 import {
   Sparkles, MessageSquare, Bot, Users, Database, Settings, ShoppingBag,
-  Plus, ChevronLeft, ChevronRight, Moon, Sun, Globe, Trash2, Search,
+  Plus, ChevronLeft, Moon, Sun, Globe, Trash2, Search,
   ChevronDown, MoreVertical, Archive, Copy, Edit2, Check
 } from 'lucide-react';
 import { useTranslation } from './i18n';
@@ -200,7 +200,7 @@ export function Sidebar({
       <div style={{ display: 'flex', flexDirection: 'column', height: '100%', overflow: 'hidden' }}>
         {/* Workspace Switcher Header */}
         <div style={{
-          padding: '12px 14px',
+          padding: collapsed ? '10px 8px' : '12px 14px',
           borderBottom: '1px solid hsl(var(--border)/0.6)',
           display: 'flex',
           alignItems: 'center',
@@ -208,82 +208,97 @@ export function Sidebar({
           position: 'relative'
         }} ref={dropdownRef}>
           {!collapsed ? (
+            <>
+              <button
+                className="btn btn-ghost"
+                style={{
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: '10px',
+                  padding: '6px 8px',
+                  borderRadius: '8px',
+                  maxWidth: '190px',
+                  overflow: 'hidden'
+                }}
+                onClick={() => {
+                  fetchWorkspaces();
+                  setIsWsDropdownOpen(!isWsDropdownOpen);
+                }}
+              >
+                <div style={{
+                  width: '26px',
+                  height: '26px',
+                  borderRadius: '6px',
+                  backgroundColor: 'hsl(var(--primary)/0.12)',
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  flexShrink: 0
+                }}>
+                  <img
+                    src={isDark ? "/brand/logo_bianco.svg" : "/brand/logo_nero.svg"}
+                    alt="Aether Logo"
+                    width="18"
+                    height="18"
+                    style={{ width: '18px', height: '18px', objectFit: 'contain', display: 'block' }}
+                  />
+                </div>
+                <div style={{ overflow: 'hidden', textAlign: 'left' }}>
+                  <div style={{ fontSize: '13px', fontWeight: 600, color: 'hsl(var(--fg))', whiteSpace: 'nowrap', textOverflow: 'ellipsis', overflow: 'hidden', display: 'flex', alignItems: 'center', gap: '4px' }}>
+                    <span>{workspaceName || (language === 'it' ? 'Nessun workspace' : 'No workspace')}</span>
+                    <ChevronDown size={12} className="text-muted" />
+                  </div>
+                  <div style={{ fontSize: '10px', color: 'hsl(var(--muted-fg))', letterSpacing: '0.04em' }}>
+                    {workspaceName ? 'AI WORKFORCE' : (language === 'it' ? 'CLICCA PER CREARE' : 'CLICK TO CREATE')}
+                  </div>
+                </div>
+              </button>
+
+              <button
+                className="btn btn-ghost"
+                style={{ padding: '6px', borderRadius: '6px' }}
+                onClick={() => setCollapsed(true)}
+                title={language === 'it' ? 'Comprimi Sidebar' : 'Collapse Sidebar'}
+                aria-label="Collapse Sidebar"
+              >
+                <ChevronLeft size={16} />
+              </button>
+            </>
+          ) : (
             <button
               className="btn btn-ghost"
               style={{
-                display: 'flex',
-                alignItems: 'center',
-                gap: '10px',
-                padding: '6px 8px',
-                borderRadius: '8px',
-                maxWidth: '200px',
-                overflow: 'hidden'
-              }}
-              onClick={() => {
-                fetchWorkspaces();
-                setIsWsDropdownOpen(!isWsDropdownOpen);
-              }}
-            >
-              <div style={{
-                width: '26px',
-                height: '26px',
-                borderRadius: '6px',
-                backgroundColor: 'hsl(var(--primary)/0.12)',
+                width: '44px',
+                height: '44px',
+                minWidth: '44px',
+                minHeight: '44px',
+                padding: '0',
+                borderRadius: '10px',
                 display: 'flex',
                 alignItems: 'center',
                 justifyContent: 'center',
-                flexShrink: 0
-              }}>
-                <img
-                  src={isDark ? "/brand/logo_bianco.svg" : "/brand/logo_nero.svg"}
-                  alt="Aether Logo"
-                  width="18"
-                  height="18"
-                  style={{ width: '18px', height: '18px', display: 'block' }}
-                />
-              </div>
-              <div style={{ overflow: 'hidden', textAlign: 'left' }}>
-                <div style={{ fontSize: '13px', fontWeight: 600, color: 'hsl(var(--fg))', whiteSpace: 'nowrap', textOverflow: 'ellipsis', overflow: 'hidden', display: 'flex', alignItems: 'center', gap: '4px' }}>
-                  <span>{workspaceName || (language === 'it' ? 'Nessun workspace' : 'No workspace')}</span>
-                  <ChevronDown size={12} className="text-muted" />
-                </div>
-                <div style={{ fontSize: '10px', color: 'hsl(var(--muted-fg))', letterSpacing: '0.04em' }}>
-                  {workspaceName ? 'AI WORKFORCE' : (language === 'it' ? 'CLICCA PER CREARE' : 'CLICK TO CREATE')}
-                </div>
-              </div>
-            </button>
-          ) : (
-            <div
-              style={{
-                width: '32px',
-                height: '32px',
-                borderRadius: '8px',
-                backgroundColor: 'hsl(var(--primary)/0.12)',
-                display: 'flex',
-                alignItems: 'center',
-                justifyContent: 'center',
-                cursor: 'pointer'
+                cursor: 'pointer',
+                backgroundColor: 'hsl(var(--primary)/0.08)',
+                transition: 'background-color 0.15s ease, transform 0.15s ease'
               }}
               onClick={() => setCollapsed(false)}
+              title={language === 'it' ? 'Espandi Sidebar (Aether)' : 'Expand Sidebar (Aether)'}
+              aria-label="Expand Sidebar"
             >
               <img
                 src={isDark ? "/brand/logo_bianco.svg" : "/brand/logo_nero.svg"}
                 alt="Aether Logo"
-                width="20"
-                height="20"
-                style={{ width: '20px', height: '20px', display: 'block' }}
+                width="26"
+                height="26"
+                style={{
+                  width: '26px',
+                  height: '26px',
+                  objectFit: 'contain',
+                  display: 'block'
+                }}
               />
-            </div>
+            </button>
           )}
-
-          <button
-            className="btn btn-ghost"
-            style={{ padding: '4px' }}
-            onClick={() => setCollapsed(!collapsed)}
-            title={collapsed ? 'Expand Sidebar' : 'Collapse Sidebar'}
-          >
-            {collapsed ? <ChevronRight size={16} /> : <ChevronLeft size={16} />}
-          </button>
 
           {/* Workspace Switcher Popover Dropdown */}
           {isWsDropdownOpen && !collapsed && (
