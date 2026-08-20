@@ -107,7 +107,7 @@ def test_dsk_01_b_to_l_full_desktop_supervisor_lifecycle(tmp_path):
             assert resp.status == 200
             health_data = json.loads(resp.read())
             assert health_data["status"] == "ok"
-            assert health_data["version"] == "1.3.5"
+            assert health_data["version"] == "1.4.0"
             assert health_data["port"] == bound_port
 
         # 3. Unauthenticated request blocked with 401 (DSK-01-F security)

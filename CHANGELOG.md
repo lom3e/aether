@@ -7,6 +7,31 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [v1.4.0] - 2026-08-20
+
+### Minor Release: Official Native macOS Desktop Application & Standalone Distribution
+
+This milestone release introduces the official native desktop application for macOS Apple Silicon, powered by Tauri 2 and an autonomous Python standalone runtime bundled with PyInstaller.
+
+### Added
+- **Native Desktop Shell (`src-tauri`)**:
+  - Tauri 2 architecture with native Rust supervisor lifecycle manager.
+  - Ephemeral port handshake, loopback security, and automatic sidecar health monitoring.
+  - Native WKWebView pre-script injection ensuring zero race conditions for API base resolution.
+- **Standalone Python Runtime (`scripts/build_python_runtime.py`)**:
+  - PyInstaller `onedir` bundling delivering zero dependencies on local Python or Node environments.
+  - Preserved all built-in workforce presets, system knowledge bases, and SQLite WAL database engine.
+- **Production macOS Packaging & Distribution (`scripts/build_desktop_app.py`, `scripts/build_distribution.py`)**:
+  - Standalone `Aether.app` application bundle packaging.
+  - Compressed macOS Disk Image (`Aether.dmg`) with standard Applications drag-and-drop installer.
+  - Official vector app icon generation with Apple HIG optical centering.
+- **Security & Concurrency Hardening**:
+  - Local session token authentication on REST and WebSocket endpoints.
+  - Automated CORS preflight handling for WebKit and Tauri local origins.
+  - Abstract user data directory (`~/Library/Application Support/Aether`).
+
+---
+
 ## [v1.3.5] - 2026-08-17
 
 ### Patch Release: Collapsed Sidebar Branding & Workspace Model Suggestions

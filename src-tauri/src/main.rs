@@ -34,7 +34,7 @@ fn get_runtime_info(state: State<RuntimeState>) -> Result<RuntimeInfo, String> {
         api_url: format!("http://127.0.0.1:{}", state.port),
         session_token: state.token.clone(),
         port: state.port,
-        version: "1.3.5".to_string(),
+        version: "1.4.0".to_string(),
     })
 }
 

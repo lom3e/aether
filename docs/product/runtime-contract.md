@@ -72,7 +72,7 @@ aether ui [OPTIONS]
 3. READINESS DETECTION (Desktop Shell)
    ├── Parsing opzionale stdout per estrarre la porta (se port 0)
    └── Polling HTTP su: GET http://127.0.0.1:<PORT>/api/health
-       └── Ricezione 200 OK: {"status": "ok", "version": "1.3.5", ...}
+       └── Ricezione 200 OK: {"status": "ok", "version": "1.4.0", ...}
         │
         ▼
 4. UI READY (WKWebView)
@@ -94,7 +94,7 @@ aether ui [OPTIONS]
   ```json
   {
     "status": "ok",
-    "version": "1.3.5",
+    "version": "1.4.0",
     "workspace_initialized": true,
     "workspace_root": "/Users/username/Library/Application Support/Aether/workspaces/default",
     "host": "127.0.0.1",
