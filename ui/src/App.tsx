@@ -102,6 +102,11 @@ function MainApp() {
 
   useEffect(() => {
     fetchWorkspace();
+    // Brief retry in case __AETHER_API_URL__ is set right after initial mount
+    const timer = setTimeout(() => {
+      fetchWorkspace();
+    }, 150);
+    return () => clearTimeout(timer);
   }, [fetchWorkspace]);
 
   const handleNewConversation = () => {

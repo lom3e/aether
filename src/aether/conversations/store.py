@@ -25,6 +25,9 @@ def generate_smart_title(content: str) -> str:
     return clean.capitalize() if clean else "New Task"
 
 
+from aether.core.sqlite import get_sqlite_connection
+
+
 class ConversationStore:
     """
     Manages multiple persistent conversations within a workspace.
@@ -37,10 +40,7 @@ class ConversationStore:
         self._init_db()
 
     def _get_connection(self) -> sqlite3.Connection:
-        conn = sqlite3.connect(self.db_path, uri=self.db_path.startswith("file:"))
-        conn.execute("PRAGMA foreign_keys = ON;")
-        conn.row_factory = sqlite3.Row
-        return conn
+        return get_sqlite_connection(self.db_path)
 
     def _init_db(self) -> None:
         with self._get_connection() as conn:

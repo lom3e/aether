@@ -197,30 +197,76 @@ def _build_provider(config, args):
 
 def _cmd_ui(args) -> None:
     import uvicorn
-    import subprocess
-    import threading
+    import socket
     import sys
+    import threading
     import webbrowser
     from pathlib import Path
+    from aether.core.paths import set_aether_data_dir
+    from aether.server.app import app
 
-    print("Starting Aether Workspace UI...")
+    host = getattr(args, "host", None) or "127.0.0.1"
+    port = getattr(args, "port", None)
+    if port is None:
+        port = 8000
+    data_dir = getattr(args, "data_dir", None)
+    token = getattr(args, "token", None) or os.environ.get("AETHER_SESSION_TOKEN")
+    no_browser = getattr(args, "no_browser", False)
+
+    if data_dir:
+        set_aether_data_dir(data_dir)
+        os.environ["AETHER_DATA_DIR"] = str(Path(data_dir).expanduser().resolve())
+
+    if token:
+        app.state.session_token = str(token).strip()
+        os.environ["AETHER_SESSION_TOKEN"] = str(token).strip()
+
+    # Handle port 0 (ephemeral port allocation)
+    bound_port = port
+    sock = None
+    if port == 0:
+        sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+        sock.bind((host, 0))
+        bound_port = sock.getsockname()[1]
+        sock.listen(2048)
+
+    app.state.bound_host = host
+    app.state.bound_port = bound_port
 
     ui_dir = Path(__file__).parent.parent.parent.parent / "ui"
     if (ui_dir / "package.json").exists() and not (ui_dir / "dist" / "index.html").exists():
         def start_vite():
             try:
+                import subprocess
                 subprocess.run(["npm", "run", "dev"], cwd=ui_dir, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
             except Exception:
                 pass
         threading.Thread(target=start_vite, daemon=True).start()
 
-    print("\n  ► Aether UI running at: http://localhost:8000\n")
-    try:
-        threading.Timer(1.2, lambda: webbrowser.open("http://localhost:8000")).start()
-    except Exception:
-        pass
+    base_url = f"http://{host}:{bound_port}"
+    print("Starting Aether Workspace UI...")
+    print(f"\n  ► Aether runtime ready at: {base_url}")
+    if token:
+        print(f"  ► Session token authentication enabled.")
+    print()
+    sys.stdout.flush()
 
-    uvicorn.run("aether.server.app:app", host="0.0.0.0", port=8000, reload=False)
+    if not no_browser and bound_port != 0 and port != 0:
+        try:
+            threading.Timer(1.2, lambda: webbrowser.open(base_url)).start()
+        except Exception:
+            pass
+
+    config = uvicorn.Config(app, host=host, port=bound_port, reload=False, log_level="info")
+    server = uvicorn.Server(config)
+    app.state.uvicorn_server = server
+
+    if sock is not None:
+        server.run(sockets=[sock])
+    else:
+        server.run()
+
 
 def _cmd_knowledge_add(args) -> None:
     path = Path(args.path)
@@ -370,7 +416,12 @@ def main() -> None:
     run_p.add_argument("--model", help="Override model")
 
     # ---- ui ----
-    ui_p = subparsers.add_parser("ui", help="Start the Aether Web UI")
+    ui_p = subparsers.add_parser("ui", help="Start the Aether Web UI / Desktop runtime")
+    ui_p.add_argument("--host", default="127.0.0.1", help="Host address to bind (default: 127.0.0.1)")
+    ui_p.add_argument("--port", type=int, default=8000, help="Port to listen on (use 0 for ephemeral port, default: 8000)")
+    ui_p.add_argument("--data-dir", help="Root data directory for Aether configuration and workspaces")
+    ui_p.add_argument("--token", help="Session token for local API and WebSocket authentication")
+    ui_p.add_argument("--no-browser", action="store_true", help="Do not automatically launch a web browser window")
 
     # ---- knowledge ----
     know_p = subparsers.add_parser("knowledge", help="Manage team knowledge base")

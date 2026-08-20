@@ -1,4 +1,5 @@
 import { useState, useEffect } from 'react';
+import { apiUrl } from './api';
 
 export function ProviderSettings() {
   const [provider, setProvider] = useState('openai');
@@ -8,7 +9,7 @@ export function ProviderSettings() {
   const [saving, setSaving] = useState(false);
 
   useEffect(() => {
-    fetch('http://localhost:8000/api/settings/provider')
+    fetch(apiUrl('/api/settings/provider'))
       .then(res => res.json())
       .then(data => {
         setProvider(data.provider);
@@ -21,7 +22,7 @@ export function ProviderSettings() {
   const handleSave = async () => {
     setSaving(true);
     try {
-      const res = await fetch('http://localhost:8000/api/settings/provider', {
+      const res = await fetch(apiUrl('/api/settings/provider'), {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ provider, model, api_key: apiKey || null })

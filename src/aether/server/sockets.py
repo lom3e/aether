@@ -11,14 +11,61 @@ from fastapi import APIRouter, WebSocket, WebSocketDisconnect
 
 from aether.coordination.events import AgentEvent, EventType
 
+import os
+import re
+
 logger = logging.getLogger(__name__)
 router = APIRouter()
+
+_ALLOWED_ORIGIN_REGEX = re.compile(
+    r"^(http://(localhost|127\.0\.0\.1)(:\d+)?|tauri://localhost|https://tauri\.localhost|app://localhost)$"
+)
 
 
 @router.websocket("/ws/chat")
 async def websocket_endpoint(websocket: WebSocket) -> None:
-    await websocket.accept()
     app = websocket.app
+
+    # 1. Origin validation
+    ws_headers = getattr(websocket, "headers", None) or {}
+    ws_params = getattr(websocket, "query_params", None) or {}
+    origin = ws_headers.get("origin") if hasattr(ws_headers, "get") else None
+    if origin:
+        extra_origins = [
+            o.strip() for o in os.environ.get("AETHER_ALLOWED_ORIGINS", "").split(",") if o.strip()
+        ]
+        if not _ALLOWED_ORIGIN_REGEX.match(origin) and origin not in extra_origins:
+            await websocket.accept()
+            await websocket.send_json({"type": "error", "message": "Forbidden: invalid origin."})
+            await websocket.close(code=1008)
+            return
+
+    # 2. Token authentication
+    session_token = getattr(app.state, "session_token", None) or os.environ.get("AETHER_SESSION_TOKEN")
+    if session_token:
+        token_candidate = None
+        if hasattr(ws_params, "get"):
+            token_candidate = ws_params.get("token")
+        if not token_candidate and hasattr(ws_headers, "get"):
+            token_candidate = ws_headers.get("X-Aether-Session-Token") or ws_headers.get("authorization")
+
+        if token_candidate and token_candidate.startswith("Bearer "):
+            token_candidate = token_candidate[7:]
+
+        if not token_candidate or token_candidate != session_token:
+            await websocket.accept()
+            await websocket.send_json({"type": "error", "message": "Unauthorized: invalid or missing session token."})
+            await websocket.close(code=1008)
+            return
+
+    # 3. Shutdown check
+    if getattr(app.state, "is_shutting_down", False):
+        await websocket.accept()
+        await websocket.send_json({"type": "error", "message": "Server is shutting down."})
+        await websocket.close(code=1001)
+        return
+
+    await websocket.accept()
     workspace = getattr(app.state, "workspace", None)
     if workspace is None:
         await websocket.send_json({"type": "error", "message": "Workspace is not initialized."})

@@ -13,6 +13,11 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
+from aether.core.paths import (
+    get_default_workspaces_dir,
+    get_global_config_path,
+    get_workspaces_registry_path,
+)
 from aether.workspace.workspace import Workspace, WorkspaceError
 
 
@@ -20,9 +25,9 @@ _SLUG_PATTERN = re.compile(r"[^a-zA-Z0-9_\-]+")
 
 
 def _get_registry_path() -> Path:
-    base = Path.home() / ".aether"
-    base.mkdir(parents=True, exist_ok=True)
-    return base / "workspaces.json"
+    registry_file = get_workspaces_registry_path()
+    registry_file.parent.mkdir(parents=True, exist_ok=True)
+    return registry_file
 
 
 def _slugify(name: str) -> str:
@@ -251,7 +256,7 @@ class WorkspaceRegistry:
             if _is_protected_path(ws_dir):
                 raise WorkspaceError(f"Cannot create workspace in protected system directory: {ws_dir}")
         else:
-            base_dir = Path.home() / ".aether" / "workspaces"
+            base_dir = get_default_workspaces_dir()
             base_dir.mkdir(parents=True, exist_ok=True)
             ws_dir = base_dir / slug
             counter = 1
@@ -374,7 +379,7 @@ agents:
 
         # Clean global config if deleted workspace was active
         try:
-            cfg_path = Path.home() / ".aether" / "config.json"
+            cfg_path = get_global_config_path()
             if cfg_path.exists():
                 with open(cfg_path, "r", encoding="utf-8") as f:
                     cfg_data = json.load(f)

@@ -1,7 +1,7 @@
 import { useState, useEffect, useRef, useContext } from 'react';
 import { Send, Sparkles, Square, Plus } from 'lucide-react';
 import { ToastContext } from './toast';
-import { apiUrl } from './api';
+import { apiUrl, getSessionToken } from './api';
 import { useTranslation } from './i18n';
 import { useTheme } from './theme';
 import { WorkforcePresence } from './WorkforcePresence';
@@ -90,7 +90,9 @@ export function Chat({
 
   // Connect WebSocket
   useEffect(() => {
-    const wsUrl = apiUrl('/ws/chat').replace(/^http/, 'ws');
+    const token = getSessionToken();
+    const baseWs = apiUrl('/ws/chat').replace(/^http/, 'ws');
+    const wsUrl = token ? `${baseWs}?token=${encodeURIComponent(token)}` : baseWs;
     const ws = new WebSocket(wsUrl);
     socketRef.current = ws;
 

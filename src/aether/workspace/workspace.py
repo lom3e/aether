@@ -10,13 +10,15 @@ from aether.team.loader import TeamLoader
 
 import json
 
+from aether.core.paths import get_global_config_path
+
 class WorkspaceError(Exception):
     pass
 
 def _get_global_config_path() -> Path:
     # The global file is only a convenience pointer, never workspace state.
-    # Reading it must not create ~/.aether as a side effect of starting the API.
-    return Path.home() / ".aether" / "config.json"
+    # Reading it must not create data directory as a side effect of starting the API.
+    return get_global_config_path()
 
 def _save_last_workspace(path: str | Path) -> None:
     try:

@@ -1,3 +1,5 @@
+import asyncio
+import json
 from fastapi import APIRouter, Request, HTTPException, UploadFile, File, status
 from pydantic import BaseModel, Field
 from typing import Any
@@ -7,7 +9,54 @@ import re
 import uuid
 from pathlib import Path
 
+from aether.core.paths import get_global_config_path
+
 router = APIRouter()
+
+@router.get("/health")
+async def health(request: Request):
+    """Fast, workspace-independent health check endpoint."""
+    from aether import __version__
+    ws = getattr(request.app.state, "workspace", None)
+    bound_host = getattr(request.app.state, "bound_host", None)
+    bound_port = getattr(request.app.state, "bound_port", None)
+    return {
+        "status": "ok",
+        "version": __version__,
+        "workspace_initialized": ws is not None,
+        "workspace_root": str(ws.root) if ws is not None else None,
+        "host": bound_host,
+        "port": bound_port,
+    }
+
+
+@router.post("/system/shutdown")
+async def system_shutdown(request: Request):
+    """Gracefully terminate active tasks, sockets, and signal the runtime to exit."""
+    app = request.app
+    app.state.is_shutting_down = True
+
+    # 1. Gracefully cancel all active tasks
+    active_tasks = getattr(app.state, "active_tasks", {})
+    cancelled_count = 0
+    for session_id, task in list(active_tasks.items()):
+        if not task.done():
+            task.cancel()
+            cancelled_count += 1
+
+    # 2. Trigger Uvicorn server exit if running via uvicorn.Server
+    server = getattr(app.state, "uvicorn_server", None)
+    if server is not None:
+        async def trigger_exit():
+            await asyncio.sleep(0.05)
+            server.should_exit = True
+        asyncio.create_task(trigger_exit())
+
+    return {
+        "status": "shutting_down",
+        "message": "Aether runtime is shutting down cleanly.",
+        "active_tasks_cancelled": cancelled_count,
+    }
 
 _VALID_PROVIDERS = {"openai", "anthropic", "gemini", "ollama", "mock"}
 _VALID_KNOWLEDGE_EXTENSIONS = {".txt", ".md", ".markdown", ".csv", ".pdf"}
@@ -1044,11 +1093,10 @@ async def switch_workspace(request: Request, data: SwitchWorkspacePayload):
 
         WorkspaceRegistry.register(ws.root)
 
-        # Persist active workspace in ~/.aether/config.json for automatic restoration on restart
+        # Persist active workspace in config.json for automatic restoration on restart
         try:
-            cfg_dir = Path.home() / ".aether"
-            cfg_dir.mkdir(parents=True, exist_ok=True)
-            cfg_file = cfg_dir / "config.json"
+            cfg_file = get_global_config_path()
+            cfg_file.parent.mkdir(parents=True, exist_ok=True)
             cfg_data = {}
             if cfg_file.exists():
                 try:

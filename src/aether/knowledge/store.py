@@ -20,7 +20,8 @@ from typing import Any
 from aether.knowledge.chunk import KnowledgeChunk
 
 
-_DEFAULT_DB_PATH = "~/.aether/knowledge.db"
+from aether.core.paths import get_default_knowledge_db_path
+from aether.core.sqlite import get_sqlite_connection
 
 
 class KnowledgeStore:
@@ -30,21 +31,19 @@ class KnowledgeStore:
     Parameters
     ----------
     db_path:
-        Path to the SQLite database file. Defaults to
-        ``~/.aether/knowledge.db``. Pass ``:memory:`` for an ephemeral
+        Path to the SQLite database file. Defaults to the configured Aether
+        data directory knowledge.db. Pass ``:memory:`` for an ephemeral
         in-memory store (useful for testing).
     """
 
     def __init__(self, db_path: str | None = None) -> None:
-        import os
-
         if db_path is None:
-            resolved = Path(os.path.expanduser(_DEFAULT_DB_PATH))
+            resolved = get_default_knowledge_db_path()
             resolved.parent.mkdir(parents=True, exist_ok=True)
             db_path = str(resolved)
 
         self._db_path = db_path
-        self._conn = sqlite3.connect(db_path, check_same_thread=False)
+        self._conn = get_sqlite_connection(db_path, check_same_thread=False)
         self._lock = threading.Lock()
         self._init_db()
 

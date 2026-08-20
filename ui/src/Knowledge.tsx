@@ -95,31 +95,9 @@ export function Knowledge() {
   return (
     <div style={{ flex: 1, overflowY: 'auto' }}>
       <div className="top-header">
-        <div>
-          <div className="top-header-title">Knowledge Base</div>
-          <div style={{ display: 'flex', gap: '8px', marginTop: '6px' }}>
-            <button
-              className={`btn btn-ghost ${activeTab === 'all' ? 'active' : ''}`}
-              style={{ padding: '4px 10px', fontSize: '13px', borderBottom: activeTab === 'all' ? '2px solid hsl(var(--primary))' : 'none' }}
-              onClick={() => setActiveTab('all')}
-            >
-              All ({documents.length})
-            </button>
-            <button
-              className={`btn btn-ghost ${activeTab === 'workspace' ? 'active' : ''}`}
-              style={{ padding: '4px 10px', fontSize: '13px', borderBottom: activeTab === 'workspace' ? '2px solid hsl(var(--primary))' : 'none' }}
-              onClick={() => setActiveTab('workspace')}
-            >
-              Workspace ({workspaceCount})
-            </button>
-            <button
-              className={`btn btn-ghost ${activeTab === 'system' ? 'active' : ''}`}
-              style={{ padding: '4px 10px', fontSize: '13px', borderBottom: activeTab === 'system' ? '2px solid hsl(var(--primary))' : 'none' }}
-              onClick={() => setActiveTab('system')}
-            >
-              System / Official ({systemCount})
-            </button>
-          </div>
+        <div className="top-header-title">
+          <Database size={18} className="text-primary" />
+          <span>Knowledge Base</span>
         </div>
 
         <div>
@@ -138,6 +116,50 @@ export function Knowledge() {
       </div>
 
       <div style={{ padding: '32px', maxWidth: '1200px', margin: '0 auto' }}>
+        <div style={{ display: 'flex', gap: '8px', marginBottom: '20px', borderBottom: '1px solid hsl(var(--border))', paddingBottom: '8px' }}>
+          <button
+            className={`btn btn-ghost ${activeTab === 'all' ? 'active' : ''}`}
+            style={{
+              padding: '6px 12px',
+              fontSize: '13px',
+              fontWeight: activeTab === 'all' ? 600 : 400,
+              color: activeTab === 'all' ? 'hsl(var(--primary))' : 'hsl(var(--muted-fg))',
+              borderBottom: activeTab === 'all' ? '2px solid hsl(var(--primary))' : '2px solid transparent',
+              borderRadius: 0
+            }}
+            onClick={() => setActiveTab('all')}
+          >
+            All ({documents.length})
+          </button>
+          <button
+            className={`btn btn-ghost ${activeTab === 'workspace' ? 'active' : ''}`}
+            style={{
+              padding: '6px 12px',
+              fontSize: '13px',
+              fontWeight: activeTab === 'workspace' ? 600 : 400,
+              color: activeTab === 'workspace' ? 'hsl(var(--primary))' : 'hsl(var(--muted-fg))',
+              borderBottom: activeTab === 'workspace' ? '2px solid hsl(var(--primary))' : '2px solid transparent',
+              borderRadius: 0
+            }}
+            onClick={() => setActiveTab('workspace')}
+          >
+            Workspace ({workspaceCount})
+          </button>
+          <button
+            className={`btn btn-ghost ${activeTab === 'system' ? 'active' : ''}`}
+            style={{
+              padding: '6px 12px',
+              fontSize: '13px',
+              fontWeight: activeTab === 'system' ? 600 : 400,
+              color: activeTab === 'system' ? 'hsl(var(--primary))' : 'hsl(var(--muted-fg))',
+              borderBottom: activeTab === 'system' ? '2px solid hsl(var(--primary))' : '2px solid transparent',
+              borderRadius: 0
+            }}
+            onClick={() => setActiveTab('system')}
+          >
+            System / Official ({systemCount})
+          </button>
+        </div>
         {filteredDocs.length > 0 ? (
           <div className="card" style={{ padding: 0, overflow: 'hidden' }}>
             <table className="table">

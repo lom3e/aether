@@ -1,5 +1,5 @@
 import { useState, useEffect, useContext } from 'react';
-import { Bot, Library, FileText, Layers, ArrowRight } from 'lucide-react';
+import { ShoppingBag, Bot, Library, FileText, Layers, ArrowRight } from 'lucide-react';
 import { ToastContext } from './toast';
 import { apiError, apiUrl } from './api';
 
@@ -39,18 +39,22 @@ export function Marketplace() {
   };
 
   return (
-    <div style={{ flex: 1, overflowY: 'auto', padding: '48px' }}>
-      <div style={{ maxWidth: '1000px', margin: '0 auto' }}>
-        <div style={{ display: 'flex', alignItems: 'center', gap: '16px', marginBottom: '8px' }}>
-          <h1>Workforce Packs & Marketplace</h1>
-          <span className="badge badge-success" style={{ fontSize: '12px', padding: '4px 10px' }}>Alpha Official Presets</span>
+    <div style={{ flex: 1, overflowY: 'auto' }}>
+      <div className="top-header">
+        <div className="top-header-title">
+          <ShoppingBag size={18} className="text-primary" />
+          <span>Workforce Marketplace</span>
         </div>
-        <p className="text-muted" style={{ fontSize: '17px', marginBottom: '36px', maxWidth: '680px' }}>
+        <span className="badge badge-success" style={{ fontSize: '11px', padding: '4px 10px' }}>Alpha Official Presets</span>
+      </div>
+
+      <div style={{ maxWidth: '1000px', margin: '32px auto', padding: '0 32px' }}>
+        <p className="text-muted" style={{ fontSize: '15px', marginBottom: '28px' }}>
           Official workforce starter packs and pre-configured teams ready to deploy in your workspace.
         </p>
 
-        <h2 style={{ marginBottom: '16px', fontSize: '20px' }}>Official Built-in Presets</h2>
-        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '16px', marginBottom: '48px' }}>
+        <h2 style={{ marginBottom: '16px', fontSize: '18px' }}>Official Built-in Presets</h2>
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(340px, 1fr))', gap: '20px', marginBottom: '44px' }}>
           {presets.map(preset => (
             <div key={preset.id} className="card" style={{ padding: '24px', display: 'flex', flexDirection: 'column', justifyContent: 'space-between' }}>
               <div>
@@ -66,7 +70,7 @@ export function Marketplace() {
                 </p>
 
                 <div style={{ marginBottom: '16px' }}>
-                  <div style={{ fontSize: '12px', fontWeight: 600, color: 'hsl(var(--muted-foreground))', marginBottom: '6px' }}>
+                  <div style={{ fontSize: '12px', fontWeight: 600, color: 'hsl(var(--muted-fg))', marginBottom: '6px' }}>
                     INCLUDED AGENTS & ROLES:
                   </div>
                   <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
@@ -79,7 +83,7 @@ export function Marketplace() {
                   </div>
                 </div>
 
-                <div style={{ fontSize: '12px', color: 'hsl(var(--muted-foreground))', marginBottom: '20px' }}>
+                <div style={{ fontSize: '12px', color: 'hsl(var(--muted-fg))', marginBottom: '20px' }}>
                   <strong>Knowledge:</strong> {preset.knowledge_packs.join(', ') || 'None'}
                 </div>
               </div>
@@ -96,24 +100,24 @@ export function Marketplace() {
           ))}
         </div>
 
-        <h2 style={{ marginBottom: '16px', fontSize: '20px' }}>Community Ecosystem (Coming Soon)</h2>
-        <div className="grid-container" style={{ padding: 0, marginBottom: '48px' }}>
-          <div className="card" style={{ opacity: 0.8 }}>
-            <Bot size={28} className="text-primary" style={{ marginBottom: '12px' }} />
-            <h3 style={{ marginBottom: '6px', fontSize: '16px' }}>Community Agent Packs</h3>
-            <p className="text-muted" style={{ fontSize: '13px' }}>Pre-configured specialized agents in marketing, code review, sales operations, and customer support.</p>
+        <h2 style={{ marginBottom: '16px', fontSize: '18px' }}>Community Ecosystem (Coming Soon)</h2>
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(260px, 1fr))', gap: '16px', marginBottom: '48px' }}>
+          <div className="card" style={{ opacity: 0.85, padding: '20px' }}>
+            <Bot size={26} className="text-primary" style={{ marginBottom: '12px' }} />
+            <h3 style={{ marginBottom: '6px', fontSize: '15px' }}>Community Agent Packs</h3>
+            <p className="text-muted" style={{ fontSize: '13px', lineHeight: 1.4 }}>Pre-configured specialized agents in marketing, code review, sales operations, and customer support.</p>
           </div>
 
-          <div className="card" style={{ opacity: 0.8 }}>
-            <Library size={28} className="text-primary" style={{ marginBottom: '12px' }} />
-            <h3 style={{ marginBottom: '6px', fontSize: '16px' }}>Skill Libraries</h3>
-            <p className="text-muted" style={{ fontSize: '13px' }}>Modular capabilities for GitHub, Jira, web search, database querying, and browser automation.</p>
+          <div className="card" style={{ opacity: 0.85, padding: '20px' }}>
+            <Library size={26} className="text-primary" style={{ marginBottom: '12px' }} />
+            <h3 style={{ marginBottom: '6px', fontSize: '15px' }}>Skill Libraries</h3>
+            <p className="text-muted" style={{ fontSize: '13px', lineHeight: 1.4 }}>Modular capabilities for GitHub, Jira, web search, database querying, and browser automation.</p>
           </div>
 
-          <div className="card" style={{ opacity: 0.8 }}>
-            <FileText size={28} className="text-primary" style={{ marginBottom: '12px' }} />
-            <h3 style={{ marginBottom: '6px', fontSize: '16px' }}>Knowledge Packs</h3>
-            <p className="text-muted" style={{ fontSize: '13px' }}>Curated industry datasets, standards, compliance guidelines, and domain frameworks.</p>
+          <div className="card" style={{ opacity: 0.85, padding: '20px' }}>
+            <FileText size={26} className="text-primary" style={{ marginBottom: '12px' }} />
+            <h3 style={{ marginBottom: '6px', fontSize: '15px' }}>Knowledge Packs</h3>
+            <p className="text-muted" style={{ fontSize: '13px', lineHeight: 1.4 }}>Curated industry datasets, standards, compliance guidelines, and domain frameworks.</p>
           </div>
         </div>
       </div>

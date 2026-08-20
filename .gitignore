@@ -125,4 +125,12 @@ data/
 scratch/
 ui/node_modules/
 ui/dist/
+website/node_modules/
+website/.next/
+website/out/
 .aether/
+
+# --- Tauri Desktop Build Artifacts & Sidecars ---
+src-tauri/target/
+src-tauri/binaries/
+src-tauri/resources/

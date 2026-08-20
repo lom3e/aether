@@ -236,7 +236,7 @@ export function Sidebar({
                   flexShrink: 0
                 }}>
                   <img
-                    src={isDark ? "/brand/logo_bianco.svg" : "/brand/logo_nero.svg"}
+                    src={isDark ? "/brand/logo_bianco.svg" : "/brand/logo_viola.svg"}
                     alt="Aether Logo"
                     width="18"
                     height="18"
@@ -286,7 +286,7 @@ export function Sidebar({
               aria-label="Expand Sidebar"
             >
               <img
-                src={isDark ? "/brand/logo_bianco.svg" : "/brand/logo_nero.svg"}
+                src={isDark ? "/brand/logo_bianco.svg" : "/brand/logo_viola.svg"}
                 alt="Aether Logo"
                 width="26"
                 height="26"

@@ -7,6 +7,8 @@ from datetime import datetime
 from typing import Any
 
 from aether.memory.base import BaseMemoryStore, MemoryDocument
+from aether.core.paths import get_default_memory_db_path
+from aether.core.sqlite import get_sqlite_connection
 
 
 class SemanticMemory(BaseMemoryStore):
@@ -16,14 +18,14 @@ class SemanticMemory(BaseMemoryStore):
     """
 
     def __init__(self, db_path: str | None = None) -> None:
-        import os
         using_default_path = db_path is None
         if db_path is None:
-            db_path = os.path.expanduser("~/.aether/memory.db")
-            os.makedirs(os.path.dirname(db_path), exist_ok=True)
+            resolved = get_default_memory_db_path()
+            resolved.parent.mkdir(parents=True, exist_ok=True)
+            db_path = str(resolved)
 
         self.db_path = db_path
-        self._conn = sqlite3.connect(self.db_path, check_same_thread=False)
+        self._conn = get_sqlite_connection(self.db_path, check_same_thread=False)
         self._lock = threading.Lock()
         try:
             self._init_db()
@@ -40,7 +42,7 @@ class SemanticMemory(BaseMemoryStore):
             # The global default is a convenience. A locked-down installation
             # must still be able to run; explicit db paths remain strict.
             self.db_path = ":memory:"
-            self._conn = sqlite3.connect(self.db_path, check_same_thread=False)
+            self._conn = get_sqlite_connection(self.db_path, check_same_thread=False)
             self._init_db()
 
     def _init_db(self) -> None:
