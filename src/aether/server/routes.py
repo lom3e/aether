@@ -556,6 +556,9 @@ async def save_provider_settings(request: Request, data: ProviderSettings):
         team_path = _active_team_path(request, ws)
         TeamLoader.to_yaml(team.config, team_path)
 
+        # Reload team in state so all agents are immediately re-instantiated with the new provider & model
+        request.app.state.team = ws.load_team(_active_team_key(request, ws))
+
     return {"status": "ok"}
 
 @router.post("/settings/provider/test")

@@ -32,8 +32,11 @@ export function Chat({
   const [teamInfo, setTeamInfo] = useState<{ name: string; agents: any[] }>({ name: 'Workforce', agents: [] });
   const [activeAgents, setActiveAgents] = useState<string[]>([]);
   const [waitingAgent, setWaitingAgent] = useState<string | null>(null);
+  const [isConnected, setIsConnected] = useState(true);
 
   const socketRef = useRef<WebSocket | null>(null);
+  const reconnectAttemptsRef = useRef(0);
+  const reconnectTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const showToast = useContext(ToastContext);
@@ -88,124 +91,198 @@ export function Chat({
       });
   }, [conversationId]);
 
-  // Connect WebSocket
+  // Connect WebSocket with resilient auto-reconnect
   useEffect(() => {
-    const token = getSessionToken();
-    const baseWs = apiUrl('/ws/chat').replace(/^http/, 'ws');
-    const wsUrl = token ? `${baseWs}?token=${encodeURIComponent(token)}` : baseWs;
-    const ws = new WebSocket(wsUrl);
-    socketRef.current = ws;
+    let isMounted = true;
 
-    ws.onmessage = (event) => {
-      try {
-        const data = JSON.parse(event.data);
+    const connectWebSocket = () => {
+      if (!isMounted) return;
+      const token = getSessionToken();
+      const baseWs = apiUrl('/ws/chat').replace(/^http/, 'ws');
+      const wsUrl = token ? `${baseWs}?token=${encodeURIComponent(token)}` : baseWs;
+      const ws = new WebSocket(wsUrl);
+      socketRef.current = ws;
 
-        if (data.type === 'task_started') {
-          if (!data.session_id || data.session_id === conversationId) {
-            setLoading(true);
-            setTaskStatus('active');
-            setActiveAgents(['manager']);
-          }
-          onConversationUpdated();
-        } else if (data.type === 'activity') {
-          const newAct: ActivityItem = {
-            id: String(Date.now() + Math.random()),
-            agent: data.agent || 'Workforce',
-            type: data.event || data.activity_type || '',
-            message: data.message || '',
-            timestamp: new Date().toISOString(),
-            metadata: data.metadata || data.data
-          };
-          setActivities(prev => [...prev, newAct]);
+      ws.onopen = () => {
+        if (!isMounted) return;
+        setIsConnected(true);
+        reconnectAttemptsRef.current = 0;
+      };
 
-          if (data.agent && !activeAgents.includes(data.agent)) {
-            setActiveAgents(prev => Array.from(new Set([...prev, data.agent])));
-          }
-        } else if (data.type === 'interrupt') {
-          if (!data.session_id || data.session_id === conversationId) {
-            setWaitingAgent(data.agent || 'manager');
-            const interruptMsg: ChatMessage = {
-              id: data.interrupt_id || String(Date.now()),
-              role: 'assistant',
-              agent_name: data.agent || 'Workforce Coordinator',
-              content: data.message || '',
-              interrupt: {
-                type: data.interrupt_type || 'approval',
-                message: data.message || '',
-                interrupt_id: data.interrupt_id
-              }
+      ws.onmessage = (event) => {
+        if (!isMounted) return;
+        try {
+          const data = JSON.parse(event.data);
+
+          if (data.type === 'task_started') {
+            if (!data.session_id || data.session_id === conversationId) {
+              setLoading(true);
+              setTaskStatus('active');
+              setActiveAgents(['manager']);
+            }
+            onConversationUpdated();
+          } else if (data.type === 'activity') {
+            const newAct: ActivityItem = {
+              id: String(Date.now() + Math.random()),
+              agent: data.agent || 'Workforce',
+              type: data.event || data.activity_type || '',
+              message: data.message || '',
+              timestamp: new Date().toISOString(),
+              metadata: data.metadata || data.data
             };
-            setMessages(prev => [...prev, interruptMsg]);
-          }
-        } else if (data.type === 'task_completed') {
-          if (!data.session_id || data.session_id === conversationId) {
-            setLoading(false);
-            setTaskStatus(data.success ? 'completed' : 'failed');
-            setActiveAgents([]);
-            setWaitingAgent(null);
+            setActivities(prev => [...prev, newAct]);
 
-            if (conversationId) {
-              fetch(apiUrl(`/api/conversations/${conversationId}`))
-                .then(res => res.json())
-                .then(convData => {
-                  if (convData && convData.messages) {
-                    setMessages(convData.messages);
-                    if (convData.activities) setActivities(convData.activities);
-                  }
-                })
-                .catch(console.error);
-            } else if (data.content) {
-              const botMsg: ChatMessage = {
-                id: String(Date.now()),
+            if (data.agent && !activeAgents.includes(data.agent)) {
+              setActiveAgents(prev => Array.from(new Set([...prev, data.agent])));
+            }
+          } else if (data.type === 'interrupt') {
+            if (!data.session_id || data.session_id === conversationId) {
+              setWaitingAgent(data.agent || 'manager');
+              const interruptMsg: ChatMessage = {
+                id: data.interrupt_id || String(Date.now()),
                 role: 'assistant',
-                agent_name: data.agent || 'Manager',
-                content: data.content,
-                created_at: new Date().toISOString()
+                agent_name: data.agent || 'Workforce Coordinator',
+                content: data.message || '',
+                interrupt: {
+                  type: data.interrupt_type || 'approval',
+                  message: data.message || '',
+                  interrupt_id: data.interrupt_id
+                }
               };
-              setMessages(prev => [...prev, botMsg]);
+              setMessages(prev => [...prev, interruptMsg]);
             }
-          }
-          onConversationUpdated();
-        } else if (data.type === 'task_stopped') {
-          if (!data.session_id || data.session_id === conversationId) {
-            setLoading(false);
-            setTaskStatus('interrupted');
-            setActiveAgents([]);
-            setWaitingAgent(null);
-            showToast('Task execution stopped by user.', 'info');
-            if (conversationId) {
-              fetch(apiUrl(`/api/conversations/${conversationId}`))
-                .then(res => res.json())
-                .then(convData => {
-                  if (convData) {
-                    if (convData.messages) setMessages(convData.messages);
-                    if (convData.activities) setActivities(convData.activities);
+          } else if (data.type === 'task_completed') {
+            if (!data.session_id || data.session_id === conversationId) {
+              setLoading(false);
+              setTaskStatus(data.success ? 'completed' : 'failed');
+              setActiveAgents([]);
+              setWaitingAgent(null);
+
+              if (conversationId) {
+                fetch(apiUrl(`/api/conversations/${conversationId}`))
+                  .then(res => res.json())
+                  .then(convData => {
+                    if (convData && convData.messages) {
+                      setMessages(convData.messages);
+                      if (convData.activities) setActivities(convData.activities);
+                    }
+                  })
+                  .catch(console.error);
+              } else {
+                if (data.success && data.content) {
+                  const botMsg: ChatMessage = {
+                    id: String(Date.now()),
+                    role: 'assistant',
+                    agent_name: data.agent || 'Manager',
+                    content: data.content,
+                    created_at: new Date().toISOString()
+                  };
+                  setMessages(prev => [...prev, botMsg]);
+                } else if (!data.success) {
+                  const errorMsg: ChatMessage = {
+                    id: String(Date.now()),
+                    role: 'assistant',
+                    agent_name: data.agent || 'Workforce',
+                    content: '',
+                    created_at: new Date().toISOString(),
+                    metadata: {
+                      is_error: true,
+                      error: data.error_details || { message: data.error || 'Task failed.' }
+                    }
+                  };
+                  setMessages(prev => [...prev, errorMsg]);
+                }
+              }
+            }
+            onConversationUpdated();
+          } else if (data.type === 'task_stopped') {
+            if (!data.session_id || data.session_id === conversationId) {
+              setLoading(false);
+              setTaskStatus('interrupted');
+              setActiveAgents([]);
+              setWaitingAgent(null);
+              showToast('Task execution stopped by user.', 'info');
+              if (conversationId) {
+                fetch(apiUrl(`/api/conversations/${conversationId}`))
+                  .then(res => res.json())
+                  .then(convData => {
+                    if (convData) {
+                      if (convData.messages) setMessages(convData.messages);
+                      if (convData.activities) setActivities(convData.activities);
+                    }
+                  })
+                  .catch(console.error);
+              }
+            }
+            onConversationUpdated();
+          } else if (data.type === 'error') {
+            if (!data.session_id || data.session_id === conversationId) {
+              setLoading(false);
+              setTaskStatus('failed');
+              setActiveAgents([]);
+              setWaitingAgent(null);
+              if (conversationId) {
+                fetch(apiUrl(`/api/conversations/${conversationId}`))
+                  .then(res => res.json())
+                  .then(convData => {
+                    if (convData && convData.messages) {
+                      setMessages(convData.messages);
+                      if (convData.activities) setActivities(convData.activities);
+                    }
+                  })
+                  .catch(console.error);
+              } else {
+                const errorMsg: ChatMessage = {
+                  id: String(Date.now()),
+                  role: 'assistant',
+                  agent_name: 'Workforce',
+                  content: '',
+                  created_at: new Date().toISOString(),
+                  metadata: {
+                    is_error: true,
+                    error: { message: data.message || 'Task encountered an error.', code: 'TASK_FAILED', retryable: true }
                   }
-                })
-                .catch(console.error);
+                };
+                setMessages(prev => [...prev, errorMsg]);
+              }
             }
           }
-          onConversationUpdated();
-        } else if (data.type === 'error') {
-          if (!data.session_id || data.session_id === conversationId) {
-            setLoading(false);
-            setTaskStatus('failed');
-            setActiveAgents([]);
-            setWaitingAgent(null);
-            showToast(data.message || 'Task encountered an error.', 'error');
+        } catch (err) {
+          console.error('Error processing WebSocket message:', err);
+        }
+      };
+
+      ws.onerror = () => {
+        if (!isMounted) return;
+        setLoading(false);
+      };
+
+      ws.onclose = (event) => {
+        if (!isMounted) return;
+        setIsConnected(false);
+        if (event.code !== 1000 && event.code !== 1001) {
+          const attempts = reconnectAttemptsRef.current;
+          if (attempts < 5) {
+            const delay = Math.min(1000 * Math.pow(2, attempts), 10000);
+            reconnectAttemptsRef.current += 1;
+            reconnectTimeoutRef.current = setTimeout(() => {
+              if (isMounted) connectWebSocket();
+            }, delay);
           }
         }
-      } catch (err) {
-        console.error('Error processing WebSocket message:', err);
-      }
+      };
     };
 
-    ws.onerror = () => {
-      setLoading(false);
-    };
+    connectWebSocket();
 
     return () => {
-      ws.close();
+      isMounted = false;
+      if (reconnectTimeoutRef.current) {
+        clearTimeout(reconnectTimeoutRef.current);
+      }
+      if (socketRef.current) {
+        socketRef.current.close(1000);
+      }
     };
   }, [conversationId]);
 
@@ -394,6 +471,40 @@ export function Chat({
         activeAgents={activeAgents}
         waitingAgent={waitingAgent}
       />
+
+      {/* Reconnection Banner */}
+      {!isConnected && (
+        <div
+          data-testid="ws-disconnected-banner"
+          style={{
+            padding: '8px 24px',
+            backgroundColor: 'hsl(var(--warning-bg))',
+            borderBottom: '1px solid hsl(var(--warning)/0.3)',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'space-between',
+            fontSize: '12.5px',
+            color: 'hsl(var(--warning))',
+          }}
+        >
+          <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+            <div className="status-dot active" style={{ backgroundColor: 'hsl(var(--warning))' }} />
+            <span>{t('connectionLost')}</span>
+          </div>
+          <button
+            type="button"
+            className="btn btn-secondary"
+            style={{ padding: '2px 10px', fontSize: '11px', height: '26px' }}
+            onClick={() => {
+              if (socketRef.current) {
+                socketRef.current.close();
+              }
+            }}
+          >
+            {t('retry')}
+          </button>
+        </div>
+      )}
 
       {/* Messages Scroll Area */}
       <div style={{ flex: 1, overflowY: 'auto', padding: '24px 0', display: 'flex', flexDirection: 'column' }}>

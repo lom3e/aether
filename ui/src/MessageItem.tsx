@@ -2,6 +2,7 @@ import { useState } from 'react';
 import { Bot, User, Copy, Check, ShieldAlert, CheckCircle2, RotateCw, Edit2, Trash2 } from 'lucide-react';
 import { useTranslation } from './i18n';
 import { MarkdownRenderer } from './MarkdownRenderer';
+import { ChatErrorCard } from './ChatErrorCard';
 
 export interface ChatMessage {
   id: string;
@@ -96,6 +97,40 @@ export function MessageItem({
               <span className="badge" style={{ fontSize: '10px', background: 'hsl(var(--primary)/0.1)', color: 'hsl(var(--primary))' }}>
                 AI Workforce
               </span>
+            )}
+            {!isUser && message.metadata?.model && (
+              message.metadata.requested_model && message.metadata.requested_model !== message.metadata.model ? (
+                <span
+                  data-testid="model-fallback-badge"
+                  className="badge"
+                  style={{
+                    fontSize: '10.5px',
+                    background: 'hsl(var(--warning-bg))',
+                    color: 'hsl(var(--warning))',
+                    border: '1px solid hsl(var(--warning)/0.4)',
+                    display: 'inline-flex',
+                    alignItems: 'center',
+                    gap: '3px',
+                  }}
+                  title={`Requested: ${message.metadata.requested_model} → Executed: ${message.metadata.model}`}
+                >
+                  ⚡ {message.metadata.model}
+                </span>
+              ) : (
+                <span
+                  data-testid="model-badge"
+                  className="badge"
+                  style={{
+                    fontSize: '10.5px',
+                    background: 'hsl(var(--muted)/0.6)',
+                    color: 'hsl(var(--muted-fg))',
+                    border: '1px solid hsl(var(--border)/0.5)',
+                  }}
+                  title={`Provider: ${message.metadata?.provider || 'default'} | Model: ${message.metadata.model}`}
+                >
+                  {message.metadata.model}
+                </span>
+              )
             )}
             {message.created_at && (
               <span style={{ fontSize: '11px', color: 'hsl(var(--muted-fg))' }}>
@@ -231,6 +266,11 @@ export function MessageItem({
               </button>
             </div>
           </div>
+        ) : message.metadata?.is_error || message.metadata?.error ? (
+          <ChatErrorCard
+            error={message.metadata.error}
+            onRetry={onRetryResponse ? () => onRetryResponse(message.id) : undefined}
+          />
         ) : (
           <div style={{ fontSize: '14px', color: 'hsl(var(--fg))' }}>
             <MarkdownRenderer content={message.content} />

@@ -36,6 +36,7 @@ from typing import Any, AsyncIterator, Iterator
 from aether.providers.base import AIProvider
 from aether.providers.errors import (
     AuthenticationError,
+    ModelNotFoundError,
     ProviderConnectionError,
     RateLimitError,
 )
@@ -324,12 +325,31 @@ class OllamaProvider(AIProvider):
             return []
 
     def _handle_http_error(self, exc: urllib.error.HTTPError) -> None:
+        error_body = ""
+        try:
+            raw_bytes = exc.read()
+            if raw_bytes:
+                error_body = raw_bytes.decode("utf-8", errors="replace")
+                try:
+                    parsed = json.loads(error_body)
+                    if isinstance(parsed, dict) and "error" in parsed:
+                        error_body = str(parsed["error"])
+                except Exception:
+                    pass
+        except Exception:
+            pass
+
         if exc.code == 401:
             raise AuthenticationError("Unauthorized — check API credentials.", provider="ollama") from exc
         if exc.code == 429:
             raise RateLimitError("Rate limit exceeded.", provider="ollama") from exc
+        if exc.code == 404 or "not found" in error_body.lower():
+            msg = error_body or f"Model '{self._model}' not found in Ollama."
+            raise ModelNotFoundError(msg, provider="ollama") from exc
+
+        detail = f": {error_body}" if error_body else f": {exc.reason}"
         raise ProviderConnectionError(
-            f"Ollama HTTP error {exc.code}: {exc.reason}",
+            f"Ollama HTTP error {exc.code}{detail}",
             provider="ollama",
         ) from exc
 

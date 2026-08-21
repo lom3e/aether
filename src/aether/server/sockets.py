@@ -10,6 +10,7 @@ from uuid import uuid4
 from fastapi import APIRouter, WebSocket, WebSocketDisconnect
 
 from aether.coordination.events import AgentEvent, EventType
+from aether.providers.errors import normalize_provider_error
 
 import os
 import re
@@ -191,36 +192,79 @@ async def websocket_endpoint(websocket: WebSocket) -> None:
 
             broadcast({"type": "task_started", "session_id": session_id})
 
+            prov_name = team.config.default_provider if (team and getattr(team, "config", None)) else "ollama"
+            model_name = team.config.default_model if (team and getattr(team, "config", None)) else "qwen3.5:9b"
+
             result = await asyncio.to_thread(team.run, content, session_id)
             agent_name = (result.metadata or {}).get("agent_name")
             if not agent_name:
-                entry = team.config.entry_agent()
+                entry = team.config.entry_agent() if (team and getattr(team, "config", None)) else None
                 agent_name = entry.name if entry else "Workforce"
 
-            try:
-                if result.output:
+            if result.success:
+                executed_model = (result.metadata or {}).get("provider_model") or model_name
+                msg_metadata = {
+                    "provider": prov_name,
+                    "model": executed_model,
+                    "requested_model": model_name,
+                }
+                try:
+                    if result.output:
+                        workspace.conversations.add_message(
+                            conv_id=session_id,
+                            role="assistant",
+                            content=result.output,
+                            agent_name=agent_name,
+                            metadata=msg_metadata,
+                        )
+                    workspace.conversations.update(
+                        conv_id=session_id,
+                        status="completed",
+                        last_message=result.output[:120] if result.output else "",
+                    )
+                except Exception:
+                    pass
+
+                broadcast({
+                    "type": "task_completed",
+                    "session_id": session_id,
+                    "success": True,
+                    "content": result.output,
+                    "error": None,
+                    "agent": agent_name,
+                    "model": executed_model,
+                })
+            else:
+                error_info = normalize_provider_error(
+                    result.error or "Task execution failed.",
+                    provider=prov_name,
+                    model=model_name,
+                )
+                try:
                     workspace.conversations.add_message(
                         conv_id=session_id,
                         role="assistant",
-                        content=result.output,
+                        content="",
                         agent_name=agent_name,
+                        metadata={"is_error": True, "error": error_info},
                     )
-                workspace.conversations.update(
-                    conv_id=session_id,
-                    status="completed" if result.success else "failed",
-                    last_message=result.output[:120] if result.output else (result.error or "")[:120],
-                )
-            except Exception:
-                pass
+                    workspace.conversations.update(
+                        conv_id=session_id,
+                        status="failed",
+                        last_message=error_info["message"][:120],
+                    )
+                except Exception:
+                    pass
 
-            broadcast({
-                "type": "task_completed",
-                "session_id": session_id,
-                "success": result.success,
-                "content": result.output,
-                "error": result.error,
-                "agent": agent_name,
-            })
+                broadcast({
+                    "type": "task_completed",
+                    "session_id": session_id,
+                    "success": False,
+                    "content": None,
+                    "error": error_info["message"],
+                    "error_details": error_info,
+                    "agent": agent_name,
+                })
         except asyncio.CancelledError:
             try:
                 workspace.conversations.update(
@@ -245,11 +289,29 @@ async def websocket_endpoint(websocket: WebSocket) -> None:
             })
             raise
         except Exception as exc:
+            prov_name = team.config.default_provider if (team and getattr(team, "config", None)) else "ollama"
+            model_name = team.config.default_model if (team and getattr(team, "config", None)) else "qwen3.5:9b"
+            error_info = normalize_provider_error(exc, provider=prov_name, model=model_name)
             try:
-                workspace.conversations.update(session_id, status="failed", last_message=str(exc)[:120])
+                workspace.conversations.add_message(
+                    conv_id=session_id,
+                    role="assistant",
+                    content="",
+                    agent_name="Workforce",
+                    metadata={"is_error": True, "error": error_info},
+                )
+                workspace.conversations.update(session_id, status="failed", last_message=error_info["message"][:120])
             except Exception:
                 pass
-            broadcast({"type": "error", "session_id": session_id, "message": str(exc).splitlines()[0][:500]})
+            broadcast({
+                "type": "task_completed",
+                "session_id": session_id,
+                "success": False,
+                "content": None,
+                "error": error_info["message"],
+                "error_details": error_info,
+                "agent": "Workforce",
+            })
         finally:
             if hasattr(app.state, "active_tasks"):
                 app.state.active_tasks.pop(session_id, None)
