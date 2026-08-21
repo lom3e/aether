@@ -48,7 +48,7 @@ export function CommandPalette({
     },
     {
       id: 'switch_workspace',
-      label: 'Switch Workspace (⌘⇧W)',
+      label: `${t('switchWorkspace')} (⌘⇧W)`,
       icon: <Layers size={16} className="text-primary" />,
       run: () => { onNavigate('settings'); onClose(); }
     },
@@ -155,7 +155,7 @@ export function CommandPalette({
             ref={inputRef}
             className="form-input"
             style={{ border: 'none', background: 'transparent', padding: '0', fontSize: '15px', boxShadow: 'none' }}
-            placeholder={t('searchPlaceholder')}
+            placeholder={t('cmdSearchPlaceholder')}
             value={query}
             onChange={e => { setQuery(e.target.value); setSelectedIndex(0); }}
             onKeyDown={handleKeyDown}
@@ -209,7 +209,7 @@ export function CommandPalette({
                     <div style={{ display: 'flex', alignItems: 'center', gap: '10px', overflow: 'hidden' }}>
                       <MessageSquare size={16} className="text-muted" />
                       <span style={{ textOverflow: 'ellipsis', overflow: 'hidden', whiteSpace: 'nowrap' }}>
-                        {conv.title || 'Untitled Task'}
+                        {conv.title || t('untitledTask')}
                       </span>
                     </div>
                     <span className="badge" style={{ fontSize: '10px', flexShrink: 0 }}>

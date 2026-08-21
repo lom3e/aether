@@ -2,6 +2,7 @@ import { useState, useEffect, useContext } from 'react';
 import { Plus, Trash2, Edit2, Layers, AlertTriangle, X } from 'lucide-react';
 import { apiUrl, apiError } from './api';
 import { ToastContext } from './toast';
+import { useTranslation } from './i18n';
 
 interface WorkspaceModalProps {
   isOpen: boolean;
@@ -24,6 +25,7 @@ export function WorkspaceModal({
   onWorkspaceSwitched,
   initialMode = 'create'
 }: WorkspaceModalProps) {
+  const { t } = useTranslation();
   const [mode, setMode] = useState<'create' | 'manage'>(initialMode);
   const [workspaces, setWorkspaces] = useState<any[]>([]);
   const [loading, setLoading] = useState(false);
@@ -234,14 +236,14 @@ export function WorkspaceModal({
               style={{ padding: '6px 12px', fontSize: '13px', fontWeight: 600 }}
               onClick={() => setMode('create')}
             >
-              <Plus size={15} /> New Workspace
+              <Plus size={15} /> {t('newWorkspace')}
             </button>
             <button
               className={`btn btn-ghost ${mode === 'manage' ? 'active' : ''}`}
               style={{ padding: '6px 12px', fontSize: '13px', fontWeight: 600 }}
               onClick={() => setMode('manage')}
             >
-              <Layers size={15} /> All Workspaces ({workspaces.length})
+              <Layers size={15} /> {t('allWorkspaces')} ({workspaces.length})
             </button>
           </div>
           <button className="btn btn-ghost" style={{ padding: '6px' }} onClick={onClose}>
@@ -255,12 +257,12 @@ export function WorkspaceModal({
             <form onSubmit={handleCreate} style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
               <div>
                 <label className="form-label" style={{ fontWeight: 600, fontSize: '13px' }}>
-                  Workspace Name
+                  {t('workspaceName')}
                 </label>
                 <input
                   type="text"
                   className="form-input"
-                  placeholder="e.g. Acme Robotics, Financial Research"
+                  placeholder={t('workspaceNamePlaceholder')}
                   value={name}
                   onChange={e => setName(e.target.value)}
                   required
@@ -270,12 +272,12 @@ export function WorkspaceModal({
 
               <div>
                 <label className="form-label" style={{ fontWeight: 600, fontSize: '13px' }}>
-                  Description (Optional)
+                  {t('descriptionOptional')}
                 </label>
                 <input
                   type="text"
                   className="form-input"
-                  placeholder="Short note about the purpose of this workspace"
+                  placeholder={t('workspaceDescPlaceholder')}
                   value={description}
                   onChange={e => setDescription(e.target.value)}
                 />
@@ -283,7 +285,7 @@ export function WorkspaceModal({
 
               <div>
                 <label className="form-label" style={{ fontWeight: 600, fontSize: '13px' }}>
-                  Starter Workforce Preset
+                  {t('starterWorkforcePreset')}
                 </label>
                 <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
                   <label
@@ -306,8 +308,8 @@ export function WorkspaceModal({
                       onChange={() => setPresetId('starter-workforce')}
                     />
                     <div>
-                      <div style={{ fontWeight: 600, fontSize: '13px' }}>Starter Workforce (Recommended)</div>
-                      <div style={{ fontSize: '12px', color: 'hsl(var(--muted-fg))' }}>Manager & Researcher with System Knowledge and web search.</div>
+                      <div style={{ fontWeight: 600, fontSize: '13px' }}>{t('starterWorkforceRecommended')}</div>
+                      <div style={{ fontSize: '12px', color: 'hsl(var(--muted-fg))' }}>{t('starterWorkforceDesc')}</div>
                     </div>
                   </label>
 
@@ -331,8 +333,8 @@ export function WorkspaceModal({
                       onChange={() => setPresetId('research-workforce')}
                     />
                     <div>
-                      <div style={{ fontWeight: 600, fontSize: '13px' }}>Research Workforce</div>
-                      <div style={{ fontSize: '12px', color: 'hsl(var(--muted-fg))' }}>Manager, Lead Researcher & Technical Writer.</div>
+                      <div style={{ fontWeight: 600, fontSize: '13px' }}>{t('researchWorkforce')}</div>
+                      <div style={{ fontSize: '12px', color: 'hsl(var(--muted-fg))' }}>{t('researchWorkforceDesc')}</div>
                     </div>
                   </label>
 
@@ -356,8 +358,8 @@ export function WorkspaceModal({
                       onChange={() => setPresetId('empty')}
                     />
                     <div>
-                      <div style={{ fontWeight: 600, fontSize: '13px' }}>Empty Workspace</div>
-                      <div style={{ fontSize: '12px', color: 'hsl(var(--muted-fg))' }}>Single default agent. Build your workforce from scratch.</div>
+                      <div style={{ fontWeight: 600, fontSize: '13px' }}>{t('emptyWorkspace')}</div>
+                      <div style={{ fontSize: '12px', color: 'hsl(var(--muted-fg))' }}>{t('emptyWorkspaceDesc')}</div>
                     </div>
                   </label>
                 </div>
@@ -365,7 +367,7 @@ export function WorkspaceModal({
 
               <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '12px' }}>
                 <div>
-                  <label className="form-label" style={{ fontWeight: 600, fontSize: '13px' }}>Provider</label>
+                  <label className="form-label" style={{ fontWeight: 600, fontSize: '13px' }}>{t('provider')}</label>
                   <select
                     className="form-select"
                     value={provider}
@@ -383,7 +385,7 @@ export function WorkspaceModal({
 
                 <div>
                   <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '6px' }}>
-                    <label className="form-label" style={{ fontWeight: 600, fontSize: '13px', margin: 0 }}>Model</label>
+                    <label className="form-label" style={{ fontWeight: 600, fontSize: '13px', margin: 0 }}>{t('model')}</label>
                     <button
                       type="button"
                       className="btn btn-ghost"
@@ -398,7 +400,7 @@ export function WorkspaceModal({
                         }
                       }}
                     >
-                      {isCustomModel ? 'Suggested list' : 'Custom model...'}
+                      {isCustomModel ? t('suggestedList') : t('customModel')}
                     </button>
                   </div>
                   {isCustomModel ? (
@@ -425,7 +427,7 @@ export function WorkspaceModal({
                       {availableModels.map(m => (
                         <option key={m} value={m}>{m}</option>
                       ))}
-                      <option value="__custom__">+ Other / Custom model...</option>
+                      <option value="__custom__">{t('otherCustomModel')}</option>
                     </select>
                   )}
                 </div>
@@ -433,7 +435,7 @@ export function WorkspaceModal({
 
               {provider !== 'ollama' && (
                 <div>
-                  <label className="form-label" style={{ fontWeight: 600, fontSize: '13px' }}>API Key</label>
+                  <label className="form-label" style={{ fontWeight: 600, fontSize: '13px' }}>{t('apiKey')}</label>
                   <input
                     type="password"
                     className="form-input"
@@ -446,10 +448,10 @@ export function WorkspaceModal({
 
               <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '10px', marginTop: '12px' }}>
                 <button type="button" className="btn btn-secondary" onClick={onClose}>
-                  Cancel
+                  {t('cancel')}
                 </button>
                 <button type="submit" className="btn btn-primary" disabled={loading || !name.trim()}>
-                  {loading ? 'Creating...' : 'Create & Open Workspace'}
+                  {loading ? t('creating') : t('createAndOpenWorkspace')}
                 </button>
               </div>
             </form>
@@ -485,10 +487,10 @@ export function WorkspaceModal({
                           }}
                         />
                         <button className="btn btn-primary" style={{ padding: '4px 8px', fontSize: '12px' }} onClick={() => handleRename(ws.id)}>
-                          Save
+                          {t('save')}
                         </button>
                         <button className="btn btn-secondary" style={{ padding: '4px 8px', fontSize: '12px' }} onClick={() => setEditingWsId(null)}>
-                          Cancel
+                          {t('cancel')}
                         </button>
                       </div>
                     ) : (
@@ -499,7 +501,7 @@ export function WorkspaceModal({
                           </span>
                           {ws.is_active && (
                             <span className="badge" style={{ fontSize: '10px', background: 'hsl(var(--primary))', color: 'hsl(var(--primary-fg))' }}>
-                              Active
+                              {t('statusActive')}
                             </span>
                           )}
                         </div>
@@ -517,13 +519,13 @@ export function WorkspaceModal({
                         style={{ padding: '5px 10px', fontSize: '12px' }}
                         onClick={() => handleSwitch(ws)}
                       >
-                        Switch
+                        {t('switchWorkspace')}
                       </button>
                     )}
                     <button
                       className="btn btn-ghost"
                       style={{ padding: '6px' }}
-                      title="Rename"
+                      title={t('rename')}
                       onClick={() => {
                         setEditingWsId(ws.id);
                         setRenameValue(ws.name);
@@ -535,7 +537,7 @@ export function WorkspaceModal({
                       <button
                         className="btn btn-ghost"
                         style={{ padding: '6px', color: 'hsl(var(--destructive))' }}
-                        title="Delete Workspace"
+                        title={t('deleteWorkspaceTitle')}
                         onClick={() => setDeletingWs(ws)}
                       >
                         <Trash2 size={14} />
@@ -573,17 +575,17 @@ export function WorkspaceModal({
             }}>
               <div style={{ display: 'flex', alignItems: 'center', gap: '10px', color: 'hsl(var(--destructive))' }}>
                 <AlertTriangle size={20} />
-                <h3 style={{ fontSize: '16px', fontWeight: 600 }}>Delete "{deletingWs.name}"?</h3>
+                <h3 style={{ fontSize: '16px', fontWeight: 600 }}>{t('deleteWorkspaceConfirmTitle')}</h3>
               </div>
               <p style={{ fontSize: '13px', color: 'hsl(var(--muted-fg))', lineHeight: 1.5 }}>
-                This permanently deletes this workspace directory, along with all its conversations, knowledge embeddings, and local data.
+                {t('deleteWorkspaceConfirmDesc')}
               </p>
               <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '10px', marginTop: '6px' }}>
                 <button className="btn btn-secondary" onClick={() => setDeletingWs(null)}>
-                  Cancel
+                  {t('cancel')}
                 </button>
                 <button className="btn btn-destructive" onClick={handleDelete}>
-                  Delete Workspace
+                  {t('deleteWorkspaceTitle')}
                 </button>
               </div>
             </div>

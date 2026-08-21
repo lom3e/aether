@@ -25,19 +25,24 @@ export function WorkforcePresence({
   const { t } = useTranslation();
 
   return (
-    <div style={{
-      display: 'flex',
-      alignItems: 'center',
-      gap: '16px',
-      padding: '8px 16px',
-      backgroundColor: 'hsl(var(--card))',
-      borderRadius: 'var(--radius)',
-      border: '1px solid hsl(var(--border))',
-      fontSize: '12px',
-      overflowX: 'auto'
-    }}>
-      <div style={{ display: 'flex', alignItems: 'center', gap: '6px', fontWeight: 600, color: 'hsl(var(--muted-fg))', textTransform: 'uppercase', fontSize: '11px', flexShrink: 0 }}>
-        <Cpu size={14} className="text-primary" />
+    <header
+      data-testid="workforce-presence-header"
+      className="top-header"
+      style={{
+        height: '56px',
+        borderBottom: '1px solid hsl(var(--border))',
+        display: 'flex',
+        alignItems: 'center',
+        justifyContent: 'space-between',
+        padding: '0 24px',
+        backgroundColor: 'hsl(var(--bg))',
+        fontSize: '12px',
+        overflowX: 'auto',
+        flexShrink: 0,
+      }}
+    >
+      <div style={{ display: 'flex', alignItems: 'center', gap: '8px', fontWeight: 600, color: 'hsl(var(--muted-fg))', textTransform: 'uppercase', fontSize: '11px', flexShrink: 0 }}>
+        <Cpu size={15} className="text-primary" />
         <span>{teamName || 'Workforce'}:</span>
       </div>
 
@@ -84,6 +89,6 @@ export function WorkforcePresence({
           );
         })}
       </div>
-    </div>
+    </header>
   );
 }

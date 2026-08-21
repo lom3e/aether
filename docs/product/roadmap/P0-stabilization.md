@@ -153,9 +153,9 @@ Rimuovere classi CSS duplicate, stili inline ridondanti e file non utilizzati, g
 | **P0-03** | **Creazione componente ChatErrorCard nella UI**: Componente `ChatErrorCard` in `ui/src/ChatErrorCard.tsx` integrato in `MessageItem.tsx` con badge, titolo chiaro, motivazione parlante, pulsante di retry e dettagli tecnici espandibili. | `ui/src/ChatErrorCard.tsx`, `ui/src/MessageItem.tsx` | ✅ Completato |
 | **P0-04** | **Flusso di Retry automatico e WebSocket Reconnect**: WebSocket reconnect con backoff esponenziale (fino a 5 tentativi), banner di disconnessione, e retry turn pulito senza duplicazione messaggi. | `ui/src/Chat.tsx`, `server/sockets.py`, `ui/src/i18n.tsx` | ✅ Completato |
 | **P0-05** | **Audit persistenza configurazione Provider nel runtime standalone**: `save_provider_settings` ricarica immediatamente `team` e i relativi agenti in memoria in `app.state.team`. | `server/routes.py` | ✅ Completato |
-| **P0-06** | **Creazione e migrazione TopHeader unificato**: Creare `ui/src/components/TopHeader.tsx` e migrare le pagine `Home.tsx`, `Chat.tsx`, `Teams.tsx`, `Knowledge.tsx`, `Settings.tsx`. | `ui/src/components/TopHeader.tsx`, `ui/src/*.tsx` | Da Iniziare |
-| **P0-07** | **Completamento dizionari i18n**: Estrarre tutte le stringhe residue in `i18n.tsx` e aggiungere le chiavi mancanti in italiano e inglese. | `ui/src/i18n.tsx`, `ui/src/*.tsx` | Da Iniziare |
-| **P0-08** | **Consolidamento CSS & Dead Code Cleanup**: Rimozione classi inutilizzate e allineamento variabili di colore. | `ui/src/index.css`, `ui/src/App.css` | Da Iniziare |
+| **P0-06** | **Creazione e migrazione TopHeader unificato**: Creato `ui/src/TopHeader.tsx` e migrate le view `Home.tsx`, `Agents.tsx`, `Teams.tsx`, `Knowledge.tsx`, `Marketplace.tsx`, `Settings.tsx`, `AgentProfile.tsx`, e variante coerente per `Chat.tsx` (`WorkforcePresence.tsx`). | `ui/src/TopHeader.tsx`, `ui/src/*.tsx` | ✅ Completato |
+| **P0-07** | **Completamento dizionari i18n**: Audit e migrazione completa di tutte le stringhe UI su dizionario unificato bilingue IT/EN (293 chiavi con simmetria 100%). | `ui/src/i18n.tsx`, `ui/src/*.tsx` | ✅ Completato |
+| **P0-08** | **Consolidamento CSS & Dead Code Cleanup**: Rimozione di file inutilizzati (`App.css`, `Onboarding.tsx`, `ProviderSettings.tsx`, `assets/`) e pulizia delle classi orfane in `index.css`. | `ui/src/index.css`, `ui/src/App.css` | ✅ Completato |
 
 ---
 
@@ -186,8 +186,87 @@ Rimuovere classi CSS duplicate, stili inline ridondanti e file non utilizzati, g
 
 ### Risultati Test Automatici
 - Suite `tests/test_p0_chat_reliability.py`: **8 test passati su 8**.
-- Suite completa `pytest`: **520 test passati / 0 falliti / 4 skipped**.
+- Suite completa `pytest`: **522 test passati / 0 falliti / 4 skipped**.
 - Frontend `ui`: `oxlint` e `vite build` completati con successo (0 errori).
 - Website `website`: `eslint` e `next build` completati con successo (0 errori).
 
+---
 
+## 4. Risoluzione & Verifica Tecnica P0-06 (Shared TopHeader)
+
+### Componente Creato
+- **`ui/src/TopHeader.tsx`**: Componente header condiviso universale che standardizza:
+  - `height: 56px`
+  - `border-bottom: 1px solid hsl(var(--border))`
+  - `title`, `subtitle` opzionale / badge
+  - `icon` (Lucide React) o `leading` element
+  - `actions` container flessibile
+  - Pieno riutilizzo dei token di design Aether esistenti (`hsl(var(--bg))`, `hsl(var(--card))`, `hsl(var(--border))`, `hsl(var(--fg))`).
+
+### View Migrate
+- **`ui/src/Home.tsx`**: Header standard con titolo di benvenuto, badge del workspace attivo e CTA `Start a Task`.
+- **`ui/src/Agents.tsx`**: Header standard con icona `Bot`, titolo e pulsante `Create Agent`.
+- **`ui/src/Teams.tsx`**: Header standard con icona `Users`, titolo e azioni `Use Preset` e `Create Team`.
+- **`ui/src/Knowledge.tsx`**: Header standard con icona `Database`, titolo e azione `Upload Document`.
+- **`ui/src/Marketplace.tsx`**: Header standard con icona `ShoppingBag`, titolo e badge `Alpha Official Presets`.
+- **`ui/src/Settings.tsx`**: Header standard con icona `Sliders`, titolo e descrizione coerente.
+- **`ui/src/AgentProfile.tsx`**: Header standard con pulsante back e azione `Edit Agent`.
+- **`ui/src/Chat.tsx` & `ui/src/WorkforcePresence.tsx`**: Allineamento di `WorkforcePresence` come header a barra singola da 56px e border-bottom, integrando gli indicatori di stato dinamico degli agenti senza introdurre barre duplicate o ridondanti.
+
+### Risultati Test & Verifiche Responsive
+- **Playwright E2E**: `test_11_topheader_consistency` e `test_12_topheader_responsive` passati su tutte le risoluzioni desktop/tablet (1440×900, 1200×800, 1100×700, 900×600).
+- **Zero regressioni** sui flussi chat, routing, workspace creation e preset application.
+
+---
+
+## 5. Risoluzione & Verifica Tecnica P0-07 & P0-08 (i18n & Dead Code Cleanup)
+
+### P0-07 — Completamento i18n & Parità IT/EN
+- **Espansione Dizionario (`ui/src/i18n.tsx`)**: Esteso il set di chiavi di traduzione a **293 chiavi bilingue** complete.
+- **Parità Simmetrica Garantita**: Verifica automatizzata di simmetria 100% (`missing in IT: []`, `missing in EN: []`).
+- **Componenti Migrati**:
+  - `Chat.tsx`: prompt suggestions, placeholder di caricamento, scorciatoie da tastiera, stop button.
+  - `MessageItem.tsx`: pulsanti di azione, conferme cancellazione, pulsante salva e reinvia, tooltip.
+  - `ActivityFeed.tsx`: stati runtime (`statusRunning`, `statusInterrupted`, `statusCompleted`), step counter (`stepSingular`/`stepPlural`), registro tecnico, e azioni humanized degli agenti.
+  - `MarkdownRenderer.tsx`: pulsanti e feedback di copia per blocchi di codice.
+  - `Home.tsx`: CTA rapide, intestazioni tabella task recenti, metriche di sistema.
+  - `Teams.tsx`: Team builder, modale preset picker, badge ruoli, stati vuoti.
+  - `Knowledge.tsx`: filtri di ambito, tabelle, tooltip di sola lettura per system knowledge, stati vuoti.
+  - `Marketplace.tsx`: badge, descrizioni preset, pulsanti di installazione, schede coming soon.
+  - `Settings.tsx`: tab di navigazione, form workspace, danger zone, provider default, metriche locali SQLite.
+  - `AgentProfile.tsx` & `AgentBuilder.tsx`: etichette, ruoli, deleghe, descrizioni vincoli, conferme eliminazione.
+  - `WorkspaceModal.tsx`: modale creazione e gestione workspace, preset starter, selettori modello custom.
+  - `Sidebar.tsx`: dropdown switcher workspace, opzioni archivio, pulsanti di tema e lingua.
+  - `CommandPalette.tsx`: azioni rapide e suggerimenti di ricerca.
+
+### P0-08 — CSS Consolidation & Dead Code Elimination
+- **File Rimossi**:
+  - `ui/src/App.css` (file template non referenziato).
+  - `ui/src/Onboarding.tsx` e `ui/src/ProviderSettings.tsx` (prototipi legacy orfani).
+  - `ui/src/assets/hero.png`, `ui/src/assets/react.svg`, `ui/src/assets/vite.svg` (asset non referenziati).
+  - Rimossa directory `ui/src/assets/`.
+- **CSS Consolidato (`ui/src/index.css`)**:
+  - Eliminate le classi orfane `.onboarding-wrap`, `.onboarding-card`, `.onboarding-progress`, `.progress-dot`.
+  - Nessuna duplicazione o regola orfana residua.
+
+### Risultati Test & Verifiche
+- **Pytest**: **522 passed, 0 failed, 4 skipped**.
+- **UI Linter & Build**: `oxlint` (0 errori), `tsc` (0 errori di tipo), `vite build` (bundle ottimizzato).
+- **Website Linter & Build**: `eslint` (0 errori), `next build` (0 errori).
+- **Git diff check**: 0 trailing whitespace o syntax errors.
+
+---
+
+## 6. P0 Completion Criteria
+
+Tutti i criteri di accettazione e qualità per la milestone di stabilizzazione P0 sono stati pienamente soddisfatti:
+
+* **Test Suite**: 522 test passati, 0 falliti, 4 skipped (`pytest` backend, unit, integrazione, lifecycle e Playwright E2E).
+* **UI / Website Validation**: TypeScript check, `oxlint` e `vite build` per l'interfaccia React (0 errori); `eslint` e `next build` per il sito statico Next.js (0 errori).
+* **i18n Parity**: Dizionario unificato bilingue IT/EN completo con 293 chiavi a simmetria 100%, zero stringhe hardcoded nei componenti e persistenza preferenze in `localStorage`.
+* **CSS Cleanup**: Consolidamento completo di `index.css`, eliminazione file orfani (`App.css`, `Onboarding.tsx`, `ProviderSettings.tsx`, `assets/`) e zero classi morte.
+* **Chat Reliability**: Ciclo di vita dei messaggi deterministico su bundle DMG/Desktop nativo, nessun drop silenzioso di output vuoti e propagazione affidabile su WebSocket.
+* **Provider Fallback & Error State**: Componente dedicato `ChatErrorCard`, normalizzazione degli errori con retry immediato e trasparenza visiva del modello reale eseguito in caso di fallback.
+* **TopHeader Condiviso**: Componente unificato a 56px con standardizzazione visiva responsive su tutte le viste dell'applicazione.
+
+> **P0 complete — ready to begin P1.**

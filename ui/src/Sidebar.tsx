@@ -245,11 +245,11 @@ export function Sidebar({
                 </div>
                 <div style={{ overflow: 'hidden', textAlign: 'left' }}>
                   <div style={{ fontSize: '13px', fontWeight: 600, color: 'hsl(var(--fg))', whiteSpace: 'nowrap', textOverflow: 'ellipsis', overflow: 'hidden', display: 'flex', alignItems: 'center', gap: '4px' }}>
-                    <span>{workspaceName || (language === 'it' ? 'Nessun workspace' : 'No workspace')}</span>
+                    <span>{workspaceName || t('noWorkspace')}</span>
                     <ChevronDown size={12} className="text-muted" />
                   </div>
                   <div style={{ fontSize: '10px', color: 'hsl(var(--muted-fg))', letterSpacing: '0.04em' }}>
-                    {workspaceName ? 'AI WORKFORCE' : (language === 'it' ? 'CLICCA PER CREARE' : 'CLICK TO CREATE')}
+                    {workspaceName ? t('aiWorkforce') : t('clickToCreate')}
                   </div>
                 </div>
               </button>
@@ -258,7 +258,7 @@ export function Sidebar({
                 className="btn btn-ghost"
                 style={{ padding: '6px', borderRadius: '6px' }}
                 onClick={() => setCollapsed(true)}
-                title={language === 'it' ? 'Comprimi Sidebar' : 'Collapse Sidebar'}
+                title={t('collapseSidebar')}
                 aria-label="Collapse Sidebar"
               >
                 <ChevronLeft size={16} />
@@ -282,7 +282,7 @@ export function Sidebar({
                 transition: 'background-color 0.15s ease, transform 0.15s ease'
               }}
               onClick={() => setCollapsed(false)}
-              title={language === 'it' ? 'Espandi Sidebar (Aether)' : 'Expand Sidebar (Aether)'}
+              title={t('expandSidebar')}
               aria-label="Expand Sidebar"
             >
               <img
@@ -318,12 +318,12 @@ export function Sidebar({
               gap: '2px'
             }}>
               <div style={{ fontSize: '10px', fontWeight: 600, color: 'hsl(var(--muted-fg))', padding: '4px 8px', textTransform: 'uppercase' }}>
-                Workspaces
+                {t('allWorkspaces')}
               </div>
               <div style={{ maxHeight: '180px', overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: '2px' }}>
                 {allWorkspaces.length === 0 ? (
                   <div style={{ fontSize: '11px', color: 'hsl(var(--muted-fg))', padding: '6px 8px' }}>
-                    {language === 'it' ? 'Nessun workspace salvato' : 'No workspaces saved'}
+                    {t('noWorkspacesSaved')}
                   </div>
                 ) : (
                   allWorkspaces.map(ws => (
@@ -358,7 +358,7 @@ export function Sidebar({
                   if (onOpenWorkspaceModal) onOpenWorkspaceModal('create');
                 }}
               >
-                <Plus size={13} /> + New Workspace
+                <Plus size={13} /> {t('newWorkspaceBtn')}
               </button>
 
               <button
@@ -369,7 +369,7 @@ export function Sidebar({
                   onNavigate('settings');
                 }}
               >
-                <Settings size={13} /> ⚙ Manage Workspaces
+                <Settings size={13} /> {t('manageWorkspaces')}
               </button>
             </div>
           )}
@@ -400,7 +400,8 @@ export function Sidebar({
                 <input
                   type="text"
                   className="form-input"
-                  placeholder="Search..."
+                  data-testid="sidebar-search-input"
+                  placeholder={t('searchPlaceholder')}
                   value={searchQuery}
                   onChange={e => setSearchQuery(e.target.value)}
                   style={{
@@ -448,15 +449,15 @@ export function Sidebar({
             {!collapsed && (
               <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '2px 8px', marginBottom: '4px' }}>
                 <span style={{ fontSize: '10px', fontWeight: 600, color: 'hsl(var(--muted-fg))', textTransform: 'uppercase', letterSpacing: '0.05em' }}>
-                  {showArchived ? 'Archived' : t('navConversations')}
+                  {showArchived ? t('archived') : t('navConversations')}
                 </span>
                 <button
                   className="btn btn-ghost"
                   style={{ padding: '2px 4px', fontSize: '10px', color: 'hsl(var(--muted-fg))' }}
                   onClick={() => setShowArchived(!showArchived)}
-                  title={showArchived ? 'Show Active' : 'Show Archived'}
+                  title={showArchived ? t('showActive') : t('showArchived')}
                 >
-                  {showArchived ? 'Active' : 'Archived'}
+                  {showArchived ? t('active') : t('archived')}
                 </button>
               </div>
             )}
@@ -505,13 +506,13 @@ export function Sidebar({
                           setEditingConvId(conv.id);
                           setEditTitleValue(conv.title || '');
                         }}
-                        title={conv.title || 'Untitled Task'}
+                        title={conv.title || t('untitledTask')}
                       >
                         <div style={{ display: 'flex', alignItems: 'center', gap: '8px', overflow: 'hidden' }}>
                           <MessageSquare size={13} className={isActive ? 'text-primary' : (conv.unread ? 'text-primary' : 'text-muted')} />
                           {!collapsed && (
                             <span style={{ textOverflow: 'ellipsis', overflow: 'hidden', whiteSpace: 'nowrap', fontWeight: conv.unread && !isActive ? 600 : 400 }}>
-                              {conv.title || 'Untitled Task'}
+                              {conv.title || t('untitledTask')}
                             </span>
                           )}
                         </div>
@@ -587,7 +588,7 @@ export function Sidebar({
                             setActiveMenuConvId(null);
                           }}
                         >
-                          <Edit2 size={12} /> Rename
+                          <Edit2 size={12} /> {t('rename')}
                         </button>
                         <button
                           className="btn btn-ghost"
@@ -597,7 +598,7 @@ export function Sidebar({
                             handleDuplicateConversation(conv.id);
                           }}
                         >
-                          <Copy size={12} /> Duplicate
+                          <Copy size={12} /> {t('duplicate')}
                         </button>
                         <button
                           className="btn btn-ghost"
@@ -607,7 +608,7 @@ export function Sidebar({
                             handleArchiveConversation(conv.id, conv.status);
                           }}
                         >
-                          <Archive size={12} /> {conv.status === 'archived' ? 'Unarchive' : 'Archive'}
+                          <Archive size={12} /> {conv.status === 'archived' ? t('unarchive') : t('archive')}
                         </button>
                         <button
                           className="btn btn-ghost"
@@ -618,7 +619,7 @@ export function Sidebar({
                             onDeleteConversation(conv.id);
                           }}
                         >
-                          <Trash2 size={12} /> Delete
+                          <Trash2 size={12} /> {t('delete')}
                         </button>
                       </div>
                     )}
@@ -716,7 +717,7 @@ export function Sidebar({
                 className="btn btn-ghost"
                 style={{ padding: '6px 8px', fontSize: '12px' }}
                 onClick={toggleLanguage}
-                title="Change Language"
+                title={t('changeLanguage')}
               >
                 <Globe size={14} />
                 <span>{language.toUpperCase()}</span>
@@ -727,7 +728,7 @@ export function Sidebar({
               className="btn btn-ghost"
               style={{ padding: '6px' }}
               onClick={toggleTheme}
-              title={isDark ? 'Switch to Light Theme' : 'Switch to Dark Theme'}
+              title={isDark ? t('switchToLight') : t('switchToDark')}
             >
               {isDark ? <Sun size={14} /> : <Moon size={14} />}
             </button>

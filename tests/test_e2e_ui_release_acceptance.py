@@ -260,3 +260,81 @@ def test_10_command_palette(browser_context):
         page.wait_for_timeout(200)
 
     page.close()
+
+
+def test_11_topheader_consistency(browser_context):
+    """Verifies TopHeader (56px standard header) is rendered across core views."""
+    base_url = _base_url()
+    page = browser_context.new_page()
+    page.goto(base_url)
+    page.wait_for_selector(".sidebar", timeout=10000)
+
+    # 1. Home
+    page.locator(".sidebar button:has-text('Home')").first.click()
+    page.wait_for_timeout(300)
+    expect(page.locator("[data-testid='top-header']").first).to_be_visible()
+
+    # 2. Agents
+    page.locator(".sidebar button:has-text('Agents')").first.click()
+    page.wait_for_timeout(300)
+    expect(page.locator("[data-testid='top-header']").first).to_be_visible()
+
+    # 3. Teams
+    page.locator(".sidebar button:has-text('Teams')").first.click()
+    page.wait_for_timeout(300)
+    expect(page.locator("[data-testid='top-header']").first).to_be_visible()
+
+    # 4. Knowledge
+    page.locator(".sidebar button:has-text('Knowledge')").first.click()
+    page.wait_for_timeout(300)
+    expect(page.locator("[data-testid='top-header']").first).to_be_visible()
+
+    # 5. Marketplace
+    page.locator(".sidebar button:has-text('Marketplace')").first.click()
+    page.wait_for_timeout(300)
+    expect(page.locator("[data-testid='top-header']").first).to_be_visible()
+
+    # 6. Settings
+    page.locator(".sidebar button:has-text('Settings')").first.click()
+    page.wait_for_timeout(300)
+    expect(page.locator("[data-testid='top-header']").first).to_be_visible()
+
+    # 7. Chat
+    new_task_btn = page.locator("button:has-text('New Task'), button:has-text('Nuovo Task'), .btn-new-task").first
+    if new_task_btn.is_visible():
+        new_task_btn.click()
+        page.wait_for_timeout(300)
+        expect(page.locator("[data-testid='workforce-presence-header']").first).to_be_visible()
+
+    page.close()
+
+
+def test_12_topheader_responsive(browser_context):
+    """Verifies TopHeader renders correctly without breaking on desktop and tablet viewports."""
+    base_url = _base_url()
+    viewports = [
+        {"width": 1200, "height": 800},
+        {"width": 1100, "height": 700},
+        {"width": 900, "height": 600},
+    ]
+
+    for vp in viewports:
+        page = browser_context.new_page()
+        page.set_viewport_size(vp)
+        page.goto(base_url)
+        page.wait_for_selector(".sidebar", timeout=5000)
+
+        # Verify TopHeader on Home
+        page.locator(".sidebar button:has-text('Home')").first.click()
+        page.wait_for_timeout(200)
+        top_header = page.locator("[data-testid='top-header']").first
+        expect(top_header).to_be_visible()
+
+        # Verify workforce header on Chat
+        new_task_btn = page.locator("button:has-text('New Task'), button:has-text('Nuovo Task'), .btn-new-task").first
+        if new_task_btn.is_visible():
+            new_task_btn.click()
+            page.wait_for_timeout(200)
+            expect(page.locator("[data-testid='workforce-presence-header']").first).to_be_visible()
+
+        page.close()

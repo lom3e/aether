@@ -1,6 +1,7 @@
 import { useState, useEffect, useCallback } from 'react';
 import { Bot, ArrowLeft, Cpu, ArrowRight, Edit2 } from 'lucide-react';
 import { AgentBuilder } from './AgentBuilder';
+import { TopHeader } from './TopHeader';
 import { apiUrl } from './api';
 import { useTranslation } from './i18n';
 
@@ -30,7 +31,7 @@ export function AgentProfile({ name, navigate }: { name: string, navigate: (view
   if (loading) {
     return (
       <div className="app-container" style={{ display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-        <div style={{ color: 'hsl(var(--muted-fg))', fontSize: '14px' }}>Loading agent profile...</div>
+        <div style={{ color: 'hsl(var(--muted-fg))', fontSize: '14px' }}>{t('loading')}</div>
       </div>
     );
   }
@@ -39,9 +40,9 @@ export function AgentProfile({ name, navigate }: { name: string, navigate: (view
     return (
       <div style={{ padding: '48px', textAlign: 'center' }}>
         <Bot size={48} className="text-muted" style={{ margin: '0 auto 16px' }} />
-        <h3>Agent not found</h3>
+        <h3>{t('agentNotFound')}</h3>
         <button className="btn btn-primary" style={{ marginTop: '16px' }} onClick={() => navigate('agents')}>
-          Back to Agents
+          {t('backToAgents')}
         </button>
       </div>
     );
@@ -49,17 +50,19 @@ export function AgentProfile({ name, navigate }: { name: string, navigate: (view
 
   return (
     <div style={{ flex: 1, overflowY: 'auto' }}>
-      <div className="top-header">
-        <div className="top-header-title">
+      <TopHeader
+        title={t('agentProfile')}
+        leading={
           <button className="btn btn-ghost" style={{ padding: '6px' }} onClick={() => navigate('agents')}>
             <ArrowLeft size={16} />
           </button>
-          <span>{t('agentProfile')}</span>
-        </div>
-        <button className="btn btn-secondary" onClick={() => setIsEditing(true)}>
-          <Edit2 size={14} /> Edit Agent
-        </button>
-      </div>
+        }
+        actions={
+          <button className="btn btn-secondary" onClick={() => setIsEditing(true)}>
+            <Edit2 size={14} /> {t('editAgent')}
+          </button>
+        }
+      />
 
       <div style={{ maxWidth: '840px', margin: '36px auto', padding: '0 32px' }}>
         {/* Header Banner */}
@@ -82,9 +85,9 @@ export function AgentProfile({ name, navigate }: { name: string, navigate: (view
             <h1 style={{ fontSize: '24px', marginBottom: '4px' }}>{agent.name}</h1>
             <div style={{ display: 'flex', alignItems: 'center', gap: '10px', flexWrap: 'wrap' }}>
               <span className="badge badge-primary">{agent.role}</span>
-              <span className="badge badge-success">Ready</span>
+              <span className="badge badge-success">{t('statusReady')}</span>
               <span className="badge">
-                {agent.provider || 'Team Default'} {agent.model ? `· ${agent.model}` : ''}
+                {agent.provider || t('teamDefault')} {agent.model ? `· ${agent.model}` : ''}
               </span>
             </div>
           </div>
@@ -104,7 +107,7 @@ export function AgentProfile({ name, navigate }: { name: string, navigate: (view
             borderRadius: 'var(--radius)',
             border: '1px solid hsl(var(--border)/0.5)'
           }}>
-            {agent.description || agent.instructions || <span className="text-muted italic">No specific system prompt provided.</span>}
+            {agent.description || agent.instructions || <span className="text-muted italic">{t('noPromptProvided')}</span>}
           </div>
         </div>
 
@@ -121,7 +124,7 @@ export function AgentProfile({ name, navigate }: { name: string, navigate: (view
                 ))}
               </div>
             ) : (
-              <span className="text-muted" style={{ fontSize: '13px' }}>No specific tool skills attached.</span>
+              <span className="text-muted" style={{ fontSize: '13px' }}>{t('noSkillsAttached')}</span>
             )}
           </div>
 
@@ -137,7 +140,7 @@ export function AgentProfile({ name, navigate }: { name: string, navigate: (view
                 ))}
               </div>
             ) : (
-              <span className="text-muted" style={{ fontSize: '13px' }}>Leaf agent (Does not delegate).</span>
+              <span className="text-muted" style={{ fontSize: '13px' }}>{t('leafAgentDesc')}</span>
             )}
           </div>
         </div>

@@ -1,5 +1,6 @@
 import React, { useState } from 'react';
 import { Copy, Check } from 'lucide-react';
+import { useTranslation } from './i18n';
 
 interface MarkdownRendererProps {
   content: string;
@@ -273,6 +274,7 @@ function renderBlock(block: Block): React.ReactNode {
 
 function CodeBlock({ code, language }: { code: string; language?: string }) {
   const [copied, setCopied] = useState(false);
+  const { t } = useTranslation();
 
   const handleCopy = async () => {
     try {
@@ -315,7 +317,7 @@ function CodeBlock({ code, language }: { code: string; language?: string }) {
           style={{ padding: '2px 6px', fontSize: '11px', gap: '4px', height: '22px' }}
         >
           {copied ? <Check size={12} className="text-success" /> : <Copy size={12} />}
-          <span>{copied ? 'Copiato' : 'Copia'}</span>
+          <span>{copied ? t('copied') : t('copyText')}</span>
         </button>
       </div>
       <pre

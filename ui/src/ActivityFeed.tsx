@@ -1,5 +1,6 @@
 import { useState } from 'react';
 import { ChevronDown, ChevronRight, Sparkles, Check, AlertTriangle, Pause } from 'lucide-react';
+import { useTranslation, type TranslationKey } from './i18n';
 
 export interface ActivityItem {
   id: string;
@@ -19,13 +20,14 @@ interface ActivityFeedProps {
 
 export function ActivityFeed({ activities, isLive = false, taskStatus = 'completed' }: ActivityFeedProps) {
   const [showTechnicalLogs, setShowTechnicalLogs] = useState(false);
+  const { t } = useTranslation();
 
   if (!activities || activities.length === 0) return null;
 
   const isInterrupted = taskStatus === 'interrupted' || activities.some(a => (a.type || '').toLowerCase().includes('interrupt'));
 
   // Aggregate activities by agent to show clean, humanized workforce timeline
-  const workforce = aggregateWorkforceState(activities, isLive, isInterrupted);
+  const workforce = aggregateWorkforceState(activities, isLive, isInterrupted, t);
 
   return (
     <div
@@ -60,7 +62,7 @@ export function ActivityFeed({ activities, isLive = false, taskStatus = 'complet
               style={{ fontSize: '10.5px', display: 'inline-flex', alignItems: 'center', gap: '5px' }}
             >
               <span className="status-dot active" style={{ width: '5px', height: '5px' }} />
-              In esecuzione
+              {t('statusRunning')}
             </span>
           ) : isInterrupted ? (
             <span
@@ -68,7 +70,7 @@ export function ActivityFeed({ activities, isLive = false, taskStatus = 'complet
               style={{ fontSize: '10.5px', display: 'inline-flex', alignItems: 'center', gap: '4px' }}
             >
               <Pause size={10} />
-              Interrotto
+              {t('statusInterrupted')}
             </span>
           ) : (
             <span
@@ -76,7 +78,7 @@ export function ActivityFeed({ activities, isLive = false, taskStatus = 'complet
               style={{ fontSize: '10.5px', display: 'inline-flex', alignItems: 'center', gap: '4px' }}
             >
               <Check size={10} strokeWidth={3} />
-              Completato
+              {t('statusCompleted')}
             </span>
           )}
         </div>
@@ -86,7 +88,7 @@ export function ActivityFeed({ activities, isLive = false, taskStatus = 'complet
           style={{ padding: '3px 8px', fontSize: '11px', gap: '4px' }}
           onClick={() => setShowTechnicalLogs(!showTechnicalLogs)}
         >
-          <span>{activities.length} passaggi</span>
+          <span>{activities.length} {activities.length === 1 ? t('stepSingular') : t('stepPlural')}</span>
           {showTechnicalLogs ? <ChevronDown size={13} /> : <ChevronRight size={13} />}
         </button>
       </div>
@@ -225,7 +227,7 @@ export function ActivityFeed({ activities, isLive = false, taskStatus = 'complet
           }}
         >
           <div style={{ fontSize: '11px', fontWeight: 600, color: 'hsl(var(--muted-fg))', marginBottom: '8px', textTransform: 'uppercase', letterSpacing: '0.04em' }}>
-            Registro Tecnico Eventi
+            {t('technicalEventLog')}
           </div>
           <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
             {activities.map((act, i) => {
@@ -267,7 +269,12 @@ interface AggregatedMember {
   currentAction: string;
 }
 
-function aggregateWorkforceState(activities: ActivityItem[], isLive: boolean, isInterrupted: boolean): AggregatedMember[] {
+function aggregateWorkforceState(
+  activities: ActivityItem[],
+  isLive: boolean,
+  isInterrupted: boolean,
+  t: (key: TranslationKey) => string
+): AggregatedMember[] {
   const membersMap = new Map<string, { lastEvent: ActivityItem }>();
 
   for (const act of activities) {
@@ -300,7 +307,7 @@ function aggregateWorkforceState(activities: ActivityItem[], isLive: boolean, is
       status = 'interrupted';
     }
 
-    const currentAction = humanizeAgentAction(lastEvent, isCurrentlyActive, isThisAgentInterrupted);
+    const currentAction = humanizeAgentAction(lastEvent, isCurrentlyActive, isThisAgentInterrupted, t);
 
     result.push({
       rawName,
@@ -313,48 +320,53 @@ function aggregateWorkforceState(activities: ActivityItem[], isLive: boolean, is
   return result;
 }
 
-function humanizeAgentAction(act: ActivityItem, isActive: boolean, isInterrupted: boolean = false): string {
+function humanizeAgentAction(
+  act: ActivityItem,
+  isActive: boolean,
+  isInterrupted: boolean = false,
+  t: (key: TranslationKey) => string
+): string {
   const event = (act.type || '').toLowerCase();
   const meta = act.metadata || {};
 
   if (isInterrupted || event === 'task_interrupted') {
-    return 'Attività interrotta dall\'utente';
+    return t('actionInterrupted');
   }
 
   if (event === 'agent_started') {
     if (meta.instruction) {
-      return isActive ? `Sta organizzando il lavoro: "${meta.instruction.slice(0, 60)}..."` : 'Obiettivo analizzato';
+      return isActive ? `${t('actionOrganizing')}: "${meta.instruction.slice(0, 60)}..."` : t('actionGoalAnalyzed');
     }
-    return isActive ? 'Sta pianificando il lavoro...' : 'Pianificazione completata';
+    return isActive ? t('actionPlanning') : t('actionPlanningComplete');
   }
 
   if (event === 'task_delegated') {
     const target = formatAgentName(meta.target_agent || meta.tool_name || 'Specialist');
-    return `Ha affidato l'attività a ${target}`;
+    return `${t('actionDelegatedTo')} ${target}`;
   }
 
   if (event === 'tool_called') {
     const tool = meta.tool_name || '';
     if (tool === 'search_knowledge') {
       const q = meta.arguments?.query || meta.query || '';
-      return isActive ? (q ? `Sta cercando nei documenti: "${q}"` : 'Sta consultando la knowledge base...') : 'Ha cercato nei documenti aziendali';
+      return isActive ? (q ? `${t('actionSearchingDocs')}: "${q}"` : t('actionConsultingKb')) : t('actionSearchedDocs');
     }
-    return isActive ? `Sta elaborando ${tool}...` : `Ha eseguito ${tool}`;
+    return isActive ? `${t('actionProcessing')} ${tool}...` : `${t('actionExecuted')} ${tool}`;
   }
 
   if (event === 'tool_completed') {
     const tool = meta.tool_name || '';
     if (tool === 'search_knowledge') {
-      return 'Ha trovato informazioni rilevanti nei documenti';
+      return t('actionFoundDocs');
     }
-    return `Operazione ${tool} completata`;
+    return `${t('actionOpComplete')} (${tool})`;
   }
 
   if (event === 'interrupt') {
-    return 'In attesa di approvazione o input da parte tua';
+    return t('actionWaitingApproval');
   }
 
-  return isActive ? 'Sta elaborando...' : 'Attività completata';
+  return isActive ? t('running') : t('actionCompleted');
 }
 
 function formatAgentName(raw: string): string {

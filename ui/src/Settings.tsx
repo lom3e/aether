@@ -2,11 +2,12 @@ import { useState, useEffect, useContext } from 'react';
 import { ToastContext } from './toast';
 import {
   Cpu, Globe, Moon, Sun,
-  HardDrive, Layers, AlertTriangle
+  HardDrive, Layers, AlertTriangle, Sliders
 } from 'lucide-react';
 import { apiError, apiUrl } from './api';
 import { useTranslation } from './i18n';
 import { useTheme } from './theme';
+import { TopHeader } from './TopHeader';
 
 interface SettingsProps {
   onWorkspaceSwitched?: () => void;
@@ -230,14 +231,15 @@ export function Settings({ onWorkspaceSwitched }: SettingsProps) {
   };
 
   return (
-    <div style={{ maxWidth: '840px', margin: '0 auto', padding: '32px 24px' }}>
-      {/* Header */}
-      <div style={{ marginBottom: '28px' }}>
-        <h1 style={{ fontSize: '24px', fontWeight: 700, marginBottom: '6px' }}>{t('settingsTitle')}</h1>
-        <p className="text-muted" style={{ fontSize: '14px' }}>
+    <div style={{ flex: 1, overflowY: 'auto' }}>
+      <TopHeader
+        title={t('settingsTitle')}
+        icon={Sliders}
+      />
+      <div style={{ maxWidth: '840px', margin: '0 auto', padding: '32px 24px' }}>
+        <p className="text-muted" style={{ fontSize: '14px', marginBottom: '24px' }}>
           Configure your workspace, default AI providers, knowledge storage, and system preferences.
         </p>
-      </div>
 
       {/* Tabs */}
       <div style={{
@@ -252,7 +254,7 @@ export function Settings({ onWorkspaceSwitched }: SettingsProps) {
           style={{ borderRadius: '0', borderBottom: activeTab === 'workspace' ? '2px solid hsl(var(--primary))' : 'none', padding: '10px 16px', fontSize: '13.5px' }}
           onClick={() => setActiveTab('workspace')}
         >
-          <Layers size={16} /> Workspace
+          <Layers size={16} /> {t('workspace')}
         </button>
         <button
           className={`btn btn-ghost ${activeTab === 'providers' ? 'active' : ''}`}
@@ -266,7 +268,7 @@ export function Settings({ onWorkspaceSwitched }: SettingsProps) {
           style={{ borderRadius: '0', borderBottom: activeTab === 'storage' ? '2px solid hsl(var(--primary))' : 'none', padding: '10px 16px', fontSize: '13.5px' }}
           onClick={() => setActiveTab('storage')}
         >
-          <HardDrive size={16} /> Storage & Data
+          <HardDrive size={16} /> {t('storageTab')}
         </button>
         <button
           className={`btn btn-ghost ${activeTab === 'general' ? 'active' : ''}`}
@@ -282,10 +284,10 @@ export function Settings({ onWorkspaceSwitched }: SettingsProps) {
         <div style={{ display: 'flex', flexDirection: 'column', gap: '24px' }}>
           {/* General Workspace Info */}
           <div className="card" style={{ padding: '24px' }}>
-            <h3 style={{ fontSize: '16px', fontWeight: 600, marginBottom: '16px' }}>General Workspace</h3>
+            <h3 style={{ fontSize: '16px', fontWeight: 600, marginBottom: '16px' }}>{t('generalWorkspace')}</h3>
             <div style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
               <div>
-                <label className="form-label">Workspace Display Name</label>
+                <label className="form-label">{t('workspaceDisplayName')}</label>
                 <div style={{ display: 'flex', gap: '10px' }}>
                   <input
                     type="text"
@@ -299,15 +301,15 @@ export function Settings({ onWorkspaceSwitched }: SettingsProps) {
                     onClick={handleSaveWorkspaceName}
                     disabled={savingWs || !wsName.trim()}
                   >
-                    Save
+                    {t('save')}
                   </button>
                 </div>
               </div>
 
               <div>
-                <label className="form-label">Active Team</label>
+                <label className="form-label">{t('activeTeam')}</label>
                 <div style={{ fontSize: '13.5px', color: 'hsl(var(--fg))', padding: '8px 12px', background: 'hsl(var(--muted)/0.5)', borderRadius: '6px' }}>
-                  {workspaceInfo?.name || 'default'} ({workspaceInfo?.agents?.length || 0} agents active)
+                  {workspaceInfo?.name || 'default'} ({workspaceInfo?.agents?.length || 0} {workspaceInfo?.agents?.length === 1 ? t('agentSingular').toLowerCase() : t('agentPlural').toLowerCase()} {t('statusActive').toLowerCase()})
                 </div>
               </div>
             </div>
@@ -317,37 +319,37 @@ export function Settings({ onWorkspaceSwitched }: SettingsProps) {
           <div className="card" style={{ padding: '24px', border: '1px solid hsl(var(--destructive)/0.3)' }}>
             <div style={{ display: 'flex', alignItems: 'center', gap: '8px', color: 'hsl(var(--destructive))', marginBottom: '16px' }}>
               <AlertTriangle size={18} />
-              <h3 style={{ fontSize: '16px', fontWeight: 600 }}>Danger Zone</h3>
+              <h3 style={{ fontSize: '16px', fontWeight: 600 }}>{t('dangerZone')}</h3>
             </div>
 
             <div style={{ display: 'flex', flexDirection: 'column', gap: '14px' }}>
               <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '12px', background: 'hsl(var(--bg))', borderRadius: '8px' }}>
                 <div>
-                  <div style={{ fontWeight: 600, fontSize: '13px' }}>Clear Workspace Knowledge</div>
-                  <div style={{ fontSize: '12px', color: 'hsl(var(--muted-fg))' }}>Deletes all user documents, preserving official System Knowledge.</div>
+                  <div style={{ fontWeight: 600, fontSize: '13px' }}>{t('clearKnowledgeTitle')}</div>
+                  <div style={{ fontSize: '12px', color: 'hsl(var(--muted-fg))' }}>{t('clearKnowledgeDesc')}</div>
                 </div>
                 <button className="btn btn-secondary" onClick={handleClearKnowledge}>
-                  Clear Knowledge
+                  {t('clearKnowledgeBtn')}
                 </button>
               </div>
 
               <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '12px', background: 'hsl(var(--bg))', borderRadius: '8px' }}>
                 <div>
-                  <div style={{ fontWeight: 600, fontSize: '13px' }}>Reset Workspace</div>
-                  <div style={{ fontSize: '12px', color: 'hsl(var(--muted-fg))' }}>Clears all conversation histories and private knowledge.</div>
+                  <div style={{ fontWeight: 600, fontSize: '13px' }}>{t('resetWorkspaceTitle')}</div>
+                  <div style={{ fontSize: '12px', color: 'hsl(var(--muted-fg))' }}>{t('resetWorkspaceDesc')}</div>
                 </div>
                 <button className="btn btn-secondary" onClick={handleResetWorkspace}>
-                  Reset
+                  {t('resetBtn')}
                 </button>
               </div>
 
               <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '12px', background: 'hsl(var(--destructive)/0.05)', borderRadius: '8px', border: '1px solid hsl(var(--destructive)/0.2)' }}>
                 <div>
-                  <div style={{ fontWeight: 600, fontSize: '13px', color: 'hsl(var(--destructive))' }}>Delete Workspace</div>
-                  <div style={{ fontSize: '12px', color: 'hsl(var(--muted-fg))' }}>Permanently remove this workspace folder and local databases.</div>
+                  <div style={{ fontWeight: 600, fontSize: '13px', color: 'hsl(var(--destructive))' }}>{t('deleteWorkspaceTitle')}</div>
+                  <div style={{ fontSize: '12px', color: 'hsl(var(--muted-fg))' }}>{t('deleteWorkspaceDesc')}</div>
                 </div>
                 <button className="btn btn-destructive" onClick={() => setIsDeletingWs(true)}>
-                  Delete Workspace
+                  {t('deleteWorkspaceTitle')}
                 </button>
               </div>
             </div>
@@ -359,11 +361,11 @@ export function Settings({ onWorkspaceSwitched }: SettingsProps) {
       {activeTab === 'providers' && (
         <div style={{ display: 'flex', flexDirection: 'column', gap: '20px' }}>
           <div className="card" style={{ padding: '24px' }}>
-            <h3 style={{ fontSize: '16px', fontWeight: 600, marginBottom: '16px' }}>Default AI Provider</h3>
+            <h3 style={{ fontSize: '16px', fontWeight: 600, marginBottom: '16px' }}>{t('defaultAiProvider')}</h3>
 
             <div style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
               <div>
-                <label className="form-label">Select Provider</label>
+                <label className="form-label">{t('selectProvider')}</label>
                 <select
                   className="form-select"
                   value={provider}
@@ -384,7 +386,7 @@ export function Settings({ onWorkspaceSwitched }: SettingsProps) {
               </div>
 
               <div>
-                <label className="form-label">Model</label>
+                <label className="form-label">{t('model')}</label>
                 {availableModels.length > 0 ? (
                   <select className="form-select" value={model} onChange={e => setModel(e.target.value)}>
                     {availableModels.map(m => <option key={m} value={m}>{m}</option>)}
@@ -400,7 +402,7 @@ export function Settings({ onWorkspaceSwitched }: SettingsProps) {
               </div>
 
               <div>
-                <label className="form-label">Timeout (Seconds)</label>
+                <label className="form-label">{t('providerTimeout')}</label>
                 <input
                   type="number"
                   className="form-input"
@@ -413,7 +415,7 @@ export function Settings({ onWorkspaceSwitched }: SettingsProps) {
 
               {provider !== 'ollama' && (
                 <div>
-                  <label className="form-label">API Key</label>
+                  <label className="form-label">{t('apiKey')}</label>
                   <input
                     type="password"
                     className="form-input"
@@ -430,7 +432,7 @@ export function Settings({ onWorkspaceSwitched }: SettingsProps) {
                   onClick={handleSaveProvider}
                   disabled={saving}
                 >
-                  {saving ? 'Saving...' : t('save')}
+                  {saving ? t('saving') : t('saveSettings')}
                 </button>
 
                 <button
@@ -438,7 +440,7 @@ export function Settings({ onWorkspaceSwitched }: SettingsProps) {
                   onClick={handleTestProvider}
                   disabled={testing}
                 >
-                  {testing ? 'Testing...' : t('testConnection')}
+                  {testing ? t('testing') : t('testConnection')}
                 </button>
               </div>
             </div>
@@ -450,26 +452,26 @@ export function Settings({ onWorkspaceSwitched }: SettingsProps) {
       {activeTab === 'storage' && (
         <div style={{ display: 'flex', flexDirection: 'column', gap: '20px' }}>
           <div className="card" style={{ padding: '24px' }}>
-            <h3 style={{ fontSize: '16px', fontWeight: 600, marginBottom: '16px' }}>Local Persistence Metrics</h3>
+            <h3 style={{ fontSize: '16px', fontWeight: 600, marginBottom: '16px' }}>{t('localPersistenceMetrics')}</h3>
             <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))', gap: '16px' }}>
               <div style={{ padding: '16px', backgroundColor: 'hsl(var(--bg))', borderRadius: '8px', border: '1px solid hsl(var(--border))' }}>
-                <div style={{ fontSize: '12px', color: 'hsl(var(--muted-fg))', marginBottom: '4px' }}>Conversations DB</div>
-                <div style={{ fontSize: '20px', fontWeight: 700 }}>{workspaceStats?.conversations_count || 0} tasks</div>
+                <div style={{ fontSize: '12px', color: 'hsl(var(--muted-fg))', marginBottom: '4px' }}>{t('conversationsDb')}</div>
+                <div style={{ fontSize: '20px', fontWeight: 700 }}>{workspaceStats?.conversations_count || 0} {t('navConversations').toLowerCase()}</div>
                 <div style={{ fontSize: '11px', color: 'hsl(var(--muted-fg))', marginTop: '4px' }}>
                   {formatBytes(workspaceStats?.conversations_size_bytes)}
                 </div>
               </div>
 
               <div style={{ padding: '16px', backgroundColor: 'hsl(var(--bg))', borderRadius: '8px', border: '1px solid hsl(var(--border))' }}>
-                <div style={{ fontSize: '12px', color: 'hsl(var(--muted-fg))', marginBottom: '4px' }}>Knowledge Store</div>
-                <div style={{ fontSize: '20px', fontWeight: 700 }}>{workspaceStats?.knowledge_chunks_count || 0} chunks</div>
+                <div style={{ fontSize: '12px', color: 'hsl(var(--muted-fg))', marginBottom: '4px' }}>{t('knowledgeStore')}</div>
+                <div style={{ fontSize: '20px', fontWeight: 700 }}>{workspaceStats?.knowledge_chunks_count || 0} {t('chunks').toLowerCase()}</div>
                 <div style={{ fontSize: '11px', color: 'hsl(var(--muted-fg))', marginTop: '4px' }}>
                   {workspaceStats?.knowledge_documents_count || 0} docs ({formatBytes(workspaceStats?.knowledge_size_bytes)})
                 </div>
               </div>
 
               <div style={{ padding: '16px', backgroundColor: 'hsl(var(--bg))', borderRadius: '8px', border: '1px solid hsl(var(--border))' }}>
-                <div style={{ fontSize: '12px', color: 'hsl(var(--muted-fg))', marginBottom: '4px' }}>Total Local Footprint</div>
+                <div style={{ fontSize: '12px', color: 'hsl(var(--muted-fg))', marginBottom: '4px' }}>{t('totalLocalFootprint')}</div>
                 <div style={{ fontSize: '20px', fontWeight: 700 }}>
                   {formatBytes(workspaceStats?.total_size_bytes)}
                 </div>
@@ -486,10 +488,10 @@ export function Settings({ onWorkspaceSwitched }: SettingsProps) {
       {activeTab === 'general' && (
         <div style={{ display: 'flex', flexDirection: 'column', gap: '20px' }}>
           <div className="card" style={{ padding: '24px' }}>
-            <h3 style={{ fontSize: '16px', fontWeight: 600, marginBottom: '16px' }}>Appearance & Language</h3>
+            <h3 style={{ fontSize: '16px', fontWeight: 600, marginBottom: '16px' }}>{t('appearanceAndLanguage')}</h3>
             <div style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
               <div>
-                <label className="form-label">Language</label>
+                <label className="form-label">{t('language')}</label>
                 <div style={{ display: 'flex', gap: '10px' }}>
                   <button
                     className={`btn ${language === 'en' ? 'btn-primary' : 'btn-secondary'}`}
@@ -507,19 +509,19 @@ export function Settings({ onWorkspaceSwitched }: SettingsProps) {
               </div>
 
               <div>
-                <label className="form-label">Theme</label>
+                <label className="form-label">{t('theme')}</label>
                 <div style={{ display: 'flex', gap: '10px' }}>
                   <button
                     className={`btn ${theme === 'dark' ? 'btn-primary' : 'btn-secondary'}`}
                     onClick={() => setTheme('dark')}
                   >
-                    <Moon size={15} /> Dark
+                    <Moon size={15} /> {t('themeDark')}
                   </button>
                   <button
                     className={`btn ${theme === 'light' ? 'btn-primary' : 'btn-secondary'}`}
                     onClick={() => setTheme('light')}
                   >
-                    <Sun size={15} /> Light
+                    <Sun size={15} /> {t('themeLight')}
                   </button>
                 </div>
               </div>
@@ -553,22 +555,23 @@ export function Settings({ onWorkspaceSwitched }: SettingsProps) {
           }}>
             <div style={{ display: 'flex', alignItems: 'center', gap: '10px', color: 'hsl(var(--destructive))' }}>
               <AlertTriangle size={20} />
-              <h3 style={{ fontSize: '16px', fontWeight: 600 }}>Delete Current Workspace?</h3>
+              <h3 style={{ fontSize: '16px', fontWeight: 600 }}>{t('deleteCurrentWorkspaceTitle')}</h3>
             </div>
             <p style={{ fontSize: '13px', color: 'hsl(var(--muted-fg))', lineHeight: 1.5 }}>
-              This permanently removes this workspace directory, along with all its conversations, knowledge embeddings, and local data.
+              {t('deleteWorkspaceConfirmDesc')}
             </p>
             <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '10px', marginTop: '6px' }}>
               <button className="btn btn-secondary" onClick={() => setIsDeletingWs(false)}>
-                Cancel
+                {t('cancel')}
               </button>
               <button className="btn btn-destructive" onClick={handleDeleteCurrentWorkspace}>
-                Delete Workspace
+                {t('deleteWorkspaceTitle')}
               </button>
             </div>
           </div>
         </div>
       )}
+      </div>
     </div>
   );
 }

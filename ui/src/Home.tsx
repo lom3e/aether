@@ -6,6 +6,7 @@ import {
 import { apiUrl } from './api';
 import { useTranslation } from './i18n';
 import { useTheme } from './theme';
+import { TopHeader } from './TopHeader';
 
 interface HomeProps {
   navigate: (view: string) => void;
@@ -85,20 +86,30 @@ export function Home({
   const knowledgeChunks = workspaceData?.knowledge_chunks || 0;
 
   return (
-    <div style={{ flex: 1, overflowY: 'auto', padding: '40px 48px' }}>
-      <div style={{ maxWidth: '1000px', margin: '0 auto' }}>
-        {/* Welcome Header */}
-        <div style={{ marginBottom: '36px' }}>
-          <div style={{ display: 'flex', alignItems: 'center', gap: '10px', marginBottom: '8px' }}>
-            <h1 style={{ fontSize: '26px' }}>{t('homeWelcome')}</h1>
-            <span className="badge badge-primary" style={{ fontSize: '12px', padding: '3px 8px' }}>
-              {workspaceName}
-            </span>
-          </div>
-          <p className="text-muted" style={{ fontSize: '15px', maxWidth: '640px' }}>
+    <div style={{ flex: 1, overflowY: 'auto' }}>
+      <TopHeader
+        title={t('homeWelcome')}
+        subtitle={
+          <span className="badge badge-primary" style={{ fontSize: '11.5px', padding: '2px 8px' }}>
+            {workspaceName}
+          </span>
+        }
+        icon={Cpu}
+        actions={
+          <button
+            className="btn btn-primary"
+            style={{ fontSize: '12.5px', padding: '6px 14px' }}
+            onClick={onNewTask}
+          >
+            <Plus size={15} /> {t('startTaskAction')}
+          </button>
+        }
+      />
+      <div style={{ padding: '36px 40px' }}>
+        <div style={{ maxWidth: '1000px', margin: '0 auto' }}>
+          <p className="text-muted" style={{ fontSize: '15px', marginBottom: '28px', maxWidth: '680px' }}>
             {t('homeSubtitle')}
           </p>
-        </div>
 
         {/* Workforce Overview Banner */}
         <div className="card" style={{ padding: '24px', marginBottom: '32px', display: 'flex', flexDirection: 'column', gap: '16px' }}>
@@ -108,7 +119,7 @@ export function Home({
               <h3 style={{ margin: 0, fontSize: '16px' }}>{t('activeTeam')}</h3>
             </div>
             <button className="btn btn-secondary" style={{ fontSize: '12px', padding: '4px 10px' }} onClick={() => navigate('teams')}>
-              Manage Team <ArrowRight size={13} />
+              {t('manageTeam')} <ArrowRight size={13} />
             </button>
           </div>
 
@@ -163,7 +174,7 @@ export function Home({
                 <Plus size={20} />
               </div>
               <h3 style={{ fontSize: '15px', marginBottom: '4px' }}>{t('startTaskAction')}</h3>
-              <p className="text-muted" style={{ fontSize: '12.5px', margin: 0 }}>Assign a goal and observe the workforce.</p>
+              <p className="text-muted" style={{ fontSize: '12.5px', margin: 0 }}>{t('startTaskDesc')}</p>
             </div>
 
             <div
@@ -175,7 +186,7 @@ export function Home({
                 <Bot size={20} />
               </div>
               <h3 style={{ fontSize: '15px', marginBottom: '4px' }}>{t('createAgentAction')}</h3>
-              <p className="text-muted" style={{ fontSize: '12.5px', margin: 0 }}>Configure roles, models, and delegation.</p>
+              <p className="text-muted" style={{ fontSize: '12.5px', margin: 0 }}>{t('createAgentDesc')}</p>
             </div>
 
             <div
@@ -187,7 +198,7 @@ export function Home({
                 <Database size={20} />
               </div>
               <h3 style={{ fontSize: '15px', marginBottom: '4px' }}>{t('addKnowledgeAction')}</h3>
-              <p className="text-muted" style={{ fontSize: '12.5px', margin: 0 }}>Upload PDF, Markdown, TXT, or CSV.</p>
+              <p className="text-muted" style={{ fontSize: '12.5px', margin: 0 }}>{t('addKnowledgeDesc')}</p>
             </div>
 
             <div
@@ -199,7 +210,7 @@ export function Home({
                 <Layers size={20} />
               </div>
               <h3 style={{ fontSize: '15px', marginBottom: '4px' }}>{t('usePresetAction')}</h3>
-              <p className="text-muted" style={{ fontSize: '12.5px', margin: 0 }}>Load ready-made workforce packs.</p>
+              <p className="text-muted" style={{ fontSize: '12.5px', margin: 0 }}>{t('usePresetDesc')}</p>
             </div>
           </div>
         </div>
@@ -209,7 +220,7 @@ export function Home({
           <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '16px' }}>
             <h2 style={{ fontSize: '18px' }}>{t('recentConversations')}</h2>
             <button className="btn btn-ghost" style={{ fontSize: '12px' }} onClick={() => navigate('chat')}>
-              View all
+              {t('viewAll')}
             </button>
           </div>
 
@@ -218,9 +229,9 @@ export function Home({
               <table className="table">
                 <thead>
                   <tr>
-                    <th>Task Title</th>
-                    <th>Status</th>
-                    <th>Last Updated</th>
+                    <th>{t('taskTitle')}</th>
+                    <th>{t('status')}</th>
+                    <th>{t('lastUpdated')}</th>
                     <th></th>
                   </tr>
                 </thead>
@@ -234,7 +245,7 @@ export function Home({
                       <td>
                         <div style={{ display: 'flex', alignItems: 'center', gap: '8px', fontWeight: conv.unread ? 600 : 500 }}>
                           <MessageSquare size={16} className={conv.unread ? 'text-primary' : 'text-muted'} />
-                          <span>{conv.title || 'Untitled Task'}</span>
+                          <span>{conv.title || t('untitledTask')}</span>
                           {conv.unread && (
                             <span
                               className="unread-dot"
@@ -252,7 +263,7 @@ export function Home({
                       </td>
                       <td>
                         <span className={`badge ${conv.status === 'completed' ? 'badge-success' : (conv.status === 'interrupted' ? 'badge-warning' : (conv.status === 'waiting' ? 'badge-warning' : 'badge-primary'))}`}>
-                          {conv.status === 'interrupted' ? 'Interrotto' : (conv.status || 'Active')}
+                          {conv.status === 'interrupted' ? t('statusInterrupted') : (conv.status === 'completed' ? t('statusCompleted') : (conv.status === 'waiting' ? t('statusWaiting') : t('statusActive')))}
                         </span>
                       </td>
                       <td className="text-muted" style={{ fontSize: '12px' }}>
@@ -283,7 +294,7 @@ export function Home({
             <div>
               <div style={{ fontSize: '13px', fontWeight: 600 }}>{t('systemStatus')}</div>
               <div style={{ fontSize: '12px', color: 'hsl(var(--muted-fg))' }}>
-                SQLite Isolated Memory, Scoped Knowledge Base, Multi-Agent Runtime Active.
+                {t('systemStatusDesc')}
               </div>
             </div>
           </div>
@@ -298,6 +309,7 @@ export function Home({
             </div>
           </div>
         </div>
+      </div>
       </div>
     </div>
   );

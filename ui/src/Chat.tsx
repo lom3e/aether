@@ -583,27 +583,27 @@ export function Chat({
               {t('emptyChatTitle')}
             </h2>
             <p className="text-muted" style={{ fontSize: '14px', maxWidth: '480px', marginBottom: '28px', lineHeight: 1.5 }}>
-              Ask a question, request complex analysis, or delegate tasks to your autonomous AI workforce.
+              {t('emptyChatSubtitle')}
             </p>
 
             <div style={{ display: 'flex', flexWrap: 'wrap', gap: '8px', justifyContent: 'center', maxWidth: '540px' }}>
               <button
                 className="btn btn-secondary"
-                onClick={() => setInput('Spiegami come funziona la separazione tra System Knowledge e Workspace Knowledge in Aether.')}
+                onClick={() => setInput(t('promptSuggestion1Prompt'))}
               >
-                Knowledge Architecture
+                {t('promptSuggestion1Title')}
               </button>
               <button
                 className="btn btn-secondary"
-                onClick={() => setInput('Analizza l\'azienda Acme Robotics e prepara un executive summary per il management.')}
+                onClick={() => setInput(t('promptSuggestion2Prompt'))}
               >
-                Acme Robotics Analysis
+                {t('promptSuggestion2Title')}
               </button>
               <button
                 className="btn btn-secondary"
-                onClick={() => setInput('Qual è il ruolo del Manager e come delega i task alla workforce?')}
+                onClick={() => setInput(t('promptSuggestion3Prompt'))}
               >
-                Manager Delegation
+                {t('promptSuggestion3Title')}
               </button>
             </div>
           </div>
@@ -670,7 +670,7 @@ export function Chat({
               boxShadow: 'none',
               fontSize: '14px'
             }}
-            placeholder={!hasWorkspace ? (language === 'it' ? 'Prima crea un workspace per poter inviare messaggi...' : 'Create a workspace first to send messages...') : t('chatInputPlaceholder')}
+            placeholder={!hasWorkspace ? t('createWorkspaceFirstPlaceholder') : t('chatInputPlaceholder')}
             value={input}
             onChange={e => setInput(e.target.value)}
             onKeyDown={handleKeyDown}
@@ -686,7 +686,7 @@ export function Chat({
             borderTop: '1px solid hsl(var(--border)/0.3)'
           }}>
             <div style={{ fontSize: '11px', color: 'hsl(var(--muted-fg))' }}>
-              Press <kbd style={{ padding: '2px 4px', background: 'hsl(var(--muted))', borderRadius: '3px' }}>Enter</kbd> to send, <kbd style={{ padding: '2px 4px', background: 'hsl(var(--muted))', borderRadius: '3px' }}>Shift+Enter</kbd> for newline
+              {t('chatKeyboardHint')}
             </div>
 
             <div style={{ display: 'flex', gap: '8px', alignItems: 'center' }}>
@@ -698,7 +698,7 @@ export function Chat({
                   onClick={handleStopTask}
                 >
                   <Square size={13} fill="currentColor" />
-                  <span>Stop</span>
+                  <span>{t('stop')}</span>
                 </button>
               ) : (
                 <button

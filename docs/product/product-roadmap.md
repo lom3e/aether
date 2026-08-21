@@ -94,13 +94,14 @@ Ogni elemento della roadmap è classificato secondo il modello standard di ingeg
 
 | ID | Feature / Iniziativa | Priority | Area | Comp. | Impact | Dipendenza | Versione | Stato |
 | :--- | :--- | :--- | :--- | :--- | :--- | :--- | :--- | :--- |
-| **P0-01** | Investigazione & Fix Chat Response State su DMG | **P0** | Desktop/Backend | L | Critical | Runtime standalone audit | `v1.4.1` | Planned |
-| **P0-02** | Propagazione Errori Provider & Model State | **P0** | Backend/Desktop | M | Critical | P0-01 | `v1.4.1` | Planned |
-| **P0-03** | Stato di Errore Esplicito & Banner UI nella Chat | **P0** | Desktop | M | Critical | P0-02 | `v1.4.1` | Planned |
-| **P0-04** | Flusso di Retry, Reconnect & Diagnostic Log UI | **P0** | Desktop | M | High | P0-03 | `v1.4.1` | Planned |
-| **P0-05** | TopHeader Condiviso & Unificato su tutte le Viste | **P0** | Desktop | M | High | Nessuna | `v1.4.1` | Planned |
-| **P0-06** | Completamento i18n & Eliminazione Hardcoded Strings | **P0** | Desktop | S | Medium | Nessuna | `v1.4.1` | Planned |
-| **P0-07** | Pulizia Dead Code & Consolidamento Layout CSS | **P0** | Desktop | S | Medium | P0-05 | `v1.4.1` | Planned |
+| **P0-01** | Investigazione & Fix Chat Response State su DMG | **P0** | Desktop/Backend | L | Critical | Runtime standalone audit | `v1.4.1` | Completed |
+| **P0-02** | Propagazione Errori Provider & Model State | **P0** | Backend/Desktop | M | Critical | P0-01 | `v1.4.1` | Completed |
+| **P0-03** | ChatErrorCard / Stato di Errore Esplicito nella Chat | **P0** | Desktop | M | Critical | P0-02 | `v1.4.1` | Completed |
+| **P0-04** | Flusso di Retry automatico & WebSocket Reconnect | **P0** | Desktop | M | High | P0-03 | `v1.4.1` | Completed |
+| **P0-05** | Audit Persistenza Provider & Fallback Transparency | **P0** | Backend/Desktop | M | High | P0-02 | `v1.4.1` | Completed |
+| **P0-06** | TopHeader Condiviso & Unificato su tutte le Viste | **P0** | Desktop | M | High | Nessuna | `v1.4.1` | Completed |
+| **P0-07** | Completamento i18n & Zero Hardcoded Strings | **P0** | Desktop | S | Medium | Nessuna | `v1.4.1` | Completed |
+| **P0-08** | Pulizia Dead Code & Consolidamento Layout CSS | **P0** | Desktop | S | Medium | P0-06 | `v1.4.1` | Completed |
 | **P1-01** | Specifiche Tecniche & Modello Dati Sistema Skills | **P1** | Product/Backend | M | High | Baseline v1.4.0 | `v1.5.0` | Planned |
 | **P1-02** | Indicatore Active Agent & Live Streaming Feedback | **P1** | Desktop | S | High | P0-01 | `v1.4.2` | Planned |
 | **P1-03** | Provider Status Chip & Health Check in Navbar | **P1** | Desktop | S | High | P0-02 | `v1.4.2` | Planned |

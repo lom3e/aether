@@ -2,8 +2,11 @@ import { useState, useEffect, useContext } from 'react';
 import { Database, FileText, Upload, Trash2, ShieldCheck, Lock } from 'lucide-react';
 import { ToastContext } from './toast';
 import { apiError, apiUrl } from './api';
+import { TopHeader } from './TopHeader';
+import { useTranslation } from './i18n';
 
 export function Knowledge() {
+  const { t } = useTranslation();
   const [documents, setDocuments] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
   const [uploading, setUploading] = useState(false);
@@ -94,26 +97,25 @@ export function Knowledge() {
 
   return (
     <div style={{ flex: 1, overflowY: 'auto' }}>
-      <div className="top-header">
-        <div className="top-header-title">
-          <Database size={18} className="text-primary" />
-          <span>Knowledge Base</span>
-        </div>
-
-        <div>
-          <input
-            type="file"
-            id="file-upload"
-            style={{ display: 'none' }}
-            onChange={handleFileUpload}
-            disabled={uploading}
-            accept=".txt,.md,.pdf,.csv"
-          />
-          <label htmlFor="file-upload" className="btn btn-primary" style={{ cursor: 'pointer' }}>
-            <Upload size={16} /> {uploading ? 'Uploading...' : 'Upload Document'}
-          </label>
-        </div>
-      </div>
+      <TopHeader
+        title={t('knowledgeTitle')}
+        icon={Database}
+        actions={
+          <div>
+            <input
+              type="file"
+              id="file-upload"
+              style={{ display: 'none' }}
+              onChange={handleFileUpload}
+              disabled={uploading}
+              accept=".txt,.md,.pdf,.csv"
+            />
+            <label htmlFor="file-upload" className="btn btn-primary" style={{ cursor: 'pointer' }}>
+              <Upload size={16} /> {uploading ? t('uploading') : t('uploadDocument')}
+            </label>
+          </div>
+        }
+      />
 
       <div style={{ padding: '32px', maxWidth: '1200px', margin: '0 auto' }}>
         <div style={{ display: 'flex', gap: '8px', marginBottom: '20px', borderBottom: '1px solid hsl(var(--border))', paddingBottom: '8px' }}>
@@ -129,7 +131,7 @@ export function Knowledge() {
             }}
             onClick={() => setActiveTab('all')}
           >
-            All ({documents.length})
+            {t('allScopes')} ({documents.length})
           </button>
           <button
             className={`btn btn-ghost ${activeTab === 'workspace' ? 'active' : ''}`}
@@ -143,7 +145,7 @@ export function Knowledge() {
             }}
             onClick={() => setActiveTab('workspace')}
           >
-            Workspace ({workspaceCount})
+            {t('workspaceScope')} ({workspaceCount})
           </button>
           <button
             className={`btn btn-ghost ${activeTab === 'system' ? 'active' : ''}`}
@@ -157,7 +159,7 @@ export function Knowledge() {
             }}
             onClick={() => setActiveTab('system')}
           >
-            System / Official ({systemCount})
+            {t('systemScope')} ({systemCount})
           </button>
         </div>
         {filteredDocs.length > 0 ? (
@@ -165,12 +167,12 @@ export function Knowledge() {
             <table className="table">
               <thead>
                 <tr>
-                  <th>Filename</th>
-                  <th>Scope</th>
-                  <th>Size</th>
-                  <th>Chunks</th>
-                  <th>Indexed</th>
-                  <th>Status</th>
+                  <th>{t('filename')}</th>
+                  <th>{t('scope')}</th>
+                  <th>{t('size')}</th>
+                  <th>{t('chunks')}</th>
+                  <th>{t('indexedAt')}</th>
+                  <th>{t('status')}</th>
                   <th></th>
                 </tr>
               </thead>
@@ -186,11 +188,11 @@ export function Knowledge() {
                     <td>
                       {doc.scope === 'system' ? (
                         <span className="badge" style={{ display: 'inline-flex', alignItems: 'center', gap: '4px', background: 'hsl(var(--primary)/0.1)', color: 'hsl(var(--primary))' }}>
-                          <ShieldCheck size={12} /> System
+                          <ShieldCheck size={12} /> {t('systemKnowledge')}
                         </span>
                       ) : (
                         <span className="badge" style={{ background: 'hsl(var(--muted))' }}>
-                          Workspace
+                          {t('workspaceKnowledge')}
                         </span>
                       )}
                     </td>
@@ -204,7 +206,7 @@ export function Knowledge() {
                     </td>
                     <td style={{ textAlign: 'right' }}>
                       {doc.scope === 'system' ? (
-                        <span title="Built-in System Knowledge (Read-only)" style={{ padding: '4px', color: 'hsl(var(--muted-foreground))', display: 'inline-block' }}>
+                        <span title={t('readOnlyProtected')} style={{ padding: '4px', color: 'hsl(var(--muted-foreground))', display: 'inline-block' }}>
                           <Lock size={15} />
                         </span>
                       ) : (
@@ -221,10 +223,10 @@ export function Knowledge() {
         ) : !loading && (
           <div className="empty-state">
             <Database className="empty-icon" />
-            <div className="empty-title">No Documents in this Scope</div>
-            <p className="text-muted" style={{ maxWidth: '400px' }}>Upload documents (PDF, TXT, MD, CSV) to provide contextual knowledge for your workforce.</p>
+            <div className="empty-title">{t('noDocumentsFound')}</div>
+            <p className="text-muted" style={{ maxWidth: '400px' }}>{t('noDocumentsDesc')}</p>
             <label htmlFor="file-upload" className="btn btn-primary mt-4" style={{ cursor: 'pointer' }}>
-              <Upload size={16} /> Upload your first document
+              <Upload size={16} /> {t('uploadFirstDocument')}
             </label>
           </div>
         )}

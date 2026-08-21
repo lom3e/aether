@@ -2,6 +2,7 @@ import { useState, useContext } from 'react';
 import { X, Bot } from 'lucide-react';
 import { ToastContext } from './toast';
 import { apiError, apiUrl } from './api';
+import { useTranslation } from './i18n';
 
 export function AgentBuilder({
   onClose,
@@ -12,6 +13,7 @@ export function AgentBuilder({
   onSave: () => void,
   initialData?: any
 }) {
+  const { t } = useTranslation();
   const [name, setName] = useState(initialData?.name || '');
   const [role, setRole] = useState(initialData?.role || '');
   const [instructions, setInstructions] = useState(initialData?.description || '');
@@ -92,7 +94,7 @@ export function AgentBuilder({
             <div style={{ width: '32px', height: '32px', borderRadius: '6px', backgroundColor: 'hsl(var(--primary)/0.1)', color: 'hsl(var(--primary))', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
               <Bot size={18} />
             </div>
-            {initialData ? 'Edit Agent' : 'Create Agent'}
+            {initialData ? t('editAgent') : t('createAgent')}
           </div>
           <button className="btn btn-ghost" style={{ padding: '8px' }} onClick={onClose} disabled={saving}>
             <X size={20} />
@@ -101,7 +103,7 @@ export function AgentBuilder({
 
         <div className="slide-over-body">
           <div className="form-group">
-            <label className="form-label">Name</label>
+            <label className="form-label">{t('name')}</label>
             <input
               type="text"
               className="form-input"
@@ -112,7 +114,7 @@ export function AgentBuilder({
           </div>
 
           <div className="form-group">
-            <label className="form-label">Role</label>
+            <label className="form-label">{t('role')}</label>
             <input
               type="text"
               className="form-input"
@@ -123,7 +125,7 @@ export function AgentBuilder({
           </div>
 
           <div className="form-group">
-            <label className="form-label">Instructions</label>
+            <label className="form-label">{t('instructions')}</label>
             <textarea
               className="form-textarea"
               value={instructions}
@@ -131,11 +133,11 @@ export function AgentBuilder({
               placeholder="You are responsible for..."
               rows={8}
             />
-            <p className="text-muted" style={{ fontSize: '12px', marginTop: '6px' }}>Detailed instructions shape the agent's behavior and constraints.</p>
+            <p className="text-muted" style={{ fontSize: '12px', marginTop: '6px' }}>{t('agentInstructionsDesc')}</p>
           </div>
 
           <div className="form-group">
-            <label className="form-label">Delegates To</label>
+            <label className="form-label">{t('delegatesTo')}</label>
             <input
               type="text"
               className="form-input"
@@ -147,9 +149,9 @@ export function AgentBuilder({
 
           <div className="form-row">
             <div className="form-group">
-              <label className="form-label">Provider (Optional)</label>
+              <label className="form-label">{t('providerOptional')}</label>
               <select className="form-select" value={provider} onChange={e => setProvider(e.target.value)}>
-                <option value="">Team Default</option>
+                <option value="">{t('teamDefault')}</option>
                 <option value="openai">OpenAI</option>
                 <option value="anthropic">Anthropic</option>
                 <option value="gemini">Google Gemini</option>
@@ -157,7 +159,7 @@ export function AgentBuilder({
               </select>
             </div>
             <div className="form-group">
-              <label className="form-label">Model (Optional)</label>
+              <label className="form-label">{t('modelOptional')}</label>
               <input
                 type="text"
                 className="form-input"
@@ -172,12 +174,12 @@ export function AgentBuilder({
         <div className="slide-over-footer">
           {initialData && (
             <button className="btn btn-danger" style={{ marginRight: 'auto' }} onClick={handleDelete} disabled={saving}>
-              {confirmDelete ? 'Confirm delete' : 'Delete Agent'}
+              {confirmDelete ? t('confirmDelete') : t('deleteAgent')}
             </button>
           )}
-          <button className="btn btn-secondary" onClick={onClose} disabled={saving}>Cancel</button>
+          <button className="btn btn-secondary" onClick={onClose} disabled={saving}>{t('cancel')}</button>
           <button className="btn btn-primary" onClick={handleSave} disabled={!name || !role || saving}>
-            {saving ? 'Saving...' : 'Save Agent'}
+            {saving ? t('saving') : t('saveAgent')}
           </button>
         </div>
       </div>

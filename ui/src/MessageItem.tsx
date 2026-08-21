@@ -161,7 +161,7 @@ export function MessageItem({
                     setIsEditing(true);
                     setEditContent(message.content);
                   }}
-                  title="Edit prompt"
+                  title={t('editPrompt')}
                 >
                   <Edit2 size={13} />
                 </button>
@@ -181,7 +181,7 @@ export function MessageItem({
                   className="btn btn-ghost"
                   style={{ padding: '3px 6px', fontSize: '11px', color: 'hsl(var(--destructive))' }}
                   onClick={() => setIsConfirmingDelete(true)}
-                  title="Delete message"
+                  title={t('deleteMessage')}
                 >
                   <Trash2 size={13} />
                 </button>
@@ -194,7 +194,7 @@ export function MessageItem({
                 className="btn btn-ghost"
                 style={{ padding: '3px 6px', fontSize: '11px' }}
                 onClick={() => onRetryResponse(message.id)}
-                title="Retry response"
+                title={t('retryResponse')}
               >
                 <RotateCw size={13} />
               </button>
@@ -216,7 +216,7 @@ export function MessageItem({
             gap: '12px'
           }}>
             <span style={{ fontSize: '12.5px', color: 'hsl(var(--destructive))' }}>
-              Delete this message and subsequent responses?
+              {t('confirmDeleteMessage')}
             </span>
             <div style={{ display: 'flex', gap: '8px' }}>
               <button
@@ -224,7 +224,7 @@ export function MessageItem({
                 style={{ padding: '4px 10px', fontSize: '12px' }}
                 onClick={() => setIsConfirmingDelete(false)}
               >
-                Cancel
+                {t('cancel')}
               </button>
               <button
                 className="btn btn-destructive"
@@ -234,7 +234,7 @@ export function MessageItem({
                   if (onDeleteMessage) onDeleteMessage(message.id);
                 }}
               >
-                Delete
+                {t('delete')}
               </button>
             </div>
           </div>
@@ -255,14 +255,14 @@ export function MessageItem({
                 style={{ padding: '4px 12px', fontSize: '12px' }}
                 onClick={() => setIsEditing(false)}
               >
-                Cancel
+                {t('cancel')}
               </button>
               <button
                 className="btn btn-primary"
                 style={{ padding: '4px 12px', fontSize: '12px' }}
                 onClick={handleSaveEdit}
               >
-                Save & Resend
+                {t('saveAndResend')}
               </button>
             </div>
           </div>
@@ -314,7 +314,7 @@ export function MessageItem({
                 <input
                   type="text"
                   className="form-input"
-                  placeholder="Type your response..."
+                  placeholder={t('typeYourResponse')}
                   value={inputText}
                   onChange={e => setInputText(e.target.value)}
                   onKeyDown={e => {

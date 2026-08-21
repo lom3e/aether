@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
 import { Bot, Cpu, Plus } from 'lucide-react';
 import { AgentBuilder } from './AgentBuilder';
+import { TopHeader } from './TopHeader';
 import { apiUrl } from './api';
 import { useTranslation } from './i18n';
 
@@ -29,18 +30,18 @@ export function Agents({ navigate }: { navigate: (view: string, params?: any) =>
 
   return (
     <div style={{ flex: 1, overflowY: 'auto' }}>
-      <div className="top-header">
-        <div className="top-header-title">
-          <Bot size={18} className="text-primary" />
-          <span>{t('agentsTitle')}</span>
-        </div>
-        <button
-          className="btn btn-primary"
-          onClick={() => setIsBuilding(true)}
-        >
-          <Plus size={16} /> {t('createAgent')}
-        </button>
-      </div>
+      <TopHeader
+        title={t('agentsTitle')}
+        icon={Bot}
+        actions={
+          <button
+            className="btn btn-primary"
+            onClick={() => setIsBuilding(true)}
+          >
+            <Plus size={16} /> {t('createAgent')}
+          </button>
+        }
+      />
 
       <div style={{ maxWidth: '1100px', margin: '36px auto', padding: '0 32px' }}>
         <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(320px, 1fr))', gap: '20px' }}>
@@ -72,11 +73,11 @@ export function Agents({ navigate }: { navigate: (view: string, params?: any) =>
                     <div style={{ fontSize: '12px', color: 'hsl(var(--muted-fg))' }}>{agent.role}</div>
                   </div>
                 </div>
-                <div className="status-dot idle" title="Configured" />
+                <div className="status-dot idle" title={t('configured')} />
               </div>
 
               <div style={{ marginBottom: '14px', fontSize: '13px', color: 'hsl(var(--muted-fg))', display: '-webkit-box', WebkitLineClamp: 2, WebkitBoxOrient: 'vertical', overflow: 'hidden', minHeight: '38px', lineHeight: 1.5 }}>
-                {agent.description || agent.instructions || <em>Autonomous workforce agent.</em>}
+                {agent.description || agent.instructions || <em>{t('autonomousAgentDesc')}</em>}
               </div>
 
               <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '14px', fontSize: '11.5px', color: 'hsl(var(--muted-fg))' }}>
@@ -106,7 +107,7 @@ export function Agents({ navigate }: { navigate: (view: string, params?: any) =>
             <div className="card" style={{ gridColumn: '1 / -1', textAlign: 'center', padding: '48px' }}>
               <Bot size={40} className="text-muted" style={{ margin: '0 auto 16px' }} />
               <h3 style={{ fontSize: '18px', marginBottom: '6px' }}>{t('noAgentsConfigured')}</h3>
-              <p className="text-muted" style={{ fontSize: '13.5px', marginBottom: '20px' }}>Start your workforce by configuring your first agent.</p>
+              <p className="text-muted" style={{ fontSize: '13.5px', marginBottom: '20px' }}>{t('noAgentsConfiguredDesc')}</p>
               <button className="btn btn-primary" onClick={() => setIsBuilding(true)}>
                 <Plus size={16} /> {t('createAgent')}
               </button>
