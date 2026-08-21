@@ -3,11 +3,8 @@
 App Icon Generation Pipeline for Aether Desktop (DSK-04A).
 Source of truth: website/public/brand/aether_emblem_3d.png
 Output: src-tauri/icons/ (icon.icns, icon.ico, icon.png, 32x32.png, 128x128.png, etc.)
-Applies Full-Bleed macOS Squircle Specification (1024x1024 canvas with Apple r=224 curvature):
-- Fills the 1024x1024 canvas with standard Apple squircle radius (r=224)
-- Prevents macOS Finder/Launchpad from nesting the icon inside a secondary grey container
-- Provides optimal ~780px footprint for the 3D purple ribbon emblem, perfectly matching
-  the visual weight of Google Chrome, Antigravity, Gemini, Spotify, and ChatGPT.
+Takes the original 3D emblem image at MAXIMUM size directly onto the 1024x1024 white squircle canvas
+without any cropping or artificial downscaling, utilizing the image's built-in natural margins.
 """
 import os
 import shutil
@@ -21,7 +18,7 @@ SOURCE_EMBLEM = REPO_ROOT / "website" / "public" / "brand" / "aether_emblem_3d.p
 ICONS_DIR = REPO_ROOT / "src-tauri" / "icons"
 
 
-def build_macos_full_squircle_master(emblem_path: Path, output_master_path: Path):
+def build_macos_max_squircle_master(emblem_path: Path, output_master_path: Path):
     try:
         from PIL import Image, ImageDraw
     except ImportError:
@@ -29,9 +26,9 @@ def build_macos_full_squircle_master(emblem_path: Path, output_master_path: Path
         sys.exit(1)
 
     canvas_size = 1024
-    radius = 224  # Standard Apple 1024x1024 squircle radius
+    radius = 224
 
-    # 1. Supersampled (4x) anti-aliased squircle mask
+    # 1. Anti-aliased squircle mask (4x supersampling)
     ss = 4
     ss_size = canvas_size * ss
     ss_rad = radius * ss
@@ -40,37 +37,26 @@ def build_macos_full_squircle_master(emblem_path: Path, output_master_path: Path
     draw_mask.rounded_rectangle([0, 0, ss_size - 1, ss_size - 1], radius=ss_rad, fill=255)
     tile_mask = mask_hi.resize((canvas_size, canvas_size), Image.Resampling.LANCZOS)
 
-    # 2. Crisp white to subtle platinum vertical gradient
-    tile_bg = Image.new("RGBA", (canvas_size, canvas_size), (255, 255, 255, 255))
-    for y in range(canvas_size):
-        factor = y / float(canvas_size)
-        v = int(255 - factor * 8)
-        for x in range(canvas_size):
-            tile_bg.putpixel((x, y), (v, v, v, 255))
+    # 2. Pure clean white background
+    canvas = Image.new("RGBA", (canvas_size, canvas_size), (255, 255, 255, 255))
 
-    # 3. Load & crop 3D emblem
-    emblem = Image.open(emblem_path).convert("RGBA")
-    bbox = emblem.getbbox()
-    if bbox:
-        emblem = emblem.crop(bbox)
+    # 3. Load original emblem image and scale to MAXIMUM canvas dimensions (no cropping)
+    emblem_orig = Image.open(emblem_path).convert("RGBA")
+    w, h = emblem_orig.size
+    scale = canvas_size / float(max(w, h))
+    nw = int(round(w * scale))
+    nh = int(round(h * scale))
+    emblem_max = emblem_orig.resize((nw, nh), Image.Resampling.LANCZOS)
 
-    ew, eh = emblem.size
-    target_ew = 780  # Full native visual weight
-    target_eh = int(round(eh * (target_ew / float(ew))))
-    emblem_resized = emblem.resize((target_ew, target_eh), Image.Resampling.LANCZOS)
+    ox = (canvas_size - nw) // 2
+    oy = (canvas_size - nh) // 2
+    canvas.paste(emblem_max, (ox, oy), emblem_max)
 
-    ex = (canvas_size - target_ew) // 2
-    ey = (canvas_size - target_eh) // 2 - 8  # Optical lift for triangle center of gravity
-
-    canvas = Image.new("RGBA", (canvas_size, canvas_size), (0, 0, 0, 0))
-    canvas.paste(tile_bg, (0, 0))
-    canvas.paste(emblem_resized, (ex, ey), emblem_resized)
-
-    # Apply squircle mask
+    # 4. Apply squircle mask
     final_icon = Image.new("RGBA", (canvas_size, canvas_size), (0, 0, 0, 0))
     final_icon.paste(canvas, (0, 0), tile_mask)
     final_icon.save(output_master_path, format="PNG")
-    print(f"✓ Created full-bleed squircle master icon: {output_master_path}")
+    print(f"✓ Created maximum-size squircle master icon: {output_master_path}")
 
 
 def generate_icons():
@@ -90,8 +76,8 @@ def generate_icons():
         tmp_path = Path(tmpdir)
         master_png = tmp_path / "icon_master_1024.png"
 
-        # 1. Build full-bleed Apple squircle master
-        build_macos_full_squircle_master(SOURCE_EMBLEM, master_png)
+        # 1. Build maximum-size Apple squircle master
+        build_macos_max_squircle_master(SOURCE_EMBLEM, master_png)
 
         # Update website public brand assets
         website_brand_icon = REPO_ROOT / "website" / "public" / "brand" / "aether_macos_app_icon_1024.png"
