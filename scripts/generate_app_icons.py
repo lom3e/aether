@@ -59,6 +59,44 @@ def build_macos_max_squircle_master(emblem_path: Path, output_master_path: Path)
     print(f"✓ Created maximum-size squircle master icon: {output_master_path}")
 
 
+def build_macos_icns(master_png: Path, output_icns: Path):
+    try:
+        from PIL import Image
+    except ImportError:
+        print("ERROR: Pillow is required. Run 'pip install pillow'.", file=sys.stderr)
+        sys.exit(1)
+
+    print("Building native macOS .icns via iconutil to bypass padding...")
+
+    with tempfile.TemporaryDirectory() as temp_dir:
+        iconset_dir = Path(temp_dir) / "icon.iconset"
+        iconset_dir.mkdir(parents=True, exist_ok=True)
+
+        sizes = [
+            ("icon_16x16.png", 16),
+            ("icon_16x16@2x.png", 32),
+            ("icon_32x32.png", 32),
+            ("icon_32x32@2x.png", 64),
+            ("icon_128x128.png", 128),
+            ("icon_128x128@2x.png", 256),
+            ("icon_256x256.png", 256),
+            ("icon_256x256@2x.png", 512),
+            ("icon_512x512.png", 512),
+            ("icon_512x512@2x.png", 1024),
+        ]
+
+        master_img = Image.open(master_png)
+        for filename, size in sizes:
+            resized_img = master_img.resize((size, size), Image.Resampling.LANCZOS)
+            resized_img.save(iconset_dir / filename, format="PNG")
+
+        subprocess.run(
+            ["iconutil", "-c", "icns", str(iconset_dir), "-o", str(output_icns)],
+            check=True
+        )
+        print(f"✓ Created native unpadded macOS icon: {output_icns}")
+
+
 def generate_icons():
     print("=" * 70)
     print("AETHER DESKTOP APP ICON GENERATION PIPELINE")
@@ -83,8 +121,8 @@ def generate_icons():
         website_brand_icon = REPO_ROOT / "website" / "public" / "brand" / "aether_macos_app_icon_1024.png"
         shutil.copy(master_png, website_brand_icon)
 
-        # 2. Run Tauri icon generator
-        print("Running Tauri icon generator to produce ICNS, ICO, and PNG variants...")
+        # 2. Run Tauri icon generator (for Windows/Linux ICO and PNG variants)
+        print("Running Tauri icon generator to produce ICO, and PNG variants...")
         env = os.environ.copy()
         cargo_bin = Path.home() / ".cargo" / "bin"
         if cargo_bin.exists():
@@ -97,7 +135,10 @@ def generate_icons():
             env=env,
         )
 
-    # 3. Verify generated artifacts
+        # 3. Overwrite the Tauri-generated icon.icns with our native unpadded one
+        build_macos_icns(master_png, ICONS_DIR / "icon.icns")
+
+    # 4. Verify generated artifacts
     icns_file = ICONS_DIR / "icon.icns"
     png_file = ICONS_DIR / "icon.png"
     assert icns_file.exists(), f"Missing {icns_file}"
