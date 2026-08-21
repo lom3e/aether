@@ -20,43 +20,63 @@ ICONS_DIR = REPO_ROOT / "src-tauri" / "icons"
 
 def build_macos_max_squircle_master(emblem_path: Path, output_master_path: Path):
     try:
-        from PIL import Image, ImageDraw
+        from PIL import Image, ImageDraw, ImageFilter
     except ImportError:
         print("ERROR: Pillow is required. Run 'pip install pillow'.", file=sys.stderr)
         sys.exit(1)
 
     canvas_size = 1024
-    radius = 224
+    icon_size = 824
+    radius = 185
+    ss = 4
 
     # 1. Anti-aliased squircle mask (4x supersampling)
-    ss = 4
-    ss_size = canvas_size * ss
+    ss_size = icon_size * ss
     ss_rad = radius * ss
     mask_hi = Image.new("L", (ss_size, ss_size), 0)
     draw_mask = ImageDraw.Draw(mask_hi)
     draw_mask.rounded_rectangle([0, 0, ss_size - 1, ss_size - 1], radius=ss_rad, fill=255)
-    tile_mask = mask_hi.resize((canvas_size, canvas_size), Image.Resampling.LANCZOS)
+    squircle_mask = mask_hi.resize((icon_size, icon_size), Image.Resampling.LANCZOS)
 
-    # 2. Pure clean white background
-    canvas = Image.new("RGBA", (canvas_size, canvas_size), (255, 255, 255, 255))
+    # 2. Drop Shadow (matching macOS HIG aesthetics)
+    shadow = Image.new("RGBA", (canvas_size, canvas_size), (0, 0, 0, 0))
+    black_squircle = Image.new("RGBA", (icon_size, icon_size), (0, 0, 0, 100))
+    
+    # Offset shadow slightly downwards
+    shadow_ox = (canvas_size - icon_size) // 2
+    shadow_oy = (canvas_size - icon_size) // 2 + 12
+    shadow.paste(black_squircle, (shadow_ox, shadow_oy), squircle_mask)
+    
+    # Blur the shadow
+    shadow = shadow.filter(ImageFilter.GaussianBlur(15))
 
-    # 3. Load original emblem image and scale to MAXIMUM canvas dimensions (no cropping)
+    # 3. Base transparent canvas
+    canvas = Image.new("RGBA", (canvas_size, canvas_size), (0, 0, 0, 0))
+    
+    # Apply shadow first
+    canvas = Image.alpha_composite(canvas, shadow)
+
+    # 4. Pure clean white background squircle
+    white_squircle = Image.new("RGBA", (icon_size, icon_size), (255, 255, 255, 255))
+    squircle_ox = (canvas_size - icon_size) // 2
+    squircle_oy = (canvas_size - icon_size) // 2
+    canvas.paste(white_squircle, (squircle_ox, squircle_oy), squircle_mask)
+
+    # 5. Load original emblem image and scale to fit footprint
     emblem_orig = Image.open(emblem_path).convert("RGBA")
     w, h = emblem_orig.size
-    scale = canvas_size / float(max(w, h))
+    scale = icon_size / float(max(w, h))
     nw = int(round(w * scale))
     nh = int(round(h * scale))
     emblem_max = emblem_orig.resize((nw, nh), Image.Resampling.LANCZOS)
 
+    # Center emblem on the canvas
     ox = (canvas_size - nw) // 2
     oy = (canvas_size - nh) // 2
     canvas.paste(emblem_max, (ox, oy), emblem_max)
 
-    # 4. Apply squircle mask
-    final_icon = Image.new("RGBA", (canvas_size, canvas_size), (0, 0, 0, 0))
-    final_icon.paste(canvas, (0, 0), tile_mask)
-    final_icon.save(output_master_path, format="PNG")
-    print(f"✓ Created maximum-size squircle master icon: {output_master_path}")
+    canvas.save(output_master_path, format="PNG")
+    print(f"✓ Created HIG-compliant padded squircle master icon: {output_master_path}")
 
 
 def build_macos_icns(master_png: Path, output_icns: Path):
