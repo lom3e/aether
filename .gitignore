@@ -134,3 +134,6 @@ website/out/
 src-tauri/target/
 src-tauri/binaries/
 src-tauri/resources/
+
+# Raw design references
+Loghi Aether/

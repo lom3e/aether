@@ -14,7 +14,7 @@ export function Agents({ navigate }: { navigate: (view: string, params?: any) =>
     fetch(apiUrl('/api/agents'))
       .then(res => res.json())
       .then(data => {
-        setAgents(data || []);
+        setAgents(Array.isArray(data) ? data : []);
         setLoading(false);
       })
       .catch(err => {

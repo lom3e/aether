@@ -195,7 +195,7 @@ export function Teams() {
   const showToast = useContext(ToastContext);
 
   const fetchTeams = useCallback(() => {
-    fetch(apiUrl('/api/teams')).then(res => res.json()).then(data => { setTeams(data); setLoading(false); }).catch(() => { showToast('Unable to load teams.', 'error'); setLoading(false); });
+    fetch(apiUrl('/api/teams')).then(res => res.json()).then(data => { setTeams(Array.isArray(data) ? data : []); setLoading(false); }).catch(() => { showToast('Unable to load teams.', 'error'); setLoading(false); });
   }, [showToast]);
 
   const openEditor = async (team: any) => {

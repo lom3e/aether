@@ -4,27 +4,46 @@ Playwright End-to-End browser test for:
 - Official vector SVGs (Light and Dark mode)
 - Explicit No Active Workspace empty states on Home, Chat, and Sidebar
 - Workspace creation and deletion lifecycle in browser
+
+The `aether_server` fixture (defined in conftest.py) starts the backend
+on a dynamic port before this module runs. BASE_URL is read from the
+environment variable AETHER_E2E_BASE_URL set by that fixture.
 """
+import os
 import time
 import pytest
 from playwright.sync_api import Page, expect, sync_playwright
 
-BASE_URL = "http://localhost:8000"
+# BASE_URL is set at fixture time via the module-level _state dict below.
+# We cannot use a plain `BASE_URL = os.environ.get(...)` at import time
+# because the env var is only set by the fixture after collection.
+_state: dict = {}
 
 
 @pytest.fixture(scope="module")
-def browser_context():
+def browser_context(aether_server):
+    """Module-scoped browser context. Depends on aether_server to guarantee
+    the backend is running before any test in this module executes."""
+    _state["base_url"] = aether_server["base_url"]
+    token = aether_server.get("token")
     with sync_playwright() as p:
         browser = p.chromium.launch(headless=True)
         context = browser.new_context(viewport={"width": 1440, "height": 900})
+        if token:
+            context.add_init_script(f"window.__AETHER_SESSION_TOKEN__ = '{token}';")
         yield context
         browser.close()
 
 
+def _base_url() -> str:
+    return _state.get("base_url", os.environ.get("AETHER_E2E_BASE_URL", "http://localhost:8000"))
+
+
 def test_01_tab_title_and_favicon(browser_context):
     """Verifies page title is 'Aether' and favicon link points to /brand/favicon.svg."""
+    base_url = _base_url()
     page = browser_context.new_page()
-    page.goto(BASE_URL)
+    page.goto(base_url)
     page.wait_for_timeout(1000)
 
     # 1. Page title must be 'Aether' (not 'ui')
@@ -35,7 +54,7 @@ def test_01_tab_title_and_favicon(browser_context):
     expect(favicon).to_have_attribute("href", "/brand/favicon.svg")
 
     # 3. Favicon file must be accessible with 200 OK
-    res = page.request.get(f"{BASE_URL}/brand/favicon.svg")
+    res = page.request.get(f"{base_url}/brand/favicon.svg")
     assert res.status == 200
     assert "svg" in res.headers.get("content-type", "")
 
@@ -44,6 +63,7 @@ def test_01_tab_title_and_favicon(browser_context):
 
 def test_02_official_branding_assets(browser_context):
     """Verifies official SVGs exist and are served cleanly."""
+    base_url = _base_url()
     page = browser_context.new_page()
 
     for asset in [
@@ -54,7 +74,7 @@ def test_02_official_branding_assets(browser_context):
         "scritta_AETHER.svg",
         "favicon.svg",
     ]:
-        res = page.request.get(f"{BASE_URL}/brand/{asset}")
+        res = page.request.get(f"{base_url}/brand/{asset}")
         assert res.status == 200, f"Asset /brand/{asset} failed with status {res.status}"
         assert len(res.body()) > 100
 
@@ -63,8 +83,9 @@ def test_02_official_branding_assets(browser_context):
 
 def test_03_no_workspace_empty_state_and_navigation(browser_context):
     """Verifies UI recognizes no-workspace state and shows proper cards."""
+    base_url = _base_url()
     page = browser_context.new_page()
-    page.goto(BASE_URL)
+    page.goto(base_url)
     page.wait_for_timeout(1000)
 
     # Sidebar must be visible
@@ -84,8 +105,9 @@ def test_03_no_workspace_empty_state_and_navigation(browser_context):
 
 def test_04_collapsed_sidebar_logo_and_reopen(browser_context):
     """Verifies that collapsing the sidebar keeps the Aether logo clearly visible and clicking it re-expands the sidebar."""
+    base_url = _base_url()
     page = browser_context.new_page()
-    page.goto(BASE_URL)
+    page.goto(base_url)
     page.wait_for_selector(".sidebar", timeout=10000)
 
     sidebar = page.locator(".sidebar")
@@ -127,8 +149,9 @@ def test_04_collapsed_sidebar_logo_and_reopen(browser_context):
 
 def test_05_theme_aware_collapsed_logo(browser_context):
     """Verifies that the collapsed logo switches between logo_bianco.svg and logo_nero.svg with theme."""
+    base_url = _base_url()
     page = browser_context.new_page()
-    page.goto(BASE_URL)
+    page.goto(base_url)
     page.wait_for_selector(".sidebar", timeout=10000)
 
     # Collapse sidebar
@@ -155,8 +178,9 @@ def test_05_theme_aware_collapsed_logo(browser_context):
 
 def test_06_workspace_modal_model_suggestions(browser_context):
     """Verifies that WorkspaceModal provides intelligent model dropdowns for all providers with custom input toggle."""
+    base_url = _base_url()
     page = browser_context.new_page()
-    page.goto(BASE_URL)
+    page.goto(base_url)
     page.wait_for_selector(".sidebar", timeout=10000)
 
     # Open Create Workspace Modal (from Home button or Sidebar dropdown)
