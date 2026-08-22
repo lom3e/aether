@@ -21,12 +21,14 @@ interface SidebarProps {
   onOpenWorkspaceModal?: (mode: 'create' | 'manage') => void;
   onRefreshConversations?: () => void;
   onWorkspaceSwitched?: () => void;
+  workspaceVersion?: number;
 }
 
 export function Sidebar({
   currentView,
   onNavigate,
   workspaceName,
+  workspaceVersion = 0,
   conversations,
   activeConversationId,
   onSelectConversation,
@@ -86,7 +88,7 @@ export function Sidebar({
 
   useEffect(() => {
     fetchWorkspaces();
-  }, [workspaceName]);
+  }, [workspaceName, workspaceVersion]);
 
   // Click outside listener for popovers
   useEffect(() => {
@@ -211,6 +213,7 @@ export function Sidebar({
             <>
               <button
                 className="btn btn-ghost"
+                data-testid="workspace-switcher-button"
                 style={{
                   display: 'flex',
                   alignItems: 'center',

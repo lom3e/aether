@@ -226,9 +226,22 @@ p {
   transition: all 0.15s ease;
 }
 
-.btn-icon:hover {
-  background-color: hsl(var(--muted));
-  color: hsl(var(--fg));
+.btn-destructive,
+.btn-danger {
+  background-color: hsl(var(--destructive));
+  color: hsl(var(--destructive-fg));
+  border-color: hsl(var(--destructive));
+}
+
+.btn-destructive:hover:not(:disabled),
+.btn-danger:hover:not(:disabled) {
+  opacity: 0.92;
+  box-shadow: 0 4px 14px hsl(var(--destructive) / 0.3);
+}
+
+.btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
 }
 
 /* Form Controls */

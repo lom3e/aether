@@ -190,3 +190,92 @@ async def test_case_f_create_workspace_transitions_smoothly(clean_registry, tmp_
     res_ws = await get_workspace(req)
     assert res_ws.name == "First New Workspace"
     assert res_ws.has_default_team is True
+
+
+@pytest.mark.asyncio
+async def test_case_g_delete_active_workspace_switches_to_remaining(clean_registry, tmp_path):
+    """Case G: Deleting the active workspace when another exists switches active to remaining."""
+    ws_a = WorkspaceRegistry.create_workspace(
+        name="Workspace Alpha",
+        preset_id="empty",
+        target_dir=tmp_path / "ws-alpha"
+    )
+    ws_b = WorkspaceRegistry.create_workspace(
+        name="Workspace Beta",
+        preset_id="empty",
+        target_dir=tmp_path / "ws-beta"
+    )
+
+    app.state.workspace = ws_a
+    app.state.workspace_root = ws_a.root
+    app.state.team = ws_a.load_team()
+
+    req = mock_request()
+
+    # Delete active workspace (Alpha)
+    entry_a = WorkspaceRegistry.get_workspace_entry(ws_a.root)
+    del_res = await delete_workspace_endpoint(req, entry_a["id"])
+    assert del_res == {"status": "ok"}
+
+    # Alpha directory should no longer exist
+    assert not (tmp_path / "ws-alpha").exists()
+
+    # Active workspace should have automatically switched to Beta
+    assert app.state.workspace is not None
+    assert app.state.workspace.root == ws_b.root
+    assert app.state.workspace.config["workspace"]["name"] == "Workspace Beta"
+
+    # Subsequent GET /api/workspace reflects Beta
+    info = await get_workspace(req)
+    assert info.name == "Workspace Beta"
+
+    # Workspaces list contains only Beta and marks it active
+    ws_list = await list_all_workspaces(req)
+    assert len(ws_list) == 1
+    assert ws_list[0]["name"] == "Workspace Beta"
+    assert ws_list[0]["is_active"] is True
+
+
+@pytest.mark.asyncio
+async def test_case_h_delete_inactive_workspace_keeps_active(clean_registry, tmp_path):
+    """Case H: Deleting an inactive workspace does not change active workspace."""
+    ws_a = WorkspaceRegistry.create_workspace(
+        name="Workspace Alpha",
+        preset_id="empty",
+        target_dir=tmp_path / "ws-alpha"
+    )
+    ws_b = WorkspaceRegistry.create_workspace(
+        name="Workspace Beta",
+        preset_id="empty",
+        target_dir=tmp_path / "ws-beta"
+    )
+
+    app.state.workspace = ws_a
+    app.state.workspace_root = ws_a.root
+    app.state.team = ws_a.load_team()
+
+    req = mock_request()
+
+    # Delete inactive workspace (Beta)
+    entry_b = WorkspaceRegistry.get_workspace_entry(ws_b.root)
+    del_res = await delete_workspace_endpoint(req, entry_b["id"])
+    assert del_res == {"status": "ok"}
+
+    # Beta directory should no longer exist
+    assert not (tmp_path / "ws-beta").exists()
+
+    # Active workspace remains Alpha
+    assert app.state.workspace is not None
+    assert app.state.workspace.root == ws_a.root
+
+    info = await get_workspace(req)
+    assert info.name == "Workspace Alpha"
+
+
+@pytest.mark.asyncio
+async def test_case_i_delete_nonexistent_workspace_returns_404(clean_registry):
+    """Case I: Attempting to delete a non-existent workspace ID returns 404."""
+    req = mock_request()
+    with pytest.raises(HTTPException) as exc_info:
+        await delete_workspace_endpoint(req, "non-existent-ws-id")
+    assert exc_info.value.status_code == 404

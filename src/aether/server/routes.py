@@ -1059,6 +1059,25 @@ async def create_new_workspace(request: Request, data: CreateWorkspacePayload):
             request.app.state.team = None
             request.app.state.active_team_name = None
 
+        # Persist active workspace in global config
+        try:
+            cfg_file = get_global_config_path()
+            cfg_file.parent.mkdir(parents=True, exist_ok=True)
+            cfg_data = {}
+            if cfg_file.exists():
+                try:
+                    with open(cfg_file, "r", encoding="utf-8") as f:
+                        cfg_data = json.load(f)
+                except Exception:
+                    cfg_data = {}
+            cfg_data["active_workspace"] = str(new_ws.root)
+            tmp = cfg_file.with_suffix(".tmp")
+            with open(tmp, "w", encoding="utf-8") as f:
+                json.dump(cfg_data, f, indent=2)
+            tmp.replace(cfg_file)
+        except Exception:
+            pass
+
         return {
             "status": "ok",
             "workspace": WorkspaceRegistry.get_workspace_entry(new_ws.root),
@@ -1178,6 +1197,26 @@ async def delete_workspace_endpoint(request: Request, ws_id: str):
                     request.app.state.active_team_name = next_ws.config.get("workspace", {}).get("default_team", "default")
                 except Exception:
                     request.app.state.team = None
+                    request.app.state.active_team_name = None
+
+                # Persist active workspace in global config
+                try:
+                    cfg_file = get_global_config_path()
+                    cfg_file.parent.mkdir(parents=True, exist_ok=True)
+                    cfg_data = {}
+                    if cfg_file.exists():
+                        try:
+                            with open(cfg_file, "r", encoding="utf-8") as f:
+                                cfg_data = json.load(f)
+                        except Exception:
+                            cfg_data = {}
+                    cfg_data["active_workspace"] = str(next_ws.root)
+                    tmp = cfg_file.with_suffix(".tmp")
+                    with open(tmp, "w", encoding="utf-8") as f:
+                        json.dump(cfg_data, f, indent=2)
+                    tmp.replace(cfg_file)
+                except Exception:
+                    pass
             else:
                 request.app.state.workspace = None
                 request.app.state.workspace_root = None
