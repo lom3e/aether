@@ -457,95 +457,107 @@ export function WorkspaceModal({
             </form>
           ) : (
             <div style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
-              {workspaces.map(ws => (
-                <div
-                  key={ws.id || ws.path}
-                  style={{
-                    padding: '14px',
-                    borderRadius: '8px',
-                    border: `1px solid ${ws.is_active ? 'hsl(var(--primary))' : 'hsl(var(--border))'}`,
-                    backgroundColor: ws.is_active ? 'hsl(var(--primary)/0.05)' : 'hsl(var(--card))',
-                    display: 'flex',
-                    alignItems: 'center',
-                    justifyContent: 'space-between',
-                    gap: '12px'
-                  }}
-                >
-                  <div style={{ flex: 1, minWidth: 0 }}>
-                    {editingWsId === ws.id ? (
-                      <div style={{ display: 'flex', gap: '6px', alignItems: 'center' }}>
-                        <input
-                          type="text"
-                          className="form-input"
-                          style={{ padding: '4px 8px', fontSize: '13px' }}
-                          value={renameValue}
-                          onChange={e => setRenameValue(e.target.value)}
-                          autoFocus
-                          onKeyDown={e => {
-                            if (e.key === 'Enter') handleRename(ws.id);
-                            if (e.key === 'Escape') setEditingWsId(null);
-                          }}
-                        />
-                        <button className="btn btn-primary" style={{ padding: '4px 8px', fontSize: '12px' }} onClick={() => handleRename(ws.id)}>
-                          {t('save')}
-                        </button>
-                        <button className="btn btn-secondary" style={{ padding: '4px 8px', fontSize: '12px' }} onClick={() => setEditingWsId(null)}>
-                          {t('cancel')}
-                        </button>
-                      </div>
-                    ) : (
-                      <>
-                        <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-                          <span style={{ fontWeight: 600, fontSize: '14px', color: 'hsl(var(--fg))' }}>
-                            {ws.name}
-                          </span>
-                          {ws.is_active && (
-                            <span className="badge" style={{ fontSize: '10px', background: 'hsl(var(--primary))', color: 'hsl(var(--primary-fg))' }}>
-                              {t('statusActive')}
+              {workspaces.length === 0 ? (
+                <div style={{ textAlign: 'center', padding: '36px 16px' }}>
+                  <Layers size={36} className="text-muted" style={{ margin: '0 auto 12px', opacity: 0.6 }} />
+                  <div style={{ fontSize: '15px', fontWeight: 600, marginBottom: '6px' }}>{t('noWorkspacesSaved')}</div>
+                  <p className="text-muted" style={{ fontSize: '13px', marginBottom: '16px', maxWidth: '360px', margin: '0 auto 16px' }}>
+                    {t('noActiveWorkspaceDesc')}
+                  </p>
+                  <button className="btn btn-primary" onClick={() => setMode('create')}>
+                    <Plus size={14} /> {t('newWorkspaceBtn')}
+                  </button>
+                </div>
+              ) : (
+                workspaces.map(ws => (
+                  <div
+                    key={ws.id || ws.path}
+                    style={{
+                      padding: '14px',
+                      borderRadius: '8px',
+                      border: `1px solid ${ws.is_active ? 'hsl(var(--primary))' : 'hsl(var(--border))'}`,
+                      backgroundColor: ws.is_active ? 'hsl(var(--primary)/0.05)' : 'hsl(var(--card))',
+                      display: 'flex',
+                      alignItems: 'center',
+                      justifyContent: 'space-between',
+                      gap: '12px'
+                    }}
+                  >
+                    <div style={{ flex: 1, minWidth: 0 }}>
+                      {editingWsId === ws.id ? (
+                        <div style={{ display: 'flex', gap: '6px', alignItems: 'center' }}>
+                          <input
+                            type="text"
+                            className="form-input"
+                            style={{ padding: '4px 8px', fontSize: '13px' }}
+                            value={renameValue}
+                            onChange={e => setRenameValue(e.target.value)}
+                            autoFocus
+                            onKeyDown={e => {
+                              if (e.key === 'Enter') handleRename(ws.id);
+                              if (e.key === 'Escape') setEditingWsId(null);
+                            }}
+                          />
+                          <button className="btn btn-primary" style={{ padding: '4px 8px', fontSize: '12px' }} onClick={() => handleRename(ws.id)}>
+                            {t('save')}
+                          </button>
+                          <button className="btn btn-secondary" style={{ padding: '4px 8px', fontSize: '12px' }} onClick={() => setEditingWsId(null)}>
+                            {t('cancel')}
+                          </button>
+                        </div>
+                      ) : (
+                        <>
+                          <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                            <span style={{ fontWeight: 600, fontSize: '14px', color: 'hsl(var(--fg))' }}>
+                              {ws.name}
                             </span>
-                          )}
-                        </div>
-                        <div style={{ fontSize: '11px', color: 'hsl(var(--muted-fg))', marginTop: '2px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                          {ws.path}
-                        </div>
-                      </>
-                    )}
-                  </div>
+                            {ws.is_active && (
+                              <span className="badge" style={{ fontSize: '10px', background: 'hsl(var(--primary))', color: 'hsl(var(--primary-fg))' }}>
+                                {t('statusActive')}
+                              </span>
+                            )}
+                          </div>
+                          <div style={{ fontSize: '11px', color: 'hsl(var(--muted-fg))', marginTop: '2px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                            {ws.path}
+                          </div>
+                        </>
+                      )}
+                    </div>
 
-                  <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
-                    {!ws.is_active && (
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+                      {!ws.is_active && (
+                        <button
+                          className="btn btn-secondary"
+                          style={{ padding: '5px 10px', fontSize: '12px' }}
+                          onClick={() => handleSwitch(ws)}
+                        >
+                          {t('switchWorkspace')}
+                        </button>
+                      )}
                       <button
-                        className="btn btn-secondary"
-                        style={{ padding: '5px 10px', fontSize: '12px' }}
-                        onClick={() => handleSwitch(ws)}
+                        className="btn btn-ghost"
+                        style={{ padding: '6px' }}
+                        title={t('rename')}
+                        onClick={() => {
+                          setEditingWsId(ws.id);
+                          setRenameValue(ws.name);
+                        }}
                       >
-                        {t('switchWorkspace')}
+                        <Edit2 size={14} />
                       </button>
-                    )}
-                    <button
-                      className="btn btn-ghost"
-                      style={{ padding: '6px' }}
-                      title={t('rename')}
-                      onClick={() => {
-                        setEditingWsId(ws.id);
-                        setRenameValue(ws.name);
-                      }}
-                    >
-                      <Edit2 size={14} />
-                    </button>
-                    {workspaces.length > 1 && (
                       <button
                         className="btn btn-ghost"
                         style={{ padding: '6px', color: 'hsl(var(--destructive))' }}
                         title={t('deleteWorkspaceTitle')}
+                        data-testid="delete-workspace-btn"
                         onClick={() => setDeletingWs(ws)}
                       >
                         <Trash2 size={14} />
                       </button>
-                    )}
+                    </div>
                   </div>
-                </div>
-              ))}
+                ))
+              )}
             </div>
           )}
         </div>
@@ -584,7 +596,7 @@ export function WorkspaceModal({
                 <button className="btn btn-secondary" onClick={() => setDeletingWs(null)}>
                   {t('cancel')}
                 </button>
-                <button className="btn btn-destructive" onClick={handleDelete}>
+                <button className="btn btn-destructive" data-testid="confirm-delete-workspace-btn" onClick={handleDelete}>
                   {t('deleteWorkspaceTitle')}
                 </button>
               </div>

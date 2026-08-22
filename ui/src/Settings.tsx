@@ -206,8 +206,12 @@ export function Settings({ onWorkspaceSwitched }: SettingsProps) {
     try {
       const wsListRes = await fetch(apiUrl('/api/workspaces'));
       const wsList = await wsListRes.json();
-      const current = wsList.find((w: any) => w.is_active);
-      if (!current) return;
+      const current = Array.isArray(wsList) ? (wsList.find((w: any) => w.is_active) || wsList[0]) : null;
+      if (!current) {
+        showToast('No workspace found to delete.', 'error');
+        setIsDeletingWs(false);
+        return;
+      }
 
       const res = await fetch(apiUrl(`/api/workspaces/${current.id}`), {
         method: 'DELETE'
@@ -216,9 +220,13 @@ export function Settings({ onWorkspaceSwitched }: SettingsProps) {
         showToast(`Workspace "${current.name}" deleted.`, 'info');
         setIsDeletingWs(false);
         if (onWorkspaceSwitched) onWorkspaceSwitched();
+      } else {
+        const err = await apiError(res, 'Failed to delete workspace.');
+        showToast(err.message, 'error');
       }
-    } catch (err) {
-      console.error(err);
+    } catch (err: any) {
+      console.error('Failed to delete workspace', err);
+      showToast(err?.message || 'Failed to delete workspace.', 'error');
     }
   };
 

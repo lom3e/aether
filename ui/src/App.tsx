@@ -51,7 +51,8 @@ function ToastProvider({ children }: { children: any }) {
 function MainApp() {
   const [currentView, setCurrentView] = useState('home');
   const [viewParams, setViewParams] = useState<any>(null);
-  const [workspaceName, setWorkspaceName] = useState('');
+  const [workspaceName, setWorkspaceName] = useState<string>('');
+  const [workspaceVersion, setWorkspaceVersion] = useState<number>(0);
   const [isInitialized, setIsInitialized] = useState<boolean | null>(null);
 
   // Conversations State
@@ -206,6 +207,7 @@ function MainApp() {
     setActiveConversationId(null);
     setCurrentView('home');
     fetchWorkspace();
+    setWorkspaceVersion(v => v + 1);
   };
 
   if (isInitialized === null) {
@@ -224,6 +226,7 @@ function MainApp() {
         currentView={currentView}
         onNavigate={navigate}
         workspaceName={workspaceName}
+        workspaceVersion={workspaceVersion}
         conversations={conversations}
         activeConversationId={activeConversationId}
         onSelectConversation={handleSelectConversation}
