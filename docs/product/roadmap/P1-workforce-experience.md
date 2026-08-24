@@ -254,16 +254,16 @@ Then:
 
 ## 2. Elenco dei Task Atomici (P1)
 
-| Task ID | Descrizione Operativa | Componenti Coinvolti | Stima |
+| Task ID | Descrizione Operativa | Componenti Coinvolti | Stato |
 | :--- | :--- | :--- | :--- |
-| **P1-01** | **Specifica e modello dati Skills**: Creazione modulo `skills/manifest.py`, definizione formato `skill.yaml` e schema di caricamento. | `skills/`, `models/` | M |
-| **P1-02** | **Active Agent Indicator & Streaming Badge**: Integrazione dell'agente mittente nei chunk di streaming WebSocket e animazione pulsante nella barra presence. | `ui/src/WorkforcePresence.tsx`, `ui/src/MessageItem.tsx` | S |
-| **P1-03** | **Provider Status Chip nella Navbar**: Implementazione del polling di salute e visualizzazione dello stato connettività con click rapido per impostazioni. | `ui/src/components/TopHeader.tsx`, `ui/src/ProviderSettings.tsx` | S |
-| **P1-04** | **Knowledge Drag & Drop Zone**: Creazione overlay di rilascio file con selezione scope e chiamata API batch upload. | `ui/src/Knowledge.tsx`, `ui/src/App.tsx` | M |
-| **P1-05** | **Icone e Colori Custom per Agenti**: Aggiunta campi `icon` e `color` in `AgentConfig` e selettore grafico in `AgentProfile.tsx` e `Teams.tsx`. | `core/config.py`, `ui/src/AgentProfile.tsx` | M |
-| **P1-06** | **Schema Database Projects & Pinned Chats**: Creazione tabella `projects` in `conversations.db`, aggiunta colonne `is_pinned` e `project_id`. | `memory/storage.py`, `server/conversations.py` | M |
-| **P1-07** | **Sidebar Navigation con Projects & Pinned Groups**: Riorganizzazione della barra laterale con sezioni Pinned, Projects ed accordions collassabili. | `ui/src/Sidebar.tsx` | L |
-| **P1-08** | **Tool Visibility badges nel Workforce Header**: Renderizzare la lista di tool disponibili per ciascun agente con icone informative. | `ui/src/WorkforcePresence.tsx` | S |
-| **P1-09** | **Slash Command (`/`) Parser & Autocomplete UI**: Implementazione del popover comandi rapidi nel componente input chat. | `ui/src/Chat.tsx`, `ui/src/components/SlashCommandMenu.tsx` | M |
-| **P1-10** | **Web Search Tool Subsystem (Backend)**: Implementazione dell'astrazione `WebSearchProvider` e driver `DuckDuckGoSearchProvider` a zero configurazione. | `tools/web_search.py`, `providers/` | L |
-| **P1-11** | **Web Search UI Indicator & Citations Component**: Rendering dei link alle fonti verificate e dell'indicatore di ricerca attiva nell'Activity Feed. | `ui/src/ActivityFeed.tsx`, `ui/src/MarkdownRenderer.tsx` | M |
+| **P1-01** | **Specifica e modello dati Skills**: Creazione modulo `skills/manifest.py`, definizione formato `skill.yaml` e schema di caricamento. | `skills/`, `models/` | **Completed (v1.5.0)** |
+| **P1-02** | **Active Agent Indicator & Streaming Badge**: Integrazione dell'agente mittente nei chunk di streaming WebSocket e animazione pulsante nella barra presence. | `ui/src/WorkforcePresence.tsx`, `ui/src/MessageItem.tsx` | **Completed (v1.5.0)** |
+| **P1-03** | **Provider Status Chip nella Navbar**: Implementazione del polling di salute e visualizzazione dello stato connettività con click rapido per impostazioni. | `ui/src/components/TopHeader.tsx`, `ui/src/ProviderSettings.tsx` | **Completed (v1.5.0)** |
+| **P1-04** | **Knowledge Drag & Drop Zone & Progress**: Overlay di rilascio file a tutto schermo, indicatore scope di destinazione, step progress e batch upload. | `ui/src/Knowledge.tsx`, `ui/src/index.css` | **Completed (v1.5.0)** |
+| **P1-05** | **Icone e Colori Custom per Agenti**: Aggiunta campi `icon` e `color` in `AgentConfig` e selettore grafico in `AgentProfile.tsx` e `Teams.tsx`. | `core/config.py`, `ui/src/AgentProfile.tsx` | **Completed (v1.5.0)** |
+| **P1-06** | **Schema Database Projects & Pinned Chats**: Creazione tabella `projects` in `conversations.db`, aggiunta colonne `is_pinned` e `project_id`. | `memory/storage.py`, `server/conversations.py` | **Completed (v1.5.0)** |
+| **P1-07** | **Sidebar Navigation con Projects & Pinned Groups**: Riorganizzazione della barra laterale con sezioni Pinned, Projects ed accordions collassabili. | `ui/src/Sidebar.tsx` | **Completed (v1.5.0)** |
+| **P1-08** | **Tool Visibility badges nel Workforce Header**: Renderizzare la lista di tool disponibili per ciascun agente con icone informative. | `ui/src/WorkforcePresence.tsx` | **Completed (v1.5.0)** |
+| **P1-09** | **Slash Command (`/`) Parser & Autocomplete UI**: Implementazione del popover comandi rapidi nel componente input chat. | `ui/src/Chat.tsx`, `ui/src/components/SlashCommandMenu.tsx` | **Completed (v1.5.0)** |
+| **P1-10** | **Web Search Tool Subsystem (Backend)**: Implementazione dell'astrazione `WebSearchProvider` e driver `DuckDuckGoSearchProvider` a zero configurazione. | `tools/web_search.py`, `providers/` | **Completed (v1.5.0)** |
+| **P1-11** | **Web Search UI Indicator & Citations Component**: Rendering dei link alle fonti verificate e dell'indicatore di ricerca attiva nell'Activity Feed. | `ui/src/ActivityFeed.tsx`, `ui/src/MarkdownRenderer.tsx` | **Completed (v1.5.0)** |

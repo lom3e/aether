@@ -345,11 +345,51 @@ function humanizeAgentAction(
     return `${t('actionDelegatedTo')} ${target}`;
   }
 
+  if (event === 'agent_thinking') {
+    return isActive ? t('actionThinking') : t('actionCompleted');
+  }
+
+  if (event === 'file_created') {
+    return meta.path ? `${t('actionFileCreated')}: ${meta.path}` : t('actionFileCreated');
+  }
+
+  if (event === 'file_modified') {
+    return meta.path ? `${t('actionFileModified')}: ${meta.path}` : t('actionFileModified');
+  }
+
+  if (event === 'file_deleted') {
+    return meta.path ? `${t('actionFileDeleted')}: ${meta.path}` : t('actionFileDeleted');
+  }
+
   if (event === 'tool_called') {
     const tool = meta.tool_name || '';
     if (tool === 'search_knowledge') {
       const q = meta.arguments?.query || meta.query || '';
       return isActive ? (q ? `${t('actionSearchingDocs')}: "${q}"` : t('actionConsultingKb')) : t('actionSearchedDocs');
+    }
+    if (tool === 'search_web') {
+      const q = meta.arguments?.query || meta.query || '';
+      return isActive ? (q ? `${t('actionWebSearch')}: "${q}"` : t('actionWebSearch')) : t('actionWebSearched');
+    }
+    if (tool === 'read_file') {
+      const p = meta.arguments?.path || meta.path || '';
+      return isActive ? (p ? `${t('actionReadingFile')}: ${p}` : t('actionReadingFile')) : `${t('actionExecuted')} read_file`;
+    }
+    if (tool === 'write_file') {
+      const p = meta.arguments?.path || meta.path || '';
+      return isActive ? (p ? `${t('actionWritingFile')}: ${p}` : t('actionWritingFile')) : `${t('actionExecuted')} write_file`;
+    }
+    if (tool === 'patch_file') {
+      const p = meta.arguments?.path || meta.path || '';
+      return isActive ? (p ? `${t('actionPatchingFile')}: ${p}` : t('actionPatchingFile')) : `${t('actionExecuted')} patch_file`;
+    }
+    if (tool === 'delete_file') {
+      const p = meta.arguments?.path || meta.path || '';
+      return isActive ? (p ? `${t('actionDeletingFile')}: ${p}` : t('actionDeletingFile')) : `${t('actionExecuted')} delete_file`;
+    }
+    if (tool === 'list_directory') {
+      const p = meta.arguments?.path || meta.path || '';
+      return isActive ? (p ? `${t('actionExploringDir')}: ${p}` : t('actionExploringDir')) : `${t('actionExecuted')} list_directory`;
     }
     return isActive ? `${t('actionProcessing')} ${tool}...` : `${t('actionExecuted')} ${tool}`;
   }
@@ -359,7 +399,10 @@ function humanizeAgentAction(
     if (tool === 'search_knowledge') {
       return t('actionFoundDocs');
     }
-    return `${t('actionOpComplete')} (${tool})`;
+    if (tool === 'search_web') {
+      return t('actionWebSearched');
+    }
+    return `${t('actionExecuted')} (${tool})`;
   }
 
   if (event === 'interrupt') {

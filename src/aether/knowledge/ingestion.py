@@ -238,6 +238,7 @@ class DocumentIngester:
         source_name: str | None = None,
         recursive: bool = True,
         scope: str = "workspace",
+        project_id: str | None = None,
     ) -> int:
         """
         Ingest a file, directory, or raw text string into the store.
@@ -253,7 +254,9 @@ class DocumentIngester:
         recursive:
             When *source* is a directory, whether to walk subdirectories.
         scope:
-            Knowledge scope ('workspace' or 'system').
+            Knowledge scope ('workspace', 'project', or 'system').
+        project_id:
+            Target project identifier when scope is 'project'.
 
         Returns
         -------
@@ -263,43 +266,69 @@ class DocumentIngester:
         path = Path(source) if isinstance(source, (str, Path)) else None
 
         if path and path.is_dir():
-            return self._ingest_directory(path, recursive=recursive, scope=scope)
+            return self._ingest_directory(path, recursive=recursive, scope=scope, project_id=project_id)
         if path and path.is_file():
-            return self._ingest_file(path, source_name=source_name, scope=scope)
+            return self._ingest_file(path, source_name=source_name, scope=scope, project_id=project_id)
         if isinstance(source, str) and not Path(source).exists():
             # Treat as raw text
             label = source_name or "<inline>"
-            return self._ingest_text(source, label, scope=scope)
+            return self._ingest_text(source, label, scope=scope, project_id=project_id)
         return 0
 
-    def ingest_text(self, text: str, source_name: str, scope: str = "workspace") -> int:
+    def ingest_text(
+        self,
+        text: str,
+        source_name: str,
+        scope: str = "workspace",
+        project_id: str | None = None,
+    ) -> int:
         """
         Ingest a raw text string with an explicit source label.
 
         Returns the number of chunks added.
         """
-        return self._ingest_text(text, source_name, scope=scope)
+        return self._ingest_text(text, source_name, scope=scope, project_id=project_id)
 
     # ------------------------------------------------------------------
     # Internal helpers
     # ------------------------------------------------------------------
 
-    def _ingest_directory(self, directory: Path, *, recursive: bool, scope: str = "workspace") -> int:
+    def _ingest_directory(
+        self,
+        directory: Path,
+        *,
+        recursive: bool,
+        scope: str = "workspace",
+        project_id: str | None = None,
+    ) -> int:
         total = 0
         pattern = "**/*" if recursive else "*"
         for path in sorted(directory.glob(pattern)):
             if path.is_file():
-                total += self._ingest_file(path, scope=scope)
+                total += self._ingest_file(path, scope=scope, project_id=project_id)
         return total
 
-    def _ingest_file(self, path: Path, *, source_name: str | None = None, scope: str = "workspace") -> int:
+    def _ingest_file(
+        self,
+        path: Path,
+        *,
+        source_name: str | None = None,
+        scope: str = "workspace",
+        project_id: str | None = None,
+    ) -> int:
         text = _read_file(path)
         if text is None:
             return 0  # unsupported format — skip silently
         label = source_name or str(path)
-        return self._ingest_text(text, label, scope=scope)
+        return self._ingest_text(text, label, scope=scope, project_id=project_id)
 
-    def _ingest_text(self, text: str, source: str, scope: str = "workspace") -> int:
+    def _ingest_text(
+        self,
+        text: str,
+        source: str,
+        scope: str = "workspace",
+        project_id: str | None = None,
+    ) -> int:
         """Chunk *text* and add all chunks to the store."""
         raw_chunks = _split_into_chunks(
             text,
@@ -315,6 +344,7 @@ class DocumentIngester:
                 source=source,
                 chunk_index=idx,
                 scope=scope,
+                project_id=project_id,
             )
             for idx, chunk_text in enumerate(raw_chunks)
         ]
@@ -330,6 +360,8 @@ class DocumentIngester:
         source: str | Path,
         *,
         source_name: str | None = None,
+        scope: str = "workspace",
+        project_id: str | None = None,
     ) -> list[KnowledgeChunk]:
         """
         Return the chunks that *would* be created without storing them.
@@ -345,6 +377,12 @@ class DocumentIngester:
 
         raw_chunks = _split_into_chunks(text, self._chunk_size, self._chunk_overlap)
         return [
-            KnowledgeChunk(content=c, source=label, chunk_index=i)
+            KnowledgeChunk(
+                content=c,
+                source=label,
+                chunk_index=i,
+                scope=scope,
+                project_id=project_id,
+            )
             for i, c in enumerate(raw_chunks)
         ]

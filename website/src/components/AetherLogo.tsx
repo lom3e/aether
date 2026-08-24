@@ -34,20 +34,18 @@ export function AetherLogo({
   const { resolvedTheme } = useTheme();
   const isDark = resolvedTheme === "dark";
 
-  // Resolve color mode preference
-  let effectiveMode: "light" | "dark" | "purple" | "full" = "light";
+  // Resolve color mode preference — standard purple brand identity
+  let effectiveMode: "light" | "dark" | "purple" | "full" = "purple";
 
-  if (colorMode === "purple" || id === "purple") {
-    effectiveMode = "purple";
-  } else if (colorMode === "full" || id === "full" || variant === "full") {
+  if (colorMode === "full" || id === "full" || variant === "full") {
     effectiveMode = "full";
   } else if (colorMode === "dark" || id === "dark") {
     effectiveMode = "dark";
   } else if (colorMode === "light" || id === "light") {
     effectiveMode = "light";
   } else {
-    // Auto resolution based on active theme
-    effectiveMode = isDark ? "dark" : "light";
+    // Default to official purple logo
+    effectiveMode = "purple";
   }
 
   const containerClass = `${interactive ? "aether-brand-lockup" : ""} ${className}`.trim();

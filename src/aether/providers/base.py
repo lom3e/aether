@@ -116,6 +116,8 @@ class AIProvider(ABC):
             text=response.content,
             finish_reason=response.finish_reason,
             usage=response.usage,
+            tool_calls=response.message.tool_calls if response.message else None,
+            message=response.message,
         )
 
     async def agenerate_stream(
@@ -136,6 +138,8 @@ class AIProvider(ABC):
             text=response.content,
             finish_reason=response.finish_reason,
             usage=response.usage,
+            tool_calls=response.message.tool_calls if response.message else None,
+            message=response.message,
         )
 
     def get_available_models(self) -> list[str]:

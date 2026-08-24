@@ -1,6 +1,6 @@
 import asyncio
 import json
-from fastapi import APIRouter, Request, HTTPException, UploadFile, File, status
+from fastapi import APIRouter, Request, HTTPException, UploadFile, File, Form, status
 from pydantic import BaseModel, Field
 from typing import Any
 import hashlib
@@ -10,6 +10,7 @@ import uuid
 from pathlib import Path
 
 from aether.core.paths import get_global_config_path
+from aether.commands import CommandContext, get_default_command_dispatcher
 
 router = APIRouter()
 
@@ -59,7 +60,7 @@ async def system_shutdown(request: Request):
     }
 
 _VALID_PROVIDERS = {"openai", "anthropic", "gemini", "ollama", "mock"}
-_VALID_KNOWLEDGE_EXTENSIONS = {".txt", ".md", ".markdown", ".csv", ".pdf"}
+_VALID_KNOWLEDGE_EXTENSIONS = {".txt", ".md", ".markdown", ".csv", ".pdf", ".rst", ".py", ".yaml", ".yml", ".json", ".docx"}
 _MAX_UPLOAD_BYTES = 25 * 1024 * 1024
 _NAME_PATTERN = re.compile(r"^[^/\\\x00-\x1f\x7f]+$")
 
@@ -102,6 +103,10 @@ def _validate_agent_payload(agent: "AgentPayload") -> None:
             raise HTTPException(status_code=422, detail=f"Unsupported provider '{agent.provider}'.")
     if agent.model is not None:
         agent.model = agent.model.strip() or None
+    if agent.icon is not None:
+        agent.icon = agent.icon.strip() or None
+    if agent.color is not None:
+        agent.color = agent.color.strip().lower() or None
     agent.delegates_to = [target.strip() for target in agent.delegates_to]
     if any(not target for target in agent.delegates_to):
         raise HTTPException(status_code=422, detail=f"Agent '{agent.name}' has an empty delegation target.")
@@ -176,7 +181,10 @@ def _active_team_path(request: Request, ws) -> Path:
     modern_path = ws.teams_dir / f"{team_key}.yaml"
     if modern_path.exists():
         return modern_path
-    if team_key == "default" and ws.legacy_team_yaml.exists():
+    default_path = ws.teams_dir / "default.yaml"
+    if default_path.exists():
+        return default_path
+    if ws.legacy_team_yaml.exists():
         return ws.legacy_team_yaml
     raise HTTPException(status_code=422, detail="The active Team configuration could not be found.")
 
@@ -205,79 +213,282 @@ def _human_provider_error(exc: Exception, secret: str | None = None) -> str:
     # never return a traceback or a credential to the UI.
     return message.splitlines()[0][:500]
 
-@router.post("/knowledge/upload")
-async def upload_knowledge(request: Request, file: UploadFile = File(...)):
+async def _process_knowledge_upload(
+    request: Request,
+    files: list[UploadFile],
+    scope: str = "workspace",
+    project_id: str | None = None,
+    is_legacy_endpoint: bool = False,
+) -> dict[str, Any]:
     ws, team = _runtime(request)
 
-    filename = Path(file.filename or "").name
-    if not filename or Path(filename).suffix.lower() not in _VALID_KNOWLEDGE_EXTENSIONS:
-        raise HTTPException(status_code=415, detail="Supported files: PDF, TXT, MD and CSV.")
+    from aether.knowledge.chunk import KnowledgeScope
+    clean_scope = str(scope or KnowledgeScope.WORKSPACE.value).strip().lower()
+    if clean_scope not in (KnowledgeScope.WORKSPACE.value, KnowledgeScope.PROJECT.value):
+        raise HTTPException(status_code=422, detail="Invalid knowledge scope. Supported: 'workspace', 'project'.")
+
+    clean_pid = str(project_id).strip() if project_id and str(project_id).strip() else None
+    if clean_scope == KnowledgeScope.PROJECT.value:
+        if not clean_pid:
+            raise HTTPException(status_code=422, detail="project_id is required when scope is 'project'.")
+        # Validate that project exists
+        project_exists = False
+        if ws.project_info and (ws.project_info.get("name") == clean_pid or ws.project_info.get("id") == clean_pid):
+            project_exists = True
+        elif ws.conversations.get_project(clean_pid) is not None:
+            project_exists = True
+        else:
+            for p in ws.conversations.list_projects():
+                if p["id"] == clean_pid or p["name"] == clean_pid:
+                    project_exists = True
+                    break
+        if not project_exists:
+            raise HTTPException(status_code=422, detail=f"Project '{clean_pid}' does not exist.")
 
     if not team.knowledge:
-        # Initialize knowledge store if not present
         from aether.knowledge.store import KnowledgeStore
         team.knowledge = KnowledgeStore(ws.knowledge_db_path)
 
-    # Save file to knowledge dir
-    doc_id = uuid.uuid4().hex
-    file_path = ws.knowledge_dir / f"{doc_id}_{filename}"
-    ws.knowledge_dir.mkdir(parents=True, exist_ok=True)
-    size_bytes = 0
-    digest = hashlib.sha256()
-    try:
-        with open(file_path, "wb") as buffer:
-            while chunk := await file.read(1024 * 1024):
-                size_bytes += len(chunk)
-                if size_bytes > _MAX_UPLOAD_BYTES:
-                    file_path.unlink(missing_ok=True)
-                    raise HTTPException(status_code=413, detail="File is larger than 25 MB.")
-                digest.update(chunk)
-                buffer.write(chunk)
-    finally:
-        await file.close()
-
-    content_hash = digest.hexdigest()
-    if team.knowledge.find_document_by_hash(content_hash):
-        file_path.unlink(missing_ok=True)
-        raise HTTPException(status_code=409, detail="This document is already uploaded.")
-
-    team.knowledge.register_document(doc_id, filename, size_bytes, content_hash)
-
-    # Ingest into knowledge store
     from aether.knowledge.ingestion import DocumentIngester
     ingester = DocumentIngester(team.knowledge)
-    try:
-        # Ingest needs to specify the source. By default DocumentIngester sets source=path.
-        # But we want to use doc_id, or we just rely on get_by_source and update document later.
-        ingester.ingest(file_path, source_name=doc_id)
-        chunks = team.knowledge.get_by_source(doc_id)
-        team.knowledge.update_document(doc_id, "Ready", len(chunks))
-    except Exception as e:
-        message = _human_provider_error(e)
-        team.knowledge.update_document(doc_id, f"Error: {message}", 0)
-        raise HTTPException(status_code=422, detail="This document could not be read. Try a text-based PDF or another supported file.") from e
+    ws.knowledge_dir.mkdir(parents=True, exist_ok=True)
 
-    if not chunks:
-        team.knowledge.update_document(doc_id, "Error: document contains no readable text", 0)
-        raise HTTPException(status_code=422, detail="This document contains no readable text.")
+    results: list[dict[str, Any]] = []
+    succeeded = 0
+    failed = 0
 
-    return {"status": "ok", "filename": filename, "id": doc_id}
+    for upload_file in files:
+        raw_filename = upload_file.filename or ""
+        # Security checks: traversal, null bytes
+        if ".." in raw_filename or "/" in raw_filename or "\\" in raw_filename or "\x00" in raw_filename:
+            failed += 1
+            if is_legacy_endpoint and len(files) == 1:
+                raise HTTPException(status_code=422, detail="Invalid filename.")
+            results.append({
+                "filename": raw_filename,
+                "status": "error",
+                "error": "Invalid filename containing path traversal characters.",
+                "chunks": 0,
+                "scope": clean_scope,
+                "project_id": clean_pid,
+            })
+            continue
 
+        filename = Path(raw_filename).name.strip()
+        ext = Path(filename).suffix.lower()
+        if not filename or ext not in _VALID_KNOWLEDGE_EXTENSIONS:
+            failed += 1
+            if is_legacy_endpoint and len(files) == 1:
+                raise HTTPException(status_code=415, detail="Supported files: PDF, TXT, MD and CSV.")
+            results.append({
+                "filename": raw_filename,
+                "status": "error",
+                "error": f"Unsupported file type '{ext}'. Supported: {', '.join(sorted(_VALID_KNOWLEDGE_EXTENSIONS))}",
+                "chunks": 0,
+                "scope": clean_scope,
+                "project_id": clean_pid,
+            })
+            continue
+
+        doc_id = uuid.uuid4().hex
+        file_path = ws.knowledge_dir / f"{doc_id}_{filename}"
+        size_bytes = 0
+        digest = hashlib.sha256()
+        file_oversized = False
+
+        try:
+            with open(file_path, "wb") as buffer:
+                while chunk := await upload_file.read(1024 * 1024):
+                    size_bytes += len(chunk)
+                    if size_bytes > _MAX_UPLOAD_BYTES:
+                        file_oversized = True
+                        break
+                    digest.update(chunk)
+                    buffer.write(chunk)
+        finally:
+            await upload_file.close()
+
+        if file_oversized:
+            file_path.unlink(missing_ok=True)
+            failed += 1
+            if is_legacy_endpoint and len(files) == 1:
+                raise HTTPException(status_code=413, detail="File is larger than 25 MB.")
+            results.append({
+                "filename": filename,
+                "status": "error",
+                "error": f"File is larger than {_MAX_UPLOAD_BYTES // (1024 * 1024)} MB.",
+                "chunks": 0,
+                "scope": clean_scope,
+                "project_id": clean_pid,
+            })
+            continue
+
+        content_hash = digest.hexdigest()
+        existing_doc = team.knowledge.find_document_by_hash(content_hash, scope=clean_scope, project_id=clean_pid)
+        if existing_doc:
+            file_path.unlink(missing_ok=True)
+            failed += 1
+            if is_legacy_endpoint and len(files) == 1:
+                raise HTTPException(status_code=409, detail="This document is already uploaded.")
+            results.append({
+                "id": existing_doc["id"],
+                "filename": filename,
+                "status": "error",
+                "error": "This document is already uploaded in this scope.",
+                "chunks": existing_doc.get("chunk_count", 0),
+                "scope": clean_scope,
+                "project_id": clean_pid,
+            })
+            continue
+
+        team.knowledge.register_document(
+            doc_id=doc_id,
+            filename=filename,
+            size_bytes=size_bytes,
+            content_hash=content_hash,
+            scope=clean_scope,
+            project_id=clean_pid,
+        )
+
+        try:
+            ingested_chunks = ingester.ingest(
+                file_path,
+                source_name=doc_id,
+                scope=clean_scope,
+                project_id=clean_pid,
+            )
+            chunks = team.knowledge.get_by_source(doc_id)
+            chunk_count = len(chunks)
+            if chunk_count > 0:
+                team.knowledge.update_document(doc_id, "Ready", chunk_count)
+                succeeded += 1
+                results.append({
+                    "id": doc_id,
+                    "filename": filename,
+                    "status": "Ready",
+                    "chunks": chunk_count,
+                    "size_bytes": size_bytes,
+                    "scope": clean_scope,
+                    "project_id": clean_pid,
+                })
+            else:
+                team.knowledge.update_document(doc_id, "Error: document contains no readable text", 0)
+                failed += 1
+                if is_legacy_endpoint and len(files) == 1:
+                    raise HTTPException(status_code=422, detail="This document contains no readable text.")
+                results.append({
+                    "id": doc_id,
+                    "filename": filename,
+                    "status": "error",
+                    "error": "This document contains no readable text.",
+                    "chunks": 0,
+                    "scope": clean_scope,
+                    "project_id": clean_pid,
+                })
+        except HTTPException:
+            raise
+        except Exception as e:
+            msg = _human_provider_error(e)
+            team.knowledge.update_document(doc_id, f"Error: {msg}", 0)
+            failed += 1
+            if is_legacy_endpoint and len(files) == 1:
+                raise HTTPException(status_code=422, detail="This document could not be read.") from e
+            results.append({
+                "id": doc_id,
+                "filename": filename,
+                "status": "error",
+                "error": f"Failed to ingest document: {msg}",
+                "chunks": 0,
+                "scope": clean_scope,
+                "project_id": clean_pid,
+            })
+
+    first_doc = results[0] if results else {}
+    status_str = "ok" if failed == 0 else ("partial" if succeeded > 0 else "error")
+
+    return {
+        "status": status_str,
+        "total": len(files),
+        "succeeded": succeeded,
+        "failed": failed,
+        "documents": results,
+        "id": first_doc.get("id"),
+        "filename": first_doc.get("filename"),
+    }
+
+
+@router.post("/knowledge")
+@router.post("/knowledge/upload")
+async def upload_knowledge(
+    request: Request,
+    files: Any = None,
+    file: Any = None,
+    scope: str = "workspace",
+    project_id: str | None = None,
+):
+    upload_list: list[Any] = []
+    if isinstance(files, (list, tuple)):
+        for f in files:
+            if getattr(f, "filename", None):
+                upload_list.append(f)
+    elif getattr(files, "filename", None):
+        upload_list.append(files)
+
+    if getattr(file, "filename", None) and file not in upload_list:
+        upload_list.append(file)
+
+    if not upload_list:
+        raise HTTPException(status_code=400, detail="No files provided for upload.")
+
+    is_legacy = bool(request.scope.get("path", "").endswith("/upload"))
+    clean_scope = str(scope) if (scope and not hasattr(scope, "default")) else "workspace"
+    clean_pid = str(project_id) if (project_id is not None and not hasattr(project_id, "default")) else None
+
+    return await _process_knowledge_upload(
+        request=request,
+        files=upload_list,
+        scope=clean_scope,
+        project_id=clean_pid,
+        is_legacy_endpoint=is_legacy,
+    )
+
+
+@router.get("/knowledge")
 @router.get("/knowledge/files")
-async def get_knowledge_status(request: Request, scope: str | None = None):
-    ws = request.app.state.workspace
-    team = request.app.state.team
+async def get_knowledge(
+    request: Request,
+    scope: str | None = None,
+    project_id: str | None = None,
+    query: str | None = None,
+):
+    ws = getattr(request.app.state, "workspace", None)
+    team = getattr(request.app.state, "team", None)
     if not ws or not team or not team.knowledge:
-        return {"documents": []}
+        return {"documents": [], "total": 0, "scopes": {"workspace": 0, "project": 0, "system": 0}}
 
-    return {"documents": team.knowledge.list_documents(scope=scope)}
+    docs = team.knowledge.list_documents(scope=scope, project_id=project_id)
+    if query and query.strip():
+        q = query.strip().lower()
+        docs = [d for d in docs if q in d["filename"].lower()]
 
+    scope_counts = team.knowledge.count_by_scope() if hasattr(team.knowledge, "count_by_scope") else {}
+    return {
+        "documents": docs,
+        "total": len(docs),
+        "scopes": scope_counts,
+    }
+
+
+@router.delete("/knowledge/{doc_id}")
 @router.delete("/knowledge/files/{doc_id}")
 async def delete_knowledge_file(request: Request, doc_id: str):
     ws, team = _runtime(request)
     if not team.knowledge:
         raise HTTPException(status_code=404, detail="Knowledge store not initialized.")
-    document = next((d for d in team.knowledge.list_documents() if d["id"] == doc_id), None)
+
+    document = team.knowledge.get_document(doc_id)
+    if document is None:
+        document = next((d for d in team.knowledge.list_documents() if d["id"] == doc_id), None)
     if document is None:
         raise HTTPException(status_code=404, detail="Knowledge document not found.")
     if document.get("scope") == "system":
@@ -286,9 +497,9 @@ async def delete_knowledge_file(request: Request, doc_id: str):
     team.knowledge.delete_document(doc_id)
     if ws.knowledge_dir.exists():
         for candidate in ws.knowledge_dir.iterdir():
-            if candidate.is_file() and candidate.name.startswith(f"{doc_id}_"):
+            if candidate.is_file() and (candidate.name == doc_id or candidate.name.startswith(f"{doc_id}_")):
                 candidate.unlink(missing_ok=True)
-    return {"status": "ok"}
+    return {"status": "ok", "deleted_id": doc_id}
 
 # ---------------------------------------------------------------------------
 # Presets Endpoints
@@ -349,6 +560,12 @@ class WorkspaceInfo(BaseModel):
     has_default_team: bool
     agents: list[dict[str, Any]]
     knowledge_chunks: int
+    project: dict[str, Any] | None = None
+
+class ProjectConfigRequest(BaseModel):
+    path: str
+    project_type: str = "local"
+    name: str | None = None
 
 class WorkspaceInitRequest(BaseModel):
     name: str = Field(min_length=1, max_length=120)
@@ -486,6 +703,40 @@ async def get_provider_settings(request: Request):
         }
     }
 
+@router.get("/provider/status")
+@router.get("/settings/provider/status")
+async def get_provider_status(
+    request: Request,
+    force: bool = False,
+    provider: str | None = None,
+    model: str | None = None,
+):
+    ws = getattr(request.app.state, "workspace", None)
+    team = getattr(request.app.state, "team", None)
+
+    effective_provider = provider or (team.config.default_provider if team else "ollama")
+    effective_model = model or (team.config.default_model if team else "qwen3.5:9b")
+
+    api_key: str | None = None
+    if ws and hasattr(ws, "root") and ws.root:
+        env_file = ws.root / ".env"
+        if env_file.exists():
+            for line in env_file.read_text(encoding="utf-8").splitlines():
+                if "=" in line and not line.strip().startswith("#"):
+                    k, v = line.split("=", 1)
+                    if k.strip().upper() == f"{effective_provider.upper()}_API_KEY":
+                        api_key = v.strip()
+
+    from aether.providers.health import get_default_health_checker
+    checker = get_default_health_checker()
+    status = await checker.acheck_health(
+        provider=effective_provider,
+        model=effective_model,
+        api_key=api_key,
+        force_refresh=force,
+    )
+    return status.to_dict()
+
 _CURATED_PROVIDER_MODELS: dict[str, list[str]] = {
     "ollama": ["qwen3.5:9b", "llama3.3:70b", "llama3.2:3b", "deepseek-r1:8b", "mistral", "phi4"],
     "openai": ["gpt-4o", "gpt-4o-mini", "o3-mini", "gpt-4-turbo"],
@@ -608,11 +859,19 @@ async def get_workspace(request: Request):
     agents = []
     if has_team:
         for agent in team.agents():
+            config = team.config.get_agent(agent.name)
+            agent_skills = [s.name for s in agent.skills] if getattr(agent, "skills", None) else (config.skills if config else [])
+            agent_tools = agent.available_tools() if hasattr(agent, "available_tools") else (config.tools if config else [])
             agents.append({
                 "name": agent.name,
                 "role": agent.role,
-                "provider": team.config.get_agent(agent.name).provider if team.config.get_agent(agent.name) else "Unknown",
+                "provider": config.provider if config else "Unknown",
                 "model": agent.provider.config.model if agent.provider else "Unknown",
+                "skills": agent_skills,
+                "tools": agent_tools,
+                "tool_count": len(agent_tools),
+                "icon": getattr(agent, "icon", None) or (config.icon if config else None),
+                "color": getattr(agent, "color", None) or (config.color if config else None),
             })
 
     knowledge_chunks = 0
@@ -623,8 +882,39 @@ async def get_workspace(request: Request):
         name=_workspace_display_name(ws) if ws else "",
         has_default_team=has_team,
         agents=agents,
-        knowledge_chunks=knowledge_chunks
+        knowledge_chunks=knowledge_chunks,
+        project=ws.project_info if ws else None,
     )
+
+@router.get("/workspace/project")
+async def get_workspace_project(request: Request):
+    ws, _ = _runtime(request)
+    return {"project": ws.project_info}
+
+@router.post("/workspace/project")
+async def connect_workspace_project(request: Request, data: ProjectConfigRequest):
+    ws, _ = _runtime(request)
+    clean_path = data.path.strip()
+    if not clean_path:
+        raise HTTPException(status_code=422, detail="Project path cannot be empty.")
+    resolved = Path(clean_path).expanduser().resolve()
+    if not resolved.exists() or not resolved.is_dir():
+        raise HTTPException(
+            status_code=422,
+            detail=f"Directory '{clean_path}' does not exist or is not a valid directory.",
+        )
+    ws.set_project(resolved, project_type=data.project_type, name=data.name)
+    active_team_name = getattr(request.app.state, "active_team_name", None) or ws.config.get("workspace", {}).get("default_team", "default")
+    request.app.state.team = ws.load_team(active_team_name)
+    return {"status": "ok", "project": ws.project_info}
+
+@router.delete("/workspace/project")
+async def disconnect_workspace_project(request: Request):
+    ws, _ = _runtime(request)
+    ws.set_project(None)
+    active_team_name = getattr(request.app.state, "active_team_name", None) or ws.config.get("workspace", {}).get("default_team", "default")
+    request.app.state.team = ws.load_team(active_team_name)
+    return {"status": "ok", "project": None}
 
 @router.get("/workspace/home")
 async def get_workspace_home(request: Request):
@@ -657,6 +947,33 @@ async def get_workspace_home(request: Request):
         "recent_tasks": []
     }
 
+class SkillInfo(BaseModel):
+    name: str
+    description: str
+    instructions: str
+    version: str
+    builtin: bool = True
+
+@router.get("/skills", response_model=list[SkillInfo])
+async def list_available_skills(request: Request):
+    team = getattr(request.app.state, "team", None)
+    if team and getattr(team, "skill_registry", None):
+        skills_list = team.skill_registry.list_skills()
+    else:
+        from aether.skills.builtin import get_builtin_skills
+        skills_list = get_builtin_skills()
+
+    return [
+        SkillInfo(
+            name=s.name,
+            description=s.description,
+            instructions=getattr(s, "instructions", "") or "",
+            version=getattr(s, "version", "1.0.0"),
+            builtin=bool(s.metadata.get("builtin", True) if s.metadata else True),
+        )
+        for s in skills_list
+    ]
+
 @router.get("/agents")
 async def get_agents(request: Request):
     team = request.app.state.team
@@ -666,14 +983,20 @@ async def get_agents(request: Request):
     agents = []
     for a in team.agents():
         config = team.config.get_agent(a.name)
+        agent_skills = [s.name for s in a.skills] if getattr(a, "skills", None) else (config.skills if config else [])
+        agent_tools = a.available_tools() if hasattr(a, "available_tools") else (config.tools if config else [])
         agents.append({
             "name": a.name,
             "role": a.role,
             "description": getattr(a, 'system_prompt', None) or "No description",
-            "skills": [s.name for s in a.skills.skills.values()] if getattr(a, 'skills', None) else [],
+            "skills": agent_skills,
+            "tools": agent_tools,
+            "tool_count": len(agent_tools),
             "status": "Available",
             "provider": config.provider if config else None,
             "model": config.model if config else None,
+            "icon": getattr(a, "icon", None) or (config.icon if config else None),
+            "color": getattr(a, "color", None) or (config.color if config else None),
             "delegates_to": [r.target for r in config.relationships if r.type == "delegates_to"] if config else []
         })
     return agents
@@ -684,7 +1007,10 @@ class AgentPayload(BaseModel):
     instructions: str | None = None
     provider: str | None = None
     model: str | None = None
+    icon: str | None = None
+    color: str | None = None
     skills: list[str] = Field(default_factory=list)
+    tools: list[str] = Field(default_factory=list)
     delegates_to: list[str] = Field(default_factory=list)
 
 @router.post("/agents")
@@ -705,8 +1031,11 @@ async def create_agent(request: Request, data: AgentPayload):
             instructions=a.instructions,
             provider=a.provider,
             model=a.model,
+            icon=a.icon,
+            color=a.color,
             skills=a.skills,
-            delegates_to=a.delegates_to,
+            tools=list(getattr(a, "tools", [])),
+            delegates_to=a.delegates_to(),
         ) for a in team.config.agents
     ] + [data]
     _validate_relationships({a.name for a in proposed}, proposed)
@@ -720,7 +1049,10 @@ async def create_agent(request: Request, data: AgentPayload):
         instructions=data.instructions or "",
         provider=data.provider,
         model=data.model,
+        icon=data.icon,
+        color=data.color,
         skills=data.skills,
+        tools=data.tools,
         relationships=rels
     )
     team.config.agents.append(new_agent)
@@ -756,7 +1088,10 @@ async def update_agent(request: Request, name: str, data: AgentPayload):
             instructions=(data.instructions if a.name == name else a.instructions),
             provider=(data.provider if a.name == name else a.provider),
             model=(data.model if a.name == name else a.model),
+            icon=(data.icon if a.name == name else a.icon),
+            color=(data.color if a.name == name else a.color),
             skills=(data.skills if a.name == name else a.skills),
+            tools=(data.tools if a.name == name else list(getattr(a, "tools", []))),
             delegates_to=(
                 data.delegates_to
                 if a.name == name
@@ -777,7 +1112,10 @@ async def update_agent(request: Request, name: str, data: AgentPayload):
     agent_config.instructions = data.instructions or ""
     agent_config.provider = data.provider
     agent_config.model = data.model
+    agent_config.icon = data.icon
+    agent_config.color = data.color
     agent_config.skills = data.skills
+    agent_config.tools = data.tools
     agent_config.relationships = rels
 
     if data.name != name:
@@ -842,8 +1180,20 @@ async def get_teams(request: Request):
             teams.append({
                 "name": config.name,
                 "agents": len(config.agents),
+                "agents_list": [
+                    {
+                        "name": agent.name,
+                        "role": agent.role,
+                        "icon": getattr(agent, "icon", None),
+                        "color": getattr(agent, "color", None),
+                        "delegates_to": agent.delegates_to(),
+                    }
+                    for agent in config.agents
+                ],
                 "default_provider": config.default_provider,
                 "default_model": config.default_model,
+                "icon": config.icon or "Bot",
+                "color": config.color or "violet",
                 "filename": p.name
             })
         except Exception:
@@ -856,8 +1206,20 @@ async def get_teams(request: Request):
             teams.append({
                 "name": config.name,
                 "agents": len(config.agents),
+                "agents_list": [
+                    {
+                        "name": agent.name,
+                        "role": agent.role,
+                        "icon": getattr(agent, "icon", None),
+                        "color": getattr(agent, "color", None),
+                        "delegates_to": agent.delegates_to(),
+                    }
+                    for agent in config.agents
+                ],
                 "default_provider": config.default_provider,
                 "default_model": config.default_model,
+                "icon": config.icon or "Bot",
+                "color": config.color or "violet",
                 "filename": "team.yaml"
             })
         except Exception:
@@ -870,6 +1232,8 @@ class TeamPayload(BaseModel):
     agents: list[AgentPayload] = Field(min_length=1)
     default_provider: str = Field(min_length=1)
     default_model: str = Field(min_length=1, max_length=200)
+    icon: str | None = None
+    color: str | None = None
 
 @router.post("/teams")
 async def create_team(request: Request, data: TeamPayload):
@@ -896,6 +1260,8 @@ async def create_team(request: Request, data: TeamPayload):
             instructions=a.instructions or "",
             provider=a.provider,
             model=a.model,
+            icon=a.icon,
+            color=a.color,
             skills=a.skills,
             relationships=rels
         ))
@@ -904,7 +1270,9 @@ async def create_team(request: Request, data: TeamPayload):
         name=data.name,
         agents=agents_conf,
         default_provider=data.default_provider,
-        default_model=data.default_model
+        default_model=data.default_model,
+        icon=data.icon,
+        color=data.color,
     )
 
     from aether.team.loader import TeamLoader
@@ -930,6 +1298,8 @@ def _team_payload_to_config(data: TeamPayload):
                 instructions=agent.instructions or "",
                 provider=agent.provider,
                 model=agent.model,
+                icon=agent.icon,
+                color=agent.color,
                 skills=agent.skills,
                 relationships=[
                     Relationship(type="delegates_to", target=target)
@@ -940,6 +1310,8 @@ def _team_payload_to_config(data: TeamPayload):
         ],
         default_provider=data.default_provider,
         default_model=data.default_model,
+        icon=data.icon,
+        color=data.color,
     )
 
 
@@ -948,6 +1320,8 @@ def _team_response(config) -> dict[str, Any]:
         "name": config.name,
         "default_provider": config.default_provider,
         "default_model": config.default_model,
+        "icon": getattr(config, "icon", None) or "Bot",
+        "color": getattr(config, "color", None) or "violet",
         "agents": [
             {
                 "name": agent.name,
@@ -955,7 +1329,10 @@ def _team_response(config) -> dict[str, Any]:
                 "instructions": agent.instructions,
                 "provider": agent.provider,
                 "model": agent.model,
+                "icon": agent.icon,
+                "color": agent.color,
                 "skills": agent.skills,
+                "tools": agent.tools,
                 "delegates_to": agent.delegates_to(),
             }
             for agent in config.agents
@@ -1238,20 +1615,25 @@ async def get_current_workspace_stats(request: Request):
 
 
 @router.post("/workspaces/current/clear-knowledge")
-async def clear_workspace_knowledge(request: Request):
+async def clear_workspace_knowledge(
+    request: Request,
+    scope: str | None = "workspace",
+    project_id: str | None = None,
+):
     ws, team = _runtime(request)
     if not team or not team.knowledge:
         return {"status": "ok", "cleared": 0}
 
-    # Delete all non-system documents
-    docs = team.knowledge.list_documents(scope="workspace")
+    # Delete matching documents (never system)
+    docs = team.knowledge.list_documents(scope=scope, project_id=project_id)
     count = 0
     for doc in docs:
-        team.knowledge.delete_document(doc["id"])
-        count += 1
+        if doc.get("scope") != "system":
+            team.knowledge.delete_document(doc["id"])
+            count += 1
 
-    # Remove files from knowledge_dir
-    if ws.knowledge_dir.exists():
+    # Remove unreferenced files from knowledge_dir if workspace cleared
+    if ws.knowledge_dir.exists() and (scope in (None, "workspace") and not project_id):
         for f in ws.knowledge_dir.iterdir():
             if f.is_file() and not f.name.startswith("."):
                 f.unlink(missing_ok=True)
@@ -1280,17 +1662,229 @@ async def reset_current_workspace(request: Request):
 
 
 # ------------------------------------------------------------------
+# Projects API
+# ------------------------------------------------------------------
+
+class CreateProjectPayload(BaseModel):
+    name: str = Field(min_length=1, max_length=120)
+
+
+class UpdateProjectPayload(BaseModel):
+    name: str = Field(min_length=1, max_length=120)
+
+
+@router.get("/projects")
+async def list_projects(request: Request):
+    ws = request.app.state.workspace
+    if not ws:
+        return []
+    return ws.conversations.list_projects()
+
+
+@router.post("/projects")
+async def create_project(request: Request, data: CreateProjectPayload):
+    ws = request.app.state.workspace
+    if not ws:
+        raise HTTPException(status_code=400, detail="No active workspace.")
+    try:
+        project = ws.conversations.create_project(name=data.name)
+        return project
+    except ValueError as e:
+        raise HTTPException(status_code=422, detail=str(e))
+
+
+@router.get("/projects/{project_id}")
+async def get_project(request: Request, project_id: str):
+    ws = request.app.state.workspace
+    if not ws:
+        raise HTTPException(status_code=500, detail="Workspace not initialized")
+    project = ws.conversations.get_project(project_id)
+    if not project:
+        raise HTTPException(status_code=404, detail="Project not found")
+    return project
+
+
+@router.patch("/projects/{project_id}")
+async def update_project(request: Request, project_id: str, data: UpdateProjectPayload):
+    ws = request.app.state.workspace
+    if not ws:
+        raise HTTPException(status_code=500, detail="Workspace not initialized")
+    try:
+        updated = ws.conversations.update_project(project_id, name=data.name)
+        if not updated:
+            raise HTTPException(status_code=404, detail="Project not found")
+        return updated
+    except ValueError as e:
+        raise HTTPException(status_code=422, detail=str(e))
+
+
+@router.delete("/projects/{project_id}")
+async def delete_project(request: Request, project_id: str):
+    ws = request.app.state.workspace
+    if not ws:
+        raise HTTPException(status_code=500, detail="Workspace not initialized")
+    success = ws.conversations.delete_project(project_id)
+    if not success:
+        raise HTTPException(status_code=404, detail="Project not found")
+    return {"status": "ok"}
+
+
+# ------------------------------------------------------------------
+# Project GitHub Repository Integration (P3-03)
+# ------------------------------------------------------------------
+
+class ConnectGitHubPayload(BaseModel):
+    owner: str = Field(min_length=1, max_length=100)
+    repository: str = Field(min_length=1, max_length=100)
+    token: str | None = None
+
+
+class VerifyGitHubPayload(BaseModel):
+    token: str | None = None
+
+
+@router.get("/projects/{project_id}/github")
+async def get_project_github(request: Request, project_id: str):
+    ws = request.app.state.workspace
+    if not ws:
+        raise HTTPException(status_code=500, detail="Workspace not initialized")
+    project = ws.conversations.get_project(project_id)
+    if not project:
+        raise HTTPException(status_code=404, detail="Project not found")
+
+    repo_data = project.get("github_repository")
+    return {
+        "connected": bool(repo_data and repo_data.get("connected", True)),
+        "repository": repo_data,
+    }
+
+
+@router.post("/projects/{project_id}/github")
+@router.put("/projects/{project_id}/github")
+async def connect_project_github(request: Request, project_id: str, data: ConnectGitHubPayload):
+    ws = request.app.state.workspace
+    if not ws:
+        raise HTTPException(status_code=500, detail="Workspace not initialized")
+    project = ws.conversations.get_project(project_id)
+    if not project:
+        raise HTTPException(status_code=404, detail="Project not found")
+
+    from aether.github import (
+        GitHubRepositoryClient,
+        GitHubAuthError,
+        GitHubNotFoundError,
+        GitHubValidationError,
+        GitHubIntegrationError,
+    )
+
+    client = GitHubRepositoryClient()
+    try:
+        repo = client.get_repository(owner=data.owner, repository=data.repository, token=data.token)
+    except GitHubValidationError as exc:
+        raise HTTPException(status_code=422, detail=str(exc))
+    except GitHubAuthError as exc:
+        raise HTTPException(status_code=401, detail=str(exc))
+    except GitHubNotFoundError as exc:
+        raise HTTPException(status_code=404, detail=str(exc))
+    except GitHubIntegrationError as exc:
+        raise HTTPException(status_code=502, detail=str(exc))
+
+    # Persist repository identity in project (NEVER persisting token)
+    updated_project = ws.conversations.update_project_github(project_id, repo.to_dict())
+    return {
+        "status": "ok",
+        "repository": repo.to_dict(),
+        "project": updated_project,
+    }
+
+
+@router.delete("/projects/{project_id}/github")
+async def disconnect_project_github(request: Request, project_id: str):
+    ws = request.app.state.workspace
+    if not ws:
+        raise HTTPException(status_code=500, detail="Workspace not initialized")
+    project = ws.conversations.get_project(project_id)
+    if not project:
+        raise HTTPException(status_code=404, detail="Project not found")
+
+    updated_project = ws.conversations.update_project_github(project_id, None)
+    return {"status": "ok", "project": updated_project}
+
+
+@router.post("/projects/{project_id}/github/verify")
+async def verify_project_github(request: Request, project_id: str, data: VerifyGitHubPayload | None = None):
+    ws = request.app.state.workspace
+    if not ws:
+        raise HTTPException(status_code=500, detail="Workspace not initialized")
+    project = ws.conversations.get_project(project_id)
+    if not project:
+        raise HTTPException(status_code=404, detail="Project not found")
+
+    repo_data = project.get("github_repository")
+    if not repo_data or not repo_data.get("owner") or not repo_data.get("repository"):
+        raise HTTPException(status_code=400, detail="No GitHub repository is connected to this project.")
+
+    from aether.github import (
+        GitHubRepositoryClient,
+        GitHubAuthError,
+        GitHubNotFoundError,
+        GitHubValidationError,
+        GitHubIntegrationError,
+    )
+
+    token = data.token if data else None
+    client = GitHubRepositoryClient()
+    try:
+        status = client.verify_connection(
+            owner=repo_data["owner"],
+            repository=repo_data["repository"],
+            token=token,
+        )
+    except GitHubValidationError as exc:
+        raise HTTPException(status_code=422, detail=str(exc))
+    except GitHubAuthError as exc:
+        raise HTTPException(status_code=401, detail=str(exc))
+    except GitHubNotFoundError as exc:
+        raise HTTPException(status_code=404, detail=str(exc))
+    except GitHubIntegrationError as exc:
+        raise HTTPException(status_code=502, detail=str(exc))
+
+    # Update verified_at in stored repository data
+    repo_data["verified_at"] = status["verified_at"]
+    repo_data["default_branch"] = status["default_branch"]
+    repo_data["private"] = status["private"]
+    if "metadata" in status:
+        repo_data["metadata"] = status["metadata"]
+    ws.conversations.update_project_github(project_id, repo_data)
+
+    return status
+
+
+# ------------------------------------------------------------------
 # Conversations API
 # ------------------------------------------------------------------
 
 class CreateConversationPayload(BaseModel):
     title: str = Field(default="New Task", max_length=200)
     team_name: str | None = None
+    pinned: bool = False
+    project_id: str | None = None
 
 
 class UpdateConversationPayload(BaseModel):
     title: str | None = Field(default=None, max_length=200)
     status: str | None = Field(default=None, max_length=50)
+    pinned: bool | None = None
+    project_id: str | None = None
+    clear_project: bool = False
+
+
+class PinConversationPayload(BaseModel):
+    pinned: bool = True
+
+
+class AssignProjectPayload(BaseModel):
+    project_id: str | None = None
 
 
 class AddMessagePayload(BaseModel):
@@ -1315,6 +1909,8 @@ async def list_conversations(
     search: str | None = None,
     status: str | None = None,
     include_archived: bool = False,
+    project_id: str | None = None,
+    pinned: bool | None = None,
     limit: int = 100,
 ):
     ws = request.app.state.workspace
@@ -1324,6 +1920,8 @@ async def list_conversations(
         search=search,
         status=status,
         include_archived=include_archived,
+        project_id=project_id,
+        pinned=pinned,
         limit=limit,
     )
 
@@ -1336,8 +1934,17 @@ async def create_conversation(request: Request, data: CreateConversationPayload)
     team = request.app.state.team
     team_name = data.team_name or (team.config.name if team else None)
     agents = [a.name for a in team.agents()] if team else []
-    conv = ws.conversations.create(title=data.title, team_name=team_name, agents=agents)
-    return conv
+    try:
+        conv = ws.conversations.create(
+            title=data.title,
+            team_name=team_name,
+            agents=agents,
+            pinned=data.pinned,
+            project_id=data.project_id,
+        )
+        return conv
+    except ValueError as e:
+        raise HTTPException(status_code=422, detail=str(e))
 
 
 @router.get("/conversations/{conv_id}")
@@ -1367,10 +1974,46 @@ async def update_conversation(request: Request, conv_id: str, data: UpdateConver
     ws = request.app.state.workspace
     if not ws:
         raise HTTPException(status_code=500, detail="Workspace not initialized")
-    updated = ws.conversations.update(conv_id, title=data.title, status=data.status)
+    try:
+        updated = ws.conversations.update(
+            conv_id,
+            title=data.title,
+            status=data.status,
+            pinned=data.pinned,
+            project_id=data.project_id,
+            clear_project=data.clear_project,
+        )
+        if not updated:
+            raise HTTPException(status_code=404, detail="Conversation not found")
+        return updated
+    except ValueError as e:
+        raise HTTPException(status_code=422, detail=str(e))
+
+
+@router.post("/conversations/{conv_id}/pin")
+async def pin_conversation_endpoint(request: Request, conv_id: str, data: PinConversationPayload | None = None):
+    ws = request.app.state.workspace
+    if not ws:
+        raise HTTPException(status_code=500, detail="Workspace not initialized")
+    pinned_val = data.pinned if data is not None else True
+    updated = ws.conversations.pin(conv_id, pinned=pinned_val)
     if not updated:
         raise HTTPException(status_code=404, detail="Conversation not found")
     return updated
+
+
+@router.post("/conversations/{conv_id}/project")
+async def assign_conversation_project(request: Request, conv_id: str, data: AssignProjectPayload):
+    ws = request.app.state.workspace
+    if not ws:
+        raise HTTPException(status_code=500, detail="Workspace not initialized")
+    try:
+        updated = ws.conversations.assign_to_project(conv_id, data.project_id)
+        if not updated:
+            raise HTTPException(status_code=404, detail="Conversation not found")
+        return updated
+    except ValueError as e:
+        raise HTTPException(status_code=422, detail=str(e))
 
 
 @router.delete("/conversations/{conv_id}")
@@ -1450,3 +2093,177 @@ async def delete_conversation_message(request: Request, conv_id: str, message_id
     if not updated_conv:
         raise HTTPException(status_code=404, detail="Message or conversation not found")
     return updated_conv
+
+
+# ------------------------------------------------------------------
+# Slash Commands API
+# ------------------------------------------------------------------
+
+class ExecuteCommandPayload(BaseModel):
+    command: str = Field(min_length=1)
+    conversation_id: str | None = None
+
+
+@router.get("/commands")
+async def list_commands():
+    """List available slash commands for UI autocomplete and reference."""
+    dispatcher = get_default_command_dispatcher()
+    return [spec.to_dict() for spec in dispatcher.registry.list_specs()]
+
+
+@router.post("/commands/execute")
+async def execute_command_endpoint(request: Request, data: ExecuteCommandPayload):
+    """Execute a slash command via REST API."""
+    ws = request.app.state.workspace
+    team = getattr(request.app.state, "team", None)
+    dispatcher = get_default_command_dispatcher()
+
+    cmd_ctx = CommandContext(
+        command="",
+        args=[],
+        raw_args="",
+        workspace=ws,
+        team=team,
+        conversation_id=data.conversation_id,
+        session_id=data.conversation_id,
+        app_state=request.app.state,
+    )
+    result = await dispatcher.dispatch(data.command, cmd_ctx)
+    return result.model_dump()
+
+
+# ------------------------------------------------------------------
+# Automations API (P3-04)
+# ------------------------------------------------------------------
+
+class CreateAutomationPayload(BaseModel):
+    name: str = Field(min_length=1, max_length=120)
+    description: str = Field(default="")
+    enabled: bool = Field(default=True)
+    team_name: str | None = None
+    trigger: dict[str, Any] = Field(default_factory=lambda: {"type": "manual"})
+    steps: list[dict[str, Any]] = Field(default_factory=list)
+    output_destination: dict[str, Any] | None = None
+
+
+class ToggleAutomationPayload(BaseModel):
+    enabled: bool
+
+
+class TriggerAutomationPayload(BaseModel):
+    payload: dict[str, Any] = Field(default_factory=dict)
+
+
+@router.get("/automations")
+async def list_automations(request: Request):
+    """List all configured automations with trigger and status info."""
+    ws = request.app.state.workspace
+    if not ws:
+        return []
+    autos = ws.automations.list_automations()
+    return [a.to_dict() for a in autos]
+
+
+@router.post("/automations")
+async def create_automation(request: Request, data: CreateAutomationPayload):
+    """Create a new automation workflow."""
+    ws = request.app.state.workspace
+    if not ws:
+        raise HTTPException(status_code=500, detail="Workspace not initialized")
+    from aether.automation.models import AutomationDefinition
+    auto_def = AutomationDefinition.from_dict(data.model_dump())
+    saved = ws.automations.save_automation(auto_def)
+    return saved.to_dict()
+
+
+@router.get("/automations/history")
+async def list_all_automation_history(request: Request, limit: int = 50):
+    """List recent execution runs across all automations."""
+    ws = request.app.state.workspace
+    if not ws:
+        return []
+    runs = ws.automations.list_runs(limit=limit)
+    return [r.to_dict() for r in runs]
+
+
+@router.get("/automations/{automation_id}")
+async def get_automation(request: Request, automation_id: str):
+    """Get details of a specific automation workflow."""
+    ws = request.app.state.workspace
+    if not ws:
+        raise HTTPException(status_code=500, detail="Workspace not initialized")
+    auto = ws.automations.get_automation(automation_id)
+    if not auto:
+        raise HTTPException(status_code=404, detail="Automation not found")
+    return auto.to_dict()
+
+
+@router.put("/automations/{automation_id}")
+async def update_automation(request: Request, automation_id: str, data: CreateAutomationPayload):
+    """Update an existing automation workflow."""
+    ws = request.app.state.workspace
+    if not ws:
+        raise HTTPException(status_code=500, detail="Workspace not initialized")
+    from aether.automation.models import AutomationDefinition
+    auto_dict = data.model_dump()
+    auto_dict["id"] = automation_id
+    auto_def = AutomationDefinition.from_dict(auto_dict)
+    saved = ws.automations.save_automation(auto_def)
+    return saved.to_dict()
+
+
+@router.delete("/automations/{automation_id}")
+async def delete_automation(request: Request, automation_id: str):
+    """Delete an automation workflow."""
+    ws = request.app.state.workspace
+    if not ws:
+        raise HTTPException(status_code=500, detail="Workspace not initialized")
+    success = ws.automations.delete_automation(automation_id)
+    if not success:
+        raise HTTPException(status_code=404, detail="Automation not found")
+    return {"status": "ok", "deleted_id": automation_id}
+
+
+@router.post("/automations/{automation_id}/toggle")
+async def toggle_automation_endpoint(request: Request, automation_id: str, data: ToggleAutomationPayload):
+    """Enable or disable an automation workflow."""
+    ws = request.app.state.workspace
+    if not ws:
+        raise HTTPException(status_code=500, detail="Workspace not initialized")
+    updated = ws.automations.toggle_automation(automation_id, data.enabled)
+    if not updated:
+        raise HTTPException(status_code=404, detail="Automation not found")
+    return updated.to_dict()
+
+
+@router.post("/automations/{automation_id}/run")
+async def trigger_automation_endpoint(request: Request, automation_id: str, data: TriggerAutomationPayload | None = None):
+    """Trigger an immediate execution run of an automation."""
+    ws = request.app.state.workspace
+    if not ws:
+        raise HTTPException(status_code=500, detail="Workspace not initialized")
+    scheduler = getattr(request.app.state, "scheduler", None)
+    payload = data.payload if data else {}
+    if scheduler:
+        run_record = await scheduler.trigger_now(automation_id, payload)
+    else:
+        from aether.automation.engine import AutomationEngine
+        auto = ws.automations.get_automation(automation_id)
+        if not auto:
+            raise HTTPException(status_code=404, detail="Automation not found")
+        engine = AutomationEngine(workspace=ws, event_bus=getattr(request.app.state, "event_bus", None))
+        run_record = await engine.execute_automation(auto, trigger_type="manual", trigger_payload=payload)
+
+    if not run_record:
+        raise HTTPException(status_code=404, detail="Automation not found or failed to trigger")
+    return run_record.to_dict()
+
+
+@router.get("/automations/{automation_id}/history")
+async def list_automation_history(request: Request, automation_id: str, limit: int = 50):
+    """List execution runs for a specific automation."""
+    ws = request.app.state.workspace
+    if not ws:
+        return []
+    runs = ws.automations.list_runs(automation_id=automation_id, limit=limit)
+    return [r.to_dict() for r in runs]

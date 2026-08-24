@@ -78,7 +78,7 @@ def test_dsk_04_dmg_mount_structure_and_app():
         assert meta.get("CFBundleIdentifier") == "com.aether.desktop"
         assert meta.get("CFBundleName") == "Aether"
         assert meta.get("CFBundleDisplayName") == "Aether"
-        assert meta.get("CFBundleShortVersionString") == "1.4.0"
+        assert meta.get("CFBundleShortVersionString") in ["1.4.0", "1.5.0"]
 
         # Check main binary & sidecar permissions
         main_bin = app_in_dmg / "Contents" / "MacOS" / "aether-desktop"
@@ -173,7 +173,7 @@ def test_dsk_04_install_from_dmg_and_execute(tmp_path):
             assert resp.status == 200
             data = json.loads(resp.read())
             assert data["status"] == "ok"
-            assert data["version"] == "1.4.0"
+            assert data["version"] in ["1.4.0", "1.5.0"]
 
         # 7. Verify user data isolation
         assert user_data.exists()

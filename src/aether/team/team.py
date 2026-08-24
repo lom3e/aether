@@ -91,15 +91,24 @@ class Team:
         provider: AIProvider | None = None,
         *,
         knowledge_store: KnowledgeStore | None = None,
+        sandbox: Any | None = None,
         agent_store: Any | None = None,
         conversation_db_path: str | None = None,
+        skill_registry: Any | None = None,
         feed: ActivityFeed | None = None,
+        project_id: str | None = None,
         verbose: bool = False,
     ) -> None:
         self.config = config
         self.provider = provider
         self.verbose = verbose
         self.conversation_db_path = conversation_db_path
+        self.sandbox = sandbox
+        self.project_id = str(project_id).strip() if project_id and str(project_id).strip() else None
+
+        # ---- Skills Registry ----
+        from aether.skills.builtin import get_default_skill_registry
+        self.skill_registry = skill_registry if skill_registry is not None else get_default_skill_registry()
 
         # ---- Knowledge ----
         self.knowledge: KnowledgeStore | None = knowledge_store
@@ -301,8 +310,12 @@ class Team:
                 agent_id=agent_id,
                 name=agent_config.name,
                 role=agent_config.role,
+                icon=agent_config.icon,
+                color=agent_config.color,
+                config=agent_config,
                 provider=provider,
                 memory_manager=memory_manager,
+                skill_registry=self.skill_registry,
                 events=self.emitter,
                 verbose=self.verbose,
             )
@@ -315,18 +328,62 @@ class Team:
             # ---- Knowledge Tool ----
             if self.knowledge:
                 from aether.knowledge.tool import create_knowledge_tool
-                knowledge_tool = create_knowledge_tool(self.knowledge)
-                agent.tool_registry.register(knowledge_tool)
-                if knowledge_tool.name not in agent.tools:
-                    agent.tools.append(knowledge_tool.name)
+                knowledge_tool = create_knowledge_tool(self.knowledge, project_id=self.project_id)
+                if not agent_config.tools or "search_knowledge" in agent_config.tools:
+                    try:
+                        agent.tool_registry.register(knowledge_tool)
+                        if knowledge_tool.name not in agent.tools:
+                            agent.tools.append(knowledge_tool.name)
+                    except ValueError:
+                        pass
 
-            # Load skills if configured
-            for skill_path in agent_config.skills:
+            # ---- Filesystem Tools ----
+            if self.sandbox:
+                from aether.tools.filesystem import create_filesystem_tools
+                fs_tools = create_filesystem_tools(self.sandbox, emitter=self.emitter)
+                for fs_tool in fs_tools:
+                    should_register = False
+                    if not agent_config.tools:
+                        should_register = True
+                    elif "filesystem" in agent_config.tools or fs_tool.name in agent_config.tools:
+                        should_register = True
+
+                    if should_register:
+                        try:
+                            agent.tool_registry.register(fs_tool)
+                            if fs_tool.name not in agent.tools:
+                                agent.tools.append(fs_tool.name)
+                        except ValueError:
+                            pass
+
+            # ---- Web Search Tool ----
+            if "search_web" in agent_config.tools or "web_search" in agent_config.tools:
+                from aether.tools.web_search import create_web_search_tool
+                web_tool = create_web_search_tool()
                 try:
-                    agent.load_skill(skill_path)
-                except Exception as exc:
-                    if self.verbose:
-                        print(f"[Team] Warning: could not load skill {skill_path!r}: {exc}")
+                    agent.tool_registry.register(web_tool)
+                    if web_tool.name not in agent.tools:
+                        agent.tools.append(web_tool.name)
+                except ValueError:
+                    pass
+
+            # Load / assign skills if configured
+            for skill_ref in agent_config.skills:
+                if not skill_ref or not str(skill_ref).strip():
+                    continue
+                clean_ref = str(skill_ref).strip()
+                if self.skill_registry and self.skill_registry.has(clean_ref):
+                    try:
+                        agent.assign_registered_skill(clean_ref)
+                    except Exception as exc:
+                        if self.verbose:
+                            print(f"[Team] Warning: could not assign skill {clean_ref!r}: {exc}")
+                else:
+                    try:
+                        agent.load_skill(clean_ref)
+                    except Exception as exc:
+                        if self.verbose:
+                            print(f"[Team] Warning: could not load skill {clean_ref!r}: {exc}")
 
             self._agents[agent_config.name] = agent
             self.registry.register(agent, description=agent_config.role)

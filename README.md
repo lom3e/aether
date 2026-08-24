@@ -219,14 +219,18 @@ If port 8000 is occupied by another application:
 | **Autonomous Cognitive Loop** | **IMPLEMENTED** | Planning, ReAct reasoning, structured tool execution, adaptive replanning |
 | **Multi-Agent Delegation** | **IMPLEMENTED** | Hierarchical delegation (`delegates_to`) via `CognitiveAgentTool` |
 | **Agent Identity & Memory** | **IMPLEMENTED** | Persistent persona identities & cross-session memory in SQLite |
-| **Scoped Knowledge Base** | **IMPLEMENTED** | Isolated System (built-in) vs. Workspace (user documents) indexing |
+| **Multi-Scope Knowledge Base**| **IMPLEMENTED** | Isolated System (built-in), Workspace (shared), and Project scopes with Drag & Drop |
 | **Multiple Conversations** | **IMPLEMENTED** | Persistent multi-turn chat threads, timestamps, and status tracking |
+| **Live WebSocket Bridge** | **IMPLEMENTED** | Real-time incremental token streaming, operational activity feeds & tool visibility |
 | **Human-in-the-Loop (HITL)** | **IMPLEMENTED** | `RequireApproval` and `RequireInput` interactive interrupt cards |
+| **Official Workforce Presets**| **IMPLEMENTED** | 4 ready-to-run workforces: Starter, Research, Developer, and Business Operations |
+| **Team Topology Visualizer** | **IMPLEMENTED** | Interactive SVG graph of workforce relationships and delegation paths |
+| **Automations & Scheduler** | **IMPLEMENTED** | Multi-step DAG pipelines, Cron schedules, File Watchers, Webhooks & Deliverables |
+| **Keyboard Shortcuts Manager** | **IMPLEMENTED** | Global centralized keybindings (`⌘K` Command Palette, `⌘/` Help, `⌘1`-`⌘6` Navigation) |
+| **Native Desktop Packaging** | **IMPLEMENTED** | macOS `.dmg` and Windows `.exe` NSIS installer via Tauri/Rust + PyInstaller sidecar |
 | **Ollama Hardening** | **IMPLEMENTED** | Default 120s timeout for local models + cloud provider isolation |
-| **Visual Web Workspace** | **ALPHA** | Single-page UI (`aether ui`), presence bar, natural activity feed, i18n (EN/IT) |
-| **Official Presets** | **ALPHA** | Built-in `starter-workforce` and `research-workforce` packs |
-| **Token Streaming in UI** | **PLANNED** | Real-time incremental token rendering in web chat |
-| **Community Marketplace** | **FUTURE** | Remote catalog for publishing and sharing custom agent packs |
+| **Visual Web & Desktop UI** | **IMPLEMENTED** | SPA interface (`aether ui` or Desktop app), dark/light theme, bilingue i18n (EN/IT) |
+| **Community Marketplace** | **FOUNDATION** | Catalog architecture for discovering and installing custom agent packs |
 
 ---
 
@@ -312,7 +316,7 @@ Aether supports both offline local models and cloud providers:
 
 Run the test suite:
 ```bash
-# Run 440+ backend tests
+# Run 680+ backend, E2E, and desktop packaging tests
 pytest
 
 # Build and validate frontend SPA

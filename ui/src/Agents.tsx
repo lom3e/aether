@@ -4,6 +4,8 @@ import { AgentBuilder } from './AgentBuilder';
 import { TopHeader } from './TopHeader';
 import { apiUrl } from './api';
 import { useTranslation } from './i18n';
+import { Tooltip } from './Tooltip';
+import { IdentityBadge } from './identity';
 
 export function Agents({ navigate }: { navigate: (view: string, params?: any) => void }) {
   const [agents, setAgents] = useState<any[]>([]);
@@ -54,26 +56,20 @@ export function Agents({ navigate }: { navigate: (view: string, params?: any) =>
             >
               <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '14px' }}>
                 <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
-                  <div style={{
-                    width: '38px',
-                    height: '38px',
-                    borderRadius: '8px',
-                    backgroundColor: 'hsl(var(--primary)/0.12)',
-                    color: 'hsl(var(--primary))',
-                    display: 'flex',
-                    alignItems: 'center',
-                    justifyContent: 'center',
-                    fontSize: '15px',
-                    fontWeight: 700
-                  }}>
-                    {agent.name.substring(0, 2).toUpperCase()}
-                  </div>
+                  <IdentityBadge
+                    icon={agent.icon || 'Bot'}
+                    color={agent.color || 'violet'}
+                    size={20}
+                    containerSize={38}
+                  />
                   <div>
-                    <h3 style={{ fontSize: '15px', margin: 0 }}>{agent.name}</h3>
+                    <h3 style={{ fontSize: '15px', margin: 0, fontWeight: 600 }}>{agent.name}</h3>
                     <div style={{ fontSize: '12px', color: 'hsl(var(--muted-fg))' }}>{agent.role}</div>
                   </div>
                 </div>
-                <div className="status-dot idle" title={t('configured')} />
+                <Tooltip content={t('configured')} position="left">
+                  <div className="status-dot idle" />
+                </Tooltip>
               </div>
 
               <div style={{ marginBottom: '14px', fontSize: '13px', color: 'hsl(var(--muted-fg))', display: '-webkit-box', WebkitLineClamp: 2, WebkitBoxOrient: 'vertical', overflow: 'hidden', minHeight: '38px', lineHeight: 1.5 }}>

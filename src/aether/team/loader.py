@@ -122,9 +122,12 @@ class TeamLoader:
         if not isinstance(default_provider, str) or not default_provider.strip():
             raise ValueError("team.provider must be a non-empty string")
 
+        team_icon = team_section.get("icon")
+        team_color = team_section.get("color")
+
         team_metadata = {
             k: v for k, v in team_section.items()
-            if k not in ("name", "knowledge", "knowledge_path", "provider", "model")
+            if k not in ("name", "knowledge", "knowledge_path", "provider", "model", "icon", "color")
         }
 
         # ------------------------------------------------------------------
@@ -185,8 +188,17 @@ class TeamLoader:
                             target=target.strip(),
                         ))
 
+            tools = raw_agent.get("tools") or []
+            if isinstance(tools, str):
+                tools = [tools]
+            elif not isinstance(tools, list):
+                raise ValueError(f"Agent '{agent_name}' tools must be a list")
+
+            icon = raw_agent.get("icon")
+            color = raw_agent.get("color")
+
             # Known keys — everything else goes to metadata
-            known = {"name", "role", "instructions", "model", "provider", "skills", "relationships"}
+            known = {"name", "role", "instructions", "model", "provider", "skills", "tools", "relationships", "icon", "color"}
             agent_metadata = {k: v for k, v in raw_agent.items() if k not in known}
 
             agents.append(AgentConfig(
@@ -195,8 +207,11 @@ class TeamLoader:
                 instructions=instructions,
                 relationships=relationships,
                 skills=skills,
+                tools=tools,
                 provider=provider_name,
                 model=model,
+                icon=icon if isinstance(icon, str) and icon.strip() else None,
+                color=color if isinstance(color, str) and color.strip() else None,
                 metadata=agent_metadata,
             ))
 
@@ -206,6 +221,8 @@ class TeamLoader:
             knowledge_path=knowledge_path,
             default_provider=default_provider,
             default_model=default_model,
+            icon=team_icon if isinstance(team_icon, str) and team_icon.strip() else None,
+            color=team_color if isinstance(team_color, str) and team_color.strip() else None,
             metadata=team_metadata,
         )
 
@@ -224,6 +241,10 @@ class TeamLoader:
             "agents": [],
         }
 
+        if config.icon:
+            data["team"]["icon"] = config.icon
+        if config.color:
+            data["team"]["color"] = config.color
         if config.knowledge_path:
             data["team"]["knowledge"] = config.knowledge_path
         if config.default_provider != "openai":
@@ -237,12 +258,18 @@ class TeamLoader:
             raw: dict = {"name": agent.name, "role": agent.role}
             if agent.instructions:
                 raw["instructions"] = agent.instructions
+            if agent.icon:
+                raw["icon"] = agent.icon
+            if agent.color:
+                raw["color"] = agent.color
             if agent.model:
                 raw["model"] = agent.model
             if agent.provider:
                 raw["provider"] = agent.provider
             if agent.skills:
                 raw["skills"] = agent.skills
+            if agent.tools:
+                raw["tools"] = agent.tools
             if agent.relationships:
                 raw["relationships"] = [
                     {r.type: r.target} for r in agent.relationships

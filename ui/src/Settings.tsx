@@ -2,19 +2,20 @@ import { useState, useEffect, useContext } from 'react';
 import { ToastContext } from './toast';
 import {
   Cpu, Globe, Moon, Sun,
-  HardDrive, Layers, AlertTriangle, Sliders
+  HardDrive, Layers, AlertTriangle, Sliders, Folder, Keyboard
 } from 'lucide-react';
 import { apiError, apiUrl } from './api';
 import { useTranslation } from './i18n';
 import { useTheme } from './theme';
 import { TopHeader } from './TopHeader';
+import { useKeyboardShortcuts, CATEGORY_ORDER } from './shortcuts';
 
 interface SettingsProps {
   onWorkspaceSwitched?: () => void;
 }
 
 export function Settings({ onWorkspaceSwitched }: SettingsProps) {
-  const [activeTab, setActiveTab] = useState<'workspace' | 'providers' | 'general' | 'storage' | 'advanced'>('workspace');
+  const [activeTab, setActiveTab] = useState<'workspace' | 'providers' | 'general' | 'storage' | 'shortcuts' | 'advanced'>('workspace');
 
   // Provider Settings State
   const [provider, setProvider] = useState('ollama');
@@ -33,9 +34,15 @@ export function Settings({ onWorkspaceSwitched }: SettingsProps) {
   const [savingWs, setSavingWs] = useState(false);
   const [isDeletingWs, setIsDeletingWs] = useState(false);
 
+  // Connected Project State
+  const [projectPathInput, setProjectPathInput] = useState('');
+  const [isEditingProject, setIsEditingProject] = useState(false);
+  const [savingProject, setSavingProject] = useState(false);
+
   const showToast = useContext(ToastContext);
   const { t, language, setLanguage } = useTranslation();
   const { theme, setTheme } = useTheme();
+  const { shortcuts, formatShortcut, openShortcutsModal } = useKeyboardShortcuts();
 
   const fetchWorkspaceData = () => {
     fetch(apiUrl('/api/workspace'))
@@ -202,6 +209,52 @@ export function Settings({ onWorkspaceSwitched }: SettingsProps) {
     }
   };
 
+  const handleConnectProject = async () => {
+    if (!projectPathInput.trim()) return;
+    setSavingProject(true);
+    try {
+      const res = await fetch(apiUrl('/api/workspace/project'), {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          path: projectPathInput.trim(),
+          project_type: 'local'
+        })
+      });
+      if (res.ok) {
+        showToast(language === 'it' ? 'Progetto collegato con successo.' : 'Project connected successfully.', 'info');
+        setProjectPathInput('');
+        setIsEditingProject(false);
+        fetchWorkspaceData();
+      } else {
+        const err = await apiError(res, 'Failed to connect project.');
+        showToast(err.message, 'error');
+      }
+    } catch (err: any) {
+      showToast(err?.message || 'Failed to connect project.', 'error');
+    } finally {
+      setSavingProject(false);
+    }
+  };
+
+  const handleDisconnectProject = async () => {
+    try {
+      const res = await fetch(apiUrl('/api/workspace/project'), {
+        method: 'DELETE'
+      });
+      if (res.ok) {
+        showToast(language === 'it' ? 'Progetto disconnesso.' : 'Project disconnected.', 'info');
+        fetchWorkspaceData();
+        setIsEditingProject(false);
+      } else {
+        const err = await apiError(res, 'Failed to disconnect project.');
+        showToast(err.message, 'error');
+      }
+    } catch (err: any) {
+      showToast(err?.message || 'Failed to disconnect project.', 'error');
+    }
+  };
+
   const handleDeleteCurrentWorkspace = async () => {
     try {
       const wsListRes = await fetch(apiUrl('/api/workspaces'));
@@ -285,11 +338,111 @@ export function Settings({ onWorkspaceSwitched }: SettingsProps) {
         >
           <Globe size={16} /> {t('generalTab')}
         </button>
+        <button
+          className={`btn btn-ghost ${activeTab === 'shortcuts' ? 'active' : ''}`}
+          style={{ borderRadius: '0', borderBottom: activeTab === 'shortcuts' ? '2px solid hsl(var(--primary))' : 'none', padding: '10px 16px', fontSize: '13.5px' }}
+          onClick={() => setActiveTab('shortcuts')}
+        >
+          <Keyboard size={16} /> {t('shortcutsTab')}
+        </button>
       </div>
 
       {/* WORKSPACE TAB */}
       {activeTab === 'workspace' && (
         <div style={{ display: 'flex', flexDirection: 'column', gap: '24px' }}>
+          {/* Connected Project Access */}
+          <div className="card" style={{ padding: '24px' }}>
+            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '12px' }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                <Folder size={18} className="text-primary" />
+                <h3 style={{ fontSize: '16px', fontWeight: 600 }}>{language === 'it' ? 'Progetto Collegato' : 'Connected Project'}</h3>
+              </div>
+              {workspaceInfo?.project && (
+                <span
+                  style={{
+                    fontSize: '11px',
+                    fontWeight: 600,
+                    padding: '3px 8px',
+                    borderRadius: '12px',
+                    backgroundColor: workspaceInfo.project.exists ? 'rgba(34, 197, 94, 0.15)' : 'rgba(239, 68, 68, 0.15)',
+                    color: workspaceInfo.project.exists ? 'rgb(34, 197, 94)' : 'rgb(239, 68, 68)',
+                    border: `1px solid ${workspaceInfo.project.exists ? 'rgba(34, 197, 94, 0.3)' : 'rgba(239, 68, 68, 0.3)'}`
+                  }}
+                >
+                  {workspaceInfo.project.exists ? (language === 'it' ? 'Collegato' : 'Connected') : (language === 'it' ? 'Directory non trovata' : 'Directory not found')}
+                </span>
+              )}
+            </div>
+
+            <p className="text-muted" style={{ fontSize: '13px', marginBottom: '16px', lineHeight: 1.5 }}>
+              {language === 'it'
+                ? 'Collega una directory locale al workspace. Gli agenti utilizzeranno in sicurezza i filesystem tools direttamente dentro questa cartella.'
+                : 'Connect a local directory to this workspace. Agents will securely access and edit files directly within this project folder.'}
+            </p>
+
+            {workspaceInfo?.project && !isEditingProject ? (
+              <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
+                <div style={{
+                  padding: '12px 14px',
+                  backgroundColor: 'hsl(var(--muted)/0.5)',
+                  borderRadius: '8px',
+                  border: '1px solid hsl(var(--border))',
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'space-between',
+                  gap: '12px'
+                }}>
+                  <div style={{ minWidth: 0 }}>
+                    <div style={{ fontWeight: 600, fontSize: '13.5px', color: 'hsl(var(--fg))' }}>
+                      📁 {workspaceInfo.project.name || 'Project'}
+                    </div>
+                    <div style={{ fontSize: '12px', color: 'hsl(var(--muted-fg))', fontFamily: 'monospace', marginTop: '2px', wordBreak: 'break-all' }}>
+                      {workspaceInfo.project.path}
+                    </div>
+                  </div>
+                  <div style={{ display: 'flex', gap: '8px', flexShrink: 0 }}>
+                    <button className="btn btn-secondary" style={{ fontSize: '12px', padding: '6px 12px' }} onClick={() => { setProjectPathInput(workspaceInfo.project.path); setIsEditingProject(true); }}>
+                      {language === 'it' ? 'Cambia' : 'Change'}
+                    </button>
+                    <button className="btn btn-destructive" style={{ fontSize: '12px', padding: '6px 12px' }} onClick={handleDisconnectProject}>
+                      {language === 'it' ? 'Disconnetti' : 'Disconnect'}
+                    </button>
+                  </div>
+                </div>
+              </div>
+            ) : (
+              <div>
+                <label className="form-label">{language === 'it' ? 'Percorso directory locale' : 'Local directory path'}</label>
+                <div style={{ display: 'flex', gap: '10px' }}>
+                  <input
+                    type="text"
+                    className="form-input"
+                    placeholder="/Users/name/projects/my-app"
+                    value={projectPathInput}
+                    onChange={e => setProjectPathInput(e.target.value)}
+                  />
+                  <button
+                    className="btn btn-primary"
+                    style={{ padding: '8px 18px', flexShrink: 0 }}
+                    onClick={handleConnectProject}
+                    disabled={savingProject || !projectPathInput.trim()}
+                  >
+                    {language === 'it' ? 'Collega' : 'Connect'}
+                  </button>
+                  {isEditingProject && (
+                    <button
+                      className="btn btn-ghost"
+                      style={{ padding: '8px 12px', flexShrink: 0 }}
+                      onClick={() => setIsEditingProject(false)}
+                    >
+                      {language === 'it' ? 'Annulla' : 'Cancel'}
+                    </button>
+                  )}
+                </div>
+              </div>
+            )}
+          </div>
+
           {/* General Workspace Info */}
           <div className="card" style={{ padding: '24px' }}>
             <h3 style={{ fontSize: '16px', fontWeight: 600, marginBottom: '16px' }}>{t('generalWorkspace')}</h3>
@@ -533,6 +686,96 @@ export function Settings({ onWorkspaceSwitched }: SettingsProps) {
                   </button>
                 </div>
               </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* SHORTCUTS TAB */}
+      {activeTab === 'shortcuts' && (
+        <div style={{ display: 'flex', flexDirection: 'column', gap: '24px' }}>
+          <div className="card" style={{ padding: '24px' }}>
+            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '16px' }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+                <Keyboard size={20} className="text-primary" />
+                <div>
+                  <h3 style={{ fontSize: '16px', fontWeight: 600, margin: 0 }}>{t('shortcutsTitle')}</h3>
+                  <p style={{ fontSize: '12px', color: 'hsl(var(--muted-fg))', margin: '2px 0 0' }}>
+                    {t('shortcutsSubtitle')}
+                  </p>
+                </div>
+              </div>
+              <button className="btn btn-secondary" onClick={openShortcutsModal} style={{ fontSize: '12.5px' }}>
+                Open Quick Help (⌘/)
+              </button>
+            </div>
+
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '18px' }}>
+              {CATEGORY_ORDER.map((group) => {
+                const groupShortcuts = shortcuts.filter((s) => s.category === group.category);
+                if (groupShortcuts.length === 0) return null;
+
+                return (
+                  <div key={group.category}>
+                    <div
+                      style={{
+                        fontSize: '11px',
+                        fontWeight: 600,
+                        textTransform: 'uppercase',
+                        letterSpacing: '0.05em',
+                        color: 'hsl(var(--muted-fg))',
+                        marginBottom: '8px',
+                        paddingBottom: '4px',
+                        borderBottom: '1px solid hsl(var(--border)/0.6)',
+                      }}
+                    >
+                      {t(group.labelKey as any)}
+                    </div>
+                    <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
+                      {groupShortcuts.map((shortcut) => {
+                        const keys = formatShortcut(shortcut);
+                        const label = t(shortcut.labelKey as any) || shortcut.labelKey;
+
+                        return (
+                          <div
+                            key={shortcut.id}
+                            style={{
+                              display: 'flex',
+                              alignItems: 'center',
+                              justifyContent: 'space-between',
+                              padding: '8px 12px',
+                              borderRadius: '6px',
+                              backgroundColor: 'hsl(var(--muted)/0.3)',
+                            }}
+                          >
+                            <span style={{ fontSize: '13px', color: 'hsl(var(--fg))' }}>{label}</span>
+                            <div style={{ display: 'flex', alignItems: 'center', gap: '4px' }}>
+                              {keys.map((k, idx) => (
+                                <kbd
+                                  key={idx}
+                                  style={{
+                                    padding: '2px 7px',
+                                    fontSize: '11px',
+                                    fontWeight: 600,
+                                    fontFamily: 'inherit',
+                                    backgroundColor: 'hsl(var(--card))',
+                                    border: '1px solid hsl(var(--border))',
+                                    borderRadius: '4px',
+                                    boxShadow: '0 1px 2px hsl(var(--fg)/0.05)',
+                                    color: 'hsl(var(--fg))',
+                                  }}
+                                >
+                                  {k}
+                                </kbd>
+                              ))}
+                            </div>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  </div>
+                );
+              })}
             </div>
           </div>
         </div>

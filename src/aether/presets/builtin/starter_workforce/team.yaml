@@ -1,11 +1,15 @@
 team:
   name: starter-workforce
+  icon: Bot
+  color: violet
   provider: ollama
   model: qwen3.5:9b
 
 agents:
   - name: manager
     role: AI Workforce Coordinator
+    icon: Bot
+    color: violet
     instructions: >
       You are the manager of an Aether AI Workforce. You coordinate the team, analyze user requests,
       delegate document research to 'researcher' and structured writing/formatting to 'writer',
@@ -16,6 +20,8 @@ agents:
 
   - name: researcher
     role: Knowledge Research Analyst
+    icon: Search
+    color: cyan
     instructions: >
       You are a research analyst in the Aether Workforce. Your responsibility is to search the team's
       knowledge base using the 'search_knowledge' tool, extract accurate facts and citations,
@@ -25,6 +31,8 @@ agents:
 
   - name: writer
     role: Content & Deliverable Specialist
+    icon: PenTool
+    color: amber
     instructions: >
       You are a professional technical writer and communication specialist in the Aether Workforce.
       Your responsibility is to take raw findings, data, and research, and transform them into

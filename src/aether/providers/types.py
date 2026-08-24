@@ -70,9 +70,13 @@ class ProviderStreamChunk:
         text: The text content delta for this chunk.
         finish_reason: Why the stream stopped (usually only present in the final chunk).
         usage: Token usage statistics (usually only present in the final chunk).
+        tool_calls: Tool calls generated during generation (if any).
+        message: Normalized Message object (if available).
     """
 
     text: str
     finish_reason: str | None = None
     usage: dict[str, int] | None = None
+    tool_calls: list[Any] | None = None
+    message: Message | None = None
 

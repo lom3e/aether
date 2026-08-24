@@ -5,48 +5,17 @@ import { Agents } from './Agents';
 import { Knowledge } from './Knowledge';
 import { Settings } from './Settings';
 import { Teams } from './Teams';
+import { Automations } from './Automations';
 import { Home } from './Home';
 import { Marketplace } from './Marketplace';
 import { AgentProfile } from './AgentProfile';
 import { CommandPalette } from './CommandPalette';
 import { WorkspaceModal } from './WorkspaceModal';
-import { ToastContext } from './toast';
+import { ShortcutsProvider, useKeyboardShortcuts, ShortcutsModal } from './shortcuts';
+import { ToastProvider, ToastContext } from './toast';
 import { LanguageProvider } from './i18n';
 import { ThemeProvider } from './theme';
 import { apiUrl } from './api';
-
-function ToastProvider({ children }: { children: any }) {
-  const [toast, setToast] = useState<{ message: string; type: string } | null>(null);
-
-  const showToast = useCallback((message: string, type: 'success' | 'error' | 'info' = 'info') => {
-    setToast({ message, type });
-    setTimeout(() => setToast(null), 3000);
-  }, []);
-
-  return (
-    <ToastContext.Provider value={showToast}>
-      {children}
-      {toast && (
-        <div style={{
-          position: 'fixed',
-          bottom: 24,
-          right: 24,
-          padding: '12px 20px',
-          backgroundColor: toast.type === 'error' ? 'hsl(var(--destructive))' : (toast.type === 'success' ? 'hsl(var(--success))' : 'hsl(var(--card))'),
-          color: toast.type === 'info' ? 'hsl(var(--fg))' : 'hsl(var(--primary-fg))',
-          border: toast.type === 'info' ? '1px solid hsl(var(--border))' : 'none',
-          borderRadius: 'var(--radius)',
-          boxShadow: '0 10px 25px rgba(0,0,0,0.3)',
-          zIndex: 200,
-          fontSize: '13px',
-          fontWeight: 500
-        }}>
-          {toast.message}
-        </div>
-      )}
-    </ToastContext.Provider>
-  );
-}
 
 function MainApp() {
   const [currentView, setCurrentView] = useState('home');
@@ -115,38 +84,96 @@ function MainApp() {
     setCurrentView('chat');
   };
 
-  // Keyboard Shortcuts: Cmd+K, Cmd+N, Cmd+Shift+W, Esc
+  const { registerShortcut, isShortcutsModalOpen, closeShortcutsModal, openShortcutsModal } = useKeyboardShortcuts();
+
+  // Centralized Keyboard Shortcuts registration
   useEffect(() => {
-    const handleKeyDown = (e: KeyboardEvent) => {
-      // Cmd+K -> Command Palette
-      if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 'k') {
-        e.preventDefault();
-        setIsCommandPaletteOpen(prev => !prev);
-      }
-      // Cmd+N -> New Conversation
-      if ((e.metaKey || e.ctrlKey) && !e.shiftKey && e.key.toLowerCase() === 'n') {
-        e.preventDefault();
+    const unregister1 = registerShortcut({
+      id: 'command_palette',
+      key: 'k',
+      meta: true,
+      labelKey: 'shortcutCmdPalette',
+      category: 'general',
+      allowInInput: true,
+      action: () => setIsCommandPaletteOpen((prev) => !prev),
+    });
+
+    const unregister2 = registerShortcut({
+      id: 'shortcuts_help',
+      key: '/',
+      meta: true,
+      labelKey: 'shortcutHelp',
+      category: 'general',
+      allowInInput: true,
+      action: openShortcutsModal,
+    });
+
+    const unregister3 = registerShortcut({
+      id: 'new_task',
+      key: 'n',
+      meta: true,
+      labelKey: 'shortcutNewTask',
+      category: 'general',
+      allowInInput: false,
+      action: () => {
         if (!workspaceName) {
           handleOpenWorkspaceModal('create');
         } else {
           handleNewConversation();
         }
-      }
-      // Cmd+Shift+W -> Workspace Modal
-      if ((e.metaKey || e.ctrlKey) && e.shiftKey && e.key.toLowerCase() === 'w') {
-        e.preventDefault();
+      },
+    });
+
+    const unregister4 = registerShortcut({
+      id: 'manage_workspace',
+      key: 'w',
+      meta: true,
+      shift: true,
+      labelKey: 'shortcutManageWorkspace',
+      category: 'workspace',
+      allowInInput: false,
+      action: () => {
         setWorkspaceModalMode('manage');
-        setIsWorkspaceModalOpen(prev => !prev);
-      }
-      // Esc -> Close modals
-      if (e.key === 'Escape') {
+        setIsWorkspaceModalOpen((prev) => !prev);
+      },
+    });
+
+    const unregister5 = registerShortcut({
+      id: 'close_modal',
+      key: 'Escape',
+      labelKey: 'shortcutCloseModal',
+      category: 'dialogs',
+      allowInInput: true,
+      action: () => {
         setIsCommandPaletteOpen(false);
         setIsWorkspaceModalOpen(false);
-      }
+        closeShortcutsModal();
+      },
+    });
+
+    const unregisterNav1 = registerShortcut({ id: 'nav_home', key: '1', meta: true, labelKey: 'shortcutNavHome', category: 'navigation', action: () => navigate('home') });
+    const unregisterNav2 = registerShortcut({ id: 'nav_chat', key: '2', meta: true, labelKey: 'shortcutNavChat', category: 'navigation', action: () => navigate('chat') });
+    const unregisterNav3 = registerShortcut({ id: 'nav_agents', key: '3', meta: true, labelKey: 'shortcutNavAgents', category: 'navigation', action: () => navigate('agents') });
+    const unregisterNav4 = registerShortcut({ id: 'nav_teams', key: '4', meta: true, labelKey: 'shortcutNavTeams', category: 'navigation', action: () => navigate('teams') });
+    const unregisterNav5 = registerShortcut({ id: 'nav_knowledge', key: '5', meta: true, labelKey: 'shortcutNavKnowledge', category: 'navigation', action: () => navigate('knowledge') });
+    const unregisterNav6 = registerShortcut({ id: 'nav_automations', key: '6', meta: true, labelKey: 'shortcutNavAutomations', category: 'navigation', action: () => navigate('automations') });
+    const unregisterNav7 = registerShortcut({ id: 'nav_settings', key: ',', meta: true, labelKey: 'shortcutNavSettings', category: 'navigation', action: () => navigate('settings') });
+
+    return () => {
+      unregister1();
+      unregister2();
+      unregister3();
+      unregister4();
+      unregister5();
+      unregisterNav1();
+      unregisterNav2();
+      unregisterNav3();
+      unregisterNav4();
+      unregisterNav5();
+      unregisterNav6();
+      unregisterNav7();
     };
-    window.addEventListener('keydown', handleKeyDown);
-    return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [workspaceName]);
+  }, [workspaceName, registerShortcut, openShortcutsModal, closeShortcutsModal]);
 
   const navigate = (view: string, params: any = null) => {
     setCurrentView(view);
@@ -263,6 +290,7 @@ function MainApp() {
         {currentView === 'agent' && <AgentProfile name={viewParams} navigate={navigate} />}
         {currentView === 'teams' && <Teams />}
         {currentView === 'knowledge' && <Knowledge />}
+        {currentView === 'automations' && <Automations />}
         {currentView === 'settings' && <Settings onWorkspaceSwitched={handleWorkspaceSwitched} />}
         {currentView === 'marketplace' && <Marketplace />}
       </div>
@@ -282,6 +310,11 @@ function MainApp() {
         onWorkspaceSwitched={handleWorkspaceSwitched}
         initialMode={workspaceModalMode}
       />
+
+      <ShortcutsModal
+        isOpen={isShortcutsModalOpen}
+        onClose={closeShortcutsModal}
+      />
     </div>
   );
 }
@@ -291,7 +324,9 @@ export default function App() {
     <ThemeProvider>
       <LanguageProvider>
         <ToastProvider>
-          <MainApp />
+          <ShortcutsProvider>
+            <MainApp />
+          </ShortcutsProvider>
         </ToastProvider>
       </LanguageProvider>
     </ThemeProvider>

@@ -7,6 +7,44 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [v1.5.0] - 2026-08-24
+
+### Minor Release: Multi-Agent Workforce Experience, Automations & Desktop Platform Release
+
+This milestone release unifies the full multi-agent workforce experience across web and desktop, introducing background automations, real-time token streaming, a centralized keyboard shortcuts manager, dynamic team topology graphs, multi-scope knowledge management, and the Windows build infrastructure.
+
+### Added
+- **Automations Engine & Scheduler (`src/aether/automation/`, `ui/src/Automations.tsx`)**:
+  - Background asynchronous task scheduler supporting Cron, Interval, File Watcher, Webhook, and Manual triggers.
+  - Multi-step DAG pipeline execution engine with variable interpolation (`{input}`, `{step_1_output}`).
+  - Output deliverable dispatching to Files, Knowledge Base (auto-chunked & indexed), and System Notifications.
+  - Visual builder UI with interactive cards, run history drawer, metric summary counters, and instant "Run Now" execution.
+- **Keyboard Shortcuts Manager (`ui/src/shortcuts/`)**:
+  - Global centralized keybindings registry with conflict resolution and typing suppression in inputs/textareas.
+  - Cross-platform support (`⌘` on macOS / `Ctrl` on Windows/Linux).
+  - Quick access modal with real-time search filter (`⌘/`) and dedicated Settings shortcuts tab.
+  - Preconfigured shortcuts for Command Palette (`⌘K`), New Task (`⌘N`), Workspace Switcher (`⌘⇧W`), and Navigation (`⌘1`–`⌘6`, `⌘,`).
+- **Workforce Experience & Presets (`presets/builtin/`)**:
+  - 4 official workforce presets: Starter Workforce, Research Workforce, Developer Workforce, and Business Operations Workforce.
+  - Dynamic SVG interactive Team Topology Visualizer (`TeamTopology.tsx`) with Manager and Specialist delegation mapping.
+  - Agent identity system with semantic avatar colors, thematic icons, and `IdentityBadge` component.
+  - Real-time incremental token streaming via WebSocket bridge and tool visibility status in presence bar.
+  - DuckDuckGo zero-config Web Search tool with formatted source citations and activity indicators.
+- **Knowledge Base Multi-Scope & UX (`ui/src/Knowledge.tsx`)**:
+  - Multi-scope isolation: System Knowledge (read-only platform docs), Workspace Knowledge, and Project Knowledge.
+  - Fullscreen Drag & Drop ingestion overlay with dynamic progress indicators and batch chunking.
+- **Windows Build Infrastructure (`scripts/build_distribution_windows.py`, `.github/workflows/windows-build.yml`)**:
+  - Automated Windows build pipeline generating standalone `aether-runtime.exe` and Tauri NSIS installer (`Aether-x64-setup.exe`).
+  - User data path abstraction mapping `%APPDATA%\Aether`.
+  - Multi-size Windows application icon (`icon.ico`).
+  - GitHub Actions CI matrix workflow for continuous Windows packaging validation.
+- **Product & Design System Polish**:
+  - Universal `<Tooltip>` component with smart viewport auto-flip and screen reader access.
+  - Multi-toast notification system (`toast.tsx`) with animated timer bar and status styling.
+  - Website polish with official single purple brand identity and direct native installer downloads.
+
+---
+
 ## [v1.4.0] - 2026-08-20
 
 ### Minor Release: Official Native macOS Desktop Application & Standalone Distribution

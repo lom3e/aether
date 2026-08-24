@@ -127,6 +127,7 @@ class Skill:
 
     name: str
     description: str = ""
+    instructions: str = ""
     version: str = "0.1.0"
     skill_id: str | None = None
     metadata: dict[str, Any] = field(default_factory=dict)
@@ -142,6 +143,7 @@ class Skill:
     def __post_init__(self) -> None:
         self.name = self.name.strip()
         self.description = self.description.strip()
+        self.instructions = self.instructions.strip()
         self.version = self.version.strip()
         self.skill_id = self.skill_id.strip() if isinstance(self.skill_id, str) else self.skill_id
         self.metadata = dict(self.metadata)

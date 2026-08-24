@@ -27,9 +27,9 @@ Public API::
 """
 from __future__ import annotations
 
-from aether.knowledge.chunk import KnowledgeChunk
+from aether.knowledge.chunk import KnowledgeChunk, KnowledgeScope
 from aether.knowledge.store import KnowledgeStore
 from aether.knowledge.ingestion import DocumentIngester
 from aether.knowledge.tool import create_knowledge_tool
 
-__all__ = ["KnowledgeChunk", "KnowledgeStore", "DocumentIngester", "create_knowledge_tool"]
+__all__ = ["KnowledgeChunk", "KnowledgeScope", "KnowledgeStore", "DocumentIngester", "create_knowledge_tool"]

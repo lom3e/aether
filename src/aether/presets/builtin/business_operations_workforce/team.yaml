@@ -1,12 +1,16 @@
 team:
   name: business-operations-workforce
   entry_agent: operations-manager
+  icon: Layers
+  color: emerald
   provider: ollama
   model: llama3.2
 
 agents:
   - name: operations-manager
     role: "Head of Business Operations"
+    icon: Compass
+    color: violet
     instructions: |
       You coordinate operational workflows, strategic execution, project delivery, and cross-functional deliverables.
       You delegate specialized research to research-specialist, KPI metrics to operations-analyst, and external deliverables to communication-specialist.
@@ -19,6 +23,8 @@ agents:
 
   - name: research-specialist
     role: "Market & Operations Researcher"
+    icon: Search
+    color: cyan
     instructions: |
       You gather business intelligence, analyze market trends, evaluate operational benchmarks, and synthesize domain documentation.
     delegates_to:
@@ -28,6 +34,8 @@ agents:
 
   - name: operations-analyst
     role: "Senior Operations Analyst"
+    icon: Database
+    color: emerald
     instructions: |
       You evaluate quantitative and qualitative metrics, identify process bottlenecks, design KPIs, and suggest workflow efficiencies.
     tools:
@@ -35,6 +43,8 @@ agents:
 
   - name: communication-specialist
     role: "Executive Communication & Reporting Lead"
+    icon: PenTool
+    color: rose
     instructions: |
       You author polished executive briefs, stakeholder memos, operational reports, and customer-facing announcements.
     tools:

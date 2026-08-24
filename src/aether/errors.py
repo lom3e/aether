@@ -33,6 +33,38 @@ class AetherFatalError(AetherError):
     pass
 
 
+# ── Security & Filesystem Errors ───────────────────────────────────────────
+
+class SecurityError(AetherError):
+    """Base class for all security-related errors."""
+    pass
+
+
+class SecurityBoundaryViolation(SecurityError):
+    """Raised when a path violates the sandbox boundary (e.g. traversal attempt, symlink escape)."""
+    pass
+
+
+class SensitivePathAccessDenied(SecurityError):
+    """Raised when accessing a protected or sensitive file or directory (e.g. .env, .git, credentials, keys)."""
+    pass
+
+
+class FilesystemToolError(ExecutionError):
+    """Base class for filesystem tool execution errors."""
+    pass
+
+
+class FileNotFoundToolError(FilesystemToolError):
+    """Raised when a requested file does not exist in the sandbox."""
+    pass
+
+
+class DirectoryNotFoundToolError(FilesystemToolError):
+    """Raised when a requested directory does not exist in the sandbox."""
+    pass
+
+
 # ── Skill Errors ────────────────────────────────────────────────────────────
 
 class SkillError(AetherError):

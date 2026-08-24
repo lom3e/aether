@@ -2,6 +2,8 @@ id: starter-workforce
 name: Aether Starter Workforce
 version: 1.0.0
 description: A versatile 3-agent workforce featuring a Coordinator Manager, Knowledge Researcher, and Content Writer.
+icon: Bot
+color: violet
 type: workforce_preset
 author: Aether Team
 compatibility:
@@ -11,14 +13,20 @@ agents:
   - name: manager
     role: AI Workforce Coordinator
     description: Coordinates the team, breaks down complex tasks, delegates research and writing, and delivers the final synthesis.
+    icon: Bot
+    color: violet
   - name: researcher
     role: Knowledge Research Analyst
     description: Queries the team knowledge base, analyzes documentation, and extracts structured factual findings.
+    icon: Search
+    color: cyan
     skills:
       - search_knowledge
   - name: writer
     role: Content & Deliverable Specialist
     description: Transforms analytical findings and research into clear, structured, professional outputs.
+    icon: PenTool
+    color: amber
 
 relationships:
   - source: manager

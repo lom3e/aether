@@ -4,17 +4,30 @@ import { ToastContext } from './toast';
 import { apiError, apiUrl } from './api';
 import { TopHeader } from './TopHeader';
 import { useTranslation } from './i18n';
+import { IdentityBadge, SUPPORTED_ICONS, SUPPORTED_COLORS } from './identity';
+import { TeamTopology } from './TeamTopology';
 
-type TeamAgent = { name: string; role: string; delegates_to: string; skills: string[]; provider?: string | null; model?: string | null };
+type TeamAgent = {
+  name: string;
+  role: string;
+  delegates_to: string;
+  skills: string[];
+  provider?: string | null;
+  model?: string | null;
+  icon?: string | null;
+  color?: string | null;
+};
 
 function TeamBuilder({ onClose, onSaved, initialTeam }: { onClose: () => void; onSaved: () => void; initialTeam?: any }) {
   const { t } = useTranslation();
   const [name, setName] = useState(initialTeam?.name || '');
   const [provider, setProvider] = useState(initialTeam?.default_provider || 'ollama');
   const [model, setModel] = useState(initialTeam?.default_model || 'qwen3.5:9b');
+  const [teamIcon, setTeamIcon] = useState(initialTeam?.icon || 'Bot');
+  const [teamColor, setTeamColor] = useState(initialTeam?.color || 'violet');
   const [agents, setAgents] = useState<TeamAgent[]>([
-    { name: 'Manager', role: 'Coordinates the workforce', delegates_to: '', skills: [] },
-    { name: 'Researcher', role: 'Researches and summarizes knowledge', delegates_to: '', skills: ['search_knowledge'] },
+    { name: 'Manager', role: 'Coordinates the workforce', delegates_to: '', skills: [], icon: 'Bot', color: 'violet' },
+    { name: 'Researcher', role: 'Researches and summarizes knowledge', delegates_to: '', skills: ['search_knowledge'], icon: 'Search', color: 'cyan' },
   ]);
   const [saving, setSaving] = useState(false);
   const showToast = useContext(ToastContext);
@@ -24,6 +37,8 @@ function TeamBuilder({ onClose, onSaved, initialTeam }: { onClose: () => void; o
     setName(initialTeam.name || '');
     setProvider(initialTeam.default_provider || 'ollama');
     setModel(initialTeam.default_model || '');
+    setTeamIcon(initialTeam.icon || 'Bot');
+    setTeamColor(initialTeam.color || 'violet');
     setAgents((initialTeam.agents || []).map((agent: any) => ({
       name: agent.name || '',
       role: agent.role || '',
@@ -31,10 +46,12 @@ function TeamBuilder({ onClose, onSaved, initialTeam }: { onClose: () => void; o
       skills: agent.skills || [],
       provider: agent.provider || null,
       model: agent.model || null,
+      icon: agent.icon || null,
+      color: agent.color || null,
     })));
   }, [initialTeam]);
 
-  const updateAgent = (index: number, key: keyof TeamAgent, value: string) => {
+  const updateAgent = (index: number, key: keyof TeamAgent, value: any) => {
     setAgents(current => current.map((agent, i) => i === index ? { ...agent, [key]: value } : agent));
   };
 
@@ -46,7 +63,12 @@ function TeamBuilder({ onClose, onSaved, initialTeam }: { onClose: () => void; o
         method: initialTeam ? 'PUT' : 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          name: name.trim(), provider, default_provider: provider, default_model: model,
+          name: name.trim(),
+          provider,
+          default_provider: provider,
+          default_model: model,
+          icon: teamIcon,
+          color: teamColor,
           agents: agents.map(agent => ({
             name: agent.name.trim(),
             role: agent.role.trim(),
@@ -54,6 +76,8 @@ function TeamBuilder({ onClose, onSaved, initialTeam }: { onClose: () => void; o
             skills: agent.skills,
             provider: agent.provider || null,
             model: agent.model || null,
+            icon: agent.icon || null,
+            color: agent.color || null,
           })),
         }),
       });
@@ -70,27 +94,96 @@ function TeamBuilder({ onClose, onSaved, initialTeam }: { onClose: () => void; o
     }
   };
 
-  return <>
-    <div className="overlay" onClick={() => !saving && onClose()} />
-    <div className="slide-over">
-      <div className="slide-over-header"><strong>{initialTeam ? t('editTeam') : t('createTeam')}</strong><button className="btn btn-ghost" onClick={onClose} disabled={saving}><X size={20} /></button></div>
-      <div className="slide-over-body">
-        <div className="form-group"><label className="form-label">{t('teamName')}</label><input className="form-input" autoFocus value={name} onChange={event => setName(event.target.value)} placeholder={t('teamNamePlaceholder')} /></div>
-        <div className="form-row">
-          <div className="form-group"><label className="form-label">{t('provider')}</label><select className="form-select" value={provider} onChange={event => setProvider(event.target.value)}><option value="ollama">Ollama</option><option value="openai">OpenAI</option><option value="anthropic">Anthropic</option><option value="gemini">Google Gemini</option><option value="mock">Mock</option></select></div>
-          <div className="form-group"><label className="form-label">{t('model')}</label><input className="form-input" value={model} onChange={event => setModel(event.target.value)} placeholder="Model name" /></div>
+  return (
+    <>
+      <div className="overlay" onClick={() => !saving && onClose()} />
+      <div className="slide-over">
+        <div className="slide-over-header">
+          <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+            <IdentityBadge icon={teamIcon} color={teamColor} size={18} containerSize={32} />
+            <strong>{initialTeam ? t('editTeam') : t('createTeam')}</strong>
+          </div>
+          <button className="btn btn-ghost" onClick={onClose} disabled={saving}><X size={20} /></button>
         </div>
-        <h3 style={{ marginTop: 24 }}>{t('workforceMembers')}</h3>
-        {agents.map((agent, index) => <div className="card" style={{ padding: 16, marginBottom: 12 }} key={index}>
-          <div className="form-group"><label className="form-label">{t('agentName')}</label><input className="form-input" value={agent.name} onChange={event => updateAgent(index, 'name', event.target.value)} /></div>
-          <div className="form-group"><label className="form-label">{t('role')}</label><input className="form-input" value={agent.role} onChange={event => updateAgent(index, 'role', event.target.value)} /></div>
-          <div className="form-group" style={{ marginBottom: 0 }}><label className="form-label">{t('delegatesTo')} <span className="text-muted">{t('commaSeparated')}</span></label><input className="form-input" value={agent.delegates_to} onChange={event => updateAgent(index, 'delegates_to', event.target.value)} placeholder="Researcher" /></div>
-        </div>)}
-        <button className="btn btn-secondary" onClick={() => setAgents(current => [...current, { name: '', role: '', delegates_to: '', skills: [] }])}><Plus size={15} /> {t('addAgent')}</button>
+        <div className="slide-over-body">
+          <div className="form-group">
+            <label className="form-label">{t('teamName')}</label>
+            <input className="form-input" autoFocus value={name} onChange={event => setName(event.target.value)} placeholder={t('teamNamePlaceholder')} />
+          </div>
+
+          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '12px', marginBottom: '16px' }}>
+            <div className="form-group" style={{ marginBottom: 0 }}>
+              <label className="form-label">Team Icon</label>
+              <select className="form-select" value={teamIcon} onChange={e => setTeamIcon(e.target.value)}>
+                {SUPPORTED_ICONS.map(i => (
+                  <option key={i} value={i}>{i}</option>
+                ))}
+              </select>
+            </div>
+            <div className="form-group" style={{ marginBottom: 0 }}>
+              <label className="form-label">Team Color</label>
+              <select className="form-select" value={teamColor} onChange={e => setTeamColor(e.target.value)}>
+                {SUPPORTED_COLORS.map(c => (
+                  <option key={c} value={c}>{c}</option>
+                ))}
+              </select>
+            </div>
+          </div>
+
+          <div className="form-row">
+            <div className="form-group">
+              <label className="form-label">{t('provider')}</label>
+              <select className="form-select" value={provider} onChange={event => setProvider(event.target.value)}>
+                <option value="ollama">Ollama</option>
+                <option value="openai">OpenAI</option>
+                <option value="anthropic">Anthropic</option>
+                <option value="gemini">Google Gemini</option>
+                <option value="mock">Mock</option>
+              </select>
+            </div>
+            <div className="form-group">
+              <label className="form-label">{t('model')}</label>
+              <input className="form-input" value={model} onChange={event => setModel(event.target.value)} placeholder="Model name" />
+            </div>
+          </div>
+
+          <div style={{ marginTop: 24, marginBottom: 16 }}>
+            <div style={{ fontSize: '11px', fontWeight: 600, color: 'hsl(var(--muted-fg))', marginBottom: '8px', textTransform: 'uppercase', letterSpacing: '0.05em' }}>
+              Workforce Topology
+            </div>
+            <TeamTopology agents={agents} teamName={name || 'Team'} height={150} />
+          </div>
+
+          <h3 style={{ marginTop: 20 }}>{t('workforceMembers')}</h3>
+          {agents.map((agent, index) => (
+            <div className="card" style={{ padding: 16, marginBottom: 12 }} key={index}>
+              <div className="form-group">
+                <label className="form-label">{t('agentName')}</label>
+                <input className="form-input" value={agent.name} onChange={event => updateAgent(index, 'name', event.target.value)} />
+              </div>
+              <div className="form-group">
+                <label className="form-label">{t('role')}</label>
+                <input className="form-input" value={agent.role} onChange={event => updateAgent(index, 'role', event.target.value)} />
+              </div>
+              <div className="form-group" style={{ marginBottom: 0 }}>
+                <label className="form-label">{t('delegatesTo')} <span className="text-muted">{t('commaSeparated')}</span></label>
+                <input className="form-input" value={agent.delegates_to} onChange={event => updateAgent(index, 'delegates_to', event.target.value)} placeholder="Researcher" />
+              </div>
+            </div>
+          ))}
+          <button className="btn btn-secondary" onClick={() => setAgents(current => [...current, { name: '', role: '', delegates_to: '', skills: [], icon: 'Bot', color: 'violet' }])}>
+            <Plus size={15} /> {t('addAgent')}
+          </button>
+        </div>
+        <div className="slide-over-footer">
+          <button className="btn btn-secondary" onClick={onClose} disabled={saving}>{t('cancel')}</button>
+          <button className="btn btn-primary" onClick={save} disabled={saving || !name.trim() || agents.some(agent => !agent.name.trim() || !agent.role.trim())}>
+            {saving ? t('saving') : (initialTeam ? t('saveChanges') : t('createTeam'))}
+          </button>
+        </div>
       </div>
-      <div className="slide-over-footer"><button className="btn btn-secondary" onClick={onClose} disabled={saving}>{t('cancel')}</button><button className="btn btn-primary" onClick={save} disabled={saving || !name.trim() || agents.some(agent => !agent.name.trim() || !agent.role.trim())}>{saving ? t('saving') : (initialTeam ? t('saveChanges') : t('createTeam'))}</button></div>
-    </div>
-  </>;
+    </>
+  );
 }
 
 function PresetPickerModal({ onClose, onInstalled }: { onClose: () => void; onInstalled: () => void }) {
@@ -161,8 +254,11 @@ function PresetPickerModal({ onClose, onInstalled }: { onClose: () => void; onIn
                   backgroundColor: selectedId === p.id ? 'hsl(var(--primary)/0.05)' : 'hsl(var(--card-bg))',
                 }}
               >
-                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '6px' }}>
-                  <strong style={{ fontSize: '15px' }}>{p.name}</strong>
+                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '8px' }}>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+                    <IdentityBadge icon={p.icon || 'Bot'} color={p.color || 'violet'} size={18} containerSize={32} />
+                    <strong style={{ fontSize: '15px' }}>{p.name}</strong>
+                  </div>
                   <span className="badge badge-primary">{p.agent_count} {p.agent_count === 1 ? t('agentSingular') : t('agentPlural')}</span>
                 </div>
                 <p className="text-muted" style={{ fontSize: '13px', lineHeight: 1.4, margin: '0 0 10px 0' }}>
@@ -232,18 +328,64 @@ export function Teams() {
           </>
         }
       />
-    <div className="grid-container">
-      {teams.map((team, index) => <div key={index} className="card card-interactive">
-        <div className="card-title"><span style={{ display: 'flex', alignItems: 'center', gap: 8 }}><Users size={20} className="text-primary" />{team.name}</span></div>
-        <div className="card-subtitle" style={{ fontFamily: 'monospace' }}>{team.filename}</div>
-        <div style={{ marginBottom: 16, fontSize: 14 }}>Contains {team.agents} {team.agents === 1 ? t('agentSingular').toLowerCase() : t('agentPlural').toLowerCase()}.</div>
-        <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', marginTop: 12 }}><span className="badge badge-default">{t('provider')}: {team.default_provider}</span>{team.default_model && <span className="badge badge-default">{t('model')}: {team.default_model}</span>}</div>
-        <div style={{ marginTop: 24, display: 'flex', justifyContent: 'flex-end' }}><button className="btn btn-ghost" onClick={() => openEditor(team)}><Edit size={16} /> {t('editTeam')}</button></div>
-      </div>)}
-      {teams.length === 0 && !loading && <div className="empty-state" style={{ gridColumn: '1 / -1' }}><Users className="empty-icon" /><div className="empty-title">{t('noTeamsYet')}</div><p className="text-muted">{t('noTeamsDesc')}</p></div>}
-    </div>
-    {isBuilding && <TeamBuilder initialTeam={editingTeam} onClose={() => { setIsBuilding(false); setEditingTeam(undefined); }} onSaved={fetchTeams} />}
-    {isPresetOpen && <PresetPickerModal onClose={() => setIsPresetOpen(false)} onInstalled={fetchTeams} />}
+
+      <div className="grid-container">
+        {teams.map((team, index) => (
+          <div
+            key={index}
+            className="card card-interactive"
+            style={{ display: 'flex', flexDirection: 'column', height: '100%', padding: '22px' }}
+          >
+            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '14px' }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
+                <IdentityBadge icon={team.icon || 'Bot'} color={team.color || 'violet'} size={20} containerSize={38} />
+                <div>
+                  <h3 style={{ fontSize: '15px', margin: 0, fontWeight: 600 }}>{team.name}</h3>
+                  <div className="text-muted" style={{ fontSize: '12px', fontFamily: 'monospace' }}>{team.filename}</div>
+                </div>
+              </div>
+              <span className="badge badge-primary" style={{ fontSize: '11px' }}>
+                {team.agents} {team.agents === 1 ? t('agentSingular') : t('agentPlural')}
+              </span>
+            </div>
+
+            <div style={{ margin: '8px 0 14px' }}>
+              <TeamTopology agents={team.agents_list || []} teamName={team.name} height={135} />
+            </div>
+
+            <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap', marginBottom: '14px' }}>
+              <span className="badge" style={{ fontSize: '10.5px' }}>{t('provider')}: {team.default_provider}</span>
+              {team.default_model && <span className="badge" style={{ fontSize: '10.5px' }}>{t('model')}: {team.default_model}</span>}
+            </div>
+
+            <div style={{ marginTop: 'auto', paddingTop: '12px', borderTop: '1px solid hsl(var(--border)/0.4)', display: 'flex', justifyContent: 'flex-end' }}>
+              <button className="btn btn-ghost" style={{ fontSize: '12px', padding: '5px 10px' }} onClick={() => openEditor(team)}>
+                <Edit size={14} /> {t('editTeam')}
+              </button>
+            </div>
+          </div>
+        ))}
+        {teams.length === 0 && !loading && (
+          <div className="empty-state" style={{ gridColumn: '1 / -1' }}>
+            <Users className="empty-icon" />
+            <div className="empty-title">{t('noTeamsYet')}</div>
+            <p className="text-muted">{t('noTeamsDesc')}</p>
+          </div>
+        )}
+      </div>
+      {isBuilding && (
+        <TeamBuilder
+          initialTeam={editingTeam}
+          onClose={() => { setIsBuilding(false); setEditingTeam(undefined); }}
+          onSaved={fetchTeams}
+        />
+      )}
+      {isPresetOpen && (
+        <PresetPickerModal
+          onClose={() => setIsPresetOpen(false)}
+          onInstalled={fetchTeams}
+        />
+      )}
     </div>
   );
 }

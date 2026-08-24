@@ -34,7 +34,7 @@ fn get_runtime_info(state: State<RuntimeState>) -> Result<RuntimeInfo, String> {
         api_url: format!("http://127.0.0.1:{}", state.port),
         session_token: state.token.clone(),
         port: state.port,
-        version: "1.4.0".to_string(),
+        version: "1.5.0".to_string(),
     })
 }
 
@@ -55,13 +55,27 @@ fn get_data_directory(is_app_bundle: bool) -> PathBuf {
         }
     }
 
-    // 2. Production app bundle on macOS: ~/Library/Application Support/Aether
+    // 2. Windows: %APPDATA%\Aether or %USERPROFILE%\.aether
+    #[cfg(target_os = "windows")]
+    {
+        if let Ok(appdata) = std::env::var("APPDATA") {
+            return PathBuf::from(appdata).join("Aether");
+        }
+        if let Ok(userprofile) = std::env::var("USERPROFILE") {
+            return PathBuf::from(userprofile).join(".aether");
+        }
+    }
+
+    // 3. macOS / Unix
     if let Ok(home) = std::env::var("HOME") {
         if is_app_bundle {
+            #[cfg(target_os = "macos")]
             return PathBuf::from(home)
                 .join("Library")
                 .join("Application Support")
                 .join("Aether");
+            #[cfg(not(target_os = "macos"))]
+            return PathBuf::from(home).join(".aether");
         } else {
             return PathBuf::from(home).join(".aether");
         }
@@ -84,14 +98,23 @@ fn resolve_runtime_target(is_app_bundle: bool) -> Result<RuntimeTarget, String> 
     let exe_dir = exe_path.parent().unwrap_or_else(|| Path::new("."));
     let current_dir = std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."));
 
-    // 2. Bundled production paths (inside Aether.app/Contents/Resources/ or adjacent)
+    // 2. Bundled production paths (inside Aether.app/Contents/Resources/, NSIS resources, or adjacent)
     let bundled_candidate_paths = [
+        exe_dir.join("../Resources/aether-runtime/aether-runtime.exe"),
         exe_dir.join("../Resources/aether-runtime/aether-runtime"),
+        exe_dir.join("../Resources/resources/aether-runtime/aether-runtime.exe"),
         exe_dir.join("../Resources/resources/aether-runtime/aether-runtime"),
+        exe_dir.join("../Resources/binaries/aether-runtime-x86_64-pc-windows-msvc.exe"),
         exe_dir.join("../Resources/binaries/aether-runtime-aarch64-apple-darwin"),
+        exe_dir.join("../Resources/aether-runtime.exe"),
         exe_dir.join("../Resources/aether-runtime"),
+        exe_dir.join("resources/aether-runtime/aether-runtime.exe"),
+        exe_dir.join("resources/aether-runtime/aether-runtime"),
+        exe_dir.join("aether-runtime/aether-runtime.exe"),
         exe_dir.join("aether-runtime/aether-runtime"),
+        exe_dir.join("aether-runtime.exe"),
         exe_dir.join("aether-runtime"),
+        exe_dir.join("aether-runtime-x86_64-pc-windows-msvc.exe"),
         exe_dir.join("aether-runtime-aarch64-apple-darwin"),
     ];
 
@@ -113,10 +136,15 @@ fn resolve_runtime_target(is_app_bundle: bool) -> Result<RuntimeTarget, String> 
 
     // 4. Local build paths in repository/development mode
     let dev_standalone_paths = [
+        current_dir.join("build").join("aether-runtime").join("aether-runtime.exe"),
         current_dir.join("build").join("aether-runtime").join("aether-runtime"),
+        current_dir.join("..").join("build").join("aether-runtime").join("aether-runtime.exe"),
         current_dir.join("..").join("build").join("aether-runtime").join("aether-runtime"),
+        current_dir.join("src-tauri").join("resources").join("aether-runtime").join("aether-runtime.exe"),
         current_dir.join("src-tauri").join("resources").join("aether-runtime").join("aether-runtime"),
+        current_dir.join("src-tauri").join("binaries").join("aether-runtime-x86_64-pc-windows-msvc.exe"),
         current_dir.join("src-tauri").join("binaries").join("aether-runtime-aarch64-apple-darwin"),
+        current_dir.join("binaries").join("aether-runtime-x86_64-pc-windows-msvc.exe"),
         current_dir.join("binaries").join("aether-runtime-aarch64-apple-darwin"),
     ];
 
@@ -130,7 +158,13 @@ fn resolve_runtime_target(is_app_bundle: bool) -> Result<RuntimeTarget, String> 
     // 5. Fallback to Python Virtualenv in development mode only
     let mut check_dir = current_dir.clone();
     for _ in 0..5 {
-        let venv_python = check_dir.join(".venv").join("bin").join("python");
+        let venv_python_unix = check_dir.join(".venv").join("bin").join("python");
+        let venv_python_win = check_dir.join(".venv").join("Scripts").join("python.exe");
+        let venv_python = if venv_python_win.exists() {
+            venv_python_win
+        } else {
+            venv_python_unix
+        };
         if venv_python.exists() {
             println!("[Aether Desktop] Found development Python virtualenv: {:?}", venv_python);
             return Ok(RuntimeTarget::PythonDev {

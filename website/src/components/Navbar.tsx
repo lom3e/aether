@@ -68,7 +68,7 @@ export function Navbar() {
               fontFamily: "var(--font-mono)",
             }}
           >
-            v1.3.0 Alpha
+            {t.nav.alphaLabel}
           </span>
         </Link>
 

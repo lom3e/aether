@@ -14,7 +14,7 @@ from aether.skills.executor import SkillExecutor
 from aether.skills.registry import SkillRegistry
 from aether.skills.skill import Skill
 from aether.providers.base import AIProvider
-from aether.providers.types import Message
+from aether.providers.types import Message, ProviderResponse, ProviderStreamChunk
 from aether.tools.registry import ToolRegistry
 from aether.core.safety import RuntimeSafetyPolicy
 from aether.planning.observation import ObservationFactory
@@ -60,6 +60,9 @@ class Agent:
         plan_validator: PlanValidator | None = None,
         runtime_safety_policy: RuntimeSafetyPolicy | None = None,
         observation_factory: ObservationFactory | None = None,
+        icon: str | None = None,
+        color: str | None = None,
+        config: Any | None = None,
         events: EventEmitter | None = None,
         verbose: bool = False,
     ):
@@ -68,6 +71,9 @@ class Agent:
         self.verbose = verbose
         self.events = events
         self.role = role
+        self.icon = icon
+        self.color = color
+        self.config = config
         self.provider = provider
         self.memory = memory
         self.memory_manager = memory_manager
@@ -97,6 +103,21 @@ class Agent:
         self.plan_validator = plan_validator
         self.assign_skills(list(skills or []))
 
+
+    def available_tools(self) -> list[str]:
+        """
+        Return the list of names of all tools registered and available on this agent.
+        Source of truth is the active ToolRegistry combined with configured tools.
+        """
+        names: list[str] = []
+        if self.tool_registry:
+            for t in self.tool_registry.list_tools():
+                if t.name not in names:
+                    names.append(t.name)
+        for t_name in self.tools:
+            if t_name not in names:
+                names.append(t_name)
+        return names
 
     def initialize(self) -> AgentLifecycleState:
         self.lifecycle.initialize()
@@ -426,9 +447,8 @@ class Agent:
                     agent_context.messages, limit
                 )
 
-            # Generate provider response
-            provider_tools = tools_schema if tools_schema else None
-            response = self.provider.generate(agent_context.messages, tools=provider_tools)
+            # Generate provider response (with streaming chunk emission if supported)
+            response = self._generate_step(agent_context.messages, tools_schema, task)
 
             # Accumulate token usage in AgentContext
             if response.usage:
@@ -568,8 +588,88 @@ class Agent:
             metadata=metadata,
         )
 
+    def _generate_step(
+        self,
+        messages: list[Message],
+        tools_schema: list[dict[str, Any]] | None,
+        task: Task,
+    ) -> ProviderResponse:
+        """
+        Generate response from provider, emitting streaming events if supported.
+        """
+        provider_tools = tools_schema if tools_schema else None
 
+        supports_streaming = hasattr(self.provider, "generate_stream") and callable(
+            getattr(self.provider, "generate_stream", None)
+        )
 
+        if supports_streaming and self.events is not None:
+            try:
+                from aether.coordination.events import AgentEvent, EventType
+
+                if hasattr(self.events, "emit"):
+                    self.events.emit(
+                        AgentEvent(
+                            event_type=EventType.AGENT_THINKING,
+                            agent_name=self.name,
+                            task_id=task.id,
+                            metadata={"status": "thinking"},
+                        )
+                    )
+
+                chunks: list[str] = []
+                last_chunk = None
+
+                for chunk in self.provider.generate_stream(messages, tools=provider_tools):
+                    last_chunk = chunk
+                    if chunk.text:
+                        chunks.append(chunk.text)
+                        if hasattr(self.events, "emit"):
+                            self.events.emit(
+                                AgentEvent(
+                                    event_type=EventType.TOKEN_STREAM,
+                                    agent_name=self.name,
+                                    task_id=task.id,
+                                    metadata={"delta": chunk.text},
+                                )
+                            )
+
+                content = "".join(chunks)
+                if content or (last_chunk and last_chunk.finish_reason):
+                    finish_reason = (last_chunk.finish_reason if last_chunk else None) or "stop"
+                    usage = (last_chunk.usage if last_chunk else None) or {}
+
+                    tool_calls = (last_chunk.tool_calls if last_chunk and last_chunk.tool_calls else None) or []
+                    if not tool_calls and content.startswith('{"name"'):
+                        try:
+                            import json
+                            from aether.core.execution import ToolCall
+                            data = json.loads(content)
+                            tool_calls = [
+                                ToolCall(
+                                    call_id="call-1",
+                                    tool_name=data.get("name", ""),
+                                    arguments=data.get("arguments", {}),
+                                )
+                            ]
+                            finish_reason = "tool_calls"
+                            content = ""
+                        except Exception:
+                            pass
+
+                    msg = (last_chunk.message if (last_chunk and last_chunk.message) else None) or Message(role="assistant", content=content, tool_calls=tool_calls)
+                    model_name = getattr(self.provider, "_model", getattr(getattr(self.provider, "config", None), "model", "default"))
+                    return ProviderResponse(
+                        content=content,
+                        model=model_name or "default",
+                        usage=usage,
+                        finish_reason=finish_reason,
+                        message=msg,
+                    )
+            except Exception:
+                pass
+
+        return self.provider.generate(messages, tools=provider_tools)
 
     def run(self, task: Task, context: ExecutionContext | None = None) -> ExecutionResult:
         """Backward-compatible alias for execute()."""
@@ -750,6 +850,36 @@ class Agent:
         messages: list[Message] = [
             Message(role="system", content=system_content),
         ]
+
+        fs_tools = {"list_directory", "read_file", "write_file", "patch_file", "delete_file"}
+        if any(t in self.tools for t in fs_tools):
+            messages.append(
+                Message(
+                    role="system",
+                    content=(
+                        "A workspace project environment is connected. You can explore, read, write, "
+                        "patch, and manage project files using the available filesystem tools with "
+                        "relative paths (e.g. 'src/main.py', 'README.md')."
+                    ),
+                )
+            )
+
+        # Inject active skill instructions
+        resolved_skills = context.skills if context.skills else self.resolve_skills()
+        if resolved_skills:
+            skill_blocks = []
+            for s in resolved_skills:
+                desc = s.description.strip() if getattr(s, "description", None) else ""
+                inst = s.instructions.strip() if getattr(s, "instructions", None) else ""
+                body = inst or desc
+                if body:
+                    skill_blocks.append(f"### Skill: {s.name}\n{body}")
+            if skill_blocks:
+                skill_content = (
+                    "Active Specialized Skills & Guidelines:\n\n"
+                    + "\n\n".join(skill_blocks)
+                )
+                messages.append(Message(role="system", content=skill_content))
 
         memory_context = self._collect_memory_context(task, context)
         if memory_context:

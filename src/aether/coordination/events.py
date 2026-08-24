@@ -14,6 +14,11 @@ class EventType(Enum):
     AGENT_FAILED = "agent_failed"
     TOOL_CALLED = "tool_called"
     TOOL_COMPLETED = "tool_completed"
+    FILE_CREATED = "file_created"
+    FILE_MODIFIED = "file_modified"
+    FILE_DELETED = "file_deleted"
+    TOKEN_STREAM = "token_stream"
+    AGENT_THINKING = "agent_thinking"
 
 
 @dataclass(slots=True)

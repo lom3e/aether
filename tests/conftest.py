@@ -29,6 +29,7 @@ def reset_app_state_and_paths():
     app.state.active_tasks = {}
     app.state.chat_sockets = set()
     app.state.hitl_queues = {}
+    app.state.active_team_name = None
     set_aether_data_dir(None)
     os.environ.pop("AETHER_DATA_DIR", None)
     os.environ.pop("AETHER_SESSION_TOKEN", None)
@@ -41,6 +42,7 @@ def reset_app_state_and_paths():
     app.state.active_tasks = {}
     app.state.chat_sockets = set()
     app.state.hitl_queues = {}
+    app.state.active_team_name = None
     set_aether_data_dir(None)
     os.environ.pop("AETHER_DATA_DIR", None)
     os.environ.pop("AETHER_SESSION_TOKEN", None)

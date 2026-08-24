@@ -19,6 +19,7 @@ interface ChatProps {
 
 export function Chat({
   conversationId,
+  onNewConversation,
   onSelectConversation,
   onConversationUpdated,
   hasWorkspace = true,
@@ -29,10 +30,15 @@ export function Chat({
   const [taskStatus, setTaskStatus] = useState<string>('active');
   const [input, setInput] = useState('');
   const [loading, setLoading] = useState(false);
-  const [teamInfo, setTeamInfo] = useState<{ name: string; agents: any[] }>({ name: 'Workforce', agents: [] });
+  const [teamInfo, setTeamInfo] = useState<{ name: string; agents: any[]; project?: any }>({ name: 'Workforce', agents: [] });
   const [activeAgents, setActiveAgents] = useState<string[]>([]);
   const [waitingAgent, setWaitingAgent] = useState<string | null>(null);
+  const [agentStatus, setAgentStatus] = useState<{ agent: string; status: string } | null>(null);
   const [isConnected, setIsConnected] = useState(true);
+
+  // Slash commands autocomplete state
+  const [commandSpecs, setCommandSpecs] = useState<any[]>([]);
+  const [selectedCommandIndex, setSelectedCommandIndex] = useState(0);
 
   const socketRef = useRef<WebSocket | null>(null);
   const reconnectAttemptsRef = useRef(0);
@@ -43,7 +49,7 @@ export function Chat({
   const { t, language } = useTranslation();
   const { isDark } = useTheme();
 
-  // Load team info
+  // Load team info and command specs
   useEffect(() => {
     fetch(apiUrl('/api/workspace'))
       .then(res => res.json())
@@ -51,8 +57,18 @@ export function Chat({
         if (data) {
           setTeamInfo({
             name: data.name || 'Workforce',
-            agents: data.agents || []
+            agents: data.agents || [],
+            project: data.project || null
           });
+        }
+      })
+      .catch(console.error);
+
+    fetch(apiUrl('/api/commands'))
+      .then(res => res.json())
+      .then(data => {
+        if (Array.isArray(data)) {
+          setCommandSpecs(data);
         }
       })
       .catch(console.error);
@@ -107,6 +123,9 @@ export function Chat({
         if (!isMounted) return;
         setIsConnected(true);
         reconnectAttemptsRef.current = 0;
+        if (conversationId) {
+          ws.send(JSON.stringify({ type: 'join_session', session_id: conversationId }));
+        }
       };
 
       ws.onmessage = (event) => {
@@ -119,8 +138,68 @@ export function Chat({
               setLoading(true);
               setTaskStatus('active');
               setActiveAgents(['manager']);
+              setAgentStatus({ agent: 'manager', status: 'started' });
             }
             onConversationUpdated();
+          } else if (data.type === 'token_chunk') {
+            if (!data.session_id || data.session_id === conversationId) {
+              const delta = data.delta || '';
+              const agent = data.agent || 'Workforce';
+              const streamId = `streaming-${data.session_id || conversationId || 'active'}`;
+
+              setMessages(prev => {
+                const existingIndex = prev.findIndex(m => m.id === streamId);
+                if (existingIndex >= 0) {
+                  const updated = [...prev];
+                  updated[existingIndex] = {
+                    ...updated[existingIndex],
+                    content: updated[existingIndex].content + delta,
+                    agent_name: agent,
+                  };
+                  return updated;
+                } else {
+                  const newStreamMsg: ChatMessage = {
+                    id: streamId,
+                    role: 'assistant',
+                    agent_name: agent,
+                    content: delta,
+                    created_at: new Date().toISOString(),
+                  };
+                  return [...prev, newStreamMsg];
+                }
+              });
+            }
+          } else if (data.type === 'agent_status') {
+            if (!data.session_id || data.session_id === conversationId) {
+              const agent = data.agent || 'Workforce';
+              const status = data.status || 'thinking';
+              setAgentStatus({ agent, status });
+              if (agent && !activeAgents.includes(agent)) {
+                setActiveAgents(prev => Array.from(new Set([...prev, agent])));
+              }
+            }
+          } else if (data.type === 'file_action') {
+            if (!data.session_id || data.session_id === conversationId) {
+              const action = data.action || 'modified';
+              const path = data.path || '';
+              const actionLabel = action === 'created'
+                ? (language === 'it' ? 'Ha creato il file' : 'Created file')
+                : (action === 'modified'
+                  ? (language === 'it' ? 'Ha modificato il file' : 'Modified file')
+                  : (language === 'it' ? 'Ha eliminato il file' : 'Deleted file'));
+              const newAct: ActivityItem = {
+                id: String(Date.now() + Math.random()),
+                agent: data.agent || 'Workforce',
+                type: `file_${action}`,
+                message: path ? `${actionLabel}: ${path}` : actionLabel,
+                timestamp: new Date().toISOString(),
+                metadata: { path, action }
+              };
+              setActivities(prev => [...prev, newAct]);
+              if (data.agent && !activeAgents.includes(data.agent)) {
+                setActiveAgents(prev => Array.from(new Set([...prev, data.agent])));
+              }
+            }
           } else if (data.type === 'activity') {
             const newAct: ActivityItem = {
               id: String(Date.now() + Math.random()),
@@ -157,6 +236,7 @@ export function Chat({
               setTaskStatus(data.success ? 'completed' : 'failed');
               setActiveAgents([]);
               setWaitingAgent(null);
+              setAgentStatus(null);
 
               if (conversationId) {
                 fetch(apiUrl(`/api/conversations/${conversationId}`))
@@ -169,29 +249,61 @@ export function Chat({
                   })
                   .catch(console.error);
               } else {
-                if (data.success && data.content) {
-                  const botMsg: ChatMessage = {
-                    id: String(Date.now()),
-                    role: 'assistant',
-                    agent_name: data.agent || 'Manager',
-                    content: data.content,
-                    created_at: new Date().toISOString()
-                  };
-                  setMessages(prev => [...prev, botMsg]);
-                } else if (!data.success) {
-                  const errorMsg: ChatMessage = {
-                    id: String(Date.now()),
-                    role: 'assistant',
-                    agent_name: data.agent || 'Workforce',
-                    content: '',
-                    created_at: new Date().toISOString(),
-                    metadata: {
-                      is_error: true,
-                      error: data.error_details || { message: data.error || 'Task failed.' }
+                const streamId = `streaming-${data.session_id || conversationId || 'active'}`;
+                if (data.success) {
+                  const finalContent = data.content;
+                  setMessages(prev => {
+                    const filtered = prev.filter(m => m.id !== streamId);
+                    if (finalContent) {
+                      const botMsg: ChatMessage = {
+                        id: String(Date.now()),
+                        role: 'assistant',
+                        agent_name: data.agent || 'Manager',
+                        content: finalContent,
+                        created_at: new Date().toISOString()
+                      };
+                      return [...filtered, botMsg];
                     }
-                  };
-                  setMessages(prev => [...prev, errorMsg]);
+                    return filtered;
+                  });
+                } else {
+                  const errorDetails = data.error_details || { message: data.error || 'Task failed.' };
+                  setMessages(prev => {
+                    const filtered = prev.filter(m => m.id !== streamId);
+                    const errorMsg: ChatMessage = {
+                      id: String(Date.now()),
+                      role: 'assistant',
+                      agent_name: data.agent || 'Workforce',
+                      content: '',
+                      created_at: new Date().toISOString(),
+                      metadata: {
+                        is_error: true,
+                        error: errorDetails
+                      }
+                    };
+                    return [...filtered, errorMsg];
+                  });
                 }
+              }
+            }
+            onConversationUpdated();
+          } else if (data.type === 'command_result') {
+            if (!data.session_id || data.session_id === conversationId) {
+              setLoading(false);
+              setTaskStatus(data.success ? 'completed' : 'failed');
+              setActiveAgents([]);
+              setWaitingAgent(null);
+              setAgentStatus(null);
+
+              if (data.ui_action === 'clear_chat') {
+                setMessages([]);
+                setActivities([]);
+              } else if (data.ui_action === 'new_conversation') {
+                if (onNewConversation) onNewConversation();
+              } else if (data.ui_action === 'rename_conversation') {
+                onConversationUpdated();
+              } else if (data.ui_action === 'select_conversation' && data.data?.conversation_id) {
+                if (onSelectConversation) onSelectConversation(data.data.conversation_id);
               }
             }
             onConversationUpdated();
@@ -201,6 +313,7 @@ export function Chat({
               setTaskStatus('interrupted');
               setActiveAgents([]);
               setWaitingAgent(null);
+              setAgentStatus(null);
               showToast('Task execution stopped by user.', 'info');
               if (conversationId) {
                 fetch(apiUrl(`/api/conversations/${conversationId}`))
@@ -221,6 +334,9 @@ export function Chat({
               setTaskStatus('failed');
               setActiveAgents([]);
               setWaitingAgent(null);
+              setAgentStatus(null);
+              const errMsg = data.message || 'Task encountered an error.';
+              showToast(errMsg, 'error');
               if (conversationId) {
                 fetch(apiUrl(`/api/conversations/${conversationId}`))
                   .then(res => res.json())
@@ -232,18 +348,22 @@ export function Chat({
                   })
                   .catch(console.error);
               } else {
-                const errorMsg: ChatMessage = {
-                  id: String(Date.now()),
-                  role: 'assistant',
-                  agent_name: 'Workforce',
-                  content: '',
-                  created_at: new Date().toISOString(),
-                  metadata: {
-                    is_error: true,
-                    error: { message: data.message || 'Task encountered an error.', code: 'TASK_FAILED', retryable: true }
-                  }
-                };
-                setMessages(prev => [...prev, errorMsg]);
+                const streamId = `streaming-${data.session_id || conversationId || 'active'}`;
+                setMessages(prev => {
+                  const filtered = prev.filter(m => m.id !== streamId);
+                  const errorMsg: ChatMessage = {
+                    id: String(Date.now()),
+                    role: 'assistant',
+                    agent_name: 'Workforce',
+                    content: '',
+                    created_at: new Date().toISOString(),
+                    metadata: {
+                      is_error: true,
+                      error: { message: errMsg, code: 'TASK_FAILED', retryable: true }
+                    }
+                  };
+                  return [...filtered, errorMsg];
+                });
               }
             }
           }
@@ -255,11 +375,14 @@ export function Chat({
       ws.onerror = () => {
         if (!isMounted) return;
         setLoading(false);
+        setAgentStatus(null);
       };
 
       ws.onclose = (event) => {
         if (!isMounted) return;
         setIsConnected(false);
+        setLoading(false);
+        setAgentStatus(null);
         if (event.code !== 1000 && event.code !== 1001) {
           const attempts = reconnectAttemptsRef.current;
           if (attempts < 5) {
@@ -329,7 +452,21 @@ export function Chat({
         session_id: activeId
       }));
     } else {
-      showToast('Connecting to workforce server...', 'info');
+      setLoading(false);
+      setTaskStatus('failed');
+      showToast(t('connectionLost'), 'error');
+      const errorMsg: ChatMessage = {
+        id: String(Date.now()),
+        role: 'assistant',
+        agent_name: 'Workforce',
+        content: '',
+        created_at: new Date().toISOString(),
+        metadata: {
+          is_error: true,
+          error: { message: t('connectionLost'), code: 'CONNECTION_ERROR', retryable: true }
+        }
+      };
+      setMessages(prev => [...prev, errorMsg]);
     }
   };
 
@@ -453,7 +590,48 @@ export function Chat({
     }
   };
 
+  const slashQuery = input.startsWith('/') && !input.includes(' ') && input.length > 0 ? input.slice(1).toLowerCase() : null;
+  const matchingCommands = slashQuery !== null
+    ? commandSpecs.filter(c =>
+        c.name.toLowerCase().startsWith(slashQuery) ||
+        (c.aliases || []).some((a: string) => a.toLowerCase().startsWith(slashQuery))
+      ).slice(0, 8)
+    : [];
+
+  const handleSelectCommand = (cmd: any) => {
+    setInput(`/${cmd.name} `);
+    if (textareaRef.current) {
+      textareaRef.current.focus();
+    }
+  };
+
   const handleKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
+    if (matchingCommands.length > 0) {
+      if (e.key === 'ArrowDown') {
+        e.preventDefault();
+        setSelectedCommandIndex(prev => (prev + 1) % matchingCommands.length);
+        return;
+      }
+      if (e.key === 'ArrowUp') {
+        e.preventDefault();
+        setSelectedCommandIndex(prev => (prev - 1 + matchingCommands.length) % matchingCommands.length);
+        return;
+      }
+      if (e.key === 'Tab' || (e.key === 'Enter' && !e.shiftKey)) {
+        e.preventDefault();
+        const selected = matchingCommands[selectedCommandIndex] || matchingCommands[0];
+        if (selected) {
+          handleSelectCommand(selected);
+          return;
+        }
+      }
+      if (e.key === 'Escape') {
+        e.preventDefault();
+        setInput('');
+        return;
+      }
+    }
+
     if (e.key === 'Enter' && !e.shiftKey) {
       e.preventDefault();
       handleSend();
@@ -470,6 +648,7 @@ export function Chat({
         agents={teamInfo.agents}
         activeAgents={activeAgents}
         waitingAgent={waitingAgent}
+        project={teamInfo.project}
       />
 
       {/* Reconnection Banner */}
@@ -628,10 +807,21 @@ export function Chat({
               </div>
             )}
 
-            {loading && activities.length === 0 && (
-              <div style={{ padding: '16px 24px', display: 'flex', alignItems: 'center', gap: '10px', color: 'hsl(var(--muted-fg))', fontSize: '13px' }}>
+            {loading && (
+              <div style={{
+                padding: '12px 24px',
+                display: 'flex',
+                alignItems: 'center',
+                gap: '10px',
+                color: 'hsl(var(--muted-fg))',
+                fontSize: '13px'
+              }}>
                 <div className="status-dot active" />
-                <span>{t('running')}</span>
+                <span>
+                  {agentStatus?.status === 'thinking'
+                    ? (language === 'it' ? `${agentStatus.agent || 'Workforce'} sta elaborando...` : `${agentStatus.agent || 'Workforce'} is thinking...`)
+                    : t('running')}
+                </span>
               </div>
             )}
 
@@ -657,6 +847,61 @@ export function Chat({
           display: 'flex',
           flexDirection: 'column'
         }}>
+          {/* Slash Commands Autocomplete Popover */}
+          {matchingCommands.length > 0 && (
+            <div style={{
+              position: 'absolute',
+              bottom: '100%',
+              left: 0,
+              right: 0,
+              marginBottom: '8px',
+              backgroundColor: 'hsl(var(--card))',
+              border: '1px solid hsl(var(--border))',
+              borderRadius: '8px',
+              boxShadow: '0 -6px 20px rgba(0,0,0,0.2)',
+              maxHeight: '260px',
+              overflowY: 'auto',
+              zIndex: 50,
+              padding: '4px'
+            }}>
+              <div style={{ padding: '4px 8px', fontSize: '10px', fontWeight: 600, color: 'hsl(var(--muted-fg))', textTransform: 'uppercase', letterSpacing: '0.05em', borderBottom: '1px solid hsl(var(--border)/0.4)' }}>
+                Commands
+              </div>
+              {matchingCommands.map((cmd, idx) => {
+                const isSelected = idx === selectedCommandIndex;
+                return (
+                  <div
+                    key={cmd.name}
+                    style={{
+                      padding: '6px 10px',
+                      borderRadius: '6px',
+                      cursor: 'pointer',
+                      display: 'flex',
+                      alignItems: 'center',
+                      justifyContent: 'space-between',
+                      backgroundColor: isSelected ? 'hsl(var(--primary)/0.12)' : 'transparent',
+                      color: isSelected ? 'hsl(var(--primary))' : 'hsl(var(--fg))'
+                    }}
+                    onMouseEnter={() => setSelectedCommandIndex(idx)}
+                    onClick={() => handleSelectCommand(cmd)}
+                  >
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '8px', overflow: 'hidden' }}>
+                      <span style={{ fontWeight: 600, fontSize: '13px', fontFamily: 'monospace' }}>
+                        /{cmd.name}
+                      </span>
+                      <span style={{ fontSize: '12px', color: 'hsl(var(--muted-fg))', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                        {cmd.description}
+                      </span>
+                    </div>
+                    <span style={{ fontSize: '11px', fontFamily: 'monospace', color: 'hsl(var(--muted-fg))', flexShrink: 0 }}>
+                      {cmd.usage}
+                    </span>
+                  </div>
+                );
+              })}
+            </div>
+          )}
+
           <textarea
             ref={textareaRef}
             className="form-textarea"

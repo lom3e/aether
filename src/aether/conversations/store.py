@@ -1,6 +1,7 @@
 """
-ConversationStore — SQLite-backed persistence for multi-turn conversations and sessions.
-Supports full conversation lifecycle: creation, editing, deletion, archiving, duplication, activities timeline, unread state, and search.
+ConversationStore — SQLite-backed persistence for multi-turn conversations, projects, and sessions.
+Supports full conversation lifecycle: creation, editing, deletion, archiving, duplication,
+pin/unpin, project organization, activities timeline, unread state, and search.
 """
 from __future__ import annotations
 
@@ -30,7 +31,7 @@ from aether.core.sqlite import get_sqlite_connection
 
 class ConversationStore:
     """
-    Manages multiple persistent conversations within a workspace.
+    Manages persistent conversations, organizational projects, and UI history within a workspace.
     """
 
     def __init__(self, db_path: str | Path) -> None:
@@ -44,6 +45,19 @@ class ConversationStore:
 
     def _init_db(self) -> None:
         with self._get_connection() as conn:
+            # 1. Projects Table
+            conn.execute(
+                """
+                CREATE TABLE IF NOT EXISTS projects (
+                    id TEXT PRIMARY KEY,
+                    name TEXT NOT NULL,
+                    created_at TEXT NOT NULL,
+                    updated_at TEXT NOT NULL
+                )
+                """
+            )
+
+            # 2. Conversations Table
             conn.execute(
                 """
                 CREATE TABLE IF NOT EXISTS conversations (
@@ -55,15 +69,32 @@ class ConversationStore:
                     updated_at TEXT NOT NULL,
                     last_message TEXT,
                     agents TEXT DEFAULT '[]',
-                    unread INTEGER DEFAULT 0
+                    unread INTEGER DEFAULT 0,
+                    pinned INTEGER DEFAULT 0,
+                    project_id TEXT DEFAULT NULL
                 )
                 """
             )
+
+            # Backward-compatibility schema migrations
             try:
                 conn.execute("ALTER TABLE conversations ADD COLUMN unread INTEGER DEFAULT 0")
             except Exception:
                 pass
+            try:
+                conn.execute("ALTER TABLE conversations ADD COLUMN pinned INTEGER DEFAULT 0")
+            except Exception:
+                pass
+            try:
+                conn.execute("ALTER TABLE conversations ADD COLUMN project_id TEXT DEFAULT NULL")
+            except Exception:
+                pass
+            try:
+                conn.execute("ALTER TABLE projects ADD COLUMN github_repository TEXT DEFAULT NULL")
+            except Exception:
+                pass
 
+            # 3. UI Messages & Activities
             conn.execute(
                 """
                 CREATE TABLE IF NOT EXISTS conversation_ui_messages (
@@ -92,11 +123,207 @@ class ConversationStore:
                 )
                 """
             )
+
+            # 4. Performance Indexes
             conn.execute("CREATE INDEX IF NOT EXISTS idx_conv_updated ON conversations(updated_at DESC)")
+            conn.execute("CREATE INDEX IF NOT EXISTS idx_conv_pinned ON conversations(pinned DESC, updated_at DESC)")
+            conn.execute("CREATE INDEX IF NOT EXISTS idx_conv_project ON conversations(project_id)")
             conn.execute("CREATE INDEX IF NOT EXISTS idx_conv_status ON conversations(status)")
+            conn.execute("CREATE INDEX IF NOT EXISTS idx_projects_updated ON projects(updated_at DESC)")
             conn.execute("CREATE INDEX IF NOT EXISTS idx_msg_conv ON conversation_ui_messages(conversation_id, created_at ASC)")
             conn.execute("CREATE INDEX IF NOT EXISTS idx_msg_content ON conversation_ui_messages(content)")
             conn.execute("CREATE INDEX IF NOT EXISTS idx_act_conv ON conversation_activities(conversation_id, created_at ASC)")
+
+    # ---------------------------------------------------------------------------
+    # Project CRUD Operations
+    # ---------------------------------------------------------------------------
+
+    def create_project(
+        self,
+        name: str,
+        project_id: str | None = None,
+        github_repository: dict[str, Any] | None = None,
+    ) -> dict[str, Any]:
+        """Create a new organizational Project for grouping conversations."""
+        clean_name = str(name).strip()
+        if not clean_name:
+            raise ValueError("Project name cannot be empty.")
+
+        pid = project_id or uuid.uuid4().hex
+        now = datetime.now(timezone.utc).isoformat()
+        gh_json = json.dumps(github_repository) if github_repository else None
+
+        with self._get_connection() as conn:
+            conn.execute(
+                """
+                INSERT INTO projects (id, name, created_at, updated_at, github_repository)
+                VALUES (?, ?, ?, ?, ?)
+                """,
+                (pid, clean_name, now, now, gh_json),
+            )
+
+        return {
+            "id": pid,
+            "name": clean_name,
+            "created_at": now,
+            "updated_at": now,
+            "github_repository": github_repository,
+            "conversation_count": 0,
+        }
+
+    def get_project(self, project_id: str) -> dict[str, Any] | None:
+        """Retrieve project metadata and its associated conversations."""
+        with self._get_connection() as conn:
+            row = conn.execute(
+                "SELECT id, name, created_at, updated_at, github_repository FROM projects WHERE id = ?",
+                (project_id,),
+            ).fetchone()
+            if not row:
+                return None
+
+            conv_rows = conn.execute(
+                """
+                SELECT id, title, team_name, status, created_at, updated_at, last_message, agents, unread, pinned, project_id
+                FROM conversations
+                WHERE project_id = ?
+                ORDER BY pinned DESC, updated_at DESC
+                """,
+                (project_id,),
+            ).fetchall()
+
+        convs = []
+        for r in conv_rows:
+            agents_list = []
+            try:
+                agents_list = json.loads(r["agents"] or "[]")
+            except Exception:
+                pass
+            convs.append({
+                "id": r["id"],
+                "title": r["title"],
+                "team_name": r["team_name"],
+                "status": r["status"],
+                "created_at": r["created_at"],
+                "updated_at": r["updated_at"],
+                "last_message": r["last_message"] or "",
+                "agents": agents_list,
+                "unread": bool(r["unread"] if "unread" in r.keys() else 0),
+                "pinned": bool(r["pinned"] if "pinned" in r.keys() else 0),
+                "project_id": r["project_id"] if "project_id" in r.keys() else None,
+            })
+
+        gh_repo = None
+        if "github_repository" in row.keys() and row["github_repository"]:
+            try:
+                gh_repo = json.loads(row["github_repository"])
+            except Exception:
+                pass
+
+        return {
+            "id": row["id"],
+            "name": row["name"],
+            "created_at": row["created_at"],
+            "updated_at": row["updated_at"],
+            "github_repository": gh_repo,
+            "conversation_count": len(convs),
+            "conversations": convs,
+        }
+
+    def list_projects(self) -> list[dict[str, Any]]:
+        """List all projects with their conversation count."""
+        with self._get_connection() as conn:
+            rows = conn.execute(
+                """
+                SELECT p.id, p.name, p.created_at, p.updated_at, p.github_repository,
+                       COUNT(c.id) as conversation_count
+                FROM projects p
+                LEFT JOIN conversations c ON c.project_id = p.id AND c.status != 'archived'
+                GROUP BY p.id
+                ORDER BY p.updated_at DESC
+                """
+            ).fetchall()
+
+        res = []
+        for r in rows:
+            gh_repo = None
+            if "github_repository" in r.keys() and r["github_repository"]:
+                try:
+                    gh_repo = json.loads(r["github_repository"])
+                except Exception:
+                    pass
+            res.append({
+                "id": r["id"],
+                "name": r["name"],
+                "created_at": r["created_at"],
+                "updated_at": r["updated_at"],
+                "github_repository": gh_repo,
+                "conversation_count": int(r["conversation_count"] or 0),
+            })
+        return res
+
+    def update_project(self, project_id: str, name: str) -> dict[str, Any] | None:
+        """Rename an existing project."""
+        clean_name = str(name).strip()
+        if not clean_name:
+            raise ValueError("Project name cannot be empty.")
+
+        now = datetime.now(timezone.utc).isoformat()
+        with self._get_connection() as conn:
+            cursor = conn.execute(
+                """
+                UPDATE projects
+                SET name = ?, updated_at = ?
+                WHERE id = ?
+                """,
+                (clean_name, now, project_id),
+            )
+            if cursor.rowcount == 0:
+                return None
+
+        return self.get_project(project_id)
+
+    def update_project_github(
+        self,
+        project_id: str,
+        github_repository: dict[str, Any] | None,
+    ) -> dict[str, Any] | None:
+        """Connect, update, or disconnect (when None) the GitHub repository on a project."""
+        gh_json = json.dumps(github_repository) if github_repository else None
+        now = datetime.now(timezone.utc).isoformat()
+        with self._get_connection() as conn:
+            cursor = conn.execute(
+                """
+                UPDATE projects
+                SET github_repository = ?, updated_at = ?
+                WHERE id = ?
+                """,
+                (gh_json, now, project_id),
+            )
+            if cursor.rowcount == 0:
+                return None
+
+        return self.get_project(project_id)
+
+    def delete_project(self, project_id: str) -> bool:
+        """
+        Delete a project. Does NOT delete conversations; unlinks them back to project_id=None.
+        """
+        with self._get_connection() as conn:
+            # 1. Unassign all conversations in this project
+            conn.execute(
+                "UPDATE conversations SET project_id = NULL WHERE project_id = ?",
+                (project_id,),
+            )
+            # 2. Delete project entry
+            cursor = conn.execute(
+                "DELETE FROM projects WHERE id = ?",
+                (project_id,),
+            )
+            return cursor.rowcount > 0
+
+    # ---------------------------------------------------------------------------
+    # Conversation CRUD Operations
+    # ---------------------------------------------------------------------------
 
     def create(
         self,
@@ -105,20 +332,29 @@ class ConversationStore:
         conv_id: str | None = None,
         status: str = "active",
         agents: list[str] | None = None,
+        pinned: bool = False,
+        project_id: str | None = None,
     ) -> dict[str, Any]:
         cid = conv_id or uuid.uuid4().hex
         now = datetime.now(timezone.utc).isoformat()
         agents_json = json.dumps(agents or [])
 
+        # Validate project existence if project_id specified
+        if project_id:
+            with self._get_connection() as conn:
+                p_exists = conn.execute("SELECT 1 FROM projects WHERE id = ?", (project_id,)).fetchone()
+                if not p_exists:
+                    raise ValueError(f"Project with id '{project_id}' does not exist.")
+
         with self._get_connection() as conn:
             conn.execute(
                 """
-                INSERT INTO conversations (id, title, team_name, status, created_at, updated_at, last_message, agents, unread)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, 0)
+                INSERT INTO conversations (id, title, team_name, status, created_at, updated_at, last_message, agents, unread, pinned, project_id)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, 0, ?, ?)
                 ON CONFLICT(id) DO UPDATE SET
                     updated_at = excluded.updated_at
                 """,
-                (cid, title, team_name, status, now, now, "", agents_json),
+                (cid, title, team_name, status, now, now, "", agents_json, 1 if pinned else 0, project_id),
             )
 
         return {
@@ -131,6 +367,8 @@ class ConversationStore:
             "last_message": "",
             "agents": agents or [],
             "unread": False,
+            "pinned": bool(pinned),
+            "project_id": project_id,
             "messages": [],
             "activities": [],
         }
@@ -140,9 +378,11 @@ class ConversationStore:
         search: str | None = None,
         status: str | None = None,
         include_archived: bool = False,
+        project_id: str | None = None,
+        pinned: bool | None = None,
         limit: int = 100,
     ) -> list[dict[str, Any]]:
-        query = "SELECT id, title, team_name, status, created_at, updated_at, last_message, agents, unread FROM conversations WHERE 1=1"
+        query = "SELECT id, title, team_name, status, created_at, updated_at, last_message, agents, unread, pinned, project_id FROM conversations WHERE 1=1"
         params: list[Any] = []
 
         if not include_archived:
@@ -151,6 +391,17 @@ class ConversationStore:
         if status:
             query += " AND status = ?"
             params.append(status)
+
+        if project_id is not None:
+            if project_id in ("none", "unassigned", ""):
+                query += " AND (project_id IS NULL OR project_id = '')"
+            else:
+                query += " AND project_id = ?"
+                params.append(project_id)
+
+        if pinned is not None:
+            query += " AND pinned = ?"
+            params.append(1 if pinned else 0)
 
         if search and search.strip():
             term = f"%{search.strip()}%"
@@ -163,7 +414,7 @@ class ConversationStore:
             """
             params.extend([term, term, term])
 
-        query += " ORDER BY updated_at DESC LIMIT ?"
+        query += " ORDER BY pinned DESC, updated_at DESC LIMIT ?"
         params.append(limit)
 
         with self._get_connection() as conn:
@@ -186,13 +437,15 @@ class ConversationStore:
                 "last_message": r["last_message"] or "",
                 "agents": agents_list,
                 "unread": bool(r["unread"] if "unread" in r.keys() else 0),
+                "pinned": bool(r["pinned"] if "pinned" in r.keys() else 0),
+                "project_id": r["project_id"] if "project_id" in r.keys() else None,
             })
         return results
 
     def get(self, conv_id: str) -> dict[str, Any] | None:
         with self._get_connection() as conn:
             row = conn.execute(
-                "SELECT id, title, team_name, status, created_at, updated_at, last_message, agents, unread FROM conversations WHERE id = ?",
+                "SELECT id, title, team_name, status, created_at, updated_at, last_message, agents, unread, pinned, project_id FROM conversations WHERE id = ?",
                 (conv_id,),
             ).fetchone()
             if not row:
@@ -256,6 +509,8 @@ class ConversationStore:
             "last_message": row["last_message"] or "",
             "agents": agents_list,
             "unread": bool(row["unread"] if "unread" in row.keys() else 0),
+            "pinned": bool(row["pinned"] if "pinned" in row.keys() else 0),
+            "project_id": row["project_id"] if "project_id" in row.keys() else None,
             "messages": messages,
             "activities": activities,
         }
@@ -298,11 +553,22 @@ class ConversationStore:
         last_message: str | None = None,
         agents: list[str] | None = None,
         unread: bool | None = None,
+        pinned: bool | None = None,
+        project_id: str | None = None,
+        clear_project: bool = False,
     ) -> dict[str, Any] | None:
         now = datetime.now(timezone.utc).isoformat()
+
+        # Validate project_id if provided
+        if project_id and not clear_project:
+            with self._get_connection() as conn:
+                p_exists = conn.execute("SELECT 1 FROM projects WHERE id = ?", (project_id,)).fetchone()
+                if not p_exists:
+                    raise ValueError(f"Project with id '{project_id}' does not exist.")
+
         with self._get_connection() as conn:
             row = conn.execute(
-                "SELECT title, status, last_message, agents, unread FROM conversations WHERE id = ?",
+                "SELECT title, status, last_message, agents, unread, pinned, project_id FROM conversations WHERE id = ?",
                 (conv_id,),
             ).fetchone()
             if not row:
@@ -312,18 +578,36 @@ class ConversationStore:
             new_status = status if status is not None else row["status"]
             new_last = last_message if last_message is not None else row["last_message"]
             new_agents = json.dumps(agents) if agents is not None else row["agents"]
-            new_unread = int(unread) if unread is not None else row["unread"]
+            new_unread = int(unread) if unread is not None else (row["unread"] if "unread" in row.keys() else 0)
+            new_pinned = int(pinned) if pinned is not None else (row["pinned"] if "pinned" in row.keys() else 0)
+
+            if clear_project:
+                new_project_id = None
+            elif project_id is not None:
+                new_project_id = project_id
+            else:
+                new_project_id = row["project_id"] if "project_id" in row.keys() else None
 
             conn.execute(
                 """
                 UPDATE conversations
-                SET title = ?, status = ?, last_message = ?, agents = ?, unread = ?, updated_at = ?
+                SET title = ?, status = ?, last_message = ?, agents = ?, unread = ?, pinned = ?, project_id = ?, updated_at = ?
                 WHERE id = ?
                 """,
-                (new_title, new_status, new_last, new_agents, new_unread, now, conv_id),
+                (new_title, new_status, new_last, new_agents, new_unread, new_pinned, new_project_id, now, conv_id),
             )
 
         return self.get(conv_id)
+
+    def pin(self, conv_id: str, pinned: bool = True) -> dict[str, Any] | None:
+        """Pin or unpin a conversation."""
+        return self.update(conv_id, pinned=pinned)
+
+    def assign_to_project(self, conv_id: str, project_id: str | None) -> dict[str, Any] | None:
+        """Assign conversation to a project or remove it if project_id is None."""
+        if project_id is None:
+            return self.update(conv_id, clear_project=True)
+        return self.update(conv_id, project_id=project_id)
 
     def archive(self, conv_id: str, archived: bool = True) -> dict[str, Any] | None:
         """Mark a conversation as archived or restore it to active/completed."""
@@ -340,6 +624,8 @@ class ConversationStore:
             title=new_title,
             team_name=existing.get("team_name"),
             agents=existing.get("agents"),
+            project_id=existing.get("project_id"),
+            pinned=False,
         )
         for msg in existing.get("messages", []):
             self.add_message(
@@ -360,22 +646,202 @@ class ConversationStore:
         return self.get(new_conv["id"])
 
     def delete(self, conv_id: str) -> bool:
+        """Permanently remove a conversation and all its cascade children."""
         with self._get_connection() as conn:
-            conn.execute("DELETE FROM conversation_ui_messages WHERE conversation_id = ?", (conv_id,))
-            conn.execute("DELETE FROM conversation_activities WHERE conversation_id = ?", (conv_id,))
-            res = conn.execute("DELETE FROM conversations WHERE id = ?", (conv_id,))
-            return res.rowcount > 0
+            cursor = conn.execute("DELETE FROM conversations WHERE id = ?", (conv_id,))
+            return cursor.rowcount > 0
+
+    def add_message(
+        self,
+        conv_id: str,
+        role: str,
+        content: str,
+        agent_name: str | None = None,
+        metadata: dict[str, Any] | None = None,
+        msg_id: str | None = None,
+    ) -> dict[str, Any]:
+        """Record an exchange message in the conversation timeline."""
+        mid = msg_id or uuid.uuid4().hex
+        now = datetime.now(timezone.utc).isoformat()
+        meta_json = json.dumps(metadata or {})
+
+        # Compute snippet for last_message preview
+        clean_content = content.strip()
+        last_snippet = (clean_content[:97] + "...") if len(clean_content) > 100 else clean_content
+
+        with self._get_connection() as conn:
+            # Auto-create conversation if missing (e.g. initial draft session)
+            row = conn.execute("SELECT title, unread FROM conversations WHERE id = ?", (conv_id,)).fetchone()
+            if not row:
+                init_title = generate_smart_title(content) if role == "user" else "New Task"
+                conn.execute(
+                    """
+                    INSERT INTO conversations (id, title, team_name, status, created_at, updated_at, last_message, agents, unread, pinned, project_id)
+                    VALUES (?, ?, NULL, 'active', ?, ?, '', '[]', 0, 0, NULL)
+                    """,
+                    (conv_id, init_title, now, now),
+                )
+                row = conn.execute("SELECT title, unread FROM conversations WHERE id = ?", (conv_id,)).fetchone()
+
+            conn.execute(
+                """
+                INSERT INTO conversation_ui_messages (id, conversation_id, role, agent_name, content, created_at, metadata)
+                VALUES (?, ?, ?, ?, ?, ?, ?)
+                """,
+                (mid, conv_id, role, agent_name, content, now, meta_json),
+            )
+
+            # Auto-title conversation if it still has default title
+            new_title = None
+            if row and (row["title"] in ("New Task", "Nuova Task", "New Conversation") or not row["title"].strip()):
+                if role == "user":
+                    new_title = generate_smart_title(content)
+
+            unread_val = 1 if role in ("assistant", "system", "agent") else 0
+
+            if new_title:
+                conn.execute(
+                    """
+                    UPDATE conversations
+                    SET last_message = ?, updated_at = ?, title = ?, unread = ?
+                    WHERE id = ?
+                    """,
+                    (last_snippet, now, new_title, unread_val, conv_id),
+                )
+            else:
+                conn.execute(
+                    """
+                    UPDATE conversations
+                    SET last_message = ?, updated_at = ?, unread = ?
+                    WHERE id = ?
+                    """,
+                    (last_snippet, now, unread_val, conv_id),
+                )
+
+        return {
+            "id": mid,
+            "conversation_id": conv_id,
+            "role": role,
+            "agent_name": agent_name,
+            "content": content,
+            "created_at": now,
+            "metadata": metadata or {},
+        }
+
+    def delete_message(
+        self,
+        conv_id: str,
+        message_id: str,
+        truncate_after: bool = True,
+    ) -> list[dict[str, Any]]:
+        """
+        Delete a message from a conversation and optionally truncate subsequent messages.
+        """
+        now = datetime.now(timezone.utc).isoformat()
+        with self._get_connection() as conn:
+            target = conn.execute(
+                "SELECT created_at FROM conversation_ui_messages WHERE id = ? AND conversation_id = ?",
+                (message_id, conv_id),
+            ).fetchone()
+            if not target:
+                return self.get_messages(conv_id)
+
+            target_created = target["created_at"]
+
+            if truncate_after:
+                conn.execute(
+                    "DELETE FROM conversation_ui_messages WHERE conversation_id = ? AND created_at >= ?",
+                    (conv_id, target_created),
+                )
+                conn.execute(
+                    "DELETE FROM conversation_activities WHERE conversation_id = ? AND created_at >= ?",
+                    (conv_id, target_created),
+                )
+            else:
+                conn.execute(
+                    "DELETE FROM conversation_ui_messages WHERE id = ?",
+                    (message_id,),
+                )
+
+            last_msg = conn.execute(
+                "SELECT content FROM conversation_ui_messages WHERE conversation_id = ? ORDER BY created_at DESC LIMIT 1",
+                (conv_id,),
+            ).fetchone()
+            snippet = ""
+            if last_msg:
+                c = last_msg["content"].strip()
+                snippet = (c[:97] + "...") if len(c) > 100 else c
+
+            conn.execute(
+                "UPDATE conversations SET last_message = ?, updated_at = ? WHERE id = ?",
+                (snippet, now, conv_id),
+            )
+
+        return self.get_messages(conv_id)
+
+    def edit_message(
+        self,
+        conv_id: str,
+        message_id: str,
+        new_content: str,
+        truncate_after: bool = True,
+    ) -> list[dict[str, Any]]:
+        """
+        Edit a user message and optionally truncate later messages for conversation forking.
+        """
+        now = datetime.now(timezone.utc).isoformat()
+        with self._get_connection() as conn:
+            target = conn.execute(
+                "SELECT created_at FROM conversation_ui_messages WHERE id = ? AND conversation_id = ?",
+                (message_id, conv_id),
+            ).fetchone()
+            if not target:
+                raise ValueError(f"Message '{message_id}' not found in conversation '{conv_id}'.")
+
+            target_created = target["created_at"]
+
+            if truncate_after:
+                conn.execute(
+                    "DELETE FROM conversation_ui_messages WHERE conversation_id = ? AND created_at > ?",
+                    (conv_id, target_created),
+                )
+                conn.execute(
+                    "DELETE FROM conversation_activities WHERE conversation_id = ? AND created_at > ?",
+                    (conv_id, target_created),
+                )
+
+            conn.execute(
+                "UPDATE conversation_ui_messages SET content = ? WHERE id = ?",
+                (new_content, message_id),
+            )
+
+            last_msg = conn.execute(
+                "SELECT content FROM conversation_ui_messages WHERE conversation_id = ? ORDER BY created_at DESC LIMIT 1",
+                (conv_id,),
+            ).fetchone()
+            snippet = ""
+            if last_msg:
+                c = last_msg["content"].strip()
+                snippet = (c[:97] + "...") if len(c) > 100 else c
+
+            conn.execute(
+                "UPDATE conversations SET last_message = ?, updated_at = ? WHERE id = ?",
+                (snippet, now, conv_id),
+            )
+
+        return self.get_messages(conv_id)
 
     def add_activity(
         self,
         conv_id: str,
         agent: str,
         activity_type: str,
-        message: str = "",
+        message: str | None = None,
         metadata: dict[str, Any] | None = None,
+        act_id: str | None = None,
     ) -> dict[str, Any]:
-        """Persist a live or recorded activity event into the conversation timeline."""
-        act_id = uuid.uuid4().hex
+        """Record an agent runtime event / tool action in the activity timeline."""
+        aid = act_id or uuid.uuid4().hex
         now = datetime.now(timezone.utc).isoformat()
         meta_json = json.dumps(metadata or {})
 
@@ -385,181 +851,15 @@ class ConversationStore:
                 INSERT INTO conversation_activities (id, conversation_id, agent, activity_type, message, metadata, created_at)
                 VALUES (?, ?, ?, ?, ?, ?, ?)
                 """,
-                (act_id, conv_id, agent, activity_type, message, meta_json, now),
+                (aid, conv_id, agent, activity_type, message or "", meta_json, now),
             )
 
         return {
-            "id": act_id,
+            "id": aid,
             "conversation_id": conv_id,
             "agent": agent,
             "type": activity_type,
-            "message": message,
+            "message": message or "",
             "metadata": metadata or {},
             "timestamp": now,
         }
-
-    def get_activities(self, conv_id: str) -> list[dict[str, Any]]:
-        """Retrieve persisted workforce activities for a conversation."""
-        with self._get_connection() as conn:
-            rows = conn.execute(
-                "SELECT id, agent, activity_type, message, metadata, created_at FROM conversation_activities WHERE conversation_id = ? ORDER BY created_at ASC",
-                (conv_id,),
-            ).fetchall()
-
-        results = []
-        for a in rows:
-            meta = {}
-            try:
-                meta = json.loads(a["metadata"] or "{}")
-            except Exception:
-                pass
-            results.append({
-                "id": a["id"],
-                "agent": a["agent"],
-                "type": a["activity_type"],
-                "message": a["message"] or "",
-                "metadata": meta,
-                "timestamp": a["created_at"],
-            })
-        return results
-
-    def add_message(
-        self,
-        conv_id: str,
-        role: str,
-        content: str,
-        agent_name: str | None = None,
-        metadata: dict[str, Any] | None = None,
-    ) -> dict[str, Any]:
-        """Add a single message and update conversation metadata atomically."""
-        msg_id = uuid.uuid4().hex
-        now = datetime.now(timezone.utc).isoformat()
-        meta_json = json.dumps(metadata or {})
-        unread_flag = 1 if role == "assistant" else 0
-
-        with self._get_connection() as conn:
-            existing = conn.execute("SELECT id, title, agents, unread FROM conversations WHERE id = ?", (conv_id,)).fetchone()
-            if not existing:
-                title = generate_smart_title(content)
-                agents_init = [agent_name] if agent_name else []
-                conn.execute(
-                    """
-                    INSERT INTO conversations (id, title, team_name, status, created_at, updated_at, last_message, agents, unread)
-                    VALUES (?, ?, ?, 'active', ?, ?, ?, ?, ?)
-                    """,
-                    (conv_id, title, None, now, now, content[:120], json.dumps(agents_init), unread_flag),
-                )
-            else:
-                curr_agents = []
-                try:
-                    curr_agents = json.loads(existing["agents"] or "[]")
-                except Exception:
-                    pass
-                if agent_name and agent_name not in curr_agents:
-                    curr_agents.append(agent_name)
-
-                current_title = existing["title"]
-                if current_title in ("New Task", "New Conversation", "Nuovo Task") and role == "user":
-                    current_title = generate_smart_title(content)
-
-                conn.execute(
-                    """
-                    UPDATE conversations
-                    SET last_message = ?, updated_at = ?, agents = ?, title = ?, unread = ?
-                    WHERE id = ?
-                    """,
-                    (content[:120], now, json.dumps(curr_agents), current_title, unread_flag, conv_id),
-                )
-
-            conn.execute(
-                """
-                INSERT INTO conversation_ui_messages (id, conversation_id, role, agent_name, content, created_at, metadata)
-                VALUES (?, ?, ?, ?, ?, ?, ?)
-                """,
-                (msg_id, conv_id, role, agent_name, content, now, meta_json),
-            )
-
-        return {
-            "id": msg_id,
-            "conversation_id": conv_id,
-            "role": role,
-            "agent_name": agent_name,
-            "content": content,
-            "created_at": now,
-            "metadata": metadata or {},
-        }
-
-    def edit_message(
-        self,
-        conv_id: str,
-        message_id: str,
-        new_content: str,
-        truncate_after: bool = True,
-    ) -> dict[str, Any] | None:
-        """Edit a message and invalidate subsequent future messages in that turn."""
-        now = datetime.now(timezone.utc).isoformat()
-        with self._get_connection() as conn:
-            msg = conn.execute(
-                "SELECT id, conversation_id, created_at, role FROM conversation_ui_messages WHERE id = ? AND conversation_id = ?",
-                (message_id, conv_id),
-            ).fetchone()
-            if not msg:
-                return None
-
-            conn.execute(
-                "UPDATE conversation_ui_messages SET content = ? WHERE id = ?",
-                (new_content, message_id),
-            )
-
-            if truncate_after:
-                conn.execute(
-                    "DELETE FROM conversation_ui_messages WHERE conversation_id = ? AND created_at > ?",
-                    (conv_id, msg["created_at"]),
-                )
-
-            last_row = conn.execute(
-                "SELECT content FROM conversation_ui_messages WHERE conversation_id = ? ORDER BY created_at DESC LIMIT 1",
-                (conv_id,),
-            ).fetchone()
-            last_text = last_row["content"][:120] if last_row else ""
-
-            conn.execute(
-                "UPDATE conversations SET last_message = ?, updated_at = ? WHERE id = ?",
-                (last_text, now, conv_id),
-            )
-
-        return self.get(conv_id)
-
-    def delete_message(self, conv_id: str, message_id: str, truncate_after: bool = False) -> dict[str, Any] | None:
-        """Delete a single message from history, optionally truncating subsequent messages."""
-        now = datetime.now(timezone.utc).isoformat()
-        with self._get_connection() as conn:
-            msg = conn.execute(
-                "SELECT id, conversation_id, created_at, role FROM conversation_ui_messages WHERE id = ? AND conversation_id = ?",
-                (message_id, conv_id),
-            ).fetchone()
-            if not msg:
-                return self.get(conv_id)
-
-            conn.execute(
-                "DELETE FROM conversation_ui_messages WHERE id = ? AND conversation_id = ?",
-                (message_id, conv_id),
-            )
-            if truncate_after:
-                conn.execute(
-                    "DELETE FROM conversation_ui_messages WHERE conversation_id = ? AND created_at > ?",
-                    (conv_id, msg["created_at"]),
-                )
-
-            last_row = conn.execute(
-                "SELECT content FROM conversation_ui_messages WHERE conversation_id = ? ORDER BY created_at DESC LIMIT 1",
-                (conv_id,),
-            ).fetchone()
-            last_text = last_row["content"][:120] if last_row else ""
-
-            conn.execute(
-                "UPDATE conversations SET last_message = ?, updated_at = ? WHERE id = ?",
-                (last_text, now, conv_id),
-            )
-
-        return self.get(conv_id)

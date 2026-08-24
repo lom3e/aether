@@ -1,9 +1,10 @@
 import { useState, useEffect, useContext } from 'react';
-import { ShoppingBag, Bot, Library, FileText, Layers, ArrowRight } from 'lucide-react';
+import { ShoppingBag, Bot, Library, FileText, ArrowRight } from 'lucide-react';
 import { ToastContext } from './toast';
 import { apiError, apiUrl } from './api';
 import { TopHeader } from './TopHeader';
 import { useTranslation } from './i18n';
+import { IdentityBadge, RenderIcon, getIdentityColor } from './identity';
 
 export function Marketplace() {
   const { t } = useTranslation();
@@ -63,10 +64,10 @@ export function Marketplace() {
           {presets.map(preset => (
             <div key={preset.id} className="card" style={{ padding: '24px', display: 'flex', flexDirection: 'column', justifyContent: 'space-between' }}>
               <div>
-                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '12px' }}>
-                  <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-                    <Layers className="text-primary" size={22} />
-                    <h3 style={{ margin: 0 }}>{preset.name}</h3>
+                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '14px' }}>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+                    <IdentityBadge icon={preset.icon || 'Bot'} color={preset.color || 'violet'} size={20} containerSize={38} />
+                    <h3 style={{ margin: 0, fontSize: '16px' }}>{preset.name}</h3>
                   </div>
                   <span className="badge badge-primary">{preset.agent_count} {preset.agent_count === 1 ? t('agentSingular') : t('agentPlural')}</span>
                 </div>
@@ -75,16 +76,33 @@ export function Marketplace() {
                 </p>
 
                 <div style={{ marginBottom: '16px' }}>
-                  <div style={{ fontSize: '12px', fontWeight: 600, color: 'hsl(var(--muted-fg))', marginBottom: '6px' }}>
+                  <div style={{ fontSize: '12px', fontWeight: 600, color: 'hsl(var(--muted-fg))', marginBottom: '8px' }}>
                     {t('includedAgentsRoles')}
                   </div>
-                  <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
-                    {preset.agents.map((a: any, i: number) => (
-                      <div key={i} style={{ fontSize: '13px', display: 'flex', alignItems: 'center', gap: '6px' }}>
-                        <span className="badge" style={{ fontSize: '11px', background: 'hsl(var(--muted))' }}>{a.name}</span>
-                        <span className="text-muted">{a.role}</span>
-                      </div>
-                    ))}
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
+                    {preset.agents.map((a: any, i: number) => {
+                      const colorTheme = getIdentityColor(a.color || 'violet');
+                      return (
+                        <div key={i} style={{ fontSize: '13px', display: 'flex', alignItems: 'center', gap: '8px' }}>
+                          <span
+                            className="badge"
+                            style={{
+                              fontSize: '11px',
+                              backgroundColor: colorTheme.bg,
+                              color: colorTheme.text,
+                              border: `1px solid ${colorTheme.border}`,
+                              display: 'inline-flex',
+                              alignItems: 'center',
+                              gap: '4px',
+                            }}
+                          >
+                            <RenderIcon name={a.icon || 'Bot'} size={12} />
+                            {a.name}
+                          </span>
+                          <span className="text-muted">{a.role}</span>
+                        </div>
+                      );
+                    })}
                   </div>
                 </div>
 

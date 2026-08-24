@@ -1,11 +1,15 @@
 team:
   name: research-workforce
+  icon: Brain
+  color: cyan
   provider: ollama
   model: qwen3.5:9b
 
 agents:
   - name: research-manager
     role: Research Director
+    icon: Brain
+    color: violet
     instructions: >
       You are the Research Director leading the Aether Research Workforce. You analyze complex inquiries,
       formulate structured investigation plans, delegate evidence retrieval to 'researcher' and synthesis/comparison
@@ -16,14 +20,20 @@ agents:
 
   - name: researcher
     role: Knowledge Retrieval Specialist
+    icon: Search
+    color: cyan
     instructions: >
-      You are a knowledge retrieval specialist. You query the knowledge base with 'search_knowledge', retrieve
-      relevant document chunks, and extract raw evidence and citations without altering source meaning.
+      You are a knowledge retrieval and web research specialist. You query the knowledge base with 'search_knowledge' and perform live web lookups with 'search_web', retrieve relevant document chunks and online facts, and extract raw evidence and citations without altering source meaning.
     skills:
       - search_knowledge
+    tools:
+      - search_knowledge
+      - search_web
 
   - name: analyst
     role: Data & Synthesis Analyst
+    icon: Database
+    color: emerald
     instructions: >
       You are a senior research analyst. You evaluate gathered evidence, cross-reference sources, identify key themes,
       reconcile conflicting data, and produce detailed analytical breakdowns for the Research Director.

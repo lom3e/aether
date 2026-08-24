@@ -9,6 +9,7 @@ from uuid import uuid4
 
 from fastapi import APIRouter, WebSocket, WebSocketDisconnect
 
+from aether.commands import CommandContext, get_default_command_dispatcher
 from aether.coordination.events import AgentEvent, EventType
 from aether.providers.errors import normalize_provider_error
 
@@ -93,11 +94,32 @@ async def websocket_endpoint(websocket: WebSocket) -> None:
         await websocket.close(code=1011)
         return
 
+    ws_session = ws_params.get("session_id") if hasattr(ws_params, "get") else None
+    if not hasattr(websocket, "state"):
+        websocket.state = type("State", (), {})()
+    websocket.state.session_id = ws_session
+
     loop = asyncio.get_running_loop()
-    active_session_id: str | None = None
+    active_session_id: str | None = ws_session
+
+    def send_to_this_socket(payload: dict[str, Any]) -> None:
+        """Send payload to this connection's WebSocket client safely across threads."""
+        if loop.is_closed():
+            return
+
+        async def _do_send() -> None:
+            try:
+                await websocket.send_json(payload)
+            except Exception:
+                app.state.chat_sockets.discard(websocket)
+
+        try:
+            asyncio.run_coroutine_threadsafe(_do_send(), loop)
+        except RuntimeError:
+            pass
 
     def broadcast(payload: dict[str, Any]) -> None:
-        """Broadcast payload to all connected WebSocket clients safely."""
+        """Broadcast payload to connected WebSocket clients safely without blocking agent runtime."""
         if loop.is_closed():
             return
 
@@ -105,24 +127,87 @@ async def websocket_endpoint(websocket: WebSocket) -> None:
             dead_sockets = set()
             for ws in list(app.state.chat_sockets):
                 try:
+                    ws_session_filter = getattr(ws.state, "session_id", None) if hasattr(ws, "state") else None
+                    msg_session = payload.get("session_id")
+                    if ws_session_filter and msg_session and ws_session_filter != msg_session:
+                        continue
+
                     await ws.send_json(payload)
                 except Exception:
                     dead_sockets.add(ws)
+
             for ws in dead_sockets:
                 app.state.chat_sockets.discard(ws)
 
-        asyncio.run_coroutine_threadsafe(send_all(), loop)
+        try:
+            asyncio.run_coroutine_threadsafe(send_all(), loop)
+        except RuntimeError:
+            pass
 
     def feed_handler(event: AgentEvent) -> None:
+        target_session_id = event.task_id or active_session_id
+
+        # Verify session isolation filter for this socket connection
+        ws_session_filter = getattr(websocket.state, "session_id", None) if hasattr(websocket, "state") else None
+        if ws_session_filter and target_session_id and ws_session_filter != target_session_id:
+            return
+
+        # 1. Live Streaming token chunk forwarding
+        if event.event_type == EventType.TOKEN_STREAM:
+            delta = (event.metadata or {}).get("delta", "")
+            send_to_this_socket({
+                "type": "token_chunk",
+                "session_id": target_session_id,
+                "agent": event.agent_name,
+                "delta": delta,
+            })
+            return
+
+        # 2. Agent status (thinking / started / idle)
+        if event.event_type == EventType.AGENT_THINKING:
+            status = (event.metadata or {}).get("status", "thinking")
+            send_to_this_socket({
+                "type": "agent_status",
+                "session_id": target_session_id,
+                "agent": event.agent_name,
+                "status": status,
+            })
+
+        # 3. File action (created / modified / deleted)
+        if event.event_type in {EventType.FILE_CREATED, EventType.FILE_MODIFIED, EventType.FILE_DELETED}:
+            action = "created" if event.event_type == EventType.FILE_CREATED else (
+                "modified" if event.event_type == EventType.FILE_MODIFIED else "deleted"
+            )
+            path = (event.metadata or {}).get("path", "")
+            send_to_this_socket({
+                "type": "file_action",
+                "session_id": target_session_id,
+                "agent": event.agent_name,
+                "action": action,
+                "path": path,
+            })
+
+        # 4. General activity event (persisted in SQLite & sent to this socket)
         safe_metadata = {
             key: value
             for key, value in (event.metadata or {}).items()
-            if key in {"tool_name", "target_agent", "duration_ms", "instruction", "query", "arguments"}
+            if key in {
+                "tool_name",
+                "target_agent",
+                "duration_ms",
+                "instruction",
+                "query",
+                "arguments",
+                "path",
+                "action",
+                "status",
+                "size_bytes",
+            }
         }
-        if active_session_id:
+        if target_session_id:
             try:
                 workspace.conversations.add_activity(
-                    conv_id=active_session_id,
+                    conv_id=target_session_id,
                     agent=event.agent_name,
                     activity_type=event.event_type.value,
                     metadata=safe_metadata,
@@ -130,9 +215,9 @@ async def websocket_endpoint(websocket: WebSocket) -> None:
             except Exception:
                 pass
 
-        broadcast({
+        send_to_this_socket({
             "type": "activity",
-            "session_id": active_session_id,
+            "session_id": target_session_id,
             "event": event.event_type.value,
             "agent": event.agent_name,
             "task_id": event.task_id,
@@ -191,6 +276,62 @@ async def websocket_endpoint(websocket: WebSocket) -> None:
                 pass
 
             broadcast({"type": "task_started", "session_id": session_id})
+
+            # Intercept slash commands locally — NEVER send to external LLM provider
+            dispatcher = get_default_command_dispatcher()
+            if dispatcher.is_slash_command(content):
+                cmd_ctx = CommandContext(
+                    command="",
+                    args=[],
+                    raw_args="",
+                    workspace=workspace,
+                    team=team,
+                    conversation_id=session_id,
+                    session_id=session_id,
+                    app_state=app.state,
+                )
+                cmd_result = await dispatcher.dispatch(content, cmd_ctx)
+
+                try:
+                    workspace.conversations.add_message(
+                        conv_id=session_id,
+                        role="assistant",
+                        content=cmd_result.output,
+                        agent_name="System",
+                        metadata={
+                            "is_command": True,
+                            "command": cmd_result.command,
+                            "success": cmd_result.success,
+                            "ui_action": cmd_result.ui_action,
+                            "data": cmd_result.data,
+                        },
+                    )
+                    workspace.conversations.update(
+                        conv_id=session_id,
+                        status="completed" if cmd_result.success else "failed",
+                        last_message=cmd_result.output[:120],
+                    )
+                except Exception:
+                    pass
+
+                broadcast({
+                    "type": "command_result",
+                    "session_id": session_id,
+                    "command": cmd_result.command,
+                    "success": cmd_result.success,
+                    "content": cmd_result.output,
+                    "ui_action": cmd_result.ui_action,
+                    "data": cmd_result.data,
+                })
+                broadcast({
+                    "type": "task_completed",
+                    "session_id": session_id,
+                    "success": cmd_result.success,
+                    "content": cmd_result.output,
+                    "agent": "System",
+                    "model": "system",
+                })
+                return
 
             prov_name = team.config.default_provider if (team and getattr(team, "config", None)) else "ollama"
             model_name = team.config.default_model if (team and getattr(team, "config", None)) else "qwen3.5:9b"
@@ -386,6 +527,15 @@ async def websocket_endpoint(websocket: WebSocket) -> None:
                 response = message.get("response", "")
                 if session_id in app.state.hitl_queues:
                     app.state.hitl_queues[session_id].put(response)
+
+            elif msg_type == "join_session":
+                target_session = message.get("session_id")
+                if target_session:
+                    if not hasattr(websocket, "state"):
+                        websocket.state = type("State", (), {})()
+                    websocket.state.session_id = target_session
+                    active_session_id = target_session
+                    await websocket.send_json({"type": "session_joined", "session_id": target_session})
 
             elif msg_type == "stop":
                 target_id = message.get("session_id")

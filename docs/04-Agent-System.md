@@ -111,27 +111,28 @@ Agent
 
 # 5. Agent Identity
 
-Identity defines who the agent is.
+Identity defines who the agent is within the workforce, combining functional identity with visual distinction.
 
 Example:
 
 ```yaml
-name: Developer Agent
-
-id: developer-agent-001
-
-type: software-engineer
-
-description:
-  AI agent responsible for software implementation
+name: code-analyst
+role: "Senior Software Engineer"
+icon: Code
+color: blue
+skills:
+  - coding
+  - debugging
 ```
 
-Identity allows:
+Identity attributes:
 
-* recognition;
-* communication;
-* accountability;
-* history tracking.
+* `name`: unique identifier within the team;
+* `role`: functional position and domain role;
+* `icon`: standard Lucide icon name (e.g. `Code`, `Search`, `Compass`, `ShieldCheck`, `Brain`, `PenTool`);
+* `color`: accent theme color (e.g. `violet`, `blue`, `emerald`, `amber`, `rose`, `cyan`);
+* `instructions`: specialized prompt directives;
+* `skills` and `tools`: authorized capabilities and execution tools.
 
 ---
 

@@ -25,6 +25,12 @@ from aether.providers.ollama import OllamaProvider
 from aether.providers.resilience import ResilientProvider
 from aether.providers.types import Message, ProviderConfig, ProviderResponse
 
+from aether.providers.health import (
+    ProviderHealthChecker,
+    ProviderHealthStatus,
+    get_default_health_checker,
+)
+
 __all__ = [
     # Core interface
     "AIProvider",
@@ -32,6 +38,10 @@ __all__ = [
     "Message",
     "ProviderConfig",
     "ProviderResponse",
+    "ProviderHealthStatus",
+    # Health check
+    "ProviderHealthChecker",
+    "get_default_health_checker",
     # Error hierarchy
     "ProviderError",
     "AuthenticationError",

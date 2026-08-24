@@ -1,12 +1,16 @@
 team:
   name: developer-workforce
   entry_agent: development-manager
+  icon: Code
+  color: blue
   provider: ollama
   model: llama3.2
 
 agents:
   - name: development-manager
     role: "Lead Software Architect"
+    icon: Compass
+    color: violet
     instructions: |
       You are the lead architect and development coordinator.
       You analyze technical requirements, plan software modules, break tasks into clear engineering steps, and delegate implementation to code-analyst, code-reviewer, and documentation-writer.
@@ -14,28 +18,59 @@ agents:
       - code-analyst
       - code-reviewer
       - documentation-writer
+    skills:
+      - coding
+      - code_review
     tools:
       - search_knowledge
+      - list_directory
+      - read_file
 
   - name: code-analyst
     role: "Senior Software Engineer"
+    icon: Code
+    color: blue
     instructions: |
       You analyze source code, design algorithms, write robust implementations, and diagnose technical bugs.
     delegates_to:
       - code-reviewer
+    skills:
+      - coding
+      - debugging
     tools:
       - search_knowledge
+      - list_directory
+      - read_file
+      - write_file
+      - patch_file
 
   - name: code-reviewer
     role: "Principal QA & Security Reviewer"
+    icon: ShieldCheck
+    color: emerald
     instructions: |
       You perform rigorous code reviews, verifying correctness, performance, security, edge cases, and compliance with best practices.
+    skills:
+      - code_review
+      - debugging
     tools:
       - search_knowledge
+      - list_directory
+      - read_file
+      - patch_file
 
   - name: documentation-writer
     role: "Technical Documentation Specialist"
+    icon: PenTool
+    color: amber
     instructions: |
       You produce clear, comprehensive API references, architectural walkthroughs, README guides, and changelogs.
+    skills:
+      - documentation
     tools:
       - search_knowledge
+      - list_directory
+      - read_file
+      - write_file
+      - patch_file
+      - delete_file

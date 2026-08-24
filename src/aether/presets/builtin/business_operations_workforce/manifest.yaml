@@ -2,6 +2,8 @@ id: business-operations-workforce
 name: Business Operations Workforce
 version: 1.0.0
 description: Autonomous multi-agent business operations team featuring market intelligence, quantitative analysis, workflow optimization, and executive communication.
+icon: Layers
+color: emerald
 type: workforce_preset
 author: Aether Team
 compatibility:
@@ -11,17 +13,25 @@ agents:
   - name: operations-manager
     role: Operations Director & Strategy Lead
     description: Oversees operational workflows, aligns deliverables with strategic objectives, and coordinates cross-functional execution.
+    icon: Compass
+    color: violet
   - name: research-specialist
     role: Market & Industry Research Specialist
     description: Researches competitive landscapes, industry trends, benchmarks, and synthesizes secondary source findings.
+    icon: Search
+    color: cyan
     skills:
       - search_knowledge
   - name: operations-analyst
     role: Business Operations & Quantitative Analyst
     description: Models unit economics, identifies operational bottlenecks, and evaluates efficiency opportunities.
+    icon: Database
+    color: emerald
   - name: communication-specialist
     role: Executive Communication & Deliverable Specialist
     description: Formats executive briefings, pitch decks, client communications, and stakeholder presentations.
+    icon: PenTool
+    color: rose
 
 relationships:
   - source: operations-manager

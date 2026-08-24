@@ -125,14 +125,15 @@ def build_runtime() -> Path:
     ]
 
     # Include builtin presets package data
+    data_sep = os.pathsep
     builtin_presets = SRC_DIR / "aether" / "presets" / "builtin"
     if builtin_presets.exists():
-        cmd.extend(["--add-data", f"{builtin_presets}:aether/presets/builtin"])
+        cmd.extend(["--add-data", f"{builtin_presets}{data_sep}aether/presets/builtin"])
 
     # Include UI dist if present
     ui_dist = REPO_ROOT / "ui" / "dist"
     if ui_dist.exists():
-        cmd.extend(["--add-data", f"{ui_dist}:ui/dist"])
+        cmd.extend(["--add-data", f"{ui_dist}{data_sep}ui/dist"])
 
     # Add hidden imports
     for imp in HIDDEN_IMPORTS:

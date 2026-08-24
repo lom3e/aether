@@ -1,10 +1,11 @@
 import { useState, useEffect, useRef } from 'react';
 import {
   Search, Plus, MessageSquare, Bot, Users, Database, Settings, ShoppingBag,
-  Moon, Sun, Globe, X, Sparkles, ArrowRight, Layers
+  Moon, Sun, Globe, X, Sparkles, ArrowRight, Layers, Zap, Keyboard
 } from 'lucide-react';
 import { useTranslation } from './i18n';
 import { useTheme } from './theme';
+import { useKeyboardShortcuts } from './shortcuts';
 
 interface CommandPaletteProps {
   isOpen: boolean;
@@ -28,6 +29,7 @@ export function CommandPalette({
   const inputRef = useRef<HTMLInputElement>(null);
   const { t, language, setLanguage } = useTranslation();
   const { theme, setTheme, isDark } = useTheme();
+  const { openShortcutsModal } = useKeyboardShortcuts();
 
   useEffect(() => {
     if (isOpen) {
@@ -77,10 +79,25 @@ export function CommandPalette({
       run: () => { onNavigate('knowledge'); onClose(); }
     },
     {
+      id: 'go_automations',
+      label: t('navAutomations'),
+      icon: <Zap size={16} />,
+      run: () => { onNavigate('automations'); onClose(); }
+    },
+    {
       id: 'go_settings',
       label: t('cmdGoSettings'),
       icon: <Settings size={16} />,
       run: () => { onNavigate('settings'); onClose(); }
+    },
+    {
+      id: 'show_shortcuts',
+      label: `${t('shortcutsTitle')} (⌘/)`,
+      icon: <Keyboard size={16} />,
+      run: () => {
+        onClose();
+        openShortcutsModal();
+      }
     },
     {
       id: 'go_marketplace',

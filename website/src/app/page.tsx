@@ -9,7 +9,6 @@ import { AdaptableWork } from "@/components/AdaptableWork";
 import { FAQ } from "@/components/FAQ";
 import { AlphaCTA } from "@/components/AlphaCTA";
 import { Footer } from "@/components/Footer";
-import { VersionPreviewSwitch } from "@/components/VersionPreviewSwitch";
 
 export const metadata = {
   title: "Aether — Costruisci la tua squadra di AI | Build your AI team",
@@ -49,9 +48,6 @@ export default function HomePage() {
 
       {/* 10. Minimal Footer with LMLabs Attribution */}
       <Footer />
-
-      {/* 11. Live Logo & Theme Switcher Studio */}
-      <VersionPreviewSwitch />
     </main>
   );
 }

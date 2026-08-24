@@ -1,8 +1,9 @@
-import { useState, useContext } from 'react';
-import { X, Bot } from 'lucide-react';
+import { useState, useEffect, useContext } from 'react';
+import { X, Bot, Cpu } from 'lucide-react';
 import { ToastContext } from './toast';
 import { apiError, apiUrl } from './api';
 import { useTranslation } from './i18n';
+import { SUPPORTED_ICONS, SUPPORTED_COLORS } from './identity';
 
 export function AgentBuilder({
   onClose,
@@ -16,13 +17,26 @@ export function AgentBuilder({
   const { t } = useTranslation();
   const [name, setName] = useState(initialData?.name || '');
   const [role, setRole] = useState(initialData?.role || '');
+  const [icon, setIcon] = useState(initialData?.icon || 'Bot');
+  const [color, setColor] = useState(initialData?.color || 'violet');
   const [instructions, setInstructions] = useState(initialData?.description || '');
   const [provider, setProvider] = useState(initialData?.provider || '');
   const [model, setModel] = useState(initialData?.model || '');
   const [delegatesTo, setDelegatesTo] = useState((initialData?.delegates_to || []).join(', '));
+  const [selectedSkills, setSelectedSkills] = useState<string[]>(initialData?.skills || []);
+  const [availableSkills, setAvailableSkills] = useState<any[]>([]);
   const [saving, setSaving] = useState(false);
   const [confirmDelete, setConfirmDelete] = useState(false);
   const showToast = useContext(ToastContext);
+
+  useEffect(() => {
+    fetch(apiUrl('/api/skills'))
+      .then(res => res.json())
+      .then(data => {
+        if (Array.isArray(data)) setAvailableSkills(data);
+      })
+      .catch(() => {});
+  }, []);
 
   const handleSave = async () => {
     if (!name || !role) return;
@@ -41,10 +55,12 @@ export function AgentBuilder({
         body: JSON.stringify({
           name,
           role,
+          icon: icon || null,
+          color: color || null,
           instructions: instructions || null,
           provider: provider || null,
           model: model || null,
-          skills: [],
+          skills: selectedSkills,
           delegates_to: delegatesList
         })
       });
@@ -124,6 +140,25 @@ export function AgentBuilder({
             />
           </div>
 
+          <div className="form-row">
+            <div className="form-group">
+              <label className="form-label">Icon</label>
+              <select className="form-select" value={icon} onChange={e => setIcon(e.target.value)}>
+                {SUPPORTED_ICONS.map(i => (
+                  <option key={i} value={i}>{i}</option>
+                ))}
+              </select>
+            </div>
+            <div className="form-group">
+              <label className="form-label">Color</label>
+              <select className="form-select" value={color} onChange={e => setColor(e.target.value)}>
+                {SUPPORTED_COLORS.map(c => (
+                  <option key={c} value={c}>{c.charAt(0).toUpperCase() + c.slice(1)}</option>
+                ))}
+              </select>
+            </div>
+          </div>
+
           <div className="form-group">
             <label className="form-label">{t('instructions')}</label>
             <textarea
@@ -134,6 +169,35 @@ export function AgentBuilder({
               rows={8}
             />
             <p className="text-muted" style={{ fontSize: '12px', marginTop: '6px' }}>{t('agentInstructionsDesc')}</p>
+          </div>
+
+          <div className="form-group">
+            <label className="form-label" style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+              <Cpu size={14} className="text-primary" /> Skills
+            </label>
+            <div style={{ display: 'flex', flexWrap: 'wrap', gap: '8px', marginTop: '6px' }}>
+              {availableSkills.map((s) => {
+                const active = selectedSkills.includes(s.name);
+                return (
+                  <button
+                    key={s.name}
+                    type="button"
+                    className={`btn ${active ? 'btn-primary' : 'btn-secondary'}`}
+                    style={{ fontSize: '12px', padding: '5px 12px', borderRadius: '16px' }}
+                    onClick={() => {
+                      setSelectedSkills(prev =>
+                        active ? prev.filter(x => x !== s.name) : [...prev, s.name]
+                      );
+                    }}
+                  >
+                    {s.name}
+                  </button>
+                );
+              })}
+            </div>
+            <p className="text-muted" style={{ fontSize: '12px', marginTop: '6px' }}>
+              Select specialized capabilities and instructions for this agent.
+            </p>
           </div>
 
           <div className="form-group">

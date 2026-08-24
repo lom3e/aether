@@ -22,6 +22,8 @@ class PresetAgentInfo:
     description: str = ""
     skills: list[str] = field(default_factory=list)
     delegates_to: list[str] = field(default_factory=list)
+    icon: str | None = None
+    color: str | None = None
 
     @classmethod
     def from_dict(cls, data: dict[str, Any]) -> PresetAgentInfo:
@@ -31,16 +33,26 @@ class PresetAgentInfo:
             description=str(data.get("description", "")).strip(),
             skills=list(data.get("skills", [])),
             delegates_to=list(data.get("delegates_to", [])),
+            icon=str(data.get("icon", "")).strip() or None if data.get("icon") else None,
+            color=str(data.get("color", "")).strip() or None if data.get("color") else None,
         )
 
     def to_dict(self) -> dict[str, Any]:
-        return {
+        res: dict[str, Any] = {
             "name": self.name,
             "role": self.role,
             "description": self.description,
             "skills": self.skills,
             "delegates_to": self.delegates_to,
         }
+        if self.icon:
+            res["icon"] = self.icon
+        if self.color:
+            res["color"] = self.color
+        return res
+
+
+from aether.team.config import SUPPORTED_AGENT_COLORS, SUPPORTED_AGENT_ICONS
 
 
 @dataclass
@@ -59,6 +71,8 @@ class PresetManifest:
     relationships: list[dict[str, str]] = field(default_factory=list)
     skills: list[str] = field(default_factory=list)
     knowledge_packs: list[str] = field(default_factory=list)
+    icon: str | None = None
+    color: str | None = None
 
     def validate(self) -> None:
         """Validate the manifest integrity."""
@@ -75,12 +89,29 @@ class PresetManifest:
         if not self.agents:
             raise PresetValidationError("Preset must include at least one agent in 'agents'.")
 
+        if self.icon and self.icon not in SUPPORTED_AGENT_ICONS:
+            raise PresetValidationError(
+                f"Unsupported preset icon '{self.icon}'. Supported: {', '.join(SUPPORTED_AGENT_ICONS)}"
+            )
+        if self.color and self.color not in SUPPORTED_AGENT_COLORS:
+            raise PresetValidationError(
+                f"Unsupported preset color '{self.color}'. Supported: {', '.join(SUPPORTED_AGENT_COLORS)}"
+            )
+
         agent_names = set()
         for a in self.agents:
             if not a.name:
                 raise PresetValidationError("Each agent in preset must have a non-empty name.")
             if not a.role:
                 raise PresetValidationError(f"Agent '{a.name}' in preset must have a non-empty role.")
+            if a.icon and a.icon not in SUPPORTED_AGENT_ICONS:
+                raise PresetValidationError(
+                    f"Agent '{a.name}' has unsupported icon '{a.icon}'."
+                )
+            if a.color and a.color not in SUPPORTED_AGENT_COLORS:
+                raise PresetValidationError(
+                    f"Agent '{a.name}' has unsupported color '{a.color}'."
+                )
             if a.name.lower() in agent_names:
                 raise PresetValidationError(f"Duplicate agent name '{a.name}' in preset manifest.")
             agent_names.add(a.name.lower())
@@ -102,6 +133,9 @@ class PresetManifest:
             for a in data.get("agents", [])
         ]
 
+        icon = str(data.get("icon", "")).strip() or None if data.get("icon") else None
+        color = str(data.get("color", "")).strip() or None if data.get("color") else None
+
         manifest = cls(
             id=str(data.get("id", "")).strip(),
             name=str(data.get("name", "")).strip(),
@@ -114,6 +148,8 @@ class PresetManifest:
             relationships=list(data.get("relationships", [])),
             skills=list(data.get("skills", [])),
             knowledge_packs=list(data.get("knowledge_packs", [])),
+            icon=icon,
+            color=color,
         )
         manifest.validate()
         return manifest
@@ -147,4 +183,6 @@ class PresetManifest:
             "relationships": self.relationships,
             "skills": self.skills,
             "knowledge_packs": self.knowledge_packs,
+            "icon": self.icon or "Bot",
+            "color": self.color or "violet",
         }

@@ -11,14 +11,7 @@ interface LogoContextType {
 const LogoContext = createContext<LogoContextType | undefined>(undefined);
 
 function getInitialLogo(): LogoId {
-  if (typeof window === "undefined") return "auto";
-  try {
-    const saved = localStorage.getItem("aether_active_logo") as LogoId | null;
-    if (saved) return saved;
-  } catch {
-    // ignore
-  }
-  return "auto";
+  return "purple";
 }
 
 export function LogoProvider({ children }: { children: React.ReactNode }) {

@@ -2,11 +2,13 @@ import { useState, useEffect, useRef } from 'react';
 import {
   Sparkles, MessageSquare, Bot, Users, Database, Settings, ShoppingBag,
   Plus, ChevronLeft, Moon, Sun, Globe, Trash2, Search,
-  ChevronDown, MoreVertical, Archive, Copy, Edit2, Check
+  ChevronDown, MoreVertical, Archive, Copy, Edit2, Check,
+  Pin, Folder, GitBranch, ExternalLink, RefreshCw, X, Zap
 } from 'lucide-react';
 import { useTranslation } from './i18n';
 import { useTheme } from './theme';
 import { apiUrl } from './api';
+import { Tooltip } from './Tooltip';
 
 interface SidebarProps {
   currentView: string;
@@ -47,6 +49,23 @@ export function Sidebar({
   const [searchQuery, setSearchQuery] = useState('');
   const [showArchived, setShowArchived] = useState(false);
 
+  // Projects State
+  const [projects, setProjects] = useState<any[]>([]);
+  const [selectedProjectId, setSelectedProjectId] = useState<string | null>(null);
+  const [isCreatingProject, setIsCreatingProject] = useState(false);
+  const [newProjectName, setNewProjectName] = useState('');
+  const [editingProjectId, setEditingProjectId] = useState<string | null>(null);
+  const [editProjectName, setEditProjectName] = useState('');
+  const [activeProjectMenuId, setActiveProjectMenuId] = useState<string | null>(null);
+
+  // GitHub Modal State (P3-03)
+  const [activeGithubProject, setActiveGithubProject] = useState<any | null>(null);
+  const [githubOwner, setGithubOwner] = useState('');
+  const [githubRepo, setGithubRepo] = useState('');
+  const [githubToken, setGithubToken] = useState('');
+  const [githubLoading, setGithubLoading] = useState(false);
+  const [githubError, setGithubError] = useState<string | null>(null);
+
   // Workspace Switcher Dropdown
   const [isWsDropdownOpen, setIsWsDropdownOpen] = useState(false);
   const [allWorkspaces, setAllWorkspaces] = useState<any[]>([]);
@@ -86,8 +105,20 @@ export function Sidebar({
       .catch(console.error);
   };
 
+  const fetchProjects = () => {
+    fetch(apiUrl('/api/projects'))
+      .then(res => res.json())
+      .then(data => {
+        if (Array.isArray(data)) {
+          setProjects(data);
+        }
+      })
+      .catch(console.error);
+  };
+
   useEffect(() => {
     fetchWorkspaces();
+    fetchProjects();
   }, [workspaceName, workspaceVersion]);
 
   // Click outside listener for popovers
@@ -98,11 +129,194 @@ export function Sidebar({
       }
       if (convMenuRef.current && !convMenuRef.current.contains(e.target as Node)) {
         setActiveMenuConvId(null);
+        setActiveProjectMenuId(null);
       }
     };
     document.addEventListener('mousedown', handleClickOutside);
     return () => document.removeEventListener('mousedown', handleClickOutside);
   }, []);
+
+  const handleCreateProject = async () => {
+    if (!newProjectName.trim()) {
+      setIsCreatingProject(false);
+      return;
+    }
+    try {
+      const res = await fetch(apiUrl('/api/projects'), {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ name: newProjectName.trim() })
+      });
+      if (res.ok) {
+        setNewProjectName('');
+        setIsCreatingProject(false);
+        fetchProjects();
+      }
+    } catch (err) {
+      console.error('Failed to create project', err);
+    }
+  };
+
+  const handleRenameProject = async (id: string) => {
+    if (!editProjectName.trim()) {
+      setEditingProjectId(null);
+      return;
+    }
+    try {
+      const res = await fetch(apiUrl(`/api/projects/${id}`), {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ name: editProjectName.trim() })
+      });
+      if (res.ok) {
+        setEditingProjectId(null);
+        fetchProjects();
+      }
+    } catch (err) {
+      console.error('Failed to rename project', err);
+    }
+  };
+
+  const handleDeleteProject = async (id: string) => {
+    try {
+      const res = await fetch(apiUrl(`/api/projects/${id}`), {
+        method: 'DELETE'
+      });
+      if (res.ok) {
+        if (selectedProjectId === id) setSelectedProjectId(null);
+        fetchProjects();
+        if (onRefreshConversations) onRefreshConversations();
+      }
+    } catch (err) {
+      console.error('Failed to delete project', err);
+    }
+  };
+
+  const openGithubModal = (p: any) => {
+    setActiveGithubProject(p);
+    setGithubError(null);
+    if (p.github_repository) {
+      setGithubOwner(p.github_repository.owner || '');
+      setGithubRepo(p.github_repository.repository || '');
+    } else {
+      setGithubOwner('');
+      setGithubRepo('');
+    }
+    setGithubToken('');
+    setActiveProjectMenuId(null);
+  };
+
+  const handleConnectGithub = async () => {
+    if (!activeGithubProject || !githubOwner.trim() || !githubRepo.trim()) return;
+    setGithubLoading(true);
+    setGithubError(null);
+    try {
+      const res = await fetch(apiUrl(`/api/projects/${activeGithubProject.id}/github`), {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          owner: githubOwner.trim(),
+          repository: githubRepo.trim(),
+          token: githubToken.trim() || undefined,
+        }),
+      });
+      const data = await res.json();
+      if (!res.ok) {
+        throw new Error(data.detail || 'Failed to connect repository.');
+      }
+      setActiveGithubProject((curr: any) => curr ? { ...curr, github_repository: data.repository } : null);
+      fetchProjects();
+    } catch (err: any) {
+      setGithubError(err.message || 'Failed to connect repository.');
+    } finally {
+      setGithubLoading(false);
+    }
+  };
+
+  const handleVerifyGithub = async () => {
+    if (!activeGithubProject) return;
+    setGithubLoading(true);
+    setGithubError(null);
+    try {
+      const res = await fetch(apiUrl(`/api/projects/${activeGithubProject.id}/github/verify`), {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          token: githubToken.trim() || undefined,
+        }),
+      });
+      const data = await res.json();
+      if (!res.ok) {
+        throw new Error(data.detail || 'Verification failed.');
+      }
+      setActiveGithubProject((curr: any) => curr ? {
+        ...curr,
+        github_repository: { ...curr.github_repository, ...data }
+      } : null);
+      fetchProjects();
+    } catch (err: any) {
+      setGithubError(err.message || 'Verification failed.');
+    } finally {
+      setGithubLoading(false);
+    }
+  };
+
+  const handleDisconnectGithub = async () => {
+    if (!activeGithubProject) return;
+    setGithubLoading(true);
+    setGithubError(null);
+    try {
+      const res = await fetch(apiUrl(`/api/projects/${activeGithubProject.id}/github`), {
+        method: 'DELETE',
+      });
+      if (!res.ok) {
+        const data = await res.json();
+        throw new Error(data.detail || 'Failed to disconnect repository.');
+      }
+      setActiveGithubProject((curr: any) => curr ? { ...curr, github_repository: null } : null);
+      setGithubOwner('');
+      setGithubRepo('');
+      setGithubToken('');
+      fetchProjects();
+    } catch (err: any) {
+      setGithubError(err.message || 'Failed to disconnect repository.');
+    } finally {
+      setGithubLoading(false);
+    }
+  };
+
+  const handlePinConversation = async (convId: string, currentPinned: boolean) => {
+    try {
+      const res = await fetch(apiUrl(`/api/conversations/${convId}/pin`), {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ pinned: !currentPinned })
+      });
+      if (res.ok) {
+        setActiveMenuConvId(null);
+        if (onRefreshConversations) onRefreshConversations();
+      }
+    } catch (err) {
+      console.error('Failed to pin conversation', err);
+    }
+  };
+
+  const handleAssignProject = async (convId: string, projectId: string | null) => {
+    try {
+      const res = await fetch(apiUrl(`/api/conversations/${convId}/project`), {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ project_id: projectId })
+      });
+      if (res.ok) {
+        setActiveMenuConvId(null);
+        fetchProjects();
+        if (onRefreshConversations) onRefreshConversations();
+      }
+    } catch (err) {
+      console.error('Failed to assign conversation to project', err);
+    }
+  };
 
   const handleSwitchWorkspace = async (ws: any) => {
     if (ws.is_active) {
@@ -181,7 +395,9 @@ export function Sidebar({
       (c.title || '').toLowerCase().includes(searchQuery.toLowerCase()) ||
       (c.last_message || '').toLowerCase().includes(searchQuery.toLowerCase());
     const matchesArchive = showArchived ? c.status === 'archived' : c.status !== 'archived';
-    return matchesSearch && matchesArchive;
+    const matchesProject = !selectedProjectId ||
+      (selectedProjectId === 'none' ? (!c.project_id) : c.project_id === selectedProjectId);
+    return matchesSearch && matchesArchive && matchesProject;
   });
 
   return (
@@ -257,50 +473,52 @@ export function Sidebar({
                 </div>
               </button>
 
-              <button
-                className="btn btn-ghost"
-                style={{ padding: '6px', borderRadius: '6px' }}
-                onClick={() => setCollapsed(true)}
-                title={t('collapseSidebar')}
-                aria-label="Collapse Sidebar"
-              >
-                <ChevronLeft size={16} />
-              </button>
+              <Tooltip content={t('collapseSidebar')} position="bottom">
+                <button
+                  className="btn btn-ghost"
+                  style={{ padding: '6px', borderRadius: '6px' }}
+                  onClick={() => setCollapsed(true)}
+                  aria-label="Collapse Sidebar"
+                >
+                  <ChevronLeft size={16} />
+                </button>
+              </Tooltip>
             </>
           ) : (
-            <button
-              className="btn btn-ghost"
-              style={{
-                width: '44px',
-                height: '44px',
-                minWidth: '44px',
-                minHeight: '44px',
-                padding: '0',
-                borderRadius: '10px',
-                display: 'flex',
-                alignItems: 'center',
-                justifyContent: 'center',
-                cursor: 'pointer',
-                backgroundColor: 'hsl(var(--primary)/0.08)',
-                transition: 'background-color 0.15s ease, transform 0.15s ease'
-              }}
-              onClick={() => setCollapsed(false)}
-              title={t('expandSidebar')}
-              aria-label="Expand Sidebar"
-            >
-              <img
-                src={isDark ? "/brand/logo_bianco.svg" : "/brand/logo_viola.svg"}
-                alt="Aether Logo"
-                width="26"
-                height="26"
+            <Tooltip content={t('expandSidebar')} position="right">
+              <button
+                className="btn btn-ghost"
                 style={{
-                  width: '26px',
-                  height: '26px',
-                  objectFit: 'contain',
-                  display: 'block'
+                  width: '44px',
+                  height: '44px',
+                  minWidth: '44px',
+                  minHeight: '44px',
+                  padding: '0',
+                  borderRadius: '10px',
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  cursor: 'pointer',
+                  backgroundColor: 'hsl(var(--primary)/0.08)',
+                  transition: 'background-color 0.15s ease, transform 0.15s ease'
                 }}
-              />
-            </button>
+                onClick={() => setCollapsed(false)}
+                aria-label="Expand Sidebar"
+              >
+                <img
+                  src={isDark ? "/brand/logo_bianco.svg" : "/brand/logo_viola.svg"}
+                  alt="Aether Logo"
+                  width="26"
+                  height="26"
+                  style={{
+                    width: '26px',
+                    height: '26px',
+                    objectFit: 'contain',
+                    display: 'block'
+                  }}
+                />
+              </button>
+            </Tooltip>
           )}
 
           {/* Workspace Switcher Popover Dropdown */}
@@ -380,21 +598,22 @@ export function Sidebar({
 
         {/* New Task & Command Palette */}
         <div style={{ padding: '10px 12px 6px', display: 'flex', flexDirection: 'column', gap: '6px' }}>
-          <button
-            className="btn btn-primary"
-            style={{ width: '100%', padding: collapsed ? '8px' : '8px 12px', fontSize: '13px' }}
-            onClick={() => {
-              if (!workspaceName) {
-                if (onOpenWorkspaceModal) onOpenWorkspaceModal('create');
-              } else {
-                onNewConversation();
-              }
-            }}
-            title={t('newTask')}
-          >
-            <Plus size={15} />
-            {!collapsed && <span>{t('newTask')}</span>}
-          </button>
+          <Tooltip content={t('newTask')} position={collapsed ? 'right' : 'top'}>
+            <button
+              className="btn btn-primary"
+              style={{ width: '100%', padding: collapsed ? '8px' : '8px 12px', fontSize: '13px' }}
+              onClick={() => {
+                if (!workspaceName) {
+                  if (onOpenWorkspaceModal) onOpenWorkspaceModal('create');
+                } else {
+                  onNewConversation();
+                }
+              }}
+            >
+              <Plus size={15} />
+              {!collapsed && <span>{t('newTask')}</span>}
+            </button>
+          </Tooltip>
 
           {!collapsed && (
             <div style={{ position: 'relative', marginTop: '2px', display: 'flex', gap: '4px' }}>
@@ -415,14 +634,15 @@ export function Sidebar({
                   }}
                 />
               </div>
-              <button
-                className="btn btn-ghost"
-                style={{ padding: '4px 6px', fontSize: '11px', color: 'hsl(var(--muted-fg))' }}
-                onClick={onOpenCommandPalette}
-                title="Command Palette (⌘K)"
-              >
-                ⌘K
-              </button>
+              <Tooltip content="Command Palette (⌘K)" position="top">
+                <button
+                  className="btn btn-ghost"
+                  style={{ padding: '4px 6px', fontSize: '11px', color: 'hsl(var(--muted-fg))' }}
+                  onClick={onOpenCommandPalette}
+                >
+                  ⌘K
+                </button>
+              </Tooltip>
             </div>
           )}
         </div>
@@ -436,15 +656,189 @@ export function Sidebar({
                 {t('workspace')}
               </div>
             )}
-            <button
-              className={`btn btn-ghost ${currentView === 'home' ? 'active' : ''}`}
-              style={{ width: '100%', justifyContent: collapsed ? 'center' : 'flex-start', padding: '7px 8px', fontSize: '13px' }}
-              onClick={() => onNavigate('home')}
-              title={t('navHome')}
-            >
-              <Sparkles size={15} />
-              {!collapsed && <span>{t('navHome')}</span>}
-            </button>
+            <Tooltip content={t('navHome')} position={collapsed ? 'right' : 'top'} disabled={!collapsed}>
+              <button
+                className={`btn btn-ghost ${currentView === 'home' ? 'active' : ''}`}
+                style={{ width: '100%', justifyContent: collapsed ? 'center' : 'flex-start', padding: '7px 8px', fontSize: '13px' }}
+                onClick={() => onNavigate('home')}
+              >
+                <Sparkles size={15} />
+                {!collapsed && <span>{t('navHome')}</span>}
+              </button>
+            </Tooltip>
+          </div>
+
+          {/* Projects Section */}
+          <div>
+            {!collapsed && (
+              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '2px 8px', marginBottom: '4px' }}>
+                <span style={{ fontSize: '10px', fontWeight: 600, color: 'hsl(var(--muted-fg))', textTransform: 'uppercase', letterSpacing: '0.05em' }}>
+                  Projects
+                </span>
+                <Tooltip content="New Project" position="top">
+                  <button
+                    className="btn btn-ghost"
+                    style={{ padding: '2px 4px', fontSize: '11px', color: 'hsl(var(--muted-fg))' }}
+                    onClick={() => setIsCreatingProject(!isCreatingProject)}
+                  >
+                    <Plus size={13} />
+                  </button>
+                </Tooltip>
+              </div>
+            )}
+
+            {isCreatingProject && !collapsed && (
+              <div style={{ padding: '4px 6px', display: 'flex', gap: '4px', marginBottom: '4px' }}>
+                <input
+                  type="text"
+                  className="form-input"
+                  placeholder="Project name..."
+                  style={{ padding: '3px 6px', fontSize: '12px', height: '26px' }}
+                  value={newProjectName}
+                  onChange={e => setNewProjectName(e.target.value)}
+                  autoFocus
+                  onKeyDown={e => {
+                    if (e.key === 'Enter') handleCreateProject();
+                    if (e.key === 'Escape') setIsCreatingProject(false);
+                  }}
+                />
+              </div>
+            )}
+
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '2px' }}>
+              {selectedProjectId && !collapsed && (
+                <button
+                  className="btn btn-ghost"
+                  style={{ width: '100%', justifyContent: 'space-between', padding: '5px 8px', fontSize: '11.5px', color: 'hsl(var(--primary))' }}
+                  onClick={() => setSelectedProjectId(null)}
+                >
+                  <span>← Show All Conversations</span>
+                </button>
+              )}
+
+              {projects.map(p => {
+                const isSelected = selectedProjectId === p.id;
+                const isEditing = editingProjectId === p.id;
+                const isMenuOpen = activeProjectMenuId === p.id;
+
+                return (
+                  <div key={p.id} style={{ position: 'relative' }}>
+                    {isEditing ? (
+                      <div style={{ padding: '4px 6px', display: 'flex', gap: '4px' }}>
+                        <input
+                          type="text"
+                          className="form-input"
+                          style={{ padding: '3px 6px', fontSize: '12px', height: '26px' }}
+                          value={editProjectName}
+                          onChange={e => setEditProjectName(e.target.value)}
+                          autoFocus
+                          onKeyDown={e => {
+                            if (e.key === 'Enter') handleRenameProject(p.id);
+                            if (e.key === 'Escape') setEditingProjectId(null);
+                          }}
+                        />
+                      </div>
+                    ) : (
+                      <button
+                        className={`btn btn-ghost ${isSelected ? 'active' : ''}`}
+                        style={{
+                          width: '100%',
+                          justifyContent: collapsed ? 'center' : 'space-between',
+                          padding: '5px 8px',
+                          fontSize: '12px',
+                          overflow: 'hidden'
+                        }}
+                        onClick={() => setSelectedProjectId(isSelected ? null : p.id)}
+                        title={p.name}
+                      >
+                        <div style={{ display: 'flex', alignItems: 'center', gap: '7px', overflow: 'hidden' }}>
+                          <Folder size={13} className={isSelected ? 'text-primary' : 'text-muted'} />
+                          {!collapsed && (
+                            <span style={{ textOverflow: 'ellipsis', overflow: 'hidden', whiteSpace: 'nowrap' }}>
+                              {p.name}
+                            </span>
+                          )}
+                        </div>
+                        {!collapsed && (
+                          <div style={{ display: 'flex', alignItems: 'center', gap: '4px' }}>
+                            {p.github_repository && (
+                              <span title={`GitHub: ${p.github_repository.owner}/${p.github_repository.repository}`} style={{ display: 'inline-flex' }}>
+                                <GitBranch size={11} className="text-primary" />
+                              </span>
+                            )}
+                            <span style={{ fontSize: '10px', color: 'hsl(var(--muted-fg))' }}>
+                              {p.conversation_count || 0}
+                            </span>
+                            <button
+                              className="btn btn-ghost"
+                              style={{ padding: '2px', color: 'hsl(var(--muted-fg))' }}
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                setActiveProjectMenuId(isMenuOpen ? null : p.id);
+                              }}
+                            >
+                              <MoreVertical size={11} />
+                            </button>
+                          </div>
+                        )}
+                      </button>
+                    )}
+
+                    {isMenuOpen && !collapsed && (
+                      <div style={{
+                        position: 'absolute',
+                        right: '4px',
+                        top: '100%',
+                        backgroundColor: 'hsl(var(--card))',
+                        border: '1px solid hsl(var(--border))',
+                        borderRadius: '8px',
+                        boxShadow: '0 10px 25px rgba(0,0,0,0.3)',
+                        padding: '4px',
+                        zIndex: 50,
+                        width: '140px',
+                        display: 'flex',
+                        flexDirection: 'column',
+                        gap: '2px'
+                      }}>
+                        <button
+                          className="btn btn-ghost"
+                          style={{ width: '100%', justifyContent: 'flex-start', padding: '5px 8px', fontSize: '12px' }}
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            openGithubModal(p);
+                          }}
+                        >
+                          <GitBranch size={12} /> {t('githubRepo')}
+                        </button>
+                        <button
+                          className="btn btn-ghost"
+                          style={{ width: '100%', justifyContent: 'flex-start', padding: '5px 8px', fontSize: '12px' }}
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            setEditingProjectId(p.id);
+                            setEditProjectName(p.name);
+                            setActiveProjectMenuId(null);
+                          }}
+                        >
+                          <Edit2 size={12} /> Rename
+                        </button>
+                        <button
+                          className="btn btn-ghost"
+                          style={{ width: '100%', justifyContent: 'flex-start', padding: '5px 8px', fontSize: '12px', color: 'hsl(var(--destructive))' }}
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            setActiveProjectMenuId(null);
+                            handleDeleteProject(p.id);
+                          }}
+                        >
+                          <Trash2 size={12} /> Delete
+                        </button>
+                      </div>
+                    )}
+                  </div>
+                );
+              })}
+            </div>
           </div>
 
           {/* Conversations Section */}
@@ -466,7 +860,7 @@ export function Sidebar({
             )}
 
             <div style={{ display: 'flex', flexDirection: 'column', gap: '2px' }}>
-              {filteredConversations.slice(0, 15).map(conv => {
+              {filteredConversations.slice(0, 25).map(conv => {
                 const isActive = currentView === 'chat' && activeConversationId === conv.id;
                 const isHovered = hoveredConv === conv.id;
                 const isMenuOpen = activeMenuConvId === conv.id;
@@ -512,7 +906,11 @@ export function Sidebar({
                         title={conv.title || t('untitledTask')}
                       >
                         <div style={{ display: 'flex', alignItems: 'center', gap: '8px', overflow: 'hidden' }}>
-                          <MessageSquare size={13} className={isActive ? 'text-primary' : (conv.unread ? 'text-primary' : 'text-muted')} />
+                          {conv.pinned ? (
+                            <Pin size={13} className="text-primary" />
+                          ) : (
+                            <MessageSquare size={13} className={isActive ? 'text-primary' : (conv.unread ? 'text-primary' : 'text-muted')} />
+                          )}
                           {!collapsed && (
                             <span style={{ textOverflow: 'ellipsis', overflow: 'hidden', whiteSpace: 'nowrap', fontWeight: conv.unread && !isActive ? 600 : 400 }}>
                               {conv.title || t('untitledTask')}
@@ -576,11 +974,21 @@ export function Sidebar({
                         boxShadow: '0 10px 25px rgba(0,0,0,0.3)',
                         padding: '4px',
                         zIndex: 50,
-                        width: '140px',
+                        width: '160px',
                         display: 'flex',
                         flexDirection: 'column',
                         gap: '2px'
                       }}>
+                        <button
+                          className="btn btn-ghost"
+                          style={{ width: '100%', justifyContent: 'flex-start', padding: '5px 8px', fontSize: '12px' }}
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            handlePinConversation(conv.id, conv.pinned);
+                          }}
+                        >
+                          <Pin size={12} /> {conv.pinned ? 'Unpin' : 'Pin to top'}
+                        </button>
                         <button
                           className="btn btn-ghost"
                           style={{ width: '100%', justifyContent: 'flex-start', padding: '5px 8px', fontSize: '12px' }}
@@ -603,6 +1011,44 @@ export function Sidebar({
                         >
                           <Copy size={12} /> {t('duplicate')}
                         </button>
+
+                        {/* Assign to project list */}
+                        {projects.length > 0 && (
+                          <div style={{ borderTop: '1px solid hsl(var(--border)/0.5)', margin: '3px 0', paddingTop: '3px' }}>
+                            <div style={{ fontSize: '10px', color: 'hsl(var(--muted-fg))', padding: '2px 8px' }}>
+                              Project
+                            </div>
+                            {conv.project_id && (
+                              <button
+                                className="btn btn-ghost"
+                                style={{ width: '100%', justifyContent: 'flex-start', padding: '4px 8px', fontSize: '11px', color: 'hsl(var(--muted-fg))' }}
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  handleAssignProject(conv.id, null);
+                                }}
+                              >
+                                Remove from Project
+                              </button>
+                            )}
+                            {projects.map(p => (
+                              <button
+                                key={p.id}
+                                className="btn btn-ghost"
+                                style={{ width: '100%', justifyContent: 'space-between', padding: '4px 8px', fontSize: '11px' }}
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  handleAssignProject(conv.id, p.id);
+                                }}
+                              >
+                                <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                                  {p.name}
+                                </span>
+                                {conv.project_id === p.id && <Check size={11} className="text-primary" />}
+                              </button>
+                            ))}
+                          </div>
+                        )}
+
                         <button
                           className="btn btn-ghost"
                           style={{ width: '100%', justifyContent: 'flex-start', padding: '5px 8px', fontSize: '12px' }}
@@ -640,35 +1086,49 @@ export function Sidebar({
               </div>
             )}
             <div style={{ display: 'flex', flexDirection: 'column', gap: '2px', marginTop: '2px' }}>
-              <button
-                className={`btn btn-ghost ${currentView === 'agents' ? 'active' : ''}`}
-                style={{ width: '100%', justifyContent: collapsed ? 'center' : 'flex-start', padding: '7px 8px', fontSize: '13px' }}
-                onClick={() => onNavigate('agents')}
-                title={t('navAgents')}
-              >
-                <Bot size={15} />
-                {!collapsed && <span>{t('navAgents')}</span>}
-              </button>
+              <Tooltip content={t('navAgents')} position={collapsed ? 'right' : 'top'} disabled={!collapsed}>
+                <button
+                  className={`btn btn-ghost ${currentView === 'agents' ? 'active' : ''}`}
+                  style={{ width: '100%', justifyContent: collapsed ? 'center' : 'flex-start', padding: '7px 8px', fontSize: '13px' }}
+                  onClick={() => onNavigate('agents')}
+                >
+                  <Bot size={15} />
+                  {!collapsed && <span>{t('navAgents')}</span>}
+                </button>
+              </Tooltip>
 
-              <button
-                className={`btn btn-ghost ${currentView === 'teams' ? 'active' : ''}`}
-                style={{ width: '100%', justifyContent: collapsed ? 'center' : 'flex-start', padding: '7px 8px', fontSize: '13px' }}
-                onClick={() => onNavigate('teams')}
-                title={t('navTeams')}
-              >
-                <Users size={15} />
-                {!collapsed && <span>{t('navTeams')}</span>}
-              </button>
+              <Tooltip content={t('navTeams')} position={collapsed ? 'right' : 'top'} disabled={!collapsed}>
+                <button
+                  className={`btn btn-ghost ${currentView === 'teams' ? 'active' : ''}`}
+                  style={{ width: '100%', justifyContent: collapsed ? 'center' : 'flex-start', padding: '7px 8px', fontSize: '13px' }}
+                  onClick={() => onNavigate('teams')}
+                >
+                  <Users size={15} />
+                  {!collapsed && <span>{t('navTeams')}</span>}
+                </button>
+              </Tooltip>
 
-              <button
-                className={`btn btn-ghost ${currentView === 'knowledge' ? 'active' : ''}`}
-                style={{ width: '100%', justifyContent: collapsed ? 'center' : 'flex-start', padding: '7px 8px', fontSize: '13px' }}
-                onClick={() => onNavigate('knowledge')}
-                title={t('navKnowledge')}
-              >
-                <Database size={15} />
-                {!collapsed && <span>{t('navKnowledge')}</span>}
-              </button>
+              <Tooltip content={t('navKnowledge')} position={collapsed ? 'right' : 'top'} disabled={!collapsed}>
+                <button
+                  className={`btn btn-ghost ${currentView === 'knowledge' ? 'active' : ''}`}
+                  style={{ width: '100%', justifyContent: collapsed ? 'center' : 'flex-start', padding: '7px 8px', fontSize: '13px' }}
+                  onClick={() => onNavigate('knowledge')}
+                >
+                  <Database size={15} />
+                  {!collapsed && <span>{t('navKnowledge')}</span>}
+                </button>
+              </Tooltip>
+
+              <Tooltip content={t('navAutomations')} position={collapsed ? 'right' : 'top'} disabled={!collapsed}>
+                <button
+                  className={`btn btn-ghost ${currentView === 'automations' ? 'active' : ''}`}
+                  style={{ width: '100%', justifyContent: collapsed ? 'center' : 'flex-start', padding: '7px 8px', fontSize: '13px' }}
+                  onClick={() => onNavigate('automations')}
+                >
+                  <Zap size={15} />
+                  {!collapsed && <span>{t('navAutomations')}</span>}
+                </button>
+              </Tooltip>
             </div>
           </div>
 
@@ -680,25 +1140,27 @@ export function Sidebar({
               </div>
             )}
             <div style={{ display: 'flex', flexDirection: 'column', gap: '2px', marginTop: '2px' }}>
-              <button
-                className={`btn btn-ghost ${currentView === 'settings' ? 'active' : ''}`}
-                style={{ width: '100%', justifyContent: collapsed ? 'center' : 'flex-start', padding: '7px 8px', fontSize: '13px' }}
-                onClick={() => onNavigate('settings')}
-                title={t('navSettings')}
-              >
-                <Settings size={15} />
-                {!collapsed && <span>{t('navSettings')}</span>}
-              </button>
+              <Tooltip content={t('navSettings')} position={collapsed ? 'right' : 'top'} disabled={!collapsed}>
+                <button
+                  className={`btn btn-ghost ${currentView === 'settings' ? 'active' : ''}`}
+                  style={{ width: '100%', justifyContent: collapsed ? 'center' : 'flex-start', padding: '7px 8px', fontSize: '13px' }}
+                  onClick={() => onNavigate('settings')}
+                >
+                  <Settings size={15} />
+                  {!collapsed && <span>{t('navSettings')}</span>}
+                </button>
+              </Tooltip>
 
-              <button
-                className={`btn btn-ghost ${currentView === 'marketplace' ? 'active' : ''}`}
-                style={{ width: '100%', justifyContent: collapsed ? 'center' : 'flex-start', padding: '7px 8px', fontSize: '13px' }}
-                onClick={() => onNavigate('marketplace')}
-                title={t('navMarketplace')}
-              >
-                <ShoppingBag size={15} />
-                {!collapsed && <span>{t('navMarketplace')}</span>}
-              </button>
+              <Tooltip content={t('navMarketplace')} position={collapsed ? 'right' : 'top'} disabled={!collapsed}>
+                <button
+                  className={`btn btn-ghost ${currentView === 'marketplace' ? 'active' : ''}`}
+                  style={{ width: '100%', justifyContent: collapsed ? 'center' : 'flex-start', padding: '7px 8px', fontSize: '13px' }}
+                  onClick={() => onNavigate('marketplace')}
+                >
+                  <ShoppingBag size={15} />
+                  {!collapsed && <span>{t('navMarketplace')}</span>}
+                </button>
+              </Tooltip>
             </div>
           </div>
         </div>
@@ -716,32 +1178,227 @@ export function Sidebar({
         {!collapsed ? (
           <>
             <div style={{ display: 'flex', gap: '4px' }}>
+              <Tooltip content={t('changeLanguage')} position="top">
+                <button
+                  className="btn btn-ghost"
+                  style={{ padding: '6px 8px', fontSize: '12px' }}
+                  onClick={toggleLanguage}
+                >
+                  <Globe size={14} />
+                  <span>{language.toUpperCase()}</span>
+                </button>
+              </Tooltip>
+            </div>
+
+            <Tooltip content={isDark ? t('switchToLight') : t('switchToDark')} position="top">
               <button
                 className="btn btn-ghost"
-                style={{ padding: '6px 8px', fontSize: '12px' }}
-                onClick={toggleLanguage}
-                title={t('changeLanguage')}
+                style={{ padding: '6px' }}
+                onClick={toggleTheme}
               >
-                <Globe size={14} />
-                <span>{language.toUpperCase()}</span>
+                {isDark ? <Sun size={14} /> : <Moon size={14} />}
+              </button>
+            </Tooltip>
+          </>
+        ) : (
+          <Tooltip content={isDark ? t('switchToLight') : t('switchToDark')} position="right">
+            <button className="btn btn-ghost" style={{ padding: '6px' }} onClick={toggleTheme}>
+              {isDark ? <Sun size={14} /> : <Moon size={14} />}
+            </button>
+          </Tooltip>
+        )}
+      </div>
+
+      {/* GitHub Repository Modal */}
+      {activeGithubProject && (
+        <>
+          <div className="overlay" onClick={() => !githubLoading && setActiveGithubProject(null)} />
+          <div className="slide-over" style={{ maxWidth: '480px' }}>
+            <div className="slide-over-header">
+              <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                <GitBranch size={18} className="text-primary" />
+                <strong>{t('githubRepo')} — {activeGithubProject.name}</strong>
+              </div>
+              <button
+                className="btn btn-ghost"
+                onClick={() => setActiveGithubProject(null)}
+                disabled={githubLoading}
+              >
+                <X size={18} />
               </button>
             </div>
 
-            <button
-              className="btn btn-ghost"
-              style={{ padding: '6px' }}
-              onClick={toggleTheme}
-              title={isDark ? t('switchToLight') : t('switchToDark')}
-            >
-              {isDark ? <Sun size={14} /> : <Moon size={14} />}
-            </button>
-          </>
-        ) : (
-          <button className="btn btn-ghost" style={{ padding: '6px' }} onClick={toggleTheme}>
-            {isDark ? <Sun size={14} /> : <Moon size={14} />}
-          </button>
-        )}
-      </div>
+            <div className="slide-over-body">
+              {githubError && (
+                <div style={{
+                  padding: '10px 12px',
+                  backgroundColor: 'hsl(var(--destructive)/0.1)',
+                  color: 'hsl(var(--destructive))',
+                  borderRadius: '6px',
+                  fontSize: '13px',
+                  marginBottom: '16px',
+                  border: '1px solid hsl(var(--destructive)/0.2)',
+                }}>
+                  {githubError}
+                </div>
+              )}
+
+              {activeGithubProject.github_repository ? (
+                <div style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
+                  <div className="card" style={{ padding: '16px', backgroundColor: 'hsl(var(--card-bg))' }}>
+                    <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '8px' }}>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+                        <span style={{
+                          width: '8px',
+                          height: '8px',
+                          borderRadius: '50%',
+                          backgroundColor: activeGithubProject.github_repository.connected ? 'hsl(142 71% 45%)' : 'hsl(var(--destructive))',
+                          display: 'inline-block',
+                        }} />
+                        <span style={{ fontSize: '12px', fontWeight: 600, color: 'hsl(142 71% 45%)' }}>
+                          {activeGithubProject.github_repository.connected ? t('githubConnected') : t('githubInaccessible')}
+                        </span>
+                      </div>
+                      {activeGithubProject.github_repository.private ? (
+                        <span className="badge" style={{ fontSize: '10px' }}>Private</span>
+                      ) : (
+                        <span className="badge" style={{ fontSize: '10px' }}>Public</span>
+                      )}
+                    </div>
+
+                    <div style={{ fontSize: '16px', fontWeight: 600, marginBottom: '4px' }}>
+                      <a
+                        href={activeGithubProject.github_repository.url || `https://github.com/${activeGithubProject.github_repository.owner}/${activeGithubProject.github_repository.repository}`}
+                        target="_blank"
+                        rel="noreferrer"
+                        style={{ color: 'hsl(var(--primary))', textDecoration: 'none', display: 'inline-flex', alignItems: 'center', gap: '4px' }}
+                      >
+                        {activeGithubProject.github_repository.owner}/{activeGithubProject.github_repository.repository}
+                        <ExternalLink size={13} />
+                      </a>
+                    </div>
+
+                    {activeGithubProject.github_repository.description && (
+                      <p className="text-muted" style={{ fontSize: '13px', margin: '4px 0 10px 0', lineHeight: 1.4 }}>
+                        {activeGithubProject.github_repository.description}
+                      </p>
+                    )}
+
+                    <div style={{ display: 'flex', flexDirection: 'column', gap: '4px', fontSize: '12px', color: 'hsl(var(--muted-fg))', marginTop: '10px' }}>
+                      <div>
+                        <strong>{t('githubDefaultBranch')}:</strong> <code style={{ fontSize: '11px' }}>{activeGithubProject.github_repository.default_branch || 'main'}</code>
+                      </div>
+                      {activeGithubProject.github_repository.verified_at && (
+                        <div>
+                          <strong>{t('githubLastVerified')}:</strong> {new Date(activeGithubProject.github_repository.verified_at).toLocaleString()}
+                        </div>
+                      )}
+                    </div>
+                  </div>
+
+                  <div className="form-group" style={{ marginBottom: 0 }}>
+                    <label className="form-label">{t('githubTokenOptional')}</label>
+                    <input
+                      type="password"
+                      className="form-input"
+                      value={githubToken}
+                      onChange={e => setGithubToken(e.target.value)}
+                      placeholder="ghp_xxxxxxxxxxxxxxxxxxxx"
+                    />
+                    <span className="text-muted" style={{ fontSize: '11px', marginTop: '4px', display: 'block' }}>
+                      {t('githubTokenHint')}
+                    </span>
+                  </div>
+
+                  <div style={{ display: 'flex', gap: '8px', marginTop: '8px' }}>
+                    <button
+                      className="btn btn-secondary"
+                      onClick={handleVerifyGithub}
+                      disabled={githubLoading}
+                      style={{ flex: 1 }}
+                    >
+                      <RefreshCw size={14} className={githubLoading ? 'spin' : ''} />
+                      {githubLoading ? t('verifying') : t('verifyGithubRepo')}
+                    </button>
+                    <button
+                      className="btn btn-ghost"
+                      onClick={handleDisconnectGithub}
+                      disabled={githubLoading}
+                      style={{ color: 'hsl(var(--destructive))' }}
+                    >
+                      <Trash2 size={14} />
+                      {t('disconnectGithubRepo')}
+                    </button>
+                  </div>
+                </div>
+              ) : (
+                <div style={{ display: 'flex', flexDirection: 'column', gap: '14px' }}>
+                  <p className="text-muted" style={{ fontSize: '13px', margin: 0 }}>
+                    {t('noGithubRepo')}
+                  </p>
+
+                  <div className="form-group">
+                    <label className="form-label">{t('githubOwner')} *</label>
+                    <input
+                      type="text"
+                      className="form-input"
+                      value={githubOwner}
+                      onChange={e => setGithubOwner(e.target.value)}
+                      placeholder="e.g. lom3e or facebook"
+                      autoFocus
+                    />
+                  </div>
+
+                  <div className="form-group">
+                    <label className="form-label">{t('githubRepoName')} *</label>
+                    <input
+                      type="text"
+                      className="form-input"
+                      value={githubRepo}
+                      onChange={e => setGithubRepo(e.target.value)}
+                      placeholder="e.g. aether or react"
+                    />
+                  </div>
+
+                  <div className="form-group">
+                    <label className="form-label">{t('githubTokenOptional')}</label>
+                    <input
+                      type="password"
+                      className="form-input"
+                      value={githubToken}
+                      onChange={e => setGithubToken(e.target.value)}
+                      placeholder="ghp_xxxxxxxxxxxxxxxxxxxx"
+                    />
+                    <span className="text-muted" style={{ fontSize: '11px', marginTop: '4px', display: 'block' }}>
+                      {t('githubTokenHint')}
+                    </span>
+                  </div>
+
+                  <button
+                    className="btn btn-primary"
+                    onClick={handleConnectGithub}
+                    disabled={githubLoading || !githubOwner.trim() || !githubRepo.trim()}
+                    style={{ marginTop: '8px' }}
+                  >
+                    <GitBranch size={15} />
+                    {githubLoading ? t('connecting') : t('connectGithubRepo')}
+                  </button>
+                </div>
+              )}
+            </div>
+
+            <div className="slide-over-footer">
+              <button
+                className="btn btn-secondary"
+                onClick={() => setActiveGithubProject(null)}
+                disabled={githubLoading}
+              >
+                {t('cancel')}
+              </button>
+            </div>
+          </div>
+        </>
+      )}
     </aside>
   );
 }

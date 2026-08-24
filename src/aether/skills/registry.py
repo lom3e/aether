@@ -44,14 +44,16 @@ class SkillRegistry:
 
     install_package = register_package
 
-    def get(self, skill_id: str) -> Skill:
-        try:
-            return self._skills[skill_id]
-        except KeyError as exc:
-            raise KeyError(f"Skill '{skill_id}' is not registered.") from exc
+    def get(self, identifier: str) -> Skill:
+        if identifier in self._skills:
+            return self._skills[identifier]
+        normalized = self._normalize_name(identifier)
+        if normalized in self._skills_by_name:
+            return self._skills_by_name[normalized]
+        raise KeyError(f"Skill '{identifier}' is not registered.")
 
-    def resolve(self, skill_id: str) -> Skill:
-        return self.get(skill_id)
+    def resolve(self, identifier: str) -> Skill:
+        return self.get(identifier)
 
     def resolve_skill(self, skill: Skill) -> Skill:
         normalized_name = self._normalize_name(skill.name)
@@ -70,11 +72,16 @@ class SkillRegistry:
     def list_skills(self) -> list[Skill]:
         return list(self._skills.values())
 
+    list = list_skills
+
     def list_packages(self) -> list[SkillPackage]:
         return list(self._packages.values())
 
-    def has(self, skill_id: str) -> bool:
-        return skill_id in self._skills
+    def has(self, identifier: str) -> bool:
+        if identifier in self._skills:
+            return True
+        normalized = self._normalize_name(identifier)
+        return normalized in self._skills_by_name
 
     def _remove_package_skills(self, package_id: str) -> None:
         to_remove = [skill_id for skill_id, skill in self._skills.items() if skill.package_id == package_id]

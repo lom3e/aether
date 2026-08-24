@@ -94,13 +94,13 @@ Consentire all'utente di visualizzare la struttura di delega del team attivo tra
 
 ## 2. Elenco dei Task Atomici (P2)
 
-| Task ID | Descrizione Operativa | Componenti Coinvolti | Stima |
+| Task ID | Descrizione Operativa | Componenti Coinvolti | Stato |
 | :--- | :--- | :--- | :--- |
-| **P2-01** | **Website: Rimozione Studio e standardizzazione Logo Viola**: Pulizia testi, sostituzione asset grafici e verifica coerenza del brand. | `website/`, `landing/` | S |
-| **P2-02** | **Website: Auto-update versione e Download DMG reale**: Integrazione script fetch ultima release GitHub e link diretto all'asset `.dmg`. | `website/` | S |
-| **P2-03** | **Website: Modern animations & mobile polish**: Aggiunta animazioni CSS e ottimizzazione responsive. | `website/` | S |
-| **P2-04** | **Icone Preset per Marketplace & Team Builder**: Associazione icone tematiche a ciascun template manifest in `presets/builtin/manifest.yaml`. | `presets/`, `ui/src/Teams.tsx`, `ui/src/Marketplace.tsx` | S |
-| **P2-05** | **Polish Visivo Viste Teams, Agents e Knowledge**: Applicazione card con hover effect, badge semantici e allineamento padding. | `ui/src/Teams.tsx`, `ui/src/Agents.tsx`, `ui/src/Knowledge.tsx` | M |
-| **P2-06** | **Implementazione Componente Tooltip Universale**: Creazione wrapper `<Tooltip>` e applicazione su tutti i pulsanti icona dell'app. | `ui/src/components/Tooltip.tsx`, `ui/src/*.tsx` | M |
-| **P2-07** | **Refining Toast Notifications**: Restyling toast bar con animazione slide-in e barra di progresso timer. | `ui/src/toast.ts`, `ui/src/App.css` | S |
-| **P2-08** | **Visualizzatore Topologia Team**: Componente SVG compatto che mostra la gerarchia di delega (Manager ➔ Specialist). | `ui/src/components/TeamTopology.tsx`, `ui/src/Teams.tsx` | M |
+| **P2-01** | **Website: Rimozione Studio e standardizzazione Logo Viola**: Pulizia testi, rimozione selettore multi-logo ed esportazione del logo viola ufficiale del brand. | `website/src/components/`, `website/src/app/` | **Completed (v1.5.0)** |
+| **P2-02** | **Website: Aggiornamento versioni e Download DMG reale**: Download diretto `Aether.dmg`, pill di versione dinamica e compatibility strip macOS / Windows. | `website/src/components/AlphaCTA.tsx`, `website/src/lib/i18n/` | **Completed (v1.5.0)** |
+| **P2-03** | **Website: Modern animations & mobile polish**: Animazioni hero interattive su canvas, particelle fluide e responsive optimization. | `website/src/components/Hero.tsx`, `website/src/components/` | **Completed (v1.5.0)** |
+| **P2-04** | **Icone Preset per Marketplace & Team Builder**: Associazione icone tematiche a ciascun template manifest in `presets/builtin/manifest.yaml`. | `presets/`, `ui/src/Teams.tsx`, `ui/src/Marketplace.tsx`, `ui/src/identity.tsx` | **Completed (v1.5.0)** |
+| **P2-05** | **Polish Visivo Viste Teams, Agents e Knowledge**: Applicazione card con hover effect, avatar ed identità semantica (`IdentityBadge`), badge semantici per provider/modello/scope e allineamento responsive. | `ui/src/Teams.tsx`, `ui/src/Agents.tsx`, `ui/src/Knowledge.tsx`, `ui/src/index.css` | **Completed (v1.5.0)** |
+| **P2-06** | **Implementazione Componente Tooltip Universale**: Componente `<Tooltip>` con calcolo coordinate via portale React, supporto hover/focus, delay 200ms, auto-flip e accessibilità (`role="tooltip"`, `aria-label`). | `ui/src/Tooltip.tsx`, `ui/src/index.css`, `ui/src/*.tsx` | **Completed (v1.5.0)** |
+| **P2-07** | **Refining Toast Notifications**: Sistema multi-toast con slide-in animato, timer bar con progress shrink, icone semantiche (success, error, warning, info), auto-dismiss con pause-on-hover, dismiss manuale e supporto screen reader (`role="status"` / `role="alert"`). | `ui/src/toast.tsx`, `ui/src/index.css`, `ui/src/App.tsx` | **Completed (v1.5.0)** |
+| **P2-08** | **Visualizzatore Topologia Team**: Grafo SVG dinamico reattivo della workforce con nodi Manager (👑) e Specialist, frecce di delega orientate basate su `delegates_to`, identità semantica (icona, colore), hover highlighting interattivo e responsive design. | `ui/src/TeamTopology.tsx`, `ui/src/Teams.tsx`, `src/aether/server/routes.py` | **Completed (v1.5.0)** |

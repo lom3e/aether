@@ -127,6 +127,18 @@ async def startup_event():
             print(f"Warning: could not load default team on startup: {e}")
             app.state.team = None
             app.state.active_team_name = None
+
+        # Start Automation Scheduler
+        try:
+            from aether.automation.scheduler import AutomationScheduler
+            scheduler = AutomationScheduler(
+                workspace=ws,
+                event_bus=getattr(app.state, "event_bus", None),
+            )
+            scheduler.start()
+            app.state.scheduler = scheduler
+        except Exception as exc:
+            print(f"Warning: could not start automation scheduler: {exc}")
     except Exception as e:
         print(f"Error initializing workspace: {e}")
         app.state.workspace = None
@@ -143,6 +155,14 @@ app.include_router(ws_router)
 @app.on_event("shutdown")
 async def shutdown_event():
     app.state.is_shutting_down = True
+
+    # 0. Stop Automation Scheduler
+    scheduler = getattr(app.state, "scheduler", None)
+    if scheduler:
+        try:
+            await scheduler.stop()
+        except Exception:
+            pass
 
     # 1. Cancel any active tasks
     active_tasks = getattr(app.state, "active_tasks", {})

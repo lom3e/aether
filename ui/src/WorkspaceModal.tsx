@@ -3,6 +3,7 @@ import { Plus, Trash2, Edit2, Layers, AlertTriangle, X } from 'lucide-react';
 import { apiUrl, apiError } from './api';
 import { ToastContext } from './toast';
 import { useTranslation } from './i18n';
+import { Tooltip } from './Tooltip';
 
 interface WorkspaceModalProps {
   isOpen: boolean;
@@ -534,26 +535,28 @@ export function WorkspaceModal({
                           {t('switchWorkspace')}
                         </button>
                       )}
-                      <button
-                        className="btn btn-ghost"
-                        style={{ padding: '6px' }}
-                        title={t('rename')}
-                        onClick={() => {
-                          setEditingWsId(ws.id);
-                          setRenameValue(ws.name);
-                        }}
-                      >
-                        <Edit2 size={14} />
-                      </button>
-                      <button
-                        className="btn btn-ghost"
-                        style={{ padding: '6px', color: 'hsl(var(--destructive))' }}
-                        title={t('deleteWorkspaceTitle')}
-                        data-testid="delete-workspace-btn"
-                        onClick={() => setDeletingWs(ws)}
-                      >
-                        <Trash2 size={14} />
-                      </button>
+                      <Tooltip content={t('rename')} position="top">
+                        <button
+                          className="btn btn-ghost"
+                          style={{ padding: '6px' }}
+                          onClick={() => {
+                            setEditingWsId(ws.id);
+                            setRenameValue(ws.name);
+                          }}
+                        >
+                          <Edit2 size={14} />
+                        </button>
+                      </Tooltip>
+                      <Tooltip content={t('deleteWorkspaceTitle')} position="top">
+                        <button
+                          className="btn btn-ghost"
+                          style={{ padding: '6px', color: 'hsl(var(--destructive))' }}
+                          data-testid="delete-workspace-btn"
+                          onClick={() => setDeletingWs(ws)}
+                        >
+                          <Trash2 size={14} />
+                        </button>
+                      </Tooltip>
                     </div>
                   </div>
                 ))

@@ -66,6 +66,10 @@ class PresetApplier:
 
         team_config = TeamLoader.from_yaml(team_template_path)
         team_config.name = effective_team_name
+        if not team_config.icon and manifest.icon:
+            team_config.icon = manifest.icon
+        if not team_config.color and manifest.color:
+            team_config.color = manifest.color
 
         # Apply provider/model overrides if supplied
         if provider:

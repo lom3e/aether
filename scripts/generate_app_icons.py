@@ -96,18 +96,22 @@ def generate_icons():
         env=env,
     )
 
-    # 2. Overwrite icon.icns with native iconutil build (Tauri's icns has extra padding)
-    build_macos_icns(MASTER_PNG, ICONS_DIR / "icon.icns")
+    # 2. Overwrite icon.icns with native iconutil build on macOS (Tauri's icns has extra padding)
+    if sys.platform == "darwin" and shutil.which("iconutil"):
+        build_macos_icns(MASTER_PNG, ICONS_DIR / "icon.icns")
 
     # 3. Verify
     icns_file = ICONS_DIR / "icon.icns"
     png_file  = ICONS_DIR / "icon.png"
-    assert icns_file.exists(), f"Missing {icns_file}"
-    assert png_file.exists(),  f"Missing {png_file}"
-
-    icns_kb = os.path.getsize(icns_file) / 1024.0
+    ico_file  = ICONS_DIR / "icon.ico"
+    assert png_file.exists(), f"Missing {png_file}"
+    if ico_file.exists():
+        ico_kb = os.path.getsize(ico_file) / 1024.0
+        print(f"✓ icon.ico   {ico_kb:.1f} KB")
+    if icns_file.exists():
+        icns_kb = os.path.getsize(icns_file) / 1024.0
+        print(f"✓ icon.icns  {icns_kb:.1f} KB")
     png_kb  = os.path.getsize(png_file)  / 1024.0
-    print(f"✓ icon.icns  {icns_kb:.1f} KB")
     print(f"✓ icon.png   {png_kb:.1f} KB")
     print("=" * 70)
 

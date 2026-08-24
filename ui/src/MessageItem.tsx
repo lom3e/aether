@@ -3,6 +3,7 @@ import { Bot, User, Copy, Check, ShieldAlert, CheckCircle2, RotateCw, Edit2, Tra
 import { useTranslation } from './i18n';
 import { MarkdownRenderer } from './MarkdownRenderer';
 import { ChatErrorCard } from './ChatErrorCard';
+import { Tooltip } from './Tooltip';
 
 export interface ChatMessage {
   id: string;
@@ -112,9 +113,10 @@ export function MessageItem({
                     alignItems: 'center',
                     gap: '3px',
                   }}
-                  title={`Requested: ${message.metadata.requested_model} → Executed: ${message.metadata.model}`}
                 >
-                  ⚡ {message.metadata.model}
+                  <Tooltip content={`Requested: ${message.metadata.requested_model} → Executed: ${message.metadata.model}`} position="top">
+                    <span>⚡ {message.metadata.model}</span>
+                  </Tooltip>
                 </span>
               ) : (
                 <span
@@ -126,9 +128,10 @@ export function MessageItem({
                     color: 'hsl(var(--muted-fg))',
                     border: '1px solid hsl(var(--border)/0.5)',
                   }}
-                  title={`Provider: ${message.metadata?.provider || 'default'} | Model: ${message.metadata.model}`}
                 >
-                  {message.metadata.model}
+                  <Tooltip content={`Provider: ${message.metadata?.provider || 'default'} | Model: ${message.metadata.model}`} position="top">
+                    <span>{message.metadata.model}</span>
+                  </Tooltip>
                 </span>
               )
             )}
@@ -141,63 +144,68 @@ export function MessageItem({
 
           <div style={{ display: 'flex', alignItems: 'center', gap: '4px' }}>
             {/* Copy button */}
-            <button
-              className="btn btn-ghost"
-              style={{ padding: '3px 6px', fontSize: '11px' }}
-              onClick={handleCopy}
-              title={t('copyText')}
-            >
-              {copied ? <Check size={13} className="text-primary" /> : <Copy size={13} />}
-              <span>{copied ? t('copied') : ''}</span>
-            </button>
+            <Tooltip content={t('copyText')} position="top">
+              <button
+                className="btn btn-ghost"
+                style={{ padding: '3px 6px', fontSize: '11px' }}
+                onClick={handleCopy}
+              >
+                {copied ? <Check size={13} className="text-primary" /> : <Copy size={13} />}
+                <span>{copied ? t('copied') : ''}</span>
+              </button>
+            </Tooltip>
 
             {/* User Message Actions: Edit & Delete */}
             {isUser && !isEditing && (
               <>
-                <button
-                  className="btn btn-ghost"
-                  style={{ padding: '3px 6px', fontSize: '11px' }}
-                  onClick={() => {
-                    setIsEditing(true);
-                    setEditContent(message.content);
-                  }}
-                  title={t('editPrompt')}
-                >
-                  <Edit2 size={13} />
-                </button>
+                <Tooltip content={t('editPrompt')} position="top">
+                  <button
+                    className="btn btn-ghost"
+                    style={{ padding: '3px 6px', fontSize: '11px' }}
+                    onClick={() => {
+                      setIsEditing(true);
+                      setEditContent(message.content);
+                    }}
+                  >
+                    <Edit2 size={13} />
+                  </button>
+                </Tooltip>
 
-                <button
-                  className="btn btn-ghost"
-                  style={{ padding: '3px 6px', fontSize: '11px' }}
-                  onClick={() => {
-                    if (onRetry) onRetry(message.content);
-                  }}
-                  title={t('retry')}
-                >
-                  <RotateCw size={13} />
-                </button>
+                <Tooltip content={t('retry')} position="top">
+                  <button
+                    className="btn btn-ghost"
+                    style={{ padding: '3px 6px', fontSize: '11px' }}
+                    onClick={() => {
+                      if (onRetry) onRetry(message.content);
+                    }}
+                  >
+                    <RotateCw size={13} />
+                  </button>
+                </Tooltip>
 
-                <button
-                  className="btn btn-ghost"
-                  style={{ padding: '3px 6px', fontSize: '11px', color: 'hsl(var(--destructive))' }}
-                  onClick={() => setIsConfirmingDelete(true)}
-                  title={t('deleteMessage')}
-                >
-                  <Trash2 size={13} />
-                </button>
+                <Tooltip content={t('deleteMessage')} position="top">
+                  <button
+                    className="btn btn-ghost"
+                    style={{ padding: '3px 6px', fontSize: '11px', color: 'hsl(var(--destructive))' }}
+                    onClick={() => setIsConfirmingDelete(true)}
+                  >
+                    <Trash2 size={13} />
+                  </button>
+                </Tooltip>
               </>
             )}
 
             {/* Assistant Actions: Retry response */}
             {!isUser && onRetryResponse && (
-              <button
-                className="btn btn-ghost"
-                style={{ padding: '3px 6px', fontSize: '11px' }}
-                onClick={() => onRetryResponse(message.id)}
-                title={t('retryResponse')}
-              >
-                <RotateCw size={13} />
-              </button>
+              <Tooltip content={t('retryResponse')} position="top">
+                <button
+                  className="btn btn-ghost"
+                  style={{ padding: '3px 6px', fontSize: '11px' }}
+                  onClick={() => onRetryResponse(message.id)}
+                >
+                  <RotateCw size={13} />
+                </button>
+              </Tooltip>
             )}
           </div>
         </div>

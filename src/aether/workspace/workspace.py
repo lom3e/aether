@@ -75,6 +75,7 @@ class Workspace:
         self.teams_dir = self.root / "teams"
         self.skills_dir = self.root / "skills"
         self.knowledge_dir = self.root / "knowledge"
+        self.files_dir = self.root / "files"
 
         # Legacy paths (Aether <= 1.3)
         self.legacy_aether_dir = self.root / ".aether"
@@ -131,11 +132,114 @@ class Workspace:
         return str(self.legacy_aether_dir / "knowledge.db")
 
     @property
+    def knowledge(self):
+        """Return the KnowledgeStore for this workspace."""
+        from aether.knowledge.store import KnowledgeStore
+        Path(self.knowledge_db_path).parent.mkdir(parents=True, exist_ok=True)
+        return KnowledgeStore(self.knowledge_db_path)
+
+    @property
     def conversations(self):
         """Return the ConversationStore for this workspace."""
         from aether.conversations.store import ConversationStore
         Path(self.conversations_db_path).parent.mkdir(parents=True, exist_ok=True)
         return ConversationStore(self.conversations_db_path)
+
+    @property
+    def automations_db_path(self) -> str:
+        """Path to the persistent automations database."""
+        if self.data_dir.exists() or self.config_path.exists():
+            return str(self.data_dir / "automations.db")
+        return str(self.legacy_aether_dir / "automations.db")
+
+    @property
+    def automations(self):
+        """Return the AutomationStore for this workspace."""
+        from aether.automation.store import AutomationStore
+        Path(self.automations_db_path).parent.mkdir(parents=True, exist_ok=True)
+        return AutomationStore(self.automations_db_path)
+
+    @property
+    def project_path(self) -> Path | None:
+        """Return the resolved Path of the connected project root if configured and existing."""
+        raw_path = self.config.get("workspace", {}).get("project", {}).get("path")
+        if raw_path:
+            p = Path(raw_path).expanduser().resolve()
+            if p.exists() and p.is_dir():
+                return p
+        return None
+
+    @property
+    def project_info(self) -> dict[str, Any] | None:
+        """Return metadata about the connected project (local directory or future provider)."""
+        project_config = self.config.get("workspace", {}).get("project")
+        if not project_config or not isinstance(project_config, dict):
+            return None
+
+        raw_path = project_config.get("path")
+        if not raw_path:
+            return None
+
+        p = Path(raw_path).expanduser().resolve()
+        exists = p.exists() and p.is_dir()
+        name = project_config.get("name") or p.name
+        project_type = project_config.get("type", "local")
+
+        info: dict[str, Any] = {
+            "type": project_type,
+            "path": str(p),
+            "name": name,
+            "exists": exists,
+        }
+        if not exists:
+            info["error"] = f"Directory '{raw_path}' does not exist or is not a directory."
+        return info
+
+    def set_project(
+        self,
+        path: str | Path | None,
+        project_type: str = "local",
+        name: str | None = None,
+    ) -> None:
+        """
+        Connect or disconnect an external project root directory.
+
+        Passing path=None disconnects the project, reverting filesystem access
+        to the internal <workspace>/files directory.
+        """
+        config = dict(self.config)
+        workspace_section = dict(config.get("workspace") or {})
+
+        if path is None or not str(path).strip():
+            workspace_section.pop("project", None)
+        else:
+            resolved = Path(path).expanduser().resolve()
+            workspace_section["project"] = {
+                "type": str(project_type or "local").strip().lower(),
+                "path": str(resolved),
+                "name": (name.strip() if name else None) or resolved.name,
+            }
+
+        config["workspace"] = workspace_section
+        tmp_path = self.config_path.with_suffix(".tmp")
+        with tmp_path.open("w", encoding="utf-8") as handle:
+            yaml.safe_dump(config, handle, sort_keys=False)
+        tmp_path.replace(self.config_path)
+        self._config_cache = config
+
+    @property
+    def sandbox(self):
+        """
+        Return the PathSandbox enforcing filesystem security for this workspace.
+
+        If a valid external project directory is connected, the sandbox root is
+        bound to that project. Otherwise, it defaults to <workspace>/files.
+        """
+        from aether.core.security import PathSandbox
+
+        proj = self.project_path
+        effective_root = proj if proj is not None else self.files_dir
+        return PathSandbox(effective_root, auto_create=True)
 
     @classmethod
     def init(cls, root: str | Path, name: str) -> "Workspace":
@@ -152,6 +256,7 @@ class Workspace:
         ws.teams_dir.mkdir(parents=True, exist_ok=True)
         ws.skills_dir.mkdir(parents=True, exist_ok=True)
         ws.knowledge_dir.mkdir(parents=True, exist_ok=True)
+        ws.files_dir.mkdir(parents=True, exist_ok=True)
 
         # Create aether.yaml manifest
         manifest = {
@@ -217,12 +322,19 @@ class Workspace:
         Path(self.knowledge_db_path).parent.mkdir(parents=True, exist_ok=True)
         knowledge_store = KnowledgeStore(self.knowledge_db_path)
 
+        # Determine project_id if a project is connected
+        project_id = None
+        if self.project_info and self.project_info.get("exists"):
+            project_id = self.project_info.get("id") or self.project_info.get("name")
+
         # Instantiate Team (this will internally wire PersistentConversationMemory using conversation_db_path)
         return Team(
             config=team_config,
             knowledge_store=knowledge_store,
+            sandbox=self.sandbox,
             agent_store=agent_store,
-            conversation_db_path=self.conversations_db_path
+            conversation_db_path=self.conversations_db_path,
+            project_id=project_id,
         )
 
     def set_default_team(self, team_name: str) -> None:

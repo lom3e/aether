@@ -107,7 +107,7 @@ export default function BuildersPage() {
             </button>
           </div>
 
-          {/* Code Snippet Studio */}
+          {/* Code Snippet Showcase */}
           <div
             style={{
               background: "var(--bg-surface)",

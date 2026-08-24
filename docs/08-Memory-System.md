@@ -528,14 +528,23 @@ Future versions may include:
 
 Current phase:
 
-Architecture definition.
-
-Next priorities:
-
-1. Define memory data model.
-2. Implement basic storage.
-3. Add retrieval system.
-4. Connect memory to agents.
-5. Evaluate long-term agent behavior.
+Implemented & validated (v1.5.0).
 
 ---
+
+# 23. Knowledge Multi-Scope Architecture (v1.5.0 / P1-04)
+
+Aether introduces multi-scope document indexing and retrieval for grounding agent actions:
+
+```text
+Knowledge Scopes:
+├── workspace  — Universal organizational/team knowledge across all agents
+├── project    — Context-isolated knowledge bound to a specific project_id
+└── system     — Read-only built-in foundational knowledge packs
+```
+
+### 23.1 Retrieval & Isolation Semantics
+* **Workspace context**: Agent searches match `workspace` + `system` documents.
+* **Project context**: Agent searches match active `project` + `workspace` + `system` documents.
+* **Strict Project Isolation**: Chunks from Project B are strictly excluded when querying Project A.
+* **Storage & Schema**: SQLite `knowledge.db` with `knowledge_chunks` and `documents` tables supporting automatic non-destructive migrations.
