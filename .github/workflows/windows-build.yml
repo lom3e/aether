@@ -15,6 +15,9 @@ jobs:
   build-windows:
     name: Build & Validate Windows NSIS Installer
     runs-on: windows-latest
+    env:
+      PYTHONUTF8: "1"
+      PYTHONIOENCODING: "utf-8"
 
     steps:
       - name: Checkout repository

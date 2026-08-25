@@ -20,6 +20,12 @@ import sys
 import tempfile
 from pathlib import Path
 
+if hasattr(sys.stdout, "reconfigure"):
+    try:
+        sys.stdout.reconfigure(encoding="utf-8", errors="replace")
+    except Exception:
+        pass
+
 REPO_ROOT = Path(__file__).resolve().parent.parent
 # Approved master — single source of truth for all icon outputs
 MASTER_PNG = REPO_ROOT / "src-tauri" / "icons" / "source" / "aether_icon_master_1024.png"
@@ -109,12 +115,12 @@ def generate_icons():
     assert png_file.exists(), f"Missing {png_file}"
     if ico_file.exists():
         ico_kb = os.path.getsize(ico_file) / 1024.0
-        print(f"✓ icon.ico   {ico_kb:.1f} KB")
+        print(f"[OK] icon.ico   {ico_kb:.1f} KB")
     if icns_file.exists():
         icns_kb = os.path.getsize(icns_file) / 1024.0
-        print(f"✓ icon.icns  {icns_kb:.1f} KB")
+        print(f"[OK] icon.icns  {icns_kb:.1f} KB")
     png_kb  = os.path.getsize(png_file)  / 1024.0
-    print(f"✓ icon.png   {png_kb:.1f} KB")
+    print(f"[OK] icon.png   {png_kb:.1f} KB")
     print("=" * 70)
 
 
