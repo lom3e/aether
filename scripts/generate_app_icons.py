@@ -87,13 +87,15 @@ def generate_icons():
     env = os.environ.copy()
     cargo_bin = Path.home() / ".cargo" / "bin"
     if cargo_bin.exists():
-        env["PATH"] = f"{cargo_bin}:{env.get('PATH', '')}"
+        env["PATH"] = f"{cargo_bin}{os.pathsep}{env.get('PATH', '')}"
 
+    npm_bin = shutil.which("npm") or "npm"
     subprocess.run(
-        ["npm", "--prefix", "ui", "exec", "--", "tauri", "icon", str(MASTER_PNG), "-o", str(ICONS_DIR)],
+        [npm_bin, "--prefix", "ui", "exec", "--", "tauri", "icon", str(MASTER_PNG), "-o", str(ICONS_DIR)],
         cwd=str(REPO_ROOT),
         check=True,
         env=env,
+        shell=sys.platform == "win32",
     )
 
     # 2. Overwrite icon.icns with native iconutil build on macOS (Tauri's icns has extra padding)

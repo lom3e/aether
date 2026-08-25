@@ -37,7 +37,8 @@ def run_command(cmd, cwd=REPO_ROOT, env=None):
         path_var = current_env.get("PATH", "")
         current_env["PATH"] = f"{cargo_bin}{os.pathsep}{path_var}"
 
-    result = subprocess.run(cmd, cwd=str(cwd), env=current_env, shell=isinstance(cmd, str))
+    use_shell = sys.platform == "win32" or isinstance(cmd, str)
+    result = subprocess.run(cmd, cwd=str(cwd), env=current_env, shell=use_shell)
     if result.returncode != 0:
         print(f"ERROR: Step failed with return code {result.returncode}", file=sys.stderr)
         sys.exit(result.returncode)
