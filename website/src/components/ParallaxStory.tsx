@@ -110,8 +110,8 @@ export function ParallaxStory() {
             <div
               style={{
                 width: "100%",
-                minHeight: 320,
-                maxHeight: 500,
+                minHeight: 340,
+                maxHeight: 520,
                 background: "var(--bg-surface)",
                 border: "1px solid var(--border-medium)",
                 borderRadius: "var(--radius-xl)",
@@ -121,10 +121,22 @@ export function ParallaxStory() {
                 alignItems: "center",
                 justifyContent: "center",
                 boxShadow: "var(--window-shadow)",
-                padding: "24px 20px",
+                padding: "28px 24px",
               }}
               className="visual-stage-card"
             >
+              {/* Background Ambient Radial Glow */}
+              <div
+                style={{
+                  position: "absolute",
+                  inset: 0,
+                  background: isDark
+                    ? "radial-gradient(circle at center, rgba(139, 92, 246, 0.12) 0%, transparent 70%)"
+                    : "radial-gradient(circle at center, rgba(124, 58, 237, 0.08) 0%, transparent 70%)",
+                  pointerEvents: "none",
+                }}
+              />
+
               {/* MOMENT 1: Workforce Parallel Execution */}
               {activeMoment.id === 1 && (
                 <div style={{ width: "100%", display: "flex", flexDirection: "column", alignItems: "center", gap: 20, zIndex: 2 }}>

@@ -1,247 +1,91 @@
 "use client";
 
-import React, { useEffect, useRef, useState } from "react";
-import { ArrowDown, ArrowRight } from "lucide-react";
+import React, { useEffect, useRef } from "react";
+import { ArrowDown, ArrowRight, Sparkles } from "lucide-react";
 import { useLanguage } from "@/lib/i18n/context";
-import { useActiveLogo } from "@/lib/logo-context";
 import { useTheme } from "@/lib/theme-context";
-import { AetherLogo } from "./AetherLogo";
-
-interface AgentNode {
-  id: string;
-  name: string;
-  role: string;
-  x: number;
-  y: number;
-  vx: number;
-  vy: number;
-  radius: number;
-  baseRadius: number;
-  scale: number;
-  targetScale: number;
-  color: string;
-  activity: string;
-  connections: string[];
-}
-
-interface Packet {
-  fromNode: AgentNode;
-  toNode: AgentNode;
-  progress: number;
-  speed: number;
-  color: string;
-}
 
 export function Hero() {
-  const { t } = useLanguage();
-  const { activeLogo } = useActiveLogo();
+  const { t, lang } = useLanguage();
   const { resolvedTheme } = useTheme();
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
-  const [activeTooltip, setActiveTooltip] = useState<{
-    name: string;
-    role: string;
-    activity: string;
-    color: string;
-  } | null>(null);
-  const [hasHeroVideo, setHasHeroVideo] = useState(false);
-  const videoRef = useRef<HTMLVideoElement | null>(null);
 
-  // Persistent refs across re-renders
-  const nodesRef = useRef<AgentNode[]>([]);
-  const isDarkRef = useRef(resolvedTheme === "dark");
+  const isDark = resolvedTheme === "dark";
+  const isDarkRef = useRef(isDark);
+  const langRef = useRef(lang);
 
   useEffect(() => {
-    isDarkRef.current = resolvedTheme === "dark";
-  }, [resolvedTheme]);
+    isDarkRef.current = isDark;
+  }, [isDark]);
 
   useEffect(() => {
-    // Check if hero video asset is present
-    const testVideo = document.createElement("video");
-    testVideo.src = "/videos/hero.mp4";
-    testVideo.onloadeddata = () => setHasHeroVideo(true);
-    testVideo.onerror = () => setHasHeroVideo(false);
+    langRef.current = lang;
+  }, [lang]);
 
+  useEffect(() => {
     const canvas = canvasRef.current;
     if (!canvas) return;
     const ctx = canvas.getContext("2d");
     if (!ctx) return;
 
     let animationFrameId: number;
-    let width = (canvas.width = window.innerWidth);
-    let height = (canvas.height = window.innerHeight);
+    let dpr = Math.min(window.devicePixelRatio || 1, 2);
+    let width = window.innerWidth;
+    let height = window.innerHeight;
 
-    const handleResize = () => {
+    const resize = () => {
       if (!canvas) return;
-      width = canvas.width = window.innerWidth;
-      height = canvas.height = window.innerHeight;
+      dpr = Math.min(window.devicePixelRatio || 1, 2);
+      width = window.innerWidth;
+      height = window.innerHeight;
+      canvas.width = width * dpr;
+      canvas.height = height * dpr;
+      canvas.style.width = `${width}px`;
+      canvas.style.height = `${height}px`;
+      ctx.scale(dpr, dpr);
     };
 
-    window.addEventListener("resize", handleResize);
+    resize();
+    window.addEventListener("resize", resize);
 
-    const isDark = isDarkRef.current;
+    // Background floating ambient particles
+    const bgParticles = Array.from({ length: width < 768 ? 22 : 45 }, () => ({
+      x: Math.random() * width,
+      y: Math.random() * height,
+      vx: (Math.random() - 0.5) * 0.18,
+      vy: (Math.random() - 0.5) * 0.18,
+      size: 1 + Math.random() * 1.5,
+      alpha: 0.15 + Math.random() * 0.35,
+    }));
 
-    // Initialize nodes once (or re-anchor them without snapping)
-    if (nodesRef.current.length === 0) {
-      nodesRef.current = [
-        {
-          id: "manager",
-          name: t.hero.agents.manager.name,
-          role: t.hero.agents.manager.role,
-          x: width * 0.5,
-          y: height * 0.38,
-          vx: 0.18,
-          vy: 0.12,
-          radius: 24,
-          baseRadius: 24,
-          scale: 1,
-          targetScale: 1,
-          color: isDark ? "#8b5cf6" : "#7c3aed",
-          activity: t.hero.agents.manager.status,
-          connections: ["researcher", "writer", "oversight"],
-        },
-        {
-          id: "researcher",
-          name: t.hero.agents.researcher.name,
-          role: t.hero.agents.researcher.role,
-          x: width * 0.28,
-          y: height * 0.58,
-          vx: -0.15,
-          vy: 0.1,
-          radius: 20,
-          baseRadius: 20,
-          scale: 1,
-          targetScale: 1,
-          color: isDark ? "#a1a1aa" : "#475569",
-          activity: t.hero.agents.researcher.status,
-          connections: ["manager", "writer"],
-        },
-        {
-          id: "writer",
-          name: t.hero.agents.writer.name,
-          role: t.hero.agents.writer.role,
-          x: width * 0.72,
-          y: height * 0.58,
-          vx: 0.14,
-          vy: -0.12,
-          radius: 20,
-          baseRadius: 20,
-          scale: 1,
-          targetScale: 1,
-          color: isDark ? "#d4d4d8" : "#64748b",
-          activity: t.hero.agents.writer.status,
-          connections: ["manager", "oversight"],
-        },
-        {
-          id: "oversight",
-          name: t.hero.agents.oversight.name,
-          role: t.hero.agents.oversight.role,
-          x: width * 0.5,
-          y: height * 0.78,
-          vx: 0.11,
-          vy: 0.15,
-          radius: 20,
-          baseRadius: 20,
-          scale: 1,
-          targetScale: 1,
-          color: isDark ? "#f59e0b" : "#d97706",
-          activity: t.hero.agents.oversight.status,
-          connections: ["writer", "manager"],
-        },
-      ];
-    } else {
-      // Update text and colors smoothly without resetting coordinates
-      nodesRef.current.forEach((n) => {
-        if (n.id === "manager") {
-          n.name = t.hero.agents.manager.name;
-          n.role = t.hero.agents.manager.role;
-          n.activity = t.hero.agents.manager.status;
-          n.color = isDark ? "#8b5cf6" : "#7c3aed";
-        } else if (n.id === "researcher") {
-          n.name = t.hero.agents.researcher.name;
-          n.role = t.hero.agents.researcher.role;
-          n.activity = t.hero.agents.researcher.status;
-          n.color = isDark ? "#a1a1aa" : "#475569";
-        } else if (n.id === "writer") {
-          n.name = t.hero.agents.writer.name;
-          n.role = t.hero.agents.writer.role;
-          n.activity = t.hero.agents.writer.status;
-          n.color = isDark ? "#d4d4d8" : "#64748b";
-        } else if (n.id === "oversight") {
-          n.name = t.hero.agents.oversight.name;
-          n.role = t.hero.agents.oversight.role;
-          n.activity = t.hero.agents.oversight.status;
-          n.color = isDark ? "#f59e0b" : "#d97706";
-        }
-      });
+    // Active workflow packets between perimeter agents
+    interface Packet {
+      fromIdx: number;
+      toIdx: number;
+      progress: number;
+      speed: number;
+      color: string;
     }
+    let packets: Packet[] = [];
 
-    const nodes = nodesRef.current;
-    const packets: Packet[] = [];
-
-    const createPacket = () => {
-      if (nodes.length === 0) return;
-      const fromIdx = Math.floor(Math.random() * nodes.length);
-      const fromNode = nodes[fromIdx];
-      if (fromNode.connections.length === 0) return;
-
-      const targetConnId =
-        fromNode.connections[Math.floor(Math.random() * fromNode.connections.length)];
-      const toNode = nodes.find((n) => n.id === targetConnId);
-      if (!toNode) return;
-
+    const spawnPacket = () => {
+      const flows = [
+        { from: 0, to: 1, color: "#8b5cf6" }, // Coordinator -> Researcher
+        { from: 1, to: 2, color: "#38bdf8" }, // Researcher -> Writer
+        { from: 2, to: 3, color: "#c084fc" }, // Writer -> Reviewer
+        { from: 3, to: 0, color: "#10b981" }, // Reviewer -> Coordinator (Feedback Loop)
+      ];
+      const chosen = flows[Math.floor(Math.random() * flows.length)];
       packets.push({
-        fromNode,
-        toNode,
+        fromIdx: chosen.from,
+        toIdx: chosen.to,
         progress: 0,
-        speed: 0.006 + Math.random() * 0.006,
-        color: fromNode.color,
+        speed: 0.008 + Math.random() * 0.006,
+        color: chosen.color,
       });
     };
 
-    const packetInterval = setInterval(createPacket, 1400);
-
-    let mouseX = -2000;
-    let mouseY = -2000;
-    let hoveredNode: AgentNode | null = null;
-
-    const handleMouseMove = (e: MouseEvent) => {
-      const rect = canvas.getBoundingClientRect();
-      mouseX = e.clientX - rect.left;
-      mouseY = e.clientY - rect.top;
-
-      let found: AgentNode | null = null;
-      for (const node of nodes) {
-        const dist = Math.hypot(mouseX - node.x, mouseY - node.y);
-        if (dist < node.radius + 18) {
-          found = node;
-          break;
-        }
-      }
-
-      if (found !== hoveredNode) {
-        hoveredNode = found;
-        if (found) {
-          setActiveTooltip({
-            name: found.name,
-            role: found.role,
-            activity: found.activity,
-            color: found.color,
-          });
-        } else {
-          setActiveTooltip(null);
-        }
-      }
-    };
-
-    const handleMouseLeave = () => {
-      mouseX = -2000;
-      mouseY = -2000;
-      hoveredNode = null;
-      setActiveTooltip(null);
-    };
-
-    window.addEventListener("mousemove", handleMouseMove);
-    document.addEventListener("mouseleave", handleMouseLeave);
+    const packetTimer = setInterval(spawnPacket, 750);
 
     let tick = 0;
 
@@ -250,111 +94,180 @@ export function Hero() {
       ctx.clearRect(0, 0, width, height);
 
       const dark = isDarkRef.current;
+      const isMob = width < 768;
+      const isIt = langRef.current === "it";
 
-      // Update Node Positions & Scale Interpolation
-      nodes.forEach((node) => {
-        const isHovered = hoveredNode?.id === node.id;
-        node.targetScale = isHovered ? 1.25 : 1;
-        // Smooth easing towards target scale (10% per frame)
-        node.scale += (node.targetScale - node.scale) * 0.12;
-        node.radius = node.baseRadius * node.scale;
+      // 1. Ambient Background Particle Dust
+      bgParticles.forEach((p) => {
+        p.x += p.vx;
+        p.y += p.vy;
+        if (p.x < 0) p.x = width;
+        if (p.x > width) p.x = 0;
+        if (p.y < 0) p.y = height;
+        if (p.y > height) p.y = 0;
 
-        // Continuous smooth soft drift
-        node.x += node.vx;
-        node.y += node.vy;
-
-        const pad = node.baseRadius + 25;
-        if (node.x < pad) {
-          node.x = pad;
-          node.vx = Math.abs(node.vx);
-        } else if (node.x > width - pad) {
-          node.x = width - pad;
-          node.vx = -Math.abs(node.vx);
-        }
-
-        if (node.y < pad) {
-          node.y = pad;
-          node.vy = Math.abs(node.vy);
-        } else if (node.y > height - pad) {
-          node.y = height - pad;
-          node.vy = -Math.abs(node.vy);
-        }
+        ctx.beginPath();
+        ctx.arc(p.x, p.y, p.size, 0, Math.PI * 2);
+        ctx.fillStyle = dark
+          ? `rgba(139, 92, 246, ${p.alpha * 0.3})`
+          : `rgba(124, 58, 237, ${p.alpha * 0.2})`;
+        ctx.fill();
       });
 
-      // Draw Connection Lines
-      ctx.lineWidth = 1;
-      nodes.forEach((fromNode) => {
-        fromNode.connections.forEach((targetId) => {
-          const toNode = nodes.find((n) => n.id === targetId);
-          if (!toNode) return;
+      // 2. Expansive Perimeter Constellation (Safe-Area free from text obstruction)
+      const topY = isMob ? Math.max(70, height * 0.11) : Math.max(90, height * 0.13);
+      const bottomY = isMob ? Math.min(height - 70, height * 0.90) : Math.min(height - 80, height * 0.89);
+      const leftX = isMob ? width * 0.12 : Math.max(90, width * 0.12);
+      const rightX = isMob ? width * 0.88 : Math.min(width - 90, width * 0.88);
+      const flankY = height * 0.50;
 
-          ctx.beginPath();
-          ctx.moveTo(fromNode.x, fromNode.y);
-          ctx.lineTo(toNode.x, toNode.y);
-          ctx.strokeStyle = dark ? "rgba(255, 255, 255, 0.05)" : "rgba(0, 0, 0, 0.06)";
-          ctx.stroke();
-        });
+      const swayX = Math.sin(tick * 0.02) * (isMob ? 4 : 8);
+      const swayY = Math.cos(tick * 0.018) * (isMob ? 4 : 7);
+
+      const perimeterNodes = [
+        {
+          id: "coordinator",
+          name: isIt ? "Coordinatore" : "Coordinator",
+          x: width * 0.5 + swayX * 0.5,
+          y: topY + swayY * 0.5,
+          color: dark ? "#8b5cf6" : "#7c3aed",
+          radius: isMob ? 18 : 24,
+          isManager: true,
+        },
+        {
+          id: "researcher",
+          name: isIt ? "Ricercatore" : "Researcher",
+          x: leftX + swayX,
+          y: flankY + swayY * 0.7,
+          color: dark ? "#38bdf8" : "#0284c7",
+          radius: isMob ? 16 : 20,
+          isManager: false,
+        },
+        {
+          id: "writer",
+          name: isIt ? "Redattore" : "Writer",
+          x: rightX - swayX,
+          y: flankY - swayY * 0.7,
+          color: dark ? "#c084fc" : "#9333ea",
+          radius: isMob ? 16 : 20,
+          isManager: false,
+        },
+        {
+          id: "reviewer",
+          name: isIt ? "Revisore" : "Reviewer",
+          x: width * 0.5 - swayX * 0.5,
+          y: bottomY - swayY * 0.5,
+          color: dark ? "#f59e0b" : "#d97706",
+          radius: isMob ? 16 : 20,
+          isManager: false,
+        },
+      ];
+
+      // 3. Perimeter Connecting Arcs around the center safe-area
+      const links = [
+        [0, 1], // Coordinator -> Researcher
+        [0, 2], // Coordinator -> Writer
+        [1, 3], // Researcher -> Reviewer
+        [2, 3], // Writer -> Reviewer
+      ];
+
+      links.forEach(([i1, i2], linkIdx) => {
+        const n1 = perimeterNodes[i1];
+        const n2 = perimeterNodes[i2];
+        const pulse = (Math.sin(tick * 0.035 + linkIdx * 1.5) + 1) * 0.5;
+
+        const grad = ctx.createLinearGradient(n1.x, n1.y, n2.x, n2.y);
+        grad.addColorStop(0, n1.color);
+        grad.addColorStop(1, n2.color);
+
+        ctx.beginPath();
+        ctx.moveTo(n1.x, n1.y);
+        ctx.lineTo(n2.x, n2.y);
+        ctx.strokeStyle = dark
+          ? `rgba(139, 92, 246, ${0.14 + pulse * 0.12})`
+          : `rgba(124, 58, 237, ${0.12 + pulse * 0.10})`;
+        ctx.lineWidth = isMob ? 1.2 : 1.8;
+        ctx.stroke();
       });
 
-      // Draw & Update Packets
-      for (let i = packets.length - 1; i >= 0; i--) {
-        const p = packets[i];
+      // 4. Traveling Active Task Packets
+      for (let pIdx = packets.length - 1; pIdx >= 0; pIdx--) {
+        const p = packets[pIdx];
         p.progress += p.speed;
 
         if (p.progress >= 1) {
-          packets.splice(i, 1);
+          packets.splice(pIdx, 1);
           continue;
         }
 
-        const px = p.fromNode.x + (p.toNode.x - p.fromNode.x) * p.progress;
-        const py = p.fromNode.y + (p.toNode.y - p.fromNode.y) * p.progress;
+        const nFrom = perimeterNodes[p.fromIdx];
+        const nTo = perimeterNodes[p.toIdx];
+
+        const curX = nFrom.x + (nTo.x - nFrom.x) * p.progress;
+        const curY = nFrom.y + (nTo.y - nFrom.y) * p.progress;
+        const tailX = nFrom.x + (nTo.x - nFrom.x) * Math.max(0, p.progress - 0.08);
+        const tailY = nFrom.y + (nTo.y - nFrom.y) * Math.max(0, p.progress - 0.08);
+
+        // Comet tail trail
+        ctx.beginPath();
+        ctx.moveTo(tailX, tailY);
+        ctx.lineTo(curX, curY);
+        ctx.strokeStyle = p.color;
+        ctx.lineWidth = isMob ? 1.8 : 2.5;
+        ctx.lineCap = "round";
+        ctx.stroke();
+
+        // Packet halo & core
+        ctx.beginPath();
+        ctx.arc(curX, curY, isMob ? 5 : 7, 0, Math.PI * 2);
+        ctx.fillStyle = dark ? "rgba(139, 92, 246, 0.3)" : "rgba(124, 58, 237, 0.2)";
+        ctx.fill();
 
         ctx.beginPath();
-        ctx.arc(px, py, 3, 0, Math.PI * 2);
+        ctx.arc(curX, curY, isMob ? 2.5 : 3.5, 0, Math.PI * 2);
         ctx.fillStyle = p.color;
-        ctx.shadowColor = p.color;
-        ctx.shadowBlur = 6;
         ctx.fill();
-        ctx.shadowBlur = 0;
       }
 
-      // Draw Nodes
-      nodes.forEach((node) => {
-        const isHovered = hoveredNode?.id === node.id;
-        const pulse = Math.sin(tick * 0.035 + node.baseRadius) * 2;
+      // 5. Draw Perimeter Agent Nodes
+      perimeterNodes.forEach((node) => {
+        const pulse = Math.sin(tick * 0.04 + (node.isManager ? 0 : 2)) * 3;
 
-        // Outer Glow Halo
+        // Outer ambient aura
         ctx.beginPath();
-        ctx.arc(node.x, node.y, node.radius + 8 + pulse, 0, Math.PI * 2);
-        ctx.fillStyle = isHovered
-          ? dark ? "rgba(139, 92, 246, 0.22)" : "rgba(124, 58, 237, 0.16)"
-          : dark ? "rgba(255, 255, 255, 0.02)" : "rgba(0, 0, 0, 0.02)";
+        ctx.arc(node.x, node.y, node.radius + 6 + pulse, 0, Math.PI * 2);
+        ctx.fillStyle = dark ? "rgba(139, 92, 246, 0.12)" : "rgba(124, 58, 237, 0.08)";
         ctx.fill();
 
-        // Node Surface Circle
+        // Double ring for Coordinator
+        if (node.isManager) {
+          ctx.beginPath();
+          ctx.arc(node.x, node.y, node.radius + 3, 0, Math.PI * 2);
+          ctx.strokeStyle = dark ? "rgba(139, 92, 246, 0.45)" : "rgba(124, 58, 237, 0.35)";
+          ctx.lineWidth = 1.2;
+          ctx.stroke();
+        }
+
+        // Node disc body
         ctx.beginPath();
         ctx.arc(node.x, node.y, node.radius, 0, Math.PI * 2);
-        ctx.fillStyle = dark ? "#121214" : "#ffffff";
-        ctx.strokeStyle = isHovered
-          ? node.color
-          : dark ? "rgba(255, 255, 255, 0.15)" : "rgba(0, 0, 0, 0.14)";
-        ctx.lineWidth = isHovered ? 2.5 : 1.5;
+        ctx.fillStyle = dark ? "#111116" : "#ffffff";
+        ctx.strokeStyle = node.color;
+        ctx.lineWidth = node.isManager ? 2 : 1.5;
         ctx.fill();
         ctx.stroke();
 
-        // Center Core Point
+        // Node center core
         ctx.beginPath();
-        ctx.arc(node.x, node.y, node.radius * 0.45, 0, Math.PI * 2);
+        ctx.arc(node.x, node.y, node.radius * 0.42, 0, Math.PI * 2);
         ctx.fillStyle = node.color;
         ctx.fill();
 
-        // Label Typography
-        ctx.font = `600 13px system-ui, -apple-system, sans-serif`;
-        ctx.fillStyle = isHovered
-          ? dark ? "#f5f5f5" : "#0f172a"
-          : dark ? "rgba(245, 245, 245, 0.85)" : "rgba(15, 23, 42, 0.85)";
+        // Node label
+        ctx.font = `${node.isManager ? "700" : "600"} ${isMob ? "10.5px" : "12px"} -apple-system, BlinkMacSystemFont, sans-serif`;
+        ctx.fillStyle = dark ? "rgba(255, 255, 255, 0.85)" : "rgba(9, 9, 11, 0.85)";
         ctx.textAlign = "center";
-        ctx.fillText(node.name, node.x, node.y + node.radius + 18);
+        ctx.fillText(node.name, node.x, node.y + node.radius + (isMob ? 13 : 16));
       });
 
       animationFrameId = requestAnimationFrame(render);
@@ -363,13 +276,11 @@ export function Hero() {
     render();
 
     return () => {
-      window.removeEventListener("resize", handleResize);
-      window.removeEventListener("mousemove", handleMouseMove);
-      document.removeEventListener("mouseleave", handleMouseLeave);
-      clearInterval(packetInterval);
+      window.removeEventListener("resize", resize);
+      clearInterval(packetTimer);
       cancelAnimationFrame(animationFrameId);
     };
-  }, [t]);
+  }, [t, lang]);
 
   return (
     <section
@@ -380,72 +291,46 @@ export function Hero() {
         flexDirection: "column",
         justifyContent: "center",
         alignItems: "center",
-        padding: "140px 24px 70px",
+        padding: "130px 24px 70px",
         overflow: "hidden",
       }}
     >
-      {/* Video or Canvas Background Stage */}
-      {hasHeroVideo ? (
-        <video
-          ref={videoRef}
-          src="/videos/hero.mp4"
-          poster="/videos/hero-poster.jpg"
-          autoPlay
-          muted
-          loop
-          playsInline
-          style={{
-            position: "absolute",
-            inset: 0,
-            width: "100%",
-            height: "100%",
-            objectFit: "cover",
-            zIndex: 1,
-            opacity: resolvedTheme === "dark" ? 0.65 : 0.4,
-          }}
-        />
-      ) : (
-        <canvas
-          ref={canvasRef}
-          style={{
-            position: "absolute",
-            top: 0,
-            left: 0,
-            width: "100%",
-            height: "100%",
-            pointerEvents: "auto",
-            zIndex: 1,
-            opacity: 0.95,
-          }}
-        />
-      )}
+      {/* High-DPI Spatial Background Canvas */}
+      <canvas
+        ref={canvasRef}
+        style={{
+          position: "absolute",
+          inset: 0,
+          width: "100%",
+          height: "100%",
+          pointerEvents: "none",
+          zIndex: 1,
+        }}
+      />
 
-      {/* Hero Content Container */}
+      {/* Main Foreground Hero Content (100% Free Safe-Area) */}
       <div
         className="container"
         style={{
           position: "relative",
-          zIndex: 2,
+          zIndex: 10,
+          textAlign: "center",
+          maxWidth: 880,
           display: "flex",
           flexDirection: "column",
           alignItems: "center",
-          textAlign: "center",
-          maxWidth: 900,
           pointerEvents: "none",
         }}
       >
-        {/* Brand Supertitle Lockup with Official Mark & Wordmark */}
-        <div
-          style={{
-            display: "inline-flex",
-            alignItems: "center",
-            marginBottom: 20,
-          }}
-        >
-          <AetherLogo id={activeLogo} size={22} wordmarkHeight={13} priority />
+        {/* Minimal Platform Badge */}
+        <div style={{ display: "inline-flex", alignItems: "center", gap: 8, marginBottom: 20 }}>
+          <span className="badge-pill active" style={{ padding: "4px 14px", fontSize: "0.8125rem" }}>
+            <Sparkles size={13} style={{ color: "var(--accent-violet)" }} />
+            <span>{t.hero.badge}</span>
+          </span>
         </div>
 
-        {/* Primary Headline */}
+        {/* Giant Punchy Headline */}
         <h1
           style={{
             fontSize: "clamp(2.5rem, 6vw, 5.25rem)",
@@ -487,72 +372,40 @@ export function Hero() {
             width: "100%",
           }}
         >
+          {/* Primary CTA: Direct Download */}
           <a
-            href="#story"
+            href="#try"
             className="btn-primary"
             style={{
               padding: "14px 34px",
               fontSize: "1.025rem",
               borderRadius: "var(--radius-sm)",
+              display: "inline-flex",
+              alignItems: "center",
+              gap: "8px",
             }}
           >
             <span>{t.hero.ctaPrimary}</span>
-            <ArrowDown size={16} />
+            <ArrowRight size={16} />
           </a>
 
+          {/* Secondary CTA: Smooth Scroll to Interactive Story */}
           <a
-            href="#try"
+            href="#story"
             className="btn-secondary"
             style={{
               padding: "14px 28px",
               fontSize: "1.025rem",
               borderRadius: "var(--radius-sm)",
+              display: "inline-flex",
+              alignItems: "center",
+              gap: "8px",
             }}
           >
             <span>{t.hero.ctaSecondary}</span>
-            <ArrowRight size={16} />
+            <ArrowDown size={16} />
           </a>
         </div>
-
-        {/* Live Hover Node Inspection Overlay */}
-        {activeTooltip && (
-          <div
-            style={{
-              position: "fixed",
-              bottom: 30,
-              left: "50%",
-              transform: "translateX(-50%)",
-              background: "var(--bg-surface)",
-              border: `1px solid ${activeTooltip.color}`,
-              borderRadius: "var(--radius-md)",
-              padding: "12px 22px",
-              display: "flex",
-              alignItems: "center",
-              gap: 14,
-              boxShadow: "var(--card-shadow)",
-              backdropFilter: "blur(16px)",
-              zIndex: 50,
-              pointerEvents: "none",
-            }}
-          >
-            <div
-              style={{
-                width: 10,
-                height: 10,
-                borderRadius: "50%",
-                background: activeTooltip.color,
-              }}
-            />
-            <div style={{ textAlign: "left" }}>
-              <div style={{ fontSize: "0.875rem", fontWeight: 600, color: "var(--text-primary)" }}>
-                {activeTooltip.name} • {activeTooltip.role}
-              </div>
-              <div style={{ fontSize: "0.8125rem", color: "var(--text-secondary)" }}>
-                {activeTooltip.activity}
-              </div>
-            </div>
-          </div>
-        )}
       </div>
     </section>
   );

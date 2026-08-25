@@ -1,17 +1,24 @@
 "use client";
 
 import React from "react";
-import { Users, FileText, ShieldCheck } from "lucide-react";
+import { Users, FileText, ShieldCheck, Sparkles } from "lucide-react";
 import { useLanguage } from "@/lib/i18n/context";
 
 export function WhatIsAether() {
   const { t } = useLanguage();
 
-  const icons = [Users, FileText, ShieldCheck];
+  const iconMap: Record<string, React.ComponentType<{ size?: number; style?: React.CSSProperties }>> = {
+    Users,
+    FileText,
+    ShieldCheck,
+    Sparkles,
+  };
+
+  const defaultIcons = [Users, FileText, ShieldCheck, Sparkles];
 
   return (
     <section
-      id="what-is-aether"
+      id="why"
       style={{
         position: "relative",
         padding: "120px 0 100px",
@@ -21,7 +28,7 @@ export function WhatIsAether() {
     >
       <div className="container">
         {/* Section Header */}
-        <div style={{ maxWidth: 800, margin: "0 auto 60px", textAlign: "center" }}>
+        <div style={{ maxWidth: 820, margin: "0 auto 60px", textAlign: "center" }}>
           <span className="section-tag">{t.whatIsAether.tag}</span>
           <h2 className="section-title" style={{ margin: "0 auto 16px" }}>
             {t.whatIsAether.title}
@@ -31,18 +38,18 @@ export function WhatIsAether() {
           </p>
         </div>
 
-        {/* 3 Core Pillars */}
+        {/* 4 Core Pillars Grid */}
         <div
           style={{
             display: "grid",
-            gridTemplateColumns: "repeat(auto-fit, minmax(280px, 1fr))",
-            gap: 28,
-            maxWidth: 1060,
+            gridTemplateColumns: "repeat(auto-fit, minmax(260px, 1fr))",
+            gap: 24,
+            maxWidth: 1160,
             margin: "0 auto",
           }}
         >
           {t.whatIsAether.pillars.map((pillar, idx) => {
-            const Icon = icons[idx] || Users;
+            const Icon = (pillar.icon && iconMap[pillar.icon]) || defaultIcons[idx] || Users;
             return (
               <div
                 key={idx}

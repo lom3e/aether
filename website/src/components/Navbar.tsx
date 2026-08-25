@@ -24,7 +24,8 @@ export function Navbar() {
   }, []);
 
   const navLinks = [
-    { name: t.nav.product, href: "/#product" },
+    { name: t.nav.why, href: "/#why" },
+    { name: t.nav.story, href: "/#story" },
     { name: t.nav.howItWorks, href: "/#how-it-works" },
     { name: t.nav.solutions, href: "/#solutions" },
     { name: t.nav.faq, href: "/#faq" },

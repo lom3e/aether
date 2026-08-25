@@ -111,7 +111,7 @@ export default function RootLayout({
           }}
         />
       </head>
-      <body className={`${geistSans.variable} ${geistMono.variable}`}>
+      <body className={`${geistSans.className} ${geistSans.variable} ${geistMono.variable}`}>
         <ThemeProvider>
           <LanguageProvider>
             <LogoProvider>{children}</LogoProvider>

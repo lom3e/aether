@@ -168,7 +168,7 @@ export function AdaptableWork() {
                   color: "var(--text-primary)",
                   letterSpacing: "-0.03em",
                   lineHeight: 1.25,
-                  marginBottom: 16,
+                  marginBottom: 12,
                 }}
               >
                 {activeCategory.headline}
@@ -176,9 +176,9 @@ export function AdaptableWork() {
 
               <p
                 style={{
-                  fontSize: "1.0625rem",
+                  fontSize: "1.025rem",
                   color: "var(--text-secondary)",
-                  lineHeight: 1.65,
+                  lineHeight: 1.6,
                   margin: 0,
                 }}
               >
@@ -186,35 +186,54 @@ export function AdaptableWork() {
               </p>
             </div>
 
-            {/* Team Breakdown Box */}
+            {/* 1. Il Problema */}
+            {activeCategory.problemDesc && (
+              <div
+                style={{
+                  background: "rgba(var(--accent-violet-rgb), 0.05)",
+                  border: "1px solid rgba(var(--accent-violet-rgb), 0.18)",
+                  borderRadius: "var(--radius-md)",
+                  padding: "16px 20px",
+                }}
+              >
+                <div style={{ fontSize: "0.75rem", fontWeight: 700, color: "var(--accent-violet)", letterSpacing: "0.06em", textTransform: "uppercase", marginBottom: 6 }}>
+                  {activeCategory.problemTitle || "Il Problema"}
+                </div>
+                <div style={{ fontSize: "0.9375rem", color: "var(--text-secondary)", lineHeight: 1.5 }}>
+                  {activeCategory.problemDesc}
+                </div>
+              </div>
+            )}
+
+            {/* 2. La Squadra al Lavoro */}
             <div
               style={{
                 background: "var(--bg-surface-elevated)",
                 border: "1px solid var(--border-subtle)",
                 borderRadius: "var(--radius-md)",
-                padding: "24px 22px",
+                padding: "22px 20px",
                 display: "flex",
                 flexDirection: "column",
-                gap: 14,
+                gap: 12,
               }}
             >
               <div style={{ display: "flex", alignItems: "center", gap: 8, fontSize: "0.8125rem", fontWeight: 700, color: "var(--accent-violet)", letterSpacing: "0.08em", textTransform: "uppercase" }}>
                 <Users size={16} />
-                <span>{activeCategory.teamTitle}</span>
+                <span>{activeCategory.teamTitle || "La Squadra al Lavoro"}</span>
               </div>
 
               <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
-                {activeCategory.teamMembers.map((member: { name: string; role: string }, idx: number) => (
+                {activeCategory.teamMembers?.map((member: { name: string; role: string }, idx: number) => (
                   <div
                     key={idx}
                     style={{
                       display: "flex",
                       alignItems: "flex-start",
                       gap: 10,
-                      fontSize: "0.9375rem",
+                      fontSize: "0.9125rem",
                     }}
                   >
-                    <CheckCircle2 size={16} style={{ color: "var(--accent-emerald)", marginTop: 3, flexShrink: 0 }} />
+                    <CheckCircle2 size={16} style={{ color: "var(--accent-emerald)", marginTop: 2, flexShrink: 0 }} />
                     <div>
                       <strong style={{ color: "var(--text-primary)", fontWeight: 600 }}>{member.name}:</strong>{" "}
                       <span style={{ color: "var(--text-secondary)" }}>{member.role}</span>
@@ -224,7 +243,26 @@ export function AdaptableWork() {
               </div>
             </div>
 
-            {/* Transparent Framing Note */}
+            {/* 3. Il Risultato */}
+            {activeCategory.resultDesc && (
+              <div
+                style={{
+                  background: "rgba(16, 185, 129, 0.06)",
+                  border: "1px solid rgba(16, 185, 129, 0.2)",
+                  borderRadius: "var(--radius-md)",
+                  padding: "16px 20px",
+                }}
+              >
+                <div style={{ fontSize: "0.75rem", fontWeight: 700, color: "var(--accent-emerald)", letterSpacing: "0.06em", textTransform: "uppercase", marginBottom: 6 }}>
+                  {activeCategory.resultTitle || "Il Risultato"}
+                </div>
+                <div style={{ fontSize: "0.9375rem", color: "var(--text-primary)", fontWeight: 500, lineHeight: 1.5 }}>
+                  {activeCategory.resultDesc}
+                </div>
+              </div>
+            )}
+
+            {/* Framing Note */}
             <div
               style={{
                 display: "flex",

@@ -1,274 +1,725 @@
 "use client";
 
-import React, { useState } from "react";
+import React, { useState, useEffect, useRef } from "react";
+import Image from "next/image";
 import {
-  Bot,
-  Search,
-  CheckCircle2,
-  XCircle,
-  ShieldCheck,
+  ChevronLeft,
+  ChevronRight,
+  Download,
+  ArrowDown,
+  Sparkles,
+  Play,
+  Pause,
 } from "lucide-react";
 import { useLanguage } from "@/lib/i18n/context";
 
 export function ProductDemo() {
   const { t, lang } = useLanguage();
-  const [approved, setApproved] = useState<boolean | null>(null);
+  const [currentSlide, setCurrentSlide] = useState(0);
+  const [isPlaying, setIsPlaying] = useState(true);
+  const [touchStart, setTouchStart] = useState<number | null>(null);
+
+  const slides = t.productDemo?.slides || [];
+  const totalSlides = slides.length || 7;
+
+  // Auto-advance carousel
+  useEffect(() => {
+    if (!isPlaying) return;
+    const timer = setInterval(() => {
+      setCurrentSlide((prev) => (prev + 1) % totalSlides);
+    }, 5500);
+    return () => clearInterval(timer);
+  }, [isPlaying, totalSlides]);
+
+  const handlePrev = () => {
+    setIsPlaying(false);
+    setCurrentSlide((prev) => (prev - 1 + totalSlides) % totalSlides);
+  };
+
+  const handleNext = () => {
+    setIsPlaying(false);
+    setCurrentSlide((prev) => (prev + 1) % totalSlides);
+  };
+
+  const handleTouchStart = (e: React.TouchEvent) => {
+    setTouchStart(e.targetTouches[0].clientX);
+  };
+
+  const handleTouchEnd = (e: React.TouchEvent) => {
+    if (touchStart === null) return;
+    const touchEnd = e.changedTouches[0].clientX;
+    const diff = touchStart - touchEnd;
+    if (diff > 50) handleNext();
+    else if (diff < -50) handlePrev();
+    setTouchStart(null);
+  };
+
+  const slide = slides[currentSlide] || slides[0];
 
   return (
     <section
-      id="product"
+      id="concept"
       style={{
         position: "relative",
-        padding: "120px 0 100px",
-        background: "var(--bg-surface-elevated)",
-        borderBottom: "1px solid var(--border-subtle)",
+        padding: "100px 0 120px",
+        background: "#08080a",
+        borderTop: "1px solid rgba(255, 255, 255, 0.08)",
+        borderBottom: "1px solid rgba(255, 255, 255, 0.08)",
+        overflow: "hidden",
       }}
     >
-      <div className="container-wide">
-        {/* Section Header */}
-        <div style={{ maxWidth: 780, margin: "0 auto 50px", textAlign: "center" }}>
-          <span className="section-tag">{t.productDemo.tag}</span>
-          <h2 className="section-title" style={{ margin: "0 auto 16px" }}>
-            {t.productDemo.title}
-          </h2>
-          <p className="section-desc" style={{ margin: "0 auto" }}>
-            {t.productDemo.subtitle}
-          </p>
-        </div>
+      {/* Background Ambient Glow */}
+      <div
+        style={{
+          position: "absolute",
+          top: "30%",
+          left: "50%",
+          transform: "translate(-50%, -50%)",
+          width: "600px",
+          height: "600px",
+          background: "radial-gradient(circle, rgba(139, 92, 246, 0.15) 0%, rgba(139, 92, 246, 0) 70%)",
+          pointerEvents: "none",
+          zIndex: 0,
+        }}
+      />
 
-        {/* Real Product Window */}
-        <div
-          style={{
-            background: "var(--bg-surface)",
-            border: "1px solid var(--border-medium)",
-            borderRadius: "var(--radius-xl)",
-            overflow: "hidden",
-            boxShadow: "var(--window-shadow)",
-            maxWidth: 1140,
-            margin: "0 auto",
-          }}
-        >
-          {/* Top Window Bar */}
+      <div className="container" style={{ maxWidth: 860, position: "relative", zIndex: 1 }}>
+        {/* Section Tag */}
+        <div style={{ textAlign: "center", marginBottom: 32 }}>
           <div
             style={{
-              background: "var(--bg-surface-elevated)",
-              borderBottom: "1px solid var(--border-subtle)",
-              padding: "14px 20px",
+              display: "inline-flex",
+              alignItems: "center",
+              gap: 6,
+              padding: "4px 14px",
+              borderRadius: "9999px",
+              background: "rgba(139, 92, 246, 0.12)",
+              border: "1px solid rgba(139, 92, 246, 0.3)",
+              color: "#a78bfa",
+              fontSize: "0.8125rem",
+              fontWeight: 700,
+              letterSpacing: "0.06em",
+              textTransform: "uppercase",
+              fontFamily: '-apple-system, BlinkMacSystemFont, "SF Pro Display", "Inter", sans-serif',
+            }}
+          >
+            <Sparkles size={14} />
+            <span>{t.productDemo.tag}</span>
+          </div>
+        </div>
+
+        {/* Carousel Visual Frame */}
+        <div
+          onTouchStart={handleTouchStart}
+          onTouchEnd={handleTouchEnd}
+          style={{
+            background: "#0f0f13",
+            border: "1px solid rgba(255, 255, 255, 0.12)",
+            borderRadius: "24px",
+            padding: "48px 36px 40px",
+            minHeight: "560px",
+            display: "flex",
+            flexDirection: "column",
+            alignItems: "center",
+            justifyContent: "space-between",
+            boxShadow: "0 30px 80px -20px rgba(0, 0, 0, 0.8), 0 0 40px rgba(139, 92, 246, 0.1)",
+            position: "relative",
+            userSelect: "none",
+          }}
+        >
+          {/* 3D Aether Emblem Top Center */}
+          <div style={{ display: "flex", flexDirection: "column", alignItems: "center", marginBottom: 12 }}>
+            <Image
+              src="/brand/aether_emblem_3d.png"
+              alt="Aether Emblem"
+              width={64}
+              height={64}
+              priority
+              style={{ objectFit: "contain", filter: "drop-shadow(0 8px 24px rgba(139, 92, 246, 0.4))" }}
+            />
+          </div>
+
+          {/* Dynamic Slide Content */}
+          <div
+            style={{
+              width: "100%",
+              maxWidth: "680px",
+              display: "flex",
+              flexDirection: "column",
+              alignItems: "center",
+              textAlign: "center",
+              flex: 1,
+              justifyContent: "center",
+              margin: "16px 0 24px",
+            }}
+          >
+            {/* SLIDE 1: Vision / Cover */}
+            {currentSlide === 0 && (
+              <div style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: 16 }}>
+                <h3
+                  style={{
+                    fontSize: "clamp(2rem, 4.8vw, 3.1rem)",
+                    fontWeight: 900,
+                    lineHeight: 1.15,
+                    color: "#ffffff",
+                    letterSpacing: "-0.03em",
+                    fontFamily: '-apple-system, BlinkMacSystemFont, "SF Pro Display", "Inter", sans-serif',
+                    textTransform: "uppercase",
+                  }}
+                >
+                  <div>{slide.headlineTop}</div>
+                  <div style={{ color: "#8b5cf6", textShadow: "0 0 30px rgba(139, 92, 246, 0.5)" }}>
+                    {slide.headlineHighlight}
+                  </div>
+                </h3>
+                <p
+                  style={{
+                    fontSize: "1.25rem",
+                    fontWeight: 700,
+                    color: "#e4e4e7",
+                    marginTop: 8,
+                    fontFamily: '-apple-system, BlinkMacSystemFont, "SF Pro Display", "Inter", sans-serif',
+                  }}
+                >
+                  {slide.caption}
+                </p>
+              </div>
+            )}
+
+            {/* SLIDE 2: Problem / Single AI */}
+            {currentSlide === 1 && (
+              <div style={{ width: "100%", display: "flex", flexDirection: "column", alignItems: "center", gap: 24 }}>
+                <h3
+                  style={{
+                    fontSize: "clamp(1.75rem, 3.8vw, 2.5rem)",
+                    fontWeight: 800,
+                    color: "#ffffff",
+                    letterSpacing: "-0.02em",
+                    fontFamily: '-apple-system, BlinkMacSystemFont, "SF Pro Display", "Inter", sans-serif',
+                  }}
+                >
+                  {slide.headline}
+                </h3>
+
+                <div
+                  style={{
+                    width: "100%",
+                    background: "rgba(255, 255, 255, 0.03)",
+                    border: "1px solid rgba(255, 255, 255, 0.12)",
+                    borderRadius: "16px",
+                    padding: "24px 28px",
+                    display: "flex",
+                    flexDirection: "column",
+                    gap: 16,
+                    textAlign: "left",
+                  }}
+                >
+                  <div style={{ textAlign: "right" }}>
+                    <span
+                      style={{
+                        display: "inline-block",
+                        background: "rgba(255, 255, 255, 0.08)",
+                        border: "1px solid rgba(255, 255, 255, 0.15)",
+                        borderRadius: "12px",
+                        padding: "10px 16px",
+                        fontSize: "0.9375rem",
+                        fontWeight: 600,
+                        color: "#ffffff",
+                        maxWidth: "85%",
+                        lineHeight: 1.5,
+                      }}
+                    >
+                      {slide.prompt}
+                    </span>
+                  </div>
+
+                  <div style={{ textAlign: "left" }}>
+                    <span
+                      style={{
+                        display: "inline-block",
+                        background: "rgba(244, 63, 94, 0.08)",
+                        border: "1px solid rgba(244, 63, 94, 0.25)",
+                        borderRadius: "12px",
+                        padding: "10px 16px",
+                        fontSize: "0.9375rem",
+                        color: "#fda4af",
+                        maxWidth: "85%",
+                        lineHeight: 1.5,
+                      }}
+                    >
+                      {slide.botResponse}
+                    </span>
+                  </div>
+                </div>
+
+                <div
+                  style={{
+                    fontSize: "1.1rem",
+                    fontWeight: 700,
+                    color: "#ffffff",
+                    fontFamily: '-apple-system, BlinkMacSystemFont, "SF Pro Display", "Inter", sans-serif',
+                  }}
+                >
+                  {slide.footer}
+                </div>
+              </div>
+            )}
+
+            {/* SLIDE 3: The Team Shift */}
+            {currentSlide === 2 && (
+              <div style={{ width: "100%", display: "flex", flexDirection: "column", alignItems: "center", gap: 24 }}>
+                <h3
+                  style={{
+                    fontSize: "clamp(1.75rem, 3.8vw, 2.5rem)",
+                    fontWeight: 800,
+                    color: "#ffffff",
+                    letterSpacing: "-0.02em",
+                    fontFamily: '-apple-system, BlinkMacSystemFont, "SF Pro Display", "Inter", sans-serif',
+                  }}
+                >
+                  {slide.headline}
+                </h3>
+
+                <div style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: 12, width: "100%" }}>
+                  <div
+                    style={{
+                      background: "rgba(255, 255, 255, 0.05)",
+                      border: "1px solid rgba(255, 255, 255, 0.2)",
+                      borderRadius: "12px",
+                      padding: "12px 32px",
+                      fontSize: "1rem",
+                      fontWeight: 700,
+                      color: "#ffffff",
+                    }}
+                  >
+                    {slide.requestLabel}
+                  </div>
+
+                  <div style={{ color: "#8b5cf6", display: "flex", alignItems: "center", justifyContent: "center" }}>
+                    <ArrowDown size={22} />
+                  </div>
+
+                  <div
+                    style={{
+                      display: "grid",
+                      gridTemplateColumns: "1fr 1fr",
+                      gap: 12,
+                      width: "100%",
+                      maxWidth: "460px",
+                    }}
+                  >
+                    {slide.roles?.map((role: string, idx: number) => (
+                      <div
+                        key={idx}
+                        style={{
+                          background: "rgba(139, 92, 246, 0.08)",
+                          border: "2px solid #8b5cf6",
+                          borderRadius: "12px",
+                          padding: "16px 20px",
+                          fontSize: "1.05rem",
+                          fontWeight: 800,
+                          color: "#ffffff",
+                          boxShadow: "0 0 20px rgba(139, 92, 246, 0.2)",
+                        }}
+                      >
+                        {role}
+                      </div>
+                    ))}
+                  </div>
+                </div>
+
+                <div
+                  style={{
+                    fontSize: "1.05rem",
+                    fontWeight: 700,
+                    color: "#a1a1aa",
+                    fontFamily: '-apple-system, BlinkMacSystemFont, "SF Pro Display", "Inter", sans-serif',
+                  }}
+                >
+                  {slide.footer}
+                </div>
+              </div>
+            )}
+
+            {/* SLIDE 4: One Goal, Multiple Specialists */}
+            {currentSlide === 3 && (
+              <div style={{ width: "100%", display: "flex", flexDirection: "column", alignItems: "center", gap: 24 }}>
+                <h3
+                  style={{
+                    fontSize: "clamp(1.75rem, 3.8vw, 2.5rem)",
+                    fontWeight: 800,
+                    color: "#ffffff",
+                    letterSpacing: "-0.02em",
+                    fontFamily: '-apple-system, BlinkMacSystemFont, "SF Pro Display", "Inter", sans-serif',
+                  }}
+                >
+                  {(slide.headline || "").split(slide.highlightWord || "")[0]}
+                  <span style={{ color: "#8b5cf6" }}>{slide.highlightWord}</span>
+                </h3>
+
+                <div
+                  style={{
+                    display: "grid",
+                    gridTemplateColumns: "1fr 1fr",
+                    gap: 14,
+                    width: "100%",
+                    maxWidth: "540px",
+                  }}
+                >
+                  {slide.cards?.map((card: any, idx: number) => (
+                    <div
+                      key={idx}
+                      style={{
+                        background: "rgba(18, 18, 24, 0.95)",
+                        border: "1.5px solid rgba(139, 92, 246, 0.6)",
+                        borderRadius: "16px",
+                        padding: "20px 22px",
+                        textAlign: "left",
+                        boxShadow: "0 8px 24px rgba(0, 0, 0, 0.5), inset 0 0 20px rgba(139, 92, 246, 0.05)",
+                      }}
+                    >
+                      <div style={{ fontSize: "1.2rem", fontWeight: 800, color: "#ffffff", marginBottom: 4 }}>
+                        {card.title}
+                      </div>
+                      <div style={{ fontSize: "0.875rem", color: "#a1a1aa", fontWeight: 500 }}>
+                        {card.sub}
+                      </div>
+                    </div>
+                  ))}
+                </div>
+
+                <div
+                  style={{
+                    fontSize: "1.05rem",
+                    fontWeight: 700,
+                    color: "#a1a1aa",
+                    fontFamily: '-apple-system, BlinkMacSystemFont, "SF Pro Display", "Inter", sans-serif',
+                  }}
+                >
+                  {slide.footer}
+                </div>
+              </div>
+            )}
+
+            {/* SLIDE 5: True Collaboration */}
+            {currentSlide === 4 && (
+              <div style={{ width: "100%", display: "flex", flexDirection: "column", alignItems: "center", gap: 20 }}>
+                <h3
+                  style={{
+                    fontSize: "clamp(1.75rem, 3.8vw, 2.5rem)",
+                    fontWeight: 800,
+                    color: "#ffffff",
+                    letterSpacing: "-0.02em",
+                    fontFamily: '-apple-system, BlinkMacSystemFont, "SF Pro Display", "Inter", sans-serif',
+                  }}
+                >
+                  {(slide.headline || "").split(slide.highlightWord || "")[0]}
+                  <span style={{ color: "#8b5cf6" }}>{slide.highlightWord}</span>
+                </h3>
+
+                <div
+                  style={{
+                    width: "100%",
+                    maxWidth: "520px",
+                    display: "flex",
+                    flexDirection: "column",
+                    gap: 10,
+                    position: "relative",
+                    paddingLeft: "16px",
+                    borderLeft: "2px solid rgba(139, 92, 246, 0.5)",
+                    textAlign: "left",
+                  }}
+                >
+                  {slide.thread?.map((item: any, idx: number) => (
+                    <div
+                      key={idx}
+                      style={{
+                        background: "rgba(255, 255, 255, 0.04)",
+                        border: "1px solid rgba(255, 255, 255, 0.1)",
+                        borderRadius: "12px",
+                        padding: "12px 18px",
+                      }}
+                    >
+                      <div style={{ fontSize: "0.9375rem", fontWeight: 800, color: "#ffffff", marginBottom: 2 }}>
+                        {item.role}
+                      </div>
+                      <div style={{ fontSize: "0.8125rem", color: "#a1a1aa" }}>
+                        {item.action}
+                      </div>
+                    </div>
+                  ))}
+                </div>
+
+                <div
+                  style={{
+                    fontSize: "1rem",
+                    fontWeight: 700,
+                    color: "#a1a1aa",
+                    fontFamily: '-apple-system, BlinkMacSystemFont, "SF Pro Display", "Inter", sans-serif',
+                  }}
+                >
+                  {slide.footer}
+                </div>
+              </div>
+            )}
+
+            {/* SLIDE 6: Human In The Loop */}
+            {currentSlide === 5 && (
+              <div style={{ width: "100%", display: "flex", flexDirection: "column", alignItems: "center", gap: 20 }}>
+                <h3
+                  style={{
+                    fontSize: "clamp(1.75rem, 3.8vw, 2.5rem)",
+                    fontWeight: 800,
+                    color: "#ffffff",
+                    letterSpacing: "-0.02em",
+                    fontFamily: '-apple-system, BlinkMacSystemFont, "SF Pro Display", "Inter", sans-serif',
+                  }}
+                >
+                  {(slide.headline || "").split(slide.highlightWord || "")[0]}
+                  <span style={{ color: "#8b5cf6" }}>{slide.highlightWord}</span>
+                </h3>
+
+                <div style={{ width: "100%", maxWidth: "520px", display: "flex", flexDirection: "column", alignItems: "center", gap: 12 }}>
+                  {/* Engine Box */}
+                  <div
+                    style={{
+                      width: "100%",
+                      background: "rgba(18, 18, 24, 0.95)",
+                      border: "2px solid #8b5cf6",
+                      borderRadius: "16px",
+                      padding: "18px 20px",
+                      display: "flex",
+                      flexDirection: "column",
+                      alignItems: "center",
+                      gap: 12,
+                      boxShadow: "0 0 30px rgba(139, 92, 246, 0.25)",
+                    }}
+                  >
+                    <div style={{ fontSize: "1.1rem", fontWeight: 800, color: "#ffffff" }}>
+                      {slide.engineLabel}
+                    </div>
+                    <div style={{ display: "flex", gap: 8, flexWrap: "wrap", justifyContent: "center" }}>
+                      {slide.agents?.map((ag: string, i: number) => (
+                        <span
+                          key={i}
+                          style={{
+                            background: "rgba(255, 255, 255, 0.08)",
+                            border: "1px solid rgba(255, 255, 255, 0.15)",
+                            borderRadius: "9999px",
+                            padding: "4px 12px",
+                            fontSize: "0.75rem",
+                            fontWeight: 700,
+                            color: "#ffffff",
+                          }}
+                        >
+                          {ag}
+                        </span>
+                      ))}
+                    </div>
+                  </div>
+
+                  <div style={{ color: "#10b981", display: "flex", alignItems: "center", justifyContent: "center" }}>
+                    <ArrowDown size={22} />
+                  </div>
+
+                  {/* Delivered Asset Box */}
+                  <div
+                    style={{
+                      width: "100%",
+                      maxWidth: "380px",
+                      background: "rgba(16, 185, 129, 0.08)",
+                      border: "1.5px solid #10b981",
+                      borderRadius: "14px",
+                      padding: "14px 20px",
+                      boxShadow: "0 0 25px rgba(16, 185, 129, 0.2)",
+                    }}
+                  >
+                    <div style={{ fontSize: "0.9375rem", fontWeight: 800, color: "#34d399", marginBottom: 2 }}>
+                      {slide.assetLabel}
+                    </div>
+                    <div style={{ fontSize: "0.8125rem", color: "#a7f3d0", fontWeight: 600 }}>
+                      {slide.assetSub}
+                    </div>
+                  </div>
+                </div>
+
+                <div
+                  style={{
+                    fontSize: "1rem",
+                    fontWeight: 700,
+                    color: "#a1a1aa",
+                    fontFamily: '-apple-system, BlinkMacSystemFont, "SF Pro Display", "Inter", sans-serif',
+                  }}
+                >
+                  {slide.footer}
+                </div>
+              </div>
+            )}
+
+            {/* SLIDE 7: Stop Prompting. Start Delegating (CTA) */}
+            {currentSlide === 6 && (
+              <div style={{ width: "100%", display: "flex", flexDirection: "column", alignItems: "center", gap: 24 }}>
+                <h3
+                  style={{
+                    fontSize: "clamp(2rem, 4.5vw, 2.9rem)",
+                    fontWeight: 900,
+                    color: "#ffffff",
+                    letterSpacing: "-0.03em",
+                    lineHeight: 1.15,
+                    fontFamily: '-apple-system, BlinkMacSystemFont, "SF Pro Display", "Inter", sans-serif',
+                  }}
+                >
+                  <div>Stop prompting.</div>
+                  <div style={{ color: "#8b5cf6", textShadow: "0 0 30px rgba(139, 92, 246, 0.5)" }}>
+                    Start delegating.
+                  </div>
+                </h3>
+
+                <p style={{ fontSize: "1.1rem", color: "#a1a1aa", maxWidth: "480px", lineHeight: 1.5 }}>
+                  {slide.subheadline}
+                </p>
+
+                <a
+                  href="https://github.com/lom3e/aether/releases/latest/download/Aether.dmg"
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  style={{
+                    background: "linear-gradient(135deg, #8b5cf6 0%, #6d28d9 100%)",
+                    color: "#ffffff",
+                    padding: "16px 36px",
+                    borderRadius: "9999px",
+                    fontWeight: 800,
+                    fontSize: "1.05rem",
+                    display: "inline-flex",
+                    alignItems: "center",
+                    gap: 10,
+                    textDecoration: "none",
+                    boxShadow: "0 0 35px rgba(139, 92, 246, 0.5)",
+                    transition: "transform 150ms ease, box-shadow 150ms ease",
+                    fontFamily: '-apple-system, BlinkMacSystemFont, "SF Pro Display", "Inter", sans-serif',
+                  }}
+                >
+                  <Download size={18} />
+                  <span>{slide.ctaBtn}</span>
+                </a>
+
+                <div
+                  style={{
+                    fontSize: "0.875rem",
+                    fontWeight: 600,
+                    color: "#71717a",
+                    fontFamily: '-apple-system, BlinkMacSystemFont, "SF Pro Display", "Inter", sans-serif',
+                  }}
+                >
+                  {slide.footer}
+                </div>
+              </div>
+            )}
+          </div>
+
+          {/* Navigation Controls Bar */}
+          <div
+            style={{
+              width: "100%",
               display: "flex",
               alignItems: "center",
               justifyContent: "space-between",
-              gap: 12,
-              flexWrap: "wrap",
+              borderTop: "1px solid rgba(255, 255, 255, 0.08)",
+              paddingTop: "20px",
+              marginTop: "auto",
             }}
           >
-            <div style={{ display: "flex", alignItems: "center", gap: 12, minWidth: 0 }}>
-              <div style={{ display: "flex", gap: 6, flexShrink: 0 }}>
-                <span style={{ width: 10, height: 10, borderRadius: "50%", background: "#ef4444" }} />
-                <span style={{ width: 10, height: 10, borderRadius: "50%", background: "#f59e0b" }} />
-                <span style={{ width: 10, height: 10, borderRadius: "50%", background: "#10b981" }} />
-              </div>
-              <div
+            {/* Prev Button */}
+            <button
+              onClick={handlePrev}
+              style={{
+                background: "rgba(255, 255, 255, 0.06)",
+                border: "1px solid rgba(255, 255, 255, 0.12)",
+                borderRadius: "9999px",
+                padding: "8px 16px",
+                color: "#ffffff",
+                fontSize: "0.875rem",
+                fontWeight: 600,
+                cursor: "pointer",
+                display: "inline-flex",
+                alignItems: "center",
+                gap: 6,
+                transition: "all 150ms ease",
+              }}
+            >
+              <ChevronLeft size={16} />
+              <span>{t.productDemo.prev}</span>
+            </button>
+
+            {/* Dots Indicator */}
+            <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+              {slides.map((_: any, idx: number) => {
+                const active = idx === currentSlide;
+                return (
+                  <button
+                    key={idx}
+                    onClick={() => {
+                      setIsPlaying(false);
+                      setCurrentSlide(idx);
+                    }}
+                    style={{
+                      width: active ? 28 : 8,
+                      height: 8,
+                      borderRadius: "9999px",
+                      background: active ? "#8b5cf6" : "rgba(255, 255, 255, 0.2)",
+                      border: "none",
+                      cursor: "pointer",
+                      transition: "all 200ms ease",
+                      padding: 0,
+                    }}
+                    aria-label={`Slide ${idx + 1}`}
+                  />
+                );
+              })}
+            </div>
+
+            {/* Next Button & Autoplay Toggle */}
+            <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+              <button
+                onClick={() => setIsPlaying(!isPlaying)}
                 style={{
-                  fontSize: "0.8125rem",
-                  color: "var(--text-secondary)",
-                  background: "var(--bg-surface)",
-                  padding: "4px 12px",
-                  borderRadius: "var(--radius-sm)",
-                  border: "1px solid var(--border-subtle)",
+                  background: "transparent",
+                  border: "none",
+                  color: isPlaying ? "#8b5cf6" : "#71717a",
+                  cursor: "pointer",
+                  padding: "6px",
                   display: "flex",
                   alignItems: "center",
+                }}
+                title={isPlaying ? "Pause autoplay" : "Resume autoplay"}
+              >
+                {isPlaying ? <Pause size={15} /> : <Play size={15} />}
+              </button>
+
+              <button
+                onClick={handleNext}
+                style={{
+                  background: "rgba(255, 255, 255, 0.06)",
+                  border: "1px solid rgba(255, 255, 255, 0.12)",
+                  borderRadius: "9999px",
+                  padding: "8px 16px",
+                  color: "#ffffff",
+                  fontSize: "0.875rem",
+                  fontWeight: 600,
+                  cursor: "pointer",
+                  display: "inline-flex",
+                  alignItems: "center",
                   gap: 6,
-                  overflow: "hidden",
-                  textOverflow: "ellipsis",
-                  whiteSpace: "nowrap",
+                  transition: "all 150ms ease",
                 }}
               >
-                <span style={{ color: "var(--accent-violet)", fontWeight: 600 }}>Aether Workspace</span>
-                <span style={{ color: "var(--text-muted)" }}>•</span>
-                <span style={{ overflow: "hidden", textOverflow: "ellipsis" }}>{t.productDemo.windowTitle}</span>
-              </div>
-            </div>
-
-            <div style={{ display: "flex", alignItems: "center", gap: 8, fontSize: "0.8125rem", color: "var(--text-secondary)", fontWeight: 500, flexShrink: 0 }}>
-              <span className="pulse-dot" style={{ width: 6, height: 6 }} />
-              <span>{t.productDemo.activeBadge}</span>
-            </div>
-          </div>
-
-          {/* Main Workspace Screen Content */}
-          <div
-            style={{
-              display: "grid",
-              gridTemplateColumns: "1.1fr 0.9fr",
-              padding: "36px 30px",
-              gap: 32,
-              background: "var(--bg-surface)",
-            }}
-            className="demo-split-grid"
-          >
-            {/* Left: Stream of Delegation */}
-            <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
-              <div style={{ fontSize: "0.8125rem", fontWeight: 700, color: "var(--text-muted)", letterSpacing: "0.08em", textTransform: "uppercase" }}>
-                {lang === "it" ? "SQUADRA AL LAVORO" : "TEAM AT WORK"}
-              </div>
-
-              {/* User Goal */}
-              <div
-                style={{
-                  background: "var(--bg-surface-elevated)",
-                  borderRadius: "var(--radius-md)",
-                  padding: "16px 18px",
-                  border: "1px solid var(--border-subtle)",
-                }}
-              >
-                <span style={{ fontSize: "0.8125rem", color: "var(--accent-violet)", fontWeight: 600, display: "block", marginBottom: 4 }}>
-                  {t.productDemo.userGoalTitle}
-                </span>
-                <div style={{ fontSize: "0.95rem", color: "var(--text-primary)", fontWeight: 500, lineHeight: 1.5 }}>
-                  &ldquo;{t.productDemo.userGoalText}&rdquo;
-                </div>
-              </div>
-
-              {/* Manager Step */}
-              <div
-                style={{
-                  background: "var(--bg-surface-subtle)",
-                  border: "1px solid var(--border-medium)",
-                  borderRadius: "var(--radius-md)",
-                  padding: "16px 18px",
-                }}
-              >
-                <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 6 }}>
-                  <Bot size={18} style={{ color: "var(--accent-violet)" }} />
-                  <span style={{ fontWeight: 600, color: "var(--text-primary)", fontSize: "0.9375rem" }}>
-                    {t.productDemo.managerLabel}
-                  </span>
-                  <span style={{ fontSize: "0.8125rem", color: "var(--text-muted)", marginLeft: "auto" }}>09:41</span>
-                </div>
-                <p style={{ fontSize: "0.9375rem", color: "var(--text-secondary)", margin: 0, lineHeight: 1.5 }}>
-                  {t.productDemo.managerText}
-                </p>
-              </div>
-
-              {/* Researcher Step */}
-              <div
-                style={{
-                  background: "var(--bg-surface-subtle)",
-                  border: "1px solid var(--border-medium)",
-                  borderRadius: "var(--radius-md)",
-                  padding: "16px 18px",
-                }}
-              >
-                <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 6 }}>
-                  <Search size={18} style={{ color: "var(--accent-emerald)" }} />
-                  <span style={{ fontWeight: 600, color: "var(--text-primary)", fontSize: "0.9375rem" }}>
-                    {t.productDemo.researcherLabel}
-                  </span>
-                  <span style={{ fontSize: "0.8125rem", color: "var(--text-muted)", marginLeft: "auto" }}>09:42</span>
-                </div>
-                <p style={{ fontSize: "0.9375rem", color: "var(--text-secondary)", margin: 0, lineHeight: 1.5 }}>
-                  {t.productDemo.researcherText}
-                </p>
-              </div>
-            </div>
-
-            {/* Right: Deliverable & Sign-off */}
-            <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
-              <div style={{ fontSize: "0.8125rem", fontWeight: 700, color: "var(--text-muted)", letterSpacing: "0.08em", textTransform: "uppercase" }}>
-                {lang === "it" ? "RISULTATO & APPROVAZIONE" : "DELIVERABLE & APPROVAL"}
-              </div>
-
-              <div
-                style={{
-                  background: "var(--bg-surface-elevated)",
-                  border: "1px solid var(--border-medium)",
-                  borderRadius: "var(--radius-md)",
-                  padding: "24px 22px",
-                  display: "flex",
-                  flexDirection: "column",
-                  justifyContent: "space-between",
-                  height: "100%",
-                }}
-              >
-                <div>
-                  <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 12, flexWrap: "wrap", gap: 8 }}>
-                    <span style={{ fontWeight: 700, fontSize: "1.15rem", color: "var(--text-primary)" }}>
-                      {t.productDemo.deliverableTitle}
-                    </span>
-                    <span className="badge-pill active" style={{ fontSize: "0.75rem" }}>
-                      {t.productDemo.deliverableStatus}
-                    </span>
-                  </div>
-
-                  <p style={{ fontSize: "0.9375rem", color: "var(--text-secondary)", lineHeight: 1.6, marginBottom: 20 }}>
-                    {t.productDemo.deliverableDesc}
-                  </p>
-                </div>
-
-                {/* Sign-off Checkpoint */}
-                <div
-                  style={{
-                    borderTop: "1px solid var(--border-subtle)",
-                    paddingTop: 16,
-                  }}
-                >
-                  <div style={{ display: "flex", alignItems: "center", gap: 8, fontSize: "0.875rem", color: "var(--accent-amber)", fontWeight: 600, marginBottom: 12 }}>
-                    <ShieldCheck size={18} />
-                    <span>{t.productDemo.approvalNotice}</span>
-                  </div>
-
-                  {approved === null ? (
-                    <div style={{ display: "flex", gap: 10, flexWrap: "wrap" }}>
-                      <button
-                        onClick={() => setApproved(true)}
-                        className="btn-primary"
-                        style={{
-                          background: "var(--accent-emerald)",
-                          borderColor: "var(--accent-emerald)",
-                          color: "#ffffff",
-                          padding: "10px 20px",
-                          fontSize: "0.875rem",
-                          minHeight: 44,
-                          flex: 1,
-                        }}
-                      >
-                        <CheckCircle2 size={16} />
-                        <span>{t.productDemo.approveBtn}</span>
-                      </button>
-                      <button
-                        onClick={() => setApproved(false)}
-                        className="btn-secondary"
-                        style={{ padding: "10px 16px", fontSize: "0.875rem", minHeight: 44 }}
-                      >
-                        <XCircle size={16} />
-                        <span>{lang === "it" ? "Modifica" : "Revise"}</span>
-                      </button>
-                    </div>
-                  ) : approved ? (
-                    <div style={{ color: "var(--accent-emerald)", fontSize: "0.9375rem", fontWeight: 600 }}>
-                      {t.productDemo.approvedMsg}
-                    </div>
-                  ) : (
-                    <div style={{ color: "var(--accent-amber)", fontSize: "0.9375rem", fontWeight: 500 }}>
-                      {lang === "it" ? "La squadra sta modificando la bozza." : "Team is revising the draft."}
-                    </div>
-                  )}
-                </div>
-              </div>
+                <span>{t.productDemo.next}</span>
+                <ChevronRight size={16} />
+              </button>
             </div>
           </div>
         </div>
       </div>
-
-      <style jsx>{`
-        @media (max-width: 860px) {
-          .demo-split-grid {
-            grid-template-columns: 1fr !important;
-            padding: 24px 18px !important;
-            gap: 24px !important;
-          }
-        }
-      `}</style>
     </section>
   );
 }
