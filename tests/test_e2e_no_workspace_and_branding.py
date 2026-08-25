@@ -171,7 +171,7 @@ def test_05_theme_aware_collapsed_logo(browser_context):
         # Logo img must still be visible and match theme svg
         expect(logo_img).to_be_visible()
         src = logo_img.get_attribute("src") or ""
-        assert "logo_bianco.svg" in src or "logo_nero.svg" in src
+        assert "logo_viola.svg" in src
 
     page.close()
 

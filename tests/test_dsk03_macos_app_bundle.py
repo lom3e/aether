@@ -63,8 +63,8 @@ def test_dsk_03_bundle_structure_and_metadata():
     assert plist_data.get("CFBundleIdentifier") == "com.aether.desktop"
     assert plist_data.get("CFBundleName") == "Aether"
     assert plist_data.get("CFBundleDisplayName") == "Aether"
-    assert plist_data.get("CFBundleShortVersionString") in ["1.4.0", "1.5.0"]
-    assert plist_data.get("CFBundleVersion") in ["1.4.0", "1.5.0"]
+    assert plist_data.get("CFBundleShortVersionString") in ["1.4.0", "1.5.0", "1.6.0"]
+    assert plist_data.get("CFBundleVersion") in ["1.4.0", "1.5.0", "1.6.0"]
     assert plist_data.get("CFBundlePackageType") == "APPL"
     assert plist_data.get("NSHighResolutionCapable") is True
 
@@ -157,7 +157,7 @@ def test_dsk_03_out_of_repo_isolated_execution(tmp_path):
             assert resp.status == 200
             hdata = json.loads(resp.read())
             assert hdata["status"] == "ok"
-            assert hdata["version"] in ["1.4.0", "1.5.0"]
+            assert hdata["version"] in ["1.4.0", "1.5.0", "1.6.0"]
             assert hdata["port"] == bound_port
 
         # 2. Verify user data was created in custom user space, NOT inside the .app bundle

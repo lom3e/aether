@@ -79,3 +79,25 @@ def test_workspace_registry_safety(tmp_path, monkeypatch):
     })
     with pytest.raises(WorkspaceError, match="Cannot delete protected system directory"):
         WorkspaceRegistry.delete_workspace("system-root")
+
+
+def test_delete_workspace_by_id_with_short_slug(tmp_path, monkeypatch):
+    reg_file = tmp_path / "workspaces.json"
+    monkeypatch.setattr("aether.workspace.registry._get_registry_path", lambda: reg_file)
+
+    ws_dir = tmp_path / "workspaces" / "prova-desktop-app"
+    ws = WorkspaceRegistry.create_workspace(
+        name="prova-desktop-app",
+        description="Test workspace",
+        target_dir=ws_dir
+    )
+    assert ws.root.exists()
+
+    entry = WorkspaceRegistry.get_workspace_entry("prova-desktop-app")
+    assert entry is not None
+    assert entry["id"] == "prova-desktop-app"
+
+    # Delete using ID slug "prova-desktop-app"
+    deleted = WorkspaceRegistry.delete_workspace("prova-desktop-app")
+    assert deleted is True
+    assert not ws_dir.exists()

@@ -9,6 +9,7 @@ import { useTranslation } from './i18n';
 import { Tooltip } from './Tooltip';
 import { ToastContext } from './toast';
 import { apiUrl, apiError } from './api';
+import { MagicEnhancePromptButton } from './MagicEnhancePromptButton';
 
 interface TriggerConfig {
   type: string;
@@ -774,68 +775,75 @@ function AutomationBuilderModal({ initialData, teams, agents, onClose, onSaved }
   };
 
   return (
-    <div className="slide-over-overlay" onClick={onClose}>
-      <div className="slide-over-content" onClick={(e) => e.stopPropagation()} style={{ maxWidth: '680px' }}>
-        <div className="slide-over-header">
+    <>
+      <div className="overlay" onClick={onClose} />
+      <div className="slide-over slide-over-content" style={{ maxWidth: '720px' }}>
+        <div className="slide-over-header" style={{ padding: '20px 24px' }}>
           <div>
-            <h2 style={{ fontSize: '18px', fontWeight: 600, margin: 0 }}>
+            <h2 style={{ fontSize: '17px', fontWeight: 600, margin: 0, color: 'hsl(var(--fg))' }}>
               {initialData ? t('editAutomation') : t('createAutomation')}
             </h2>
             <div style={{ fontSize: '12px', color: 'hsl(var(--muted-fg))', marginTop: '2px' }}>
-              Configure trigger, workforce pipeline, and deliverable output.
+              {t('configureAutomationSubtitle') || 'Configura trigger, passaggi della pipeline e deliverable'}
             </div>
           </div>
-          <button className="btn btn-ghost" onClick={onClose}>
+          <button className="btn btn-ghost" style={{ padding: '8px' }} onClick={onClose}>
             <X size={18} />
           </button>
         </div>
 
-        <div className="slide-over-body" style={{ display: 'flex', flexDirection: 'column', gap: '24px' }}>
+        <div className="slide-over-body" style={{ padding: '20px 24px', display: 'flex', flexDirection: 'column', gap: '20px' }}>
           {/* SECTION 1: GENERAL */}
-          <div>
-            <div className="form-group">
-              <label className="form-label">{t('automationName')}</label>
-              <input
-                className="form-input"
-                value={name}
-                onChange={(e) => setName(e.target.value)}
-                placeholder="e.g. Weekly Research Report"
-              />
-            </div>
+          <div className="card" style={{ padding: '20px', borderRadius: '12px', border: '1px solid hsl(var(--border))' }}>
+            <h4 style={{ fontSize: '14px', margin: '0 0 14px', fontWeight: 600, color: 'hsl(var(--fg))' }}>
+              Informazioni Flusso
+            </h4>
 
-            <div className="form-group">
-              <label className="form-label">{t('automationDescription')}</label>
-              <input
-                className="form-input"
-                value={description}
-                onChange={(e) => setDescription(e.target.value)}
-                placeholder="Brief summary of what this automation executes"
-              />
-            </div>
-
-            {teams.length > 0 && (
-              <div className="form-group">
-                <label className="form-label">Assigned Workforce Team</label>
-                <select
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '14px' }}>
+              <div className="form-group" style={{ marginBottom: 0 }}>
+                <label className="form-label">{t('automationName')}</label>
+                <input
                   className="form-input"
-                  value={teamName}
-                  onChange={(e) => setTeamName(e.target.value)}
-                >
-                  {teams.map((tm) => (
-                    <option key={tm.name} value={tm.name}>{tm.name}</option>
-                  ))}
-                </select>
+                  value={name}
+                  onChange={(e) => setName(e.target.value)}
+                  placeholder={t('automationNamePlaceholder') || 'e.g. Weekly Market Report'}
+                />
               </div>
-            )}
+
+              <div className="form-group" style={{ marginBottom: 0 }}>
+                <label className="form-label">{t('automationDescription')}</label>
+                <input
+                  className="form-input"
+                  value={description}
+                  onChange={(e) => setDescription(e.target.value)}
+                  placeholder={t('automationDescPlaceholder') || 'e.g. Ingests competitor prices and produces markdown report'}
+                />
+              </div>
+
+              {teams.length > 0 && (
+                <div className="form-group" style={{ marginBottom: 0 }}>
+                  <label className="form-label">{t('assignedWorkforceTeam')}</label>
+                  <select
+                    className="form-select"
+                    value={teamName}
+                    onChange={(e) => setTeamName(e.target.value)}
+                  >
+                    {teams.map((tm) => (
+                      <option key={tm.name} value={tm.name}>{tm.name}</option>
+                    ))}
+                  </select>
+                </div>
+              )}
+            </div>
           </div>
 
           {/* SECTION 2: TRIGGER */}
-          <div style={{ padding: '16px', borderRadius: '8px', backgroundColor: 'hsl(var(--muted)/0.3)', border: '1px solid hsl(var(--border))' }}>
-            <h4 style={{ fontSize: '13px', margin: '0 0 12px', textTransform: 'uppercase', letterSpacing: '0.05em', color: 'hsl(var(--muted-fg))' }}>
+          <div className="card" style={{ padding: '20px', borderRadius: '12px', border: '1px solid hsl(var(--border))' }}>
+            <h4 style={{ fontSize: '14px', margin: '0 0 14px', fontWeight: 600, color: 'hsl(var(--fg))' }}>
               {t('triggerSection')}
             </h4>
 
-            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: '8px', marginBottom: '14px' }}>
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: '8px', marginBottom: '16px' }}>
               {[
                 { id: 'schedule', label: 'Schedule', icon: Clock },
                 { id: 'file_watcher', label: 'File Watch', icon: Folder },
@@ -849,7 +857,7 @@ function AutomationBuilderModal({ initialData, teams, agents, onClose, onSaved }
                     key={item.id}
                     type="button"
                     className={`btn ${isSel ? 'btn-primary' : 'btn-secondary'}`}
-                    style={{ flexDirection: 'column', gap: '6px', padding: '10px 4px', fontSize: '12px' }}
+                    style={{ flexDirection: 'column', gap: '6px', padding: '10px 4px', fontSize: '12px', borderRadius: '8px' }}
                     onClick={() => setTriggerType(item.id)}
                   >
                     <IconComponent size={16} />
@@ -860,8 +868,8 @@ function AutomationBuilderModal({ initialData, teams, agents, onClose, onSaved }
             </div>
 
             {triggerType === 'schedule' && (
-              <div>
-                <div style={{ display: 'flex', gap: '6px', flexWrap: 'wrap', marginBottom: '10px' }}>
+              <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
+                <div style={{ display: 'flex', gap: '6px', flexWrap: 'wrap' }}>
                   {[
                     { label: 'Every 15 mins', val: '*/15 * * * *' },
                     { label: 'Every Hour', val: '0 * * * *' },
@@ -872,14 +880,14 @@ function AutomationBuilderModal({ initialData, teams, agents, onClose, onSaved }
                       key={p.val}
                       type="button"
                       className="badge"
-                      style={{ cursor: 'pointer', border: '1px solid hsl(var(--border))', background: cron === p.val ? 'hsl(var(--primary)/0.15)' : 'hsl(var(--card))' }}
+                      style={{ cursor: 'pointer', border: '1px solid hsl(var(--border))', background: cron === p.val ? 'hsl(var(--primary)/0.15)' : 'hsl(var(--card))', padding: '4px 8px' }}
                       onClick={() => setCron(p.val)}
                     >
                       {p.label}
                     </button>
                   ))}
                 </div>
-                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '12px', marginBottom: 0 }}>
+                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '12px' }}>
                   <div className="form-group" style={{ marginBottom: 0 }}>
                     <label className="form-label">{t('cronExpression')}</label>
                     <input
@@ -929,19 +937,19 @@ function AutomationBuilderModal({ initialData, teams, agents, onClose, onSaved }
           </div>
 
           {/* SECTION 3: WORKFLOW PIPELINE */}
-          <div>
-            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '12px' }}>
-              <h4 style={{ fontSize: '13px', margin: 0, textTransform: 'uppercase', letterSpacing: '0.05em', color: 'hsl(var(--muted-fg))' }}>
-                {t('pipelineSection')}
+          <div className="card" style={{ padding: '20px', borderRadius: '12px', border: '1px solid hsl(var(--border))' }}>
+            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '14px' }}>
+              <h4 style={{ fontSize: '14px', margin: 0, fontWeight: 600, color: 'hsl(var(--fg))' }}>
+                {t('pipelineSection')} ({steps.length})
               </h4>
-              <button className="btn btn-ghost" style={{ fontSize: '12px', padding: '4px 8px' }} onClick={handleAddStep}>
+              <button className="btn btn-secondary" style={{ fontSize: '12px', padding: '4px 10px', display: 'inline-flex', alignItems: 'center', gap: '4px' }} onClick={handleAddStep}>
                 <Plus size={14} /> {t('addStep')}
               </button>
             </div>
 
             <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
               {steps.map((step, idx) => (
-                <div key={step.id || idx} className="card" style={{ padding: '14px', position: 'relative' }}>
+                <div key={step.id || idx} className="card" style={{ padding: '14px', borderRadius: '8px', border: '1px solid hsl(var(--border))' }}>
                   <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '10px' }}>
                     <span className="badge badge-primary" style={{ fontSize: '11px' }}>
                       Step {idx + 1}
@@ -949,7 +957,7 @@ function AutomationBuilderModal({ initialData, teams, agents, onClose, onSaved }
                     {steps.length > 1 && (
                       <button
                         className="btn btn-ghost"
-                        style={{ padding: '2px 6px', color: 'hsl(var(--error))' }}
+                        style={{ padding: '2px 6px', color: 'hsl(var(--destructive))' }}
                         onClick={() => handleRemoveStep(idx)}
                       >
                         <Trash2 size={13} />
@@ -959,7 +967,7 @@ function AutomationBuilderModal({ initialData, teams, agents, onClose, onSaved }
 
                   <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '10px', marginBottom: '10px' }}>
                     <div>
-                      <label className="form-label" style={{ fontSize: '11px' }}>Step Name</label>
+                      <label className="form-label" style={{ fontSize: '11.5px' }}>{t('stepLabel')} {t('name')}</label>
                       <input
                         className="form-input"
                         value={step.name}
@@ -968,9 +976,9 @@ function AutomationBuilderModal({ initialData, teams, agents, onClose, onSaved }
                       />
                     </div>
                     <div>
-                      <label className="form-label" style={{ fontSize: '11px' }}>{t('assignedAgent')}</label>
+                      <label className="form-label" style={{ fontSize: '11.5px' }}>{t('assignedAgent')}</label>
                       <select
-                        className="form-input"
+                        className="form-select"
                         value={step.agent_name}
                         onChange={(e) => handleUpdateStep(idx, 'agent_name', e.target.value)}
                       >
@@ -983,7 +991,16 @@ function AutomationBuilderModal({ initialData, teams, agents, onClose, onSaved }
                   </div>
 
                   <div>
-                    <label className="form-label" style={{ fontSize: '11px' }}>{t('promptTemplate')}</label>
+                    <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '6px' }}>
+                      <label className="form-label" style={{ fontSize: '11.5px', marginBottom: 0 }}>{t('promptTemplate')}</label>
+                      <MagicEnhancePromptButton
+                        prompt={step.prompt_template}
+                        role={step.name}
+                        agentName={step.agent_name}
+                        teamName={teamName}
+                        onEnhanced={(enhanced) => handleUpdateStep(idx, 'prompt_template', enhanced)}
+                      />
+                    </div>
                     <textarea
                       className="form-textarea"
                       rows={2}
@@ -991,17 +1008,17 @@ function AutomationBuilderModal({ initialData, teams, agents, onClose, onSaved }
                       onChange={(e) => handleUpdateStep(idx, 'prompt_template', e.target.value)}
                       placeholder="Prompt instructions for this step..."
                     />
-                    <div style={{ display: 'flex', gap: '4px', marginTop: '4px' }}>
-                      <span className="text-muted" style={{ fontSize: '10px' }}>Insert variables:</span>
+                    <div style={{ display: 'flex', gap: '4px', marginTop: '6px' }}>
+                      <span className="text-muted" style={{ fontSize: '11px' }}>{t('insertVariables')}</span>
                       <code
-                        style={{ fontSize: '10px', cursor: 'pointer', padding: '1px 4px', background: 'hsl(var(--muted))', borderRadius: '3px' }}
+                        style={{ fontSize: '11px', cursor: 'pointer', padding: '1px 5px', background: 'hsl(var(--muted))', borderRadius: '3px' }}
                         onClick={() => handleUpdateStep(idx, 'prompt_template', `${step.prompt_template} {input}`)}
                       >
                         +&#123;input&#125;
                       </code>
                       {idx > 0 && (
                         <code
-                          style={{ fontSize: '10px', cursor: 'pointer', padding: '1px 4px', background: 'hsl(var(--muted))', borderRadius: '3px' }}
+                          style={{ fontSize: '11px', cursor: 'pointer', padding: '1px 5px', background: 'hsl(var(--muted))', borderRadius: '3px' }}
                           onClick={() => handleUpdateStep(idx, 'prompt_template', `${step.prompt_template} {step_${idx}_output}`)}
                         >
                           +&#123;step_{idx}_output&#125;
@@ -1015,16 +1032,16 @@ function AutomationBuilderModal({ initialData, teams, agents, onClose, onSaved }
           </div>
 
           {/* SECTION 4: DELIVERABLE & OUTPUT */}
-          <div style={{ padding: '16px', borderRadius: '8px', backgroundColor: 'hsl(var(--muted)/0.3)', border: '1px solid hsl(var(--border))' }}>
-            <h4 style={{ fontSize: '13px', margin: '0 0 12px', textTransform: 'uppercase', letterSpacing: '0.05em', color: 'hsl(var(--muted-fg))' }}>
+          <div className="card" style={{ padding: '20px', borderRadius: '12px', border: '1px solid hsl(var(--border))' }}>
+            <h4 style={{ fontSize: '14px', margin: '0 0 14px', fontWeight: 600, color: 'hsl(var(--fg))' }}>
               {t('outputSection')}
             </h4>
 
             <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: '8px', marginBottom: '14px' }}>
               {[
-                { id: 'file', label: 'Save to File', icon: FileText },
-                { id: 'knowledge', label: 'Knowledge Base', icon: Database },
-                { id: 'notification', label: 'Notification', icon: Bell },
+                { id: 'file', label: t('outputFile'), icon: FileText },
+                { id: 'knowledge', label: t('outputKnowledge'), icon: Database },
+                { id: 'notification', label: t('outputNotification'), icon: Bell },
               ].map((item) => {
                 const IconComponent = item.icon;
                 const isSel = outputType === item.id;
@@ -1033,7 +1050,7 @@ function AutomationBuilderModal({ initialData, teams, agents, onClose, onSaved }
                     key={item.id}
                     type="button"
                     className={`btn ${isSel ? 'btn-primary' : 'btn-secondary'}`}
-                    style={{ flexDirection: 'column', gap: '6px', padding: '10px 4px', fontSize: '12px' }}
+                    style={{ flexDirection: 'column', gap: '6px', padding: '10px 4px', fontSize: '12px', borderRadius: '8px' }}
                     onClick={() => setOutputType(item.id)}
                   >
                     <IconComponent size={16} />
@@ -1058,15 +1075,15 @@ function AutomationBuilderModal({ initialData, teams, agents, onClose, onSaved }
           </div>
         </div>
 
-        <div className="slide-over-footer" style={{ display: 'flex', justifyContent: 'flex-end', gap: '8px' }}>
+        <div className="slide-over-footer" style={{ padding: '16px 24px', display: 'flex', justifyContent: 'flex-end', gap: '10px' }}>
           <button className="btn btn-secondary" onClick={onClose} disabled={saving}>
             {t('cancel')}
           </button>
-          <button className="btn btn-primary" onClick={handleSave} disabled={saving || !name.trim()}>
+          <button className="btn btn-primary" onClick={handleSave} disabled={saving || !name.trim()} style={{ padding: '8px 20px' }}>
             {saving ? t('saving') : initialData ? t('save') : t('createAutomation')}
           </button>
         </div>
       </div>
-    </div>
+    </>
   );
 }

@@ -93,23 +93,22 @@ export function AgentProfile({ name, navigate }: { name: string, navigate: (view
           </div>
         </div>
 
-        {/* Instructions Card */}
-        <div className="card" style={{ marginBottom: '24px', padding: '24px' }}>
-          <h3 style={{ fontSize: '15px', marginBottom: '12px' }}>{t('instructions')}</h3>
-          <div style={{
-            whiteSpace: 'pre-wrap',
-            color: 'hsl(var(--fg))',
-            fontSize: '13.5px',
-            lineHeight: 1.6,
-            fontFamily: 'var(--font-sans)',
-            backgroundColor: 'hsl(var(--muted)/0.4)',
-            padding: '16px',
-            borderRadius: 'var(--radius)',
-            border: '1px solid hsl(var(--border)/0.5)'
-          }}>
-            {agent.description || agent.instructions || <span className="text-muted italic">{t('noPromptProvided')}</span>}
+          <div className="card" style={{ marginBottom: '24px', padding: '24px' }}>
+            <h3 style={{ fontSize: '15px', marginBottom: '12px' }}>{t('instructions')}</h3>
+            <div style={{
+              whiteSpace: 'pre-wrap',
+              color: 'hsl(var(--fg))',
+              fontSize: '13.5px',
+              lineHeight: 1.6,
+              fontFamily: 'var(--font-sans)',
+              backgroundColor: 'hsl(var(--muted)/0.4)',
+              padding: '16px',
+              borderRadius: 'var(--radius)',
+              border: '1px solid hsl(var(--border)/0.5)'
+            }}>
+              {agent.instructions || (agent.description && agent.description !== 'No description' && agent.description !== 'No instructions provided' ? agent.description : null) || <span className="text-muted italic">{t('noPromptProvided')}</span>}
+            </div>
           </div>
-        </div>
 
         {/* Skills & Delegations Grid */}
         <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '20px' }}>

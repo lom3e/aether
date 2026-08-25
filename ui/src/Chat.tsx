@@ -3,7 +3,6 @@ import { Send, Sparkles, Square, Plus } from 'lucide-react';
 import { ToastContext } from './toast';
 import { apiUrl, getSessionToken } from './api';
 import { useTranslation } from './i18n';
-import { useTheme } from './theme';
 import { WorkforcePresence } from './WorkforcePresence';
 import { MessageItem, type ChatMessage } from './MessageItem';
 import { ActivityFeed, type ActivityItem } from './ActivityFeed';
@@ -47,7 +46,6 @@ export function Chat({
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const showToast = useContext(ToastContext);
   const { t, language } = useTranslation();
-  const { isDark } = useTheme();
 
   // Load team info and command specs
   useEffect(() => {
@@ -709,7 +707,7 @@ export function Chat({
               marginBottom: '20px'
             }}>
               <img
-                src={isDark ? "/brand/logo_bianco.svg" : "/brand/logo_viola.svg"}
+                src="/brand/logo_viola.svg"
                 alt="Aether"
                 width="34"
                 height="34"

@@ -111,7 +111,7 @@ def test_dsk_02_c_to_l_isolated_clean_env_lifecycle(tmp_path):
             assert resp.status == 200
             data = json.loads(resp.read())
             assert data["status"] == "ok"
-            assert data["version"] in ["1.4.0", "1.5.0"]
+            assert data["version"] in ["1.4.0", "1.5.0", "1.6.0"]
             assert data["port"] == bound_port
 
         # 3. REST authentication verification (DSK-02-E)

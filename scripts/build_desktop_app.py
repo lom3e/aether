@@ -22,6 +22,8 @@ RESOURCES_DIR = TAURI_DIR / "resources"
 FROZEN_RUNTIME_DIR = BUILD_DIR / "aether-runtime"
 TAURI_APP_OUTPUT = TAURI_DIR / "target" / "release" / "bundle" / "macos" / "Aether.app"
 FINAL_APP_OUTPUT = BUILD_DIR / "Aether.app"
+VENV_PYTHON = REPO_ROOT / ".venv" / "bin" / "python"
+PYTHON_BIN = str(VENV_PYTHON) if VENV_PYTHON.exists() else sys.executable
 
 
 def run_command(cmd, cwd=REPO_ROOT, env=None):
@@ -49,7 +51,7 @@ def main():
     # 1. Generate App Icons from Source of Truth SVG
     print("\n--- 1. Generating App Icons from website/public/brand/favicon.svg ---")
     gen_icons_script = REPO_ROOT / "scripts" / "generate_app_icons.py"
-    run_command([sys.executable, str(gen_icons_script)])
+    run_command([PYTHON_BIN, str(gen_icons_script)])
 
     # 2. Build React UI
     print("\n--- 2. Building React Frontend UI Bundle ---")
@@ -67,7 +69,7 @@ def main():
     # 3. Build Python Standalone Runtime (PyInstaller onedir)
     print("\n--- 3. Freezing Standalone Python Runtime ---")
     build_py_script = REPO_ROOT / "scripts" / "build_python_runtime.py"
-    run_command([sys.executable, str(build_py_script)])
+    run_command([PYTHON_BIN, str(build_py_script)])
 
     # 4. Synchronize Sidecar to Tauri Resources Directory
     print("\n--- 4. Synchronizing Sidecar to Tauri Resources ---")
@@ -143,6 +145,16 @@ def main():
                     os.chmod(p, 0o755)
                 except Exception:
                     pass
+
+    # Ensure valid ad-hoc signature on the final exported app bundle
+    if sys.platform == "darwin":
+        print("\n--- Applying Ad-Hoc Code Signature to Aether.app ---")
+        try:
+            subprocess.run(["codesign", "--force", "--deep", "-s", "-", str(FINAL_APP_OUTPUT)], check=True)
+            subprocess.run(["codesign", "-vvv", "--deep", "--strict", str(FINAL_APP_OUTPUT)], check=True)
+            print("✓ Code signature verified successfully.")
+        except Exception as err:
+            print(f"WARNING: Codesign verification: {err}")
 
     total_size = sum(
         os.path.getsize(os.path.join(dirpath, f))

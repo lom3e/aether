@@ -1,7 +1,7 @@
 import { useState, useEffect, useRef } from 'react';
 import {
   Search, Plus, MessageSquare, Bot, Users, Database, Settings, ShoppingBag,
-  Moon, Sun, Globe, X, Sparkles, ArrowRight, Layers, Zap, Keyboard
+  Moon, Sun, Globe, X, Sparkles, ArrowRight, Layers, Zap, Keyboard, Puzzle
 } from 'lucide-react';
 import { useTranslation } from './i18n';
 import { useTheme } from './theme';
@@ -83,6 +83,12 @@ export function CommandPalette({
       label: t('navAutomations'),
       icon: <Zap size={16} />,
       run: () => { onNavigate('automations'); onClose(); }
+    },
+    {
+      id: 'go_skills',
+      label: t('navSkills'),
+      icon: <Puzzle size={16} />,
+      run: () => { onNavigate('skills'); onClose(); }
     },
     {
       id: 'go_settings',

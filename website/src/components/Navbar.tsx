@@ -6,12 +6,14 @@ import { Menu, X, ArrowRight, Sun, Moon } from "lucide-react";
 import { useLanguage } from "@/lib/i18n/context";
 import { useActiveLogo } from "@/lib/logo-context";
 import { useTheme } from "@/lib/theme-context";
+import { useGithubLatestRelease } from "@/lib/useGithubRelease";
 import { AetherLogo } from "./AetherLogo";
 
 export function Navbar() {
   const { lang, setLang, t } = useLanguage();
   const { activeLogo } = useActiveLogo();
   const { theme, resolvedTheme, setTheme, toggleTheme } = useTheme();
+  const { version: latestVersion } = useGithubLatestRelease();
   const [scrolled, setScrolled] = useState(false);
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
 
@@ -68,7 +70,7 @@ export function Navbar() {
               fontFamily: "var(--font-mono)",
             }}
           >
-            {t.nav.alphaLabel}
+            {latestVersion || t.nav.alphaLabel}
           </span>
         </Link>
 

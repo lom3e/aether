@@ -277,6 +277,18 @@ async def websocket_endpoint(websocket: WebSocket) -> None:
 
             broadcast({"type": "task_started", "session_id": session_id})
 
+            # Always resolve the latest active team from app.state or workspace
+            current_team = getattr(app.state, "team", None)
+            if current_team is not None:
+                team = current_team
+            elif workspace:
+                active_team_name = getattr(app.state, "active_team_name", None)
+                try:
+                    team = workspace.load_team(active_team_name)
+                    app.state.team = team
+                except Exception:
+                    pass
+
             # Intercept slash commands locally — NEVER send to external LLM provider
             dispatcher = get_default_command_dispatcher()
             if dispatcher.is_slash_command(content):
@@ -337,17 +349,29 @@ async def websocket_endpoint(websocket: WebSocket) -> None:
             model_name = team.config.default_model if (team and getattr(team, "config", None)) else "qwen3.5:9b"
 
             result = await asyncio.to_thread(team.run, content, session_id)
+
             agent_name = (result.metadata or {}).get("agent_name")
             if not agent_name:
                 entry = team.config.entry_agent() if (team and getattr(team, "config", None)) else None
                 agent_name = entry.name if entry else "Workforce"
 
+            executing_agent_cfg = (
+                next((a for a in team.config.agents if a.name == agent_name), None)
+                if (team and getattr(team, "config", None))
+                else None
+            )
+            expected_agent_model = (
+                executing_agent_cfg.model
+                if (executing_agent_cfg and executing_agent_cfg.model)
+                else model_name
+            )
+
             if result.success:
-                executed_model = (result.metadata or {}).get("provider_model") or model_name
+                executed_model = (result.metadata or {}).get("provider_model") or expected_agent_model
                 msg_metadata = {
                     "provider": prov_name,
                     "model": executed_model,
-                    "requested_model": model_name,
+                    "requested_model": expected_agent_model,
                 }
                 try:
                     if result.output:

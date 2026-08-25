@@ -317,13 +317,63 @@ def register_builtin_commands(registry: CommandRegistry) -> None:
                 data={"provider": current_prov, "model": current_model},
             )
 
-        new_model = ctx.args[0].strip()
-        ctx.team.config.default_model = new_model
+        apply_to_all = "--all" in ctx.args or "-a" in ctx.args
+        remaining_args = [a for a in ctx.args if a not in ("--all", "-a")]
+        if not remaining_args:
+            current_prov = ctx.team.config.default_provider
+            current_model = ctx.team.config.default_model
+            return CommandResult(
+                command="model",
+                success=True,
+                output=f"**Current Model**: `{current_model}` (Provider: `{current_prov}`)\n\nTo change model, run: `/model <model_name>` (e.g. `/model qwen3.5:9b` or `/model gpt-4o --all`).",
+                data={"provider": current_prov, "model": current_model},
+            )
+
+        new_model = remaining_args[0].strip()
+        current_prov = ctx.team.config.default_provider
+
+        # 1. Dynamically update live team runtime & member agents
+        ctx.team.set_model(new_model, apply_to_all_agents=apply_to_all)
+
+        # 2. Persist updated configuration to team.yaml in workspace
+        if ctx.workspace:
+            try:
+                from aether.team.loader import TeamLoader
+                active_team_name = getattr(ctx.app_state, "active_team_name", None) or ctx.team.config.name
+                try:
+                    yaml_path = ctx.workspace._resolve_team_yaml(active_team_name)
+                except Exception:
+                    yaml_path = ctx.workspace.teams_dir / f"{active_team_name}.yaml"
+                yaml_path.parent.mkdir(parents=True, exist_ok=True)
+                TeamLoader.to_yaml(ctx.team.config, yaml_path)
+            except Exception as err:
+                print(f"[handle_model] Warning: could not persist team YAML: {err}")
+
+        # 3. Synchronize app_state.team
+        if ctx.app_state is not None:
+            ctx.app_state.team = ctx.team
+
+        # Detailed breakdown
+        inheriting_count = sum(1 for a in ctx.team.config.agents if a.model is None)
+        overridden_count = sum(1 for a in ctx.team.config.agents if a.model is not None)
+        if apply_to_all:
+            status_note = f"\n*Applied to Team and all {len(ctx.team.config.agents)} agents (overrides cleared).*"
+        elif overridden_count > 0:
+            status_note = f"\n*{inheriting_count} agent(s) inheriting new model, {overridden_count} custom override(s) preserved. Use `/model {new_model} --all` to overwrite all overrides.*"
+        else:
+            status_note = f"\n*All {inheriting_count} agent(s) inheriting team default.*"
+
         return CommandResult(
             command="model",
             success=True,
-            output=f"🔄 **Model Updated**: Active workforce model set to `{new_model}`.",
-            data={"provider": ctx.team.config.default_provider, "model": new_model},
+            output=f"🔄 **Model Updated**: Active workforce model set to `{new_model}` (Provider: `{current_prov}`).{status_note}",
+            data={
+                "provider": current_prov,
+                "model": new_model,
+                "apply_to_all": apply_to_all,
+                "inheriting_agents": inheriting_count,
+                "overridden_agents": overridden_count,
+            },
         )
 
     registry.register(
@@ -382,7 +432,23 @@ def register_builtin_commands(registry: CommandRegistry) -> None:
                 output=f"ℹ️ **Fast Mode**: No lightweight fast model configured for provider `{current_prov}`.\nCurrent model: `{current_model}`.",
             )
 
-        ctx.team.config.default_model = fast_model
+        # 1. Update live team runtime
+        ctx.team.set_model(fast_model)
+
+        # 2. Persist to workspace team.yaml
+        if ctx.workspace:
+            try:
+                from aether.team.loader import TeamLoader
+                active_team_name = getattr(ctx.app_state, "active_team_name", None) or ctx.team.config.name
+                yaml_path = ctx.workspace.teams_dir / f"{active_team_name}.yaml"
+                yaml_path.parent.mkdir(parents=True, exist_ok=True)
+                TeamLoader.to_yaml(ctx.team.config, yaml_path)
+            except Exception:
+                pass
+
+        if ctx.app_state is not None:
+            ctx.app_state.team = ctx.team
+
         return CommandResult(
             command="fast",
             success=True,
@@ -637,30 +703,54 @@ def register_builtin_commands(registry: CommandRegistry) -> None:
                 return CommandResult(
                     command="tasks",
                     success=True,
-                    output=f"🛑 **Task Stopped**: Active task `{target_id}` was cancelled.",
+                    output=f"🛑 **Attività Interrotta**: L'esecuzione della sessione `{target_id}` è stata interrotta.",
                     data={"stopped_task": target_id},
                 )
             return CommandResult(
                 command="tasks",
                 success=False,
-                error=f"No active running task found with ID '{target_id}'.",
-                output=f"**Error**: No active running task found matching `{target_id}`.",
+                error=f"Nessuna attività in esecuzione trovata con ID '{target_id}'.",
+                output=f"⚠️ **Nessuna attività attiva trovata** per `{target_id}`.",
             )
 
         if not active_tasks:
             return CommandResult(
                 command="tasks",
                 success=True,
-                output="📋 **Active Tasks**: No background or workforce tasks currently executing (Idle).",
+                output="📋 **Active Tasks / Attività Workforce**: No background or workforce tasks currently executing (Idle).",
                 data={"active_tasks": []},
             )
 
-        lines = [f"### 📋 Active Tasks ({len(active_tasks)})\n"]
+        lines = [f"### 📋 Active Tasks & Workforce Operations ({len(active_tasks)})\n"]
         for tid, t in active_tasks.items():
-            status_str = "Running" if not t.done() else ("Cancelled" if t.cancelled() else "Completed")
-            lines.append(f"- **`{tid}`** — State: `{status_str}`")
+            status_badge = "🟢 Running / In Esecuzione" if not t.done() else ("🟡 Cancelled / Annullato" if t.cancelled() else "✅ Completed / Completato")
 
-        lines.append("\nTo stop a task, run: `/tasks stop <task_id>`")
+            title = tid
+            details = []
+            if ctx.workspace:
+                try:
+                    conv = ctx.workspace.conversations.get(tid)
+                    if conv:
+                        title = conv.get("title") or tid
+                        team = conv.get("team_name")
+                        if team:
+                            details.append(f"Team: **{team}**")
+                        last_msg = conv.get("last_message")
+                        if last_msg:
+                            snippet = (last_msg[:60] + "...") if len(last_msg) > 60 else last_msg
+                            details.append(f"Prompt: *\"{snippet}\"*")
+                except Exception:
+                    pass
+
+            is_current = " *(current conversation)*" if tid == (ctx.session_id or ctx.conversation_id) else ""
+            lines.append(f"- 📌 **{title}**{is_current}")
+            lines.append(f"  • State / Stato: {status_badge}")
+            if details:
+                for d in details:
+                    lines.append(f"  • {d}")
+            lines.append(f"  • Task ID: `{tid}`\n")
+
+        lines.append("💡 *To stop a task / Per fermare un'attività:* `/tasks stop` *(for current chat)* or `/tasks stop <task_id>`")
         return CommandResult(command="tasks", success=True, output="\n".join(lines), data={"active_tasks": list(active_tasks.keys())})
 
     registry.register(

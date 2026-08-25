@@ -7,6 +7,46 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [v1.6.0] - 2026-08-25
+
+### Minor Release: AI Workforce Auto-Architect, Model Hierarchy, Visual Form Design System & Interactive Topology
+
+This milestone release introduces the autonomous **Auto-Architect** system for natural-language workforce synthesis, seamless AI Agent drafting, strict model inheritance vs override hierarchy, unified visual form controls, and a fully interactive, non-truncating Team Topology visualizer.
+
+### Added
+- **AI Workforce Auto-Architect (`src/aether/intelligence/architect.py`, `ui/src/AutoArchitectModal.tsx`)**:
+  - Autonomous multi-agent workforce blueprint generator from natural-language mission briefs (`POST /api/architect/workforce`).
+  - Interactive multi-step preview and configuration modal: Mission Brief, Team & Agent Customization, Live Visual Topology, and Automated Tool/Skill Recommendations.
+  - One-click atomic workspace application (`POST /api/architect/apply`) supporting direct creation and automatic active team switching.
+- **AI Agent Draft ("✨ Crea con l'IA") & Magic Prompt Enhancer (`ui/src/AgentBuilder.tsx`, `ui/src/MagicEnhancePromptButton.tsx`)**:
+  - Natural-language single agent synthesis (`POST /api/architect/agent-draft`) that pre-populates role, system prompt instructions, recommended skills, tools, and delegation mapping.
+  - Interactive editing flow: all AI-generated draft fields remain 100% editable prior to saving.
+  - One-click Magic Prompt Enhancer (`POST /api/architect/enhance-prompt`) converting informal agent instructions into structured, production-ready system prompts with clear operational guidelines.
+- **Model Hierarchy & Explicit Overrides (`src/aether/team/`, `ui/src/ModelSelector.tsx`)**:
+  - Semantic separation between inherited team default models (`model: null`) and explicit agent overrides (`model: "provider:model"`).
+  - Centralized `ModelSelector` dropdown with provider-aware dynamic model lists and "Eredita dal Team" default option.
+  - Responsive Team model change dialog offering granular propagation choices: *"Solo Team"* (preserves individual overrides) vs *"Applica a tutti"* (resets workforce to inherited default).
+- **Unified Visual Form Design System (`ui/src/VisualSelect.tsx`, `ui/src/DelegationSelector.tsx`, `ui/src/index.css`)**:
+  - `VisualSelect`: live interactive icon and identity color pickers with real-time visual previews.
+  - `DelegationSelector`: click-to-toggle delegation pills with identity badges, roles, and status indicators.
+  - Standardized `.form-select`, `.form-input`, `.form-row` components with consistent 38px touch targets, refined focus rings, and custom dropdown chevrons across Agent, Team, Automation, Auto-Architect, and Settings views.
+- **Interactive Team Topology Visualizer (`ui/src/TeamTopology.tsx`)**:
+  - Complete vector overhaul with adaptive dynamic node sizing eliminating all name and role text truncation.
+  - Smooth pan via mouse dragging with responsive grab/grabbing cursors.
+  - Floating control toolbar with dedicated Zoom In (`+`), Zoom Out (`−`), Fit-to-View (`⤢`), and Reset 100% (`↺`) actions.
+  - Natural mouse wheel page scrolling restored across parent layouts without canvas event interference.
+- **Team Deletion Lifecycle (`src/aether/server/routes.py`, `ui/src/Teams.tsx`)**:
+  - Endpoint `DELETE /api/teams/{team_name}` with safety guardrails protecting the last remaining team in a workspace.
+  - Automatic active team fallback switching and instant UI reactivity.
+
+### Fixed
+- **Prompt Persistence on Agent Save/Edit**:
+  - Fixed runtime agent serialization in `GET /api/agents` to reliably preserve and display `instructions` and `description` across reload and edits.
+- **Brand Asset Integrity & Theme Consistency**:
+  - Verified bit-for-bit SHA-256 asset integrity across desktop UI, website, and backend static distributions.
+
+---
+
 ## [v1.5.0] - 2026-08-24
 
 ### Minor Release: Multi-Agent Workforce Experience, Automations & Desktop Platform Release

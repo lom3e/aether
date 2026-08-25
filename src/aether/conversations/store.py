@@ -15,15 +15,54 @@ from typing import Any
 
 
 def generate_smart_title(content: str) -> str:
-    """Generate a clean, human-readable title from a prompt message."""
+    """Generate a clean, human-readable title from a prompt message or command."""
     if not content or not content.strip():
         return "New Task"
-    clean = content.strip().splitlines()[0].strip()
-    clean = re.sub(r"^[#\*\-–—\d\.\s]+", "", clean).strip()
-    if len(clean) > 48:
-        words = clean[:45].rsplit(" ", 1)
-        clean = (words[0] if len(words) > 1 else clean[:45]) + "..."
-    return clean.capitalize() if clean else "New Task"
+
+    clean = content.strip()
+
+    # Check for slash commands
+    if clean.startswith("/skills"):
+        return "Skills & Capabilities"
+    elif clean.startswith("/tools"):
+        return "Tools & Integrations"
+    elif clean.startswith("/plan"):
+        rest = clean[5:].strip()
+        return f"Plan: {rest[:32]}..." if len(rest) > 32 else (f"Plan: {rest}" if rest else "Strategic Planning")
+    elif clean.startswith("/search"):
+        rest = clean[7:].strip()
+        return f"Search: {rest[:32]}..." if len(rest) > 32 else (f"Search: {rest}" if rest else "Web Search")
+    elif clean.startswith("/team") or clean.startswith("/workforce"):
+        return "Team Coordination"
+    elif clean.startswith("/knowledge") or clean.startswith("/kb"):
+        return "Knowledge Consultation"
+    elif clean.startswith("/status") or clean.startswith("/health"):
+        return "System Status"
+    elif clean.startswith("/help"):
+        return "Platform Assistance"
+
+    # Clean first line
+    first_line = clean.splitlines()[0].strip()
+    first_line = re.sub(r"^[#\*\-–—\d\.\s>]+", "", first_line).strip()
+
+    # Strip common conversational prefixes (Italian and English)
+    prefixes = [
+        r"^(puoi\s+(per\s+favore\s+)?(aiutarmi\s+a\s+|fare\s+|scrivere\s+|creare\s+|analizzare\s+|spiegarmi\s+|trovare\s+|controllare\s+))",
+        r"^(vorrei\s+(che\s+tu\s+)?(creassi\s+|scrivessi\s+|facessi\s+|analizzassi\s+|trovassi\s+|sapere\s+))",
+        r"^(come\s+(posso\s+|si\s+fa\s+a\s+|posso\s+fare\s+per\s+))",
+        r"^(can\s+you\s+(please\s+)?(help\s+me\s+to\s+|write\s+|create\s+|analyze\s+|explain\s+|find\s+|check\s+))",
+        r"^(i\s+would\s+like\s+(you\s+to\s+|to\s+))",
+        r"^(how\s+(can\s+i\s+|to\s+|do\s+i\s+))",
+        r"^(please\s+)",
+    ]
+    for p in prefixes:
+        first_line = re.sub(p, "", first_line, flags=re.IGNORECASE).strip()
+
+    if len(first_line) > 42:
+        words = first_line[:40].rsplit(" ", 1)
+        first_line = (words[0] if len(words) > 1 else first_line[:40]) + "..."
+
+    return first_line.capitalize() if first_line else "New Task"
 
 
 from aether.core.sqlite import get_sqlite_connection

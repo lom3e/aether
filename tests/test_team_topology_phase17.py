@@ -47,8 +47,9 @@ def test_team_topology_source_files_exist():
     content = topo_tsx.read_text(encoding="utf-8")
     assert "export function TeamTopology" in content
     assert "<svg" in content
-    assert "arrow-manager" in content
-    assert "nodePositions" in content
+    assert "handleFitToView" in content
+    assert "handleMouseDown" in content
+    assert "calcNodeWidth" in content
 
     teams_content = teams_tsx.read_text(encoding="utf-8")
     assert "from './TeamTopology'" in teams_content
@@ -108,11 +109,11 @@ def test_team_topology_e2e_rendering(browser_context):
         page.wait_for_selector(".grid-container, .empty-state", timeout=5000)
 
         # Check if team cards with SVG topology are rendered
-        topo_svg = page.locator(".team-topology-container svg").first
+        topo_svg = page.locator(".team-topology-viewport svg, .team-topology-container svg").first
         if topo_svg.is_visible():
             expect(topo_svg).to_be_visible(timeout=3000)
             # Check for manager and specialist nodes in SVG
-            nodes = page.locator(".team-topology-container svg g[transform]")
+            nodes = page.locator(".team-topology-viewport svg g[transform], .team-topology-container svg g[transform]")
             assert nodes.count() >= 1
 
     page.close()

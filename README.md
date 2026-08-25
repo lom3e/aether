@@ -222,14 +222,15 @@ If port 8000 is occupied by another application:
 | **Multi-Scope Knowledge Base**| **IMPLEMENTED** | Isolated System (built-in), Workspace (shared), and Project scopes with Drag & Drop |
 | **Multiple Conversations** | **IMPLEMENTED** | Persistent multi-turn chat threads, timestamps, and status tracking |
 | **Live WebSocket Bridge** | **IMPLEMENTED** | Real-time incremental token streaming, operational activity feeds & tool visibility |
-| **Human-in-the-Loop (HITL)** | **IMPLEMENTED** | `RequireApproval` and `RequireInput` interactive interrupt cards |
-| **Official Workforce Presets**| **IMPLEMENTED** | 4 ready-to-run workforces: Starter, Research, Developer, and Business Operations |
-| **Team Topology Visualizer** | **IMPLEMENTED** | Interactive SVG graph of workforce relationships and delegation paths |
+| **AI Workforce Auto-Architect**| **IMPLEMENTED** | Autonomous multi-agent workforce synthesis from natural language mission briefs |
+| **AI Agent Draft & Enhancer** | **IMPLEMENTED** | Single agent AI synthesis ("✨ Crea con l'IA") & Magic Prompt Enhancer |
+| **Model Hierarchy & Overrides**| **IMPLEMENTED** | Team default inheritance with explicit agent overrides and bulk propagation |
+| **Team Topology Visualizer** | **IMPLEMENTED** | Interactive non-truncating SVG graph with dynamic node sizing, pan & zoom |
 | **Automations & Scheduler** | **IMPLEMENTED** | Multi-step DAG pipelines, Cron schedules, File Watchers, Webhooks & Deliverables |
 | **Keyboard Shortcuts Manager** | **IMPLEMENTED** | Global centralized keybindings (`⌘K` Command Palette, `⌘/` Help, `⌘1`-`⌘6` Navigation) |
 | **Native Desktop Packaging** | **IMPLEMENTED** | macOS `.dmg` and Windows `.exe` NSIS installer via Tauri/Rust + PyInstaller sidecar |
 | **Ollama Hardening** | **IMPLEMENTED** | Default 120s timeout for local models + cloud provider isolation |
-| **Visual Web & Desktop UI** | **IMPLEMENTED** | SPA interface (`aether ui` or Desktop app), dark/light theme, bilingue i18n (EN/IT) |
+| **Visual Web & Desktop UI** | **IMPLEMENTED** | SPA interface (`aether ui` or Desktop app), dark/light theme, bilingue i18n (EN/IT), unified form controls |
 | **Community Marketplace** | **FOUNDATION** | Catalog architecture for discovering and installing custom agent packs |
 
 ---
@@ -316,7 +317,7 @@ Aether supports both offline local models and cloud providers:
 
 Run the test suite:
 ```bash
-# Run 680+ backend, E2E, and desktop packaging tests
+# Run 710+ backend, E2E, and desktop packaging tests
 pytest
 
 # Build and validate frontend SPA

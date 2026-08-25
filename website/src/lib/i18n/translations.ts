@@ -1,3 +1,5 @@
+import { AETHER_VERSION, AETHER_RELEASE_TAG } from "../version";
+
 export const translations = {
   it: {
     nav: {
@@ -7,7 +9,7 @@ export const translations = {
       faq: "FAQ",
       cta: "Prova Aether",
       tryAether: "Scarica Aether",
-      alphaLabel: "v1.4.0",
+      alphaLabel: AETHER_VERSION,
     },
     hero: {
       badge: "Open Source AI Workforce Platform",
@@ -252,13 +254,13 @@ export const translations = {
       title: "Costruisci il tuo team AI oggi.",
       subtitle: "Scarica l'applicazione nativa per macOS o scopri il codice sorgente aperto su GitHub.",
       tryBtn: "Scarica per macOS (.dmg)",
-      macBadge: "macOS 13+ (Apple Silicon M1/M2/M3/M4)",
+      macBadge: "macOS 13+ (Apple Silicon)",
       windowsBtn: "Windows (Coming Soon)",
       windowsNotice: "Disponibile in Q4 2026",
       githubBtn: "Visualizza su GitHub",
       ctaGithub: "Scarica da GitHub",
       ctaDocs: "Leggi la Documentazione",
-      releaseTag: "Release v1.4.0 Alpha",
+      releaseTag: AETHER_RELEASE_TAG,
     },
     footer: {
       desc: "Aether è la piattaforma open source per creare, gestire e coordinare squadre di collaboratori AI specializzati.",
@@ -287,7 +289,7 @@ export const translations = {
       faq: "FAQ",
       cta: "Try Aether",
       tryAether: "Download Aether",
-      alphaLabel: "v1.4.0",
+      alphaLabel: AETHER_VERSION,
     },
     hero: {
       badge: "Open Source AI Workforce Platform",
@@ -532,13 +534,13 @@ export const translations = {
       title: "Build your AI workforce today.",
       subtitle: "Download the native macOS desktop app or explore the open source repository on GitHub.",
       tryBtn: "Download for macOS (.dmg)",
-      macBadge: "macOS 13+ (Apple Silicon M1/M2/M3/M4)",
+      macBadge: "macOS 13+ (Apple Silicon)",
       windowsBtn: "Windows (Coming Soon)",
       windowsNotice: "Coming in Q4 2026",
       githubBtn: "View on GitHub",
       ctaGithub: "Download on GitHub",
       ctaDocs: "Read Documentation",
-      releaseTag: "Release v1.4.0 Alpha",
+      releaseTag: AETHER_RELEASE_TAG,
     },
     footer: {
       desc: "Aether is the open source platform to build, manage, and coordinate teams of specialized AI agents.",

@@ -137,21 +137,19 @@ export function AetherLogo({
   }
 
   // 4. Mark Glyph Source selection based on mapping:
-  // - Light mode → logo_nero.svg
-  // - Dark mode → logo_bianco.svg
-  // - Brand/accent → logo_viola.svg
-  let markSrc = "/brand/logo_nero.svg";
-  let markAspect = 255.72 / 235.05; // ~1.088
+  // Official Purple Brand Mark (Fixed for both Light and Dark themes)
+  let markSrc = "/brand/logo_viola.svg";
+  let markAspect = 382.73 / 353.66; // ~1.082
 
-  if (effectiveMode === "purple") {
-    markSrc = "/brand/logo_viola.svg";
-    markAspect = 382.73 / 353.66; // ~1.082
-  } else if (effectiveMode === "dark") {
+  if (effectiveMode === "dark" && colorMode === "dark") {
     markSrc = "/brand/logo_bianco.svg";
-    markAspect = 255.72 / 235.05; // ~1.088
-  } else {
+    markAspect = 255.72 / 235.05;
+  } else if (effectiveMode === "light" && colorMode === "light") {
     markSrc = "/brand/logo_nero.svg";
-    markAspect = 255.72 / 235.05; // ~1.088
+    markAspect = 255.72 / 235.05;
+  } else {
+    markSrc = "/brand/logo_viola.svg";
+    markAspect = 382.73 / 353.66;
   }
 
   const markHeight = size;

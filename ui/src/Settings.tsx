@@ -9,6 +9,7 @@ import { useTranslation } from './i18n';
 import { useTheme } from './theme';
 import { TopHeader } from './TopHeader';
 import { useKeyboardShortcuts, CATEGORY_ORDER } from './shortcuts';
+import { ModelSelector } from './ModelSelector';
 
 interface SettingsProps {
   onWorkspaceSwitched?: () => void;
@@ -20,12 +21,12 @@ export function Settings({ onWorkspaceSwitched }: SettingsProps) {
   // Provider Settings State
   const [provider, setProvider] = useState('ollama');
   const [model, setModel] = useState('qwen3.5:9b');
+  const [applyToAllAgents, setApplyToAllAgents] = useState(false);
   const [timeout, setTimeoutVal] = useState<number>(120);
   const [apiKey, setApiKey] = useState('');
   const [status, setStatus] = useState<any>({});
   const [saving, setSaving] = useState(false);
   const [testing, setTesting] = useState(false);
-  const [availableModels, setAvailableModels] = useState<string[]>([]);
 
   // Workspace Settings State
   const [workspaceInfo, setWorkspaceInfo] = useState<any>(null);
@@ -76,20 +77,6 @@ export function Settings({ onWorkspaceSwitched }: SettingsProps) {
   }, []);
 
   useEffect(() => {
-    fetch(apiUrl(`/api/settings/provider/models?provider=${provider}`))
-      .then(res => res.json())
-      .then(data => {
-        if (data.models && data.models.length > 0) {
-          setAvailableModels(data.models);
-          if (!data.models.includes(model)) {
-            setModel(data.models[0]);
-          }
-        } else {
-          setAvailableModels([]);
-        }
-      })
-      .catch(console.error);
-
     if (provider === 'ollama') {
       setTimeoutVal(120);
     } else {
@@ -107,7 +94,8 @@ export function Settings({ onWorkspaceSwitched }: SettingsProps) {
           provider,
           model,
           timeout: Number(timeout),
-          api_key: apiKey || null
+          api_key: apiKey || null,
+          apply_to_all_agents: applyToAllAgents,
         })
       });
       if (res.ok) {
@@ -547,19 +535,27 @@ export function Settings({ onWorkspaceSwitched }: SettingsProps) {
               </div>
 
               <div>
-                <label className="form-label">{t('model')}</label>
-                {availableModels.length > 0 ? (
-                  <select className="form-select" value={model} onChange={e => setModel(e.target.value)}>
-                    {availableModels.map(m => <option key={m} value={m}>{m}</option>)}
-                  </select>
-                ) : (
-                  <input
-                    type="text"
-                    className="form-input"
-                    value={model}
-                    onChange={e => setModel(e.target.value)}
-                  />
-                )}
+                <ModelSelector
+                  provider={provider}
+                  value={model}
+                  teamDefaultModel={model}
+                  onChange={newModel => setModel(newModel || 'qwen3.5:9b')}
+                  isTeamLevel={true}
+                  label={t('model')}
+                />
+              </div>
+
+              <div style={{ display: 'flex', alignItems: 'center', gap: '8px', padding: '6px 0' }}>
+                <input
+                  type="checkbox"
+                  id="settings-apply-all-checkbox"
+                  checked={applyToAllAgents}
+                  onChange={e => setApplyToAllAgents(e.target.checked)}
+                  style={{ cursor: 'pointer', width: '16px', height: '16px' }}
+                />
+                <label htmlFor="settings-apply-all-checkbox" style={{ fontSize: '13px', cursor: 'pointer', color: 'hsl(var(--muted-fg))', userSelect: 'none' }}>
+                  {t('applyToAllAgents') || 'Applica al Team e a tutti gli agenti'} ({t('applyToAllAgentsDesc') || 'Rimuovi tutti gli override individuali'})
+                </label>
               </div>
 
               <div>

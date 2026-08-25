@@ -1,14 +1,15 @@
-import { useState, useEffect, useRef } from 'react';
+import { useState, useEffect, useRef, useContext } from 'react';
 import {
   Sparkles, MessageSquare, Bot, Users, Database, Settings, ShoppingBag,
   Plus, ChevronLeft, Moon, Sun, Globe, Trash2, Search,
   ChevronDown, MoreVertical, Archive, Copy, Edit2, Check,
-  Pin, Folder, GitBranch, ExternalLink, RefreshCw, X, Zap
+  Pin, Folder, GitBranch, ExternalLink, RefreshCw, X, Zap, Puzzle
 } from 'lucide-react';
 import { useTranslation } from './i18n';
 import { useTheme } from './theme';
 import { apiUrl } from './api';
 import { Tooltip } from './Tooltip';
+import { ToastContext } from './toast';
 
 interface SidebarProps {
   currentView: string;
@@ -72,7 +73,9 @@ export function Sidebar({
 
   const dropdownRef = useRef<HTMLDivElement>(null);
   const convMenuRef = useRef<HTMLDivElement>(null);
+  const projectSectionRef = useRef<HTMLDivElement>(null);
 
+  const showToast = useContext(ToastContext);
   const { t, language, setLanguage } = useTranslation();
   const { theme, setTheme, isDark } = useTheme();
 
@@ -124,11 +127,14 @@ export function Sidebar({
   // Click outside listener for popovers
   useEffect(() => {
     const handleClickOutside = (e: MouseEvent) => {
-      if (dropdownRef.current && !dropdownRef.current.contains(e.target as Node)) {
+      const target = e.target as Node;
+      if (dropdownRef.current && !dropdownRef.current.contains(target)) {
         setIsWsDropdownOpen(false);
       }
-      if (convMenuRef.current && !convMenuRef.current.contains(e.target as Node)) {
+      if (convMenuRef.current && !convMenuRef.current.contains(target)) {
         setActiveMenuConvId(null);
+      }
+      if (projectSectionRef.current && !projectSectionRef.current.contains(target)) {
         setActiveProjectMenuId(null);
       }
     };
@@ -151,9 +157,11 @@ export function Sidebar({
         setNewProjectName('');
         setIsCreatingProject(false);
         fetchProjects();
+        showToast('Project created successfully', 'success');
       }
     } catch (err) {
       console.error('Failed to create project', err);
+      showToast('Failed to create project', 'error');
     }
   };
 
@@ -171,9 +179,13 @@ export function Sidebar({
       if (res.ok) {
         setEditingProjectId(null);
         fetchProjects();
+        showToast('Project renamed', 'success');
+      } else {
+        showToast('Error updating project name', 'error');
       }
     } catch (err) {
       console.error('Failed to rename project', err);
+      showToast('Failed to rename project', 'error');
     }
   };
 
@@ -186,9 +198,13 @@ export function Sidebar({
         if (selectedProjectId === id) setSelectedProjectId(null);
         fetchProjects();
         if (onRefreshConversations) onRefreshConversations();
+        showToast('Project deleted', 'info');
+      } else {
+        showToast('Failed to delete project', 'error');
       }
     } catch (err) {
       console.error('Failed to delete project', err);
+      showToast('Failed to delete project', 'error');
     }
   };
 
@@ -455,7 +471,7 @@ export function Sidebar({
                   flexShrink: 0
                 }}>
                   <img
-                    src={isDark ? "/brand/logo_bianco.svg" : "/brand/logo_viola.svg"}
+                    src="/brand/logo_viola.svg"
                     alt="Aether Logo"
                     width="18"
                     height="18"
@@ -506,7 +522,7 @@ export function Sidebar({
                 aria-label="Expand Sidebar"
               >
                 <img
-                  src={isDark ? "/brand/logo_bianco.svg" : "/brand/logo_viola.svg"}
+                  src="/brand/logo_viola.svg"
                   alt="Aether Logo"
                   width="26"
                   height="26"
@@ -669,7 +685,7 @@ export function Sidebar({
           </div>
 
           {/* Projects Section */}
-          <div>
+          <div ref={projectSectionRef}>
             {!collapsed && (
               <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '2px 8px', marginBottom: '4px' }}>
                 <span style={{ fontSize: '10px', fontWeight: 600, color: 'hsl(var(--muted-fg))', textTransform: 'uppercase', letterSpacing: '0.05em' }}>
@@ -785,21 +801,24 @@ export function Sidebar({
                     )}
 
                     {isMenuOpen && !collapsed && (
-                      <div style={{
-                        position: 'absolute',
-                        right: '4px',
-                        top: '100%',
-                        backgroundColor: 'hsl(var(--card))',
-                        border: '1px solid hsl(var(--border))',
-                        borderRadius: '8px',
-                        boxShadow: '0 10px 25px rgba(0,0,0,0.3)',
-                        padding: '4px',
-                        zIndex: 50,
-                        width: '140px',
-                        display: 'flex',
-                        flexDirection: 'column',
-                        gap: '2px'
-                      }}>
+                      <div
+                        onMouseDown={e => e.stopPropagation()}
+                        style={{
+                          position: 'absolute',
+                          right: '4px',
+                          top: '100%',
+                          backgroundColor: 'hsl(var(--card))',
+                          border: '1px solid hsl(var(--border))',
+                          borderRadius: '8px',
+                          boxShadow: '0 10px 25px rgba(0,0,0,0.3)',
+                          padding: '4px',
+                          zIndex: 50,
+                          width: '150px',
+                          display: 'flex',
+                          flexDirection: 'column',
+                          gap: '2px'
+                        }}
+                      >
                         <button
                           className="btn btn-ghost"
                           style={{ width: '100%', justifyContent: 'flex-start', padding: '5px 8px', fontSize: '12px' }}
@@ -820,7 +839,7 @@ export function Sidebar({
                             setActiveProjectMenuId(null);
                           }}
                         >
-                          <Edit2 size={12} /> Rename
+                          <Edit2 size={12} /> {t('rename')}
                         </button>
                         <button
                           className="btn btn-ghost"
@@ -831,7 +850,7 @@ export function Sidebar({
                             handleDeleteProject(p.id);
                           }}
                         >
-                          <Trash2 size={12} /> Delete
+                          <Trash2 size={12} /> {t('delete')}
                         </button>
                       </div>
                     )}
@@ -1127,6 +1146,17 @@ export function Sidebar({
                 >
                   <Zap size={15} />
                   {!collapsed && <span>{t('navAutomations')}</span>}
+                </button>
+              </Tooltip>
+
+              <Tooltip content={t('navSkills')} position={collapsed ? 'right' : 'top'} disabled={!collapsed}>
+                <button
+                  className={`btn btn-ghost ${currentView === 'skills' ? 'active' : ''}`}
+                  style={{ width: '100%', justifyContent: collapsed ? 'center' : 'flex-start', padding: '7px 8px', fontSize: '13px' }}
+                  onClick={() => onNavigate('skills')}
+                >
+                  <Puzzle size={15} />
+                  {!collapsed && <span>{t('navSkills')}</span>}
                 </button>
               </Tooltip>
             </div>

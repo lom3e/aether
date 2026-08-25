@@ -23,6 +23,9 @@ BUILD_DESKTOP_SCRIPT = SCRIPTS_DIR / "build_desktop_app.py"
 APP_OUTPUT = BUILD_DIR / "Aether.app"
 DMG_OUTPUT = BUILD_DIR / "Aether.dmg"
 DMG_STAGING_DIR = BUILD_DIR / "dmg_staging"
+WEBSITE_DOWNLOADS_DIR = REPO_ROOT / "website" / "public" / "downloads"
+VENV_PYTHON = REPO_ROOT / ".venv" / "bin" / "python"
+PYTHON_BIN = str(VENV_PYTHON) if VENV_PYTHON.exists() else sys.executable
 
 
 def run_command(cmd, cwd=REPO_ROOT, env=None):
@@ -55,6 +58,13 @@ def create_dmg() -> Path:
     staging_app = DMG_STAGING_DIR / "Aether.app"
     print(f"Staging Aether.app -> {staging_app}...")
     shutil.copytree(APP_OUTPUT, staging_app, symlinks=True)
+
+    # Ensure valid ad-hoc signature on staging app
+    try:
+        subprocess.run(["codesign", "--force", "--deep", "-s", "-", str(staging_app)], check=True)
+        subprocess.run(["codesign", "-vvv", "--deep", "--strict", str(staging_app)], check=True)
+    except Exception as err:
+        print(f"WARNING: Codesign on staging app: {err}")
 
     # 2. Create Applications symlink for drag-and-drop installer UX
     staging_apps_link = DMG_STAGING_DIR / "Applications"
@@ -95,7 +105,7 @@ def validate_distribution():
 
     assert plist_data.get("CFBundleIdentifier") == "com.aether.desktop"
     assert plist_data.get("CFBundleDisplayName") == "Aether"
-    assert plist_data.get("CFBundleShortVersionString") == "1.5.0"
+    assert plist_data.get("CFBundleShortVersionString") in ["1.5.0", "1.6.0"]
 
     # Validate DMG by mounting temporarily
     print("Testing DMG mount integrity...")
@@ -138,12 +148,19 @@ def main():
     print("=" * 70)
 
     # Step 1: Build Aether.app
-    run_command([sys.executable, str(BUILD_DESKTOP_SCRIPT)])
+    run_command([PYTHON_BIN, str(BUILD_DESKTOP_SCRIPT)])
 
     # Step 2: Create Aether.dmg
     create_dmg()
 
-    # Step 3: Validate
+    # Step 3: Sync DMG to website public downloads for local web serving
+    if WEBSITE_DOWNLOADS_DIR.exists():
+        website_dmg = WEBSITE_DOWNLOADS_DIR / "Aether.dmg"
+        print(f"\n[DIST STEP] Syncing {DMG_OUTPUT} -> {website_dmg}...")
+        shutil.copy2(DMG_OUTPUT, website_dmg)
+        print("✓ Website downloads DMG updated.")
+
+    # Step 4: Validate
     validate_distribution()
 
 

@@ -4,9 +4,11 @@ import React from "react";
 import { Download, Apple, Clock } from "lucide-react";
 import { GithubIcon } from "@/components/icons/GithubIcon";
 import { useLanguage } from "@/lib/i18n/context";
+import { useGithubLatestRelease } from "@/lib/useGithubRelease";
 
 export function AlphaCTA() {
   const { t } = useLanguage();
+  const { releaseTag, releaseUrl } = useGithubLatestRelease();
 
   return (
     <section
@@ -23,17 +25,25 @@ export function AlphaCTA() {
         <div style={{ maxWidth: 780, margin: "0 auto" }}>
           {/* Release Tag Pill */}
           <div style={{ display: "inline-flex", alignItems: "center", gap: 8, marginBottom: 16 }}>
-            <span
-              className="badge-pill active"
-              style={{
-                padding: "4px 12px",
-                fontSize: "0.8125rem",
-                fontFamily: "var(--font-mono)",
-                fontWeight: 600,
-              }}
+            <a
+              href={releaseUrl}
+              target="_blank"
+              rel="noreferrer"
+              style={{ textDecoration: "none" }}
             >
-              {t.alpha.releaseTag || "Release v1.4.0 Alpha"}
-            </span>
+              <span
+                className="badge-pill active"
+                style={{
+                  padding: "4px 12px",
+                  fontSize: "0.8125rem",
+                  fontFamily: "var(--font-mono)",
+                  fontWeight: 600,
+                  cursor: "pointer",
+                }}
+              >
+                {releaseTag || t.alpha.releaseTag || "Release v1.5.0"}
+              </span>
+            </a>
           </div>
 
           <h2

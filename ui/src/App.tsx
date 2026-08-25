@@ -6,6 +6,7 @@ import { Knowledge } from './Knowledge';
 import { Settings } from './Settings';
 import { Teams } from './Teams';
 import { Automations } from './Automations';
+import { Skills } from './Skills';
 import { Home } from './Home';
 import { Marketplace } from './Marketplace';
 import { AgentProfile } from './AgentProfile';
@@ -291,6 +292,7 @@ function MainApp() {
         {currentView === 'teams' && <Teams />}
         {currentView === 'knowledge' && <Knowledge />}
         {currentView === 'automations' && <Automations />}
+        {currentView === 'skills' && <Skills navigate={navigate} />}
         {currentView === 'settings' && <Settings onWorkspaceSwitched={handleWorkspaceSwitched} />}
         {currentView === 'marketplace' && <Marketplace />}
       </div>

@@ -656,6 +656,7 @@ class ProviderSettings(BaseModel):
     model: str = Field(min_length=1, max_length=200)
     api_key: str | None = None
     timeout: float | None = None
+    apply_to_all_agents: bool = False
 
 @router.get("/settings/provider")
 async def get_provider_settings(request: Request):
@@ -792,8 +793,6 @@ async def save_provider_settings(request: Request, data: ProviderSettings):
 
     # Update Team default provider
     if team:
-        team.config.default_provider = data.provider
-        team.config.default_model = data.model
         if data.timeout is not None:
             if not isinstance(team.config.metadata, dict):
                 team.config.metadata = {}
@@ -801,6 +800,12 @@ async def save_provider_settings(request: Request, data: ProviderSettings):
                 team.config.metadata["provider_timeouts"] = {}
             team.config.metadata["provider_timeouts"][data.provider] = data.timeout
             team.config.metadata["timeout"] = data.timeout
+
+        team.set_provider(
+            data.provider,
+            data.model,
+            apply_to_all_agents=data.apply_to_all_agents,
+        )
 
         # Save team to yaml
         from aether.team.loader import TeamLoader
@@ -985,10 +990,12 @@ async def get_agents(request: Request):
         config = team.config.get_agent(a.name)
         agent_skills = [s.name for s in a.skills] if getattr(a, "skills", None) else (config.skills if config else [])
         agent_tools = a.available_tools() if hasattr(a, "available_tools") else (config.tools if config else [])
+        instructions_text = (config.instructions if config and config.instructions else (a.metadata.get("system_prompt") if hasattr(a, "metadata") and isinstance(a.metadata, dict) else "")) or ""
         agents.append({
             "name": a.name,
             "role": a.role,
-            "description": getattr(a, 'system_prompt', None) or "No description",
+            "instructions": instructions_text,
+            "description": instructions_text or "No instructions provided",
             "skills": agent_skills,
             "tools": agent_tools,
             "tool_count": len(agent_tools),
@@ -1043,12 +1050,15 @@ async def create_agent(request: Request, data: AgentPayload):
     from aether.team.config import AgentConfig, Relationship
     rels = [Relationship(type="delegates_to", target=t) for t in data.delegates_to]
 
+    model_val = data.model.strip() if (data.model and str(data.model).strip() and str(data.model).strip().lower() != "inherit") else None
+    prov_val = data.provider.strip() if (data.provider and str(data.provider).strip()) else None
+
     new_agent = AgentConfig(
         name=data.name,
         role=data.role,
         instructions=data.instructions or "",
-        provider=data.provider,
-        model=data.model,
+        provider=prov_val,
+        model=model_val,
         icon=data.icon,
         color=data.color,
         skills=data.skills,
@@ -1107,11 +1117,14 @@ async def update_agent(request: Request, name: str, data: AgentPayload):
     from aether.team.config import Relationship
     rels = [Relationship(type="delegates_to", target=t) for t in data.delegates_to]
 
+    model_val = data.model.strip() if (data.model and str(data.model).strip() and str(data.model).strip().lower() != "inherit") else None
+    prov_val = data.provider.strip() if (data.provider and str(data.provider).strip()) else None
+
     agent_config.name = data.name # allow rename
     agent_config.role = data.role
     agent_config.instructions = data.instructions or ""
-    agent_config.provider = data.provider
-    agent_config.model = data.model
+    agent_config.provider = prov_val
+    agent_config.model = model_val
     agent_config.icon = data.icon
     agent_config.color = data.color
     agent_config.skills = data.skills
@@ -1164,68 +1177,54 @@ async def delete_agent(request: Request, name: str):
 
     return {"status": "ok"}
 
+
+# ------------------------------------------------------------------
+# Teams Management API
+# ------------------------------------------------------------------
+
 @router.get("/teams")
-async def get_teams(request: Request):
-    ws = request.app.state.workspace
+async def list_teams(request: Request):
+    ws = getattr(request.app.state, "workspace", None)
     if not ws:
         return []
-
-    from aether.team.loader import TeamLoader
     teams = []
+    from aether.team.loader import TeamLoader
 
-    # Only list .yaml files in teams_dir
-    for p in ws.teams_dir.glob("*.yaml"):
+    for f in ws.teams_dir.glob("*.yaml"):
         try:
-            config = TeamLoader.from_yaml(p)
+            config = TeamLoader.from_yaml(f)
+            agents_list = [
+                {
+                    "name": a.name,
+                    "role": a.role,
+                    "instructions": a.instructions,
+                    "provider": a.provider,
+                    "model": a.model,
+                    "icon": getattr(a, "icon", None) or "Bot",
+                    "color": getattr(a, "color", None) or "violet",
+                    "skills": a.skills,
+                    "tools": a.tools,
+                    "delegates_to": a.delegates_to(),
+                }
+                for a in config.agents
+            ]
             teams.append({
                 "name": config.name,
                 "agents": len(config.agents),
-                "agents_list": [
-                    {
-                        "name": agent.name,
-                        "role": agent.role,
-                        "icon": getattr(agent, "icon", None),
-                        "color": getattr(agent, "color", None),
-                        "delegates_to": agent.delegates_to(),
-                    }
-                    for agent in config.agents
-                ],
+                "agent_count": len(config.agents),
+                "agents_list": agents_list,
+                "icon": getattr(config, "icon", None) or "Bot",
+                "color": getattr(config, "color", None) or "violet",
                 "default_provider": config.default_provider,
                 "default_model": config.default_model,
-                "icon": config.icon or "Bot",
-                "color": config.color or "violet",
-                "filename": p.name
-            })
-        except Exception:
-            pass
-
-    # Include legacy default if no modern teams
-    if not teams and ws.legacy_team_yaml.exists():
-        try:
-            config = TeamLoader.from_yaml(ws.legacy_team_yaml)
-            teams.append({
-                "name": config.name,
-                "agents": len(config.agents),
-                "agents_list": [
-                    {
-                        "name": agent.name,
-                        "role": agent.role,
-                        "icon": getattr(agent, "icon", None),
-                        "color": getattr(agent, "color", None),
-                        "delegates_to": agent.delegates_to(),
-                    }
-                    for agent in config.agents
-                ],
-                "default_provider": config.default_provider,
-                "default_model": config.default_model,
-                "icon": config.icon or "Bot",
-                "color": config.color or "violet",
-                "filename": "team.yaml"
+                "filename": f.name,
             })
         except Exception:
             pass
 
     return teams
+
+get_teams = list_teams
 
 class TeamPayload(BaseModel):
     name: str = Field(min_length=1, max_length=120)
@@ -1234,6 +1233,7 @@ class TeamPayload(BaseModel):
     default_model: str = Field(min_length=1, max_length=200)
     icon: str | None = None
     color: str | None = None
+    apply_to_all_agents: bool = False
 
 @router.post("/teams")
 async def create_team(request: Request, data: TeamPayload):
@@ -1248,34 +1248,8 @@ async def create_team(request: Request, data: TeamPayload):
     if team_path.exists():
         raise HTTPException(status_code=409, detail="Team already exists")
 
-    from aether.team.config import TeamConfig, AgentConfig, Relationship
-
-    # Create agents config list
-    agents_conf = []
-    for a in data.agents:
-        rels = [Relationship(type="delegates_to", target=t) for t in a.delegates_to]
-        agents_conf.append(AgentConfig(
-            name=a.name,
-            role=a.role,
-            instructions=a.instructions or "",
-            provider=a.provider,
-            model=a.model,
-            icon=a.icon,
-            color=a.color,
-            skills=a.skills,
-            relationships=rels
-        ))
-
-    team_config = TeamConfig(
-        name=data.name,
-        agents=agents_conf,
-        default_provider=data.default_provider,
-        default_model=data.default_model,
-        icon=data.icon,
-        color=data.color,
-    )
-
     from aether.team.loader import TeamLoader
+    team_config = _team_payload_to_config(data)
     TeamLoader.to_yaml(team_config, team_path)
 
     # Reload team in state and persist the explicit active-team selection.
@@ -1289,15 +1263,22 @@ async def create_team(request: Request, data: TeamPayload):
 def _team_payload_to_config(data: TeamPayload):
     from aether.team.config import AgentConfig, Relationship, TeamConfig
 
-    return TeamConfig(
-        name=data.name,
-        agents=[
+    agents = []
+    for agent in data.agents:
+        if data.apply_to_all_agents:
+            model_val = None
+            prov_val = None
+        else:
+            model_val = agent.model.strip() if (agent.model and str(agent.model).strip() and str(agent.model).strip().lower() != "inherit") else None
+            prov_val = agent.provider.strip() if (agent.provider and str(agent.provider).strip()) else None
+
+        agents.append(
             AgentConfig(
                 name=agent.name,
                 role=agent.role,
                 instructions=agent.instructions or "",
-                provider=agent.provider,
-                model=agent.model,
+                provider=prov_val,
+                model=model_val,
                 icon=agent.icon,
                 color=agent.color,
                 skills=agent.skills,
@@ -1306,8 +1287,11 @@ def _team_payload_to_config(data: TeamPayload):
                     for target in agent.delegates_to
                 ],
             )
-            for agent in data.agents
-        ],
+        )
+
+    return TeamConfig(
+        name=data.name,
+        agents=agents,
         default_provider=data.default_provider,
         default_model=data.default_model,
         icon=data.icon,
@@ -1380,6 +1364,40 @@ async def update_team(request: Request, team_name: str, data: TeamPayload):
     ws.set_default_team(data.name)
     request.app.state.active_team_name = data.name
     return {"status": "ok", "team": _team_response(request.app.state.team.config)}
+
+
+@router.delete("/teams/{team_name}")
+async def delete_team(request: Request, team_name: str):
+    ws, _ = _runtime(request)
+    team_path = _team_path(ws, team_name)
+    if not team_path.exists():
+        raise HTTPException(status_code=404, detail="Team not found.")
+
+    all_teams = list(ws.teams_dir.glob("*.yaml"))
+    if len(all_teams) <= 1:
+        raise HTTPException(
+            status_code=400,
+            detail="Cannot delete the only team in this workspace. Create or import another team first.",
+        )
+
+    # Delete team file
+    team_path.unlink(missing_ok=True)
+
+    # If the active team was deleted, switch to the first remaining team
+    active_name = getattr(request.app.state, "active_team_name", None) or (ws.default_team if hasattr(ws, "default_team") else None)
+    if active_name == team_name:
+        remaining_files = list(ws.teams_dir.glob("*.yaml"))
+        if remaining_files:
+            from aether.team.loader import TeamLoader
+            next_cfg = TeamLoader.from_yaml(remaining_files[0])
+            try:
+                request.app.state.team = ws.load_team(next_cfg.name)
+                ws.set_default_team(next_cfg.name)
+                request.app.state.active_team_name = next_cfg.name
+            except Exception:
+                pass
+
+    return {"status": "ok", "message": f"Team '{team_name}' deleted successfully."}
 
 
 # ------------------------------------------------------------------
@@ -2267,3 +2285,201 @@ async def list_automation_history(request: Request, automation_id: str, limit: i
         return []
     runs = ws.automations.list_runs(automation_id=automation_id, limit=limit)
     return [r.to_dict() for r in runs]
+
+
+# -----------------------------------------------------------------------------
+# AI Workforce Auto-Architect & Prompt Enhancer Endpoints
+# -----------------------------------------------------------------------------
+
+class ArchitectWorkforcePayload(BaseModel):
+    goal: str = Field(min_length=1, max_length=2000)
+    provider: str | None = None
+    model: str | None = None
+
+
+class EnhancePromptPayload(BaseModel):
+    prompt_hint: str = Field(min_length=1, max_length=4000)
+    role: str | None = None
+    agent_name: str | None = None
+    team_name: str | None = None
+    provider: str | None = None
+    model: str | None = None
+
+
+class AgentDraftPayload(BaseModel):
+    goal: str = Field(min_length=1, max_length=2000)
+    available_skills: list[str] | None = None
+    available_agents: list[str] | None = None
+    provider: str | None = None
+    model: str | None = None
+
+
+class ApplyArchitectWorkforcePayload(BaseModel):
+    team_name: str = Field(min_length=1, max_length=120)
+    description: str | None = None
+    icon: str | None = "Layers"
+    color: str | None = "violet"
+    default_provider: str | None = None
+    default_model: str | None = None
+    agents: list[dict[str, Any]] = Field(min_length=1)
+
+
+@router.post("/architect/workforce")
+async def generate_architect_workforce(request: Request, data: ArchitectWorkforcePayload):
+    """Generate a structured multi-agent workforce from a natural language goal."""
+    team = getattr(request.app.state, "team", None)
+    provider = getattr(team, "provider", None) if team else None
+
+    from aether.intelligence.architect import generate_workforce_architecture
+    blueprint = await generate_workforce_architecture(
+        goal=data.goal,
+        provider=provider,
+        model=data.model,
+    )
+    return blueprint.model_dump()
+
+
+@router.post("/architect/agent-draft")
+async def generate_agent_draft_endpoint(request: Request, data: AgentDraftPayload):
+    """Draft a complete agent configuration from natural language user intent."""
+    team = getattr(request.app.state, "team", None)
+    ws = getattr(request.app.state, "workspace", None)
+    provider = getattr(team, "provider", None) if team else None
+
+    skills = data.available_skills
+    if skills is None and ws and hasattr(ws, "skills"):
+        skills = [s.name for s in ws.skills.list_skills()]
+    agents = data.available_agents
+    if agents is None and team and hasattr(team, "config"):
+        agents = team.config.agent_names()
+
+    from aether.intelligence.architect import generate_agent_draft
+    blueprint = await generate_agent_draft(
+        goal=data.goal,
+        available_skills=skills,
+        available_agents=agents,
+        provider=provider,
+        model=data.model or (getattr(team.config, "default_model", None) if team and hasattr(team, "config") else None),
+    )
+    return blueprint.model_dump()
+
+
+@router.post("/architect/enhance-prompt")
+async def enhance_prompt_endpoint(request: Request, data: EnhancePromptPayload):
+    """Enhance a draft prompt into a production-ready system prompt."""
+    team = getattr(request.app.state, "team", None)
+    provider = getattr(team, "provider", None) if team else None
+
+    from aether.intelligence.architect import enhance_system_prompt
+    enhanced = await enhance_system_prompt(
+        raw_prompt=data.prompt_hint,
+        role=data.role,
+        agent_name=data.agent_name,
+        team_name=data.team_name,
+        provider=provider,
+        model=data.model,
+    )
+    return {"enhanced_prompt": enhanced}
+
+
+@router.post("/architect/apply")
+async def apply_architect_workforce(request: Request, data: ApplyArchitectWorkforcePayload):
+    """Create and persist a generated workforce blueprint into the active workspace."""
+    ws = getattr(request.app.state, "workspace", None)
+    if not ws:
+        raise HTTPException(status_code=500, detail="Workspace not initialized.")
+    current_team = getattr(request.app.state, "team", None)
+    data.team_name = _validate_name(data.team_name, "Team name")
+
+    team_path = _team_path(ws, data.team_name)
+    if team_path.exists():
+        raise HTTPException(status_code=409, detail="Team already exists with this name.")
+
+    # Determine default provider & model
+    prov_name = data.default_provider or "ollama"
+    model_name = data.default_model or "llama3"
+    if current_team and hasattr(current_team, "config"):
+        prov_name = data.default_provider or getattr(current_team.config, "default_provider", "ollama") or "ollama"
+        model_name = data.default_model or getattr(current_team.config, "default_model", "llama3") or "llama3"
+
+    from aether.team.config import TeamConfig, AgentConfig, Relationship, SUPPORTED_AGENT_ICONS, SUPPORTED_AGENT_COLORS
+
+    agents_conf: list[AgentConfig] = []
+    for a in data.agents:
+        name = str(a.get("name", "Agent")).strip()
+        role = str(a.get("role", "Specialist")).strip()
+        instructions = str(a.get("system_prompt") or a.get("instructions") or "").strip()
+        icon = a.get("icon") if a.get("icon") in SUPPORTED_AGENT_ICONS else "Bot"
+        color = a.get("color") if a.get("color") in SUPPORTED_AGENT_COLORS else "violet"
+        skills = a.get("skills") if isinstance(a.get("skills"), list) else []
+
+        raw_delegates = a.get("delegates_to") or []
+        if isinstance(raw_delegates, str):
+            del_list = [d.strip() for d in raw_delegates.split(",") if d.strip()]
+        else:
+            del_list = [str(d).strip() for d in raw_delegates if str(d).strip()]
+
+        rels = [Relationship(type="delegates_to", target=t) for t in del_list if t != name]
+
+        raw_agent_prov = a.get("provider")
+        agent_prov = raw_agent_prov.strip() if (isinstance(raw_agent_prov, str) and raw_agent_prov.strip() and raw_agent_prov.strip() != "inherit") else None
+
+        raw_agent_mod = a.get("model")
+        agent_mod = raw_agent_mod.strip() if (isinstance(raw_agent_mod, str) and raw_agent_mod.strip() and raw_agent_mod.strip() != "inherit") else None
+
+        agents_conf.append(AgentConfig(
+            name=name,
+            role=role,
+            instructions=instructions,
+            provider=agent_prov,
+            model=agent_mod,
+            icon=icon,
+            color=color,
+            skills=skills,
+            relationships=rels,
+        ))
+
+    team_icon = data.icon if data.icon in SUPPORTED_AGENT_ICONS else "Layers"
+    team_color = data.color if data.color in SUPPORTED_AGENT_COLORS else "violet"
+
+    team_config = TeamConfig(
+        name=data.team_name,
+        default_provider=prov_name,
+        default_model=model_name,
+        agents=agents_conf,
+        icon=team_icon,
+        color=team_color,
+    )
+
+    from aether.team.loader import TeamLoader
+    TeamLoader.to_yaml(team_config, team_path)
+
+    try:
+        request.app.state.team = ws.load_team(data.team_name)
+        ws.set_default_team(data.team_name)
+        request.app.state.active_team_name = data.team_name
+    except Exception:
+        pass
+
+    return {
+        "status": "ok",
+        "team": {
+            "name": data.team_name,
+            "description": data.description or "",
+            "icon": team_icon,
+            "color": team_color,
+            "agent_count": len(agents_conf),
+            "agents": [
+                {
+                    "name": ac.name,
+                    "role": ac.role,
+                    "instructions": ac.instructions,
+                    "icon": ac.icon,
+                    "color": ac.color,
+                    "delegates_to": [r.target for r in ac.relationships if r.type == "delegates_to"],
+                    "skills": ac.skills,
+                }
+                for ac in agents_conf
+            ],
+        },
+    }

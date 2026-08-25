@@ -1,12 +1,12 @@
 import { useState, useEffect } from 'react';
 import {
   Plus, Bot, Database, Layers, MessageSquare,
-  ArrowRight, ShieldCheck, Cpu
+  ArrowRight, ShieldCheck, Cpu, Sparkles
 } from 'lucide-react';
 import { apiUrl } from './api';
 import { useTranslation } from './i18n';
-import { useTheme } from './theme';
 import { TopHeader } from './TopHeader';
+import { AutoArchitectModal } from './AutoArchitectModal';
 
 interface HomeProps {
   navigate: (view: string) => void;
@@ -26,8 +26,8 @@ export function Home({
   onOpenWorkspaceModal,
 }: HomeProps) {
   const [workspaceData, setWorkspaceData] = useState<any>(null);
+  const [isAutoArchitectOpen, setIsAutoArchitectOpen] = useState(false);
   const { t } = useTranslation();
-  const { isDark } = useTheme();
 
   useEffect(() => {
     if (!workspaceName) {
@@ -56,7 +56,7 @@ export function Home({
             margin: '0 auto 20px',
           }}>
             <img
-              src={isDark ? "/brand/logo_bianco.svg" : "/brand/logo_viola.svg"}
+              src="/brand/logo_viola.svg"
               alt="Aether"
               width="36"
               height="36"
@@ -165,6 +165,27 @@ export function Home({
         <div style={{ marginBottom: '36px' }}>
           <h2 style={{ fontSize: '18px', marginBottom: '16px' }}>{t('quickActions')}</h2>
           <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))', gap: '16px' }}>
+            <div
+              className="card card-interactive"
+              onClick={() => setIsAutoArchitectOpen(true)}
+              style={{
+                cursor: 'pointer',
+                padding: '20px',
+                background: 'linear-gradient(135deg, hsl(var(--primary)/0.12) 0%, hsl(var(--card)) 100%)',
+                border: '1px solid hsl(var(--primary)/0.35)',
+              }}
+            >
+              <div style={{ width: '36px', height: '36px', borderRadius: '8px', backgroundColor: 'hsl(var(--primary)/0.2)', display: 'flex', alignItems: 'center', justifyContent: 'center', color: 'hsl(var(--primary))', marginBottom: '12px' }}>
+                <Sparkles size={20} />
+              </div>
+              <h3 style={{ fontSize: '15px', marginBottom: '4px', color: 'hsl(var(--primary))', fontWeight: 600 }}>
+                {t('designWithAi') || '✨ Progetta con l\'IA'}
+              </h3>
+              <p className="text-muted" style={{ fontSize: '12.5px', margin: 0 }}>
+                {t('autoArchitectHomeCardDesc') || 'Descrivi il tuo obiettivo e l\'IA configurerà la tua squadra su misura.'}
+              </p>
+            </div>
+
             <div
               className="card card-interactive"
               onClick={onNewTask}
@@ -311,6 +332,14 @@ export function Home({
         </div>
       </div>
       </div>
+
+      {isAutoArchitectOpen && (
+        <AutoArchitectModal
+          isOpen={isAutoArchitectOpen}
+          onClose={() => setIsAutoArchitectOpen(false)}
+          onSuccess={() => navigate('teams')}
+        />
+      )}
     </div>
   );
 }

@@ -50,20 +50,24 @@ _CRITICAL_PROTECTED_PATHS = {
     Path("/Applications").resolve(),
     Path("/Library").resolve(),
     Path("/private").resolve(),
+    Path("/Volumes").resolve(),
+    Path("/dev").resolve(),
 }
 
 
 def _is_protected_path(path: Path) -> bool:
     try:
         resolved = path.resolve()
+        # Direct match with critical system paths
         if resolved in _CRITICAL_PROTECTED_PATHS:
             return True
-        if len(resolved.parts) < 3:
+        # Direct root "/" or top-level partition
+        if resolved.parent == resolved:
             return True
-        # Check if root is exactly equal to root partitions
-        for prot in _CRITICAL_PROTECTED_PATHS:
-            if resolved == prot:
-                return True
+        # User home folder or parent of home (e.g. /Users or /home)
+        home = Path.home().resolve()
+        if resolved == home or resolved == home.parent:
+            return True
         return False
     except Exception:
         return True
@@ -343,19 +347,31 @@ agents:
     @classmethod
     def delete_workspace(cls, root_or_id: str | Path) -> bool:
         """Permanently delete a workspace folder and deregister it."""
+        # 1. Direct safety check if an explicit absolute system path was passed
         try:
-            p = Path(root_or_id).resolve()
-            if _is_protected_path(p):
-                raise WorkspaceError(f"Cannot delete protected system directory: {p}")
+            p = Path(root_or_id)
+            if p.is_absolute() and _is_protected_path(p):
+                raise WorkspaceError(f"Cannot delete protected system directory: {p.resolve()}")
         except Exception as e:
             if isinstance(e, WorkspaceError):
                 raise
 
         entry = cls.get_workspace_entry(root_or_id)
-        if not entry:
-            return False
+        ws_path: Path | None = None
 
-        ws_path = Path(entry["path"]).resolve()
+        if entry and entry.get("path"):
+            ws_path = Path(entry["path"]).resolve()
+        else:
+            # Fallback: check if root_or_id is a direct path to an initialized workspace
+            try:
+                candidate = Path(root_or_id).resolve()
+                if candidate.is_absolute() and candidate.exists() and (candidate / "aether.yaml").exists():
+                    ws_path = candidate
+            except Exception:
+                pass
+
+        if not ws_path:
+            return False
 
         # Strict safety check: Never delete system root or home directory
         if _is_protected_path(ws_path):

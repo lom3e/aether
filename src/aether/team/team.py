@@ -204,6 +204,83 @@ class Team:
         """Return all assembled agents."""
         return list(self._agents.values())
 
+    def set_model(
+        self,
+        model_name: str,
+        provider_name: str | None = None,
+        *,
+        apply_to_all_agents: bool = False,
+    ) -> None:
+        """
+        Dynamically update the active model for the team and member agents.
+
+        Parameters
+        ----------
+        model_name:
+            The new default model for the workforce.
+        provider_name:
+            Optional provider override for the workforce.
+        apply_to_all_agents:
+            If True, clears all explicit overrides on member agents (setting agent.model = None)
+            so all agents inherit the team default.
+            If False (default), agents with explicit overrides (agent.model is not None) retain their
+            configured model, while agents with agent.model is None inherit the new team default.
+        """
+        clean_model = str(model_name).strip()
+        if not clean_model:
+            return
+
+        self.config.default_model = clean_model
+        if provider_name and str(provider_name).strip():
+            self.config.default_provider = str(provider_name).strip()
+
+        # Invalidate any previously injected static provider instance
+        self.provider = None
+
+        # Reset provider manager instance cache if present
+        if hasattr(self, "_provider_manager") and self._provider_manager:
+            if hasattr(self._provider_manager, "_instances"):
+                self._provider_manager._instances.clear()
+
+        # If applying to all agents, clear overrides so they inherit
+        if apply_to_all_agents:
+            for agent_config in self.config.agents:
+                agent_config.model = None
+                agent_config.provider = None
+
+        # Re-resolve and update provider for each agent
+        for agent_config in self.config.agents:
+            agent = self._agents.get(agent_config.name)
+            if agent:
+                new_provider = self._provider_for(agent_config)
+                agent.provider = new_provider
+                agent.config = agent_config
+
+        self._wire_delegation()
+
+    def set_provider(
+        self,
+        provider_name: str,
+        model_name: str | None = None,
+        *,
+        apply_to_all_agents: bool = False,
+    ) -> None:
+        """
+        Dynamically update the active provider and model for the team.
+        """
+        clean_prov = str(provider_name).strip()
+        if not clean_prov:
+            return
+        self.config.default_provider = clean_prov
+        if model_name and str(model_name).strip():
+            self.config.default_model = str(model_name).strip()
+
+        self.set_model(
+            self.config.default_model,
+            clean_prov,
+            apply_to_all_agents=apply_to_all_agents,
+        )
+
     # ------------------------------------------------------------------
     # HITL loop
     # ------------------------------------------------------------------
