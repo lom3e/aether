@@ -4,6 +4,7 @@ import "./globals.css";
 import { LanguageProvider } from "@/lib/i18n/context";
 import { LogoProvider } from "@/lib/logo-context";
 import { ThemeProvider } from "@/lib/theme-context";
+import { CookieConsent } from "@/components/CookieConsent";
 
 const geistSans = Geist({
   variable: "--font-geist-sans",
@@ -114,7 +115,10 @@ export default function RootLayout({
       <body className={`${geistSans.className} ${geistSans.variable} ${geistMono.variable}`}>
         <ThemeProvider>
           <LanguageProvider>
-            <LogoProvider>{children}</LogoProvider>
+            <LogoProvider>
+              {children}
+              <CookieConsent />
+            </LogoProvider>
           </LanguageProvider>
         </ThemeProvider>
       </body>

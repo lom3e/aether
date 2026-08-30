@@ -11,6 +11,12 @@ export function Footer() {
   const { t } = useLanguage();
   const { activeLogo } = useActiveLogo();
 
+  const handleOpenCookiePreferences = () => {
+    if (typeof window !== "undefined") {
+      window.dispatchEvent(new CustomEvent("aether-open-cookie-preferences"));
+    }
+  };
+
   return (
     <footer
       style={{
@@ -58,13 +64,13 @@ export function Footer() {
           <div
             style={{
               display: "flex",
-              gap: 28,
+              gap: 24,
               flexWrap: "wrap",
               alignItems: "center",
             }}
           >
             <Link
-              href="/#product"
+              href="/#why"
               style={{ color: "var(--text-secondary)", textDecoration: "none", transition: "color 150ms ease" }}
               onMouseEnter={(e) => (e.currentTarget.style.color = "var(--text-primary)")}
               onMouseLeave={(e) => (e.currentTarget.style.color = "var(--text-secondary)")}
@@ -111,6 +117,38 @@ export function Footer() {
             >
               {t.footer.links.about}
             </Link>
+            <Link
+              href="/privacy"
+              style={{ color: "var(--text-secondary)", textDecoration: "none", transition: "color 150ms ease" }}
+              onMouseEnter={(e) => (e.currentTarget.style.color = "var(--text-primary)")}
+              onMouseLeave={(e) => (e.currentTarget.style.color = "var(--text-secondary)")}
+            >
+              {t.footer.links.privacy}
+            </Link>
+            <Link
+              href="/cookies"
+              style={{ color: "var(--text-secondary)", textDecoration: "none", transition: "color 150ms ease" }}
+              onMouseEnter={(e) => (e.currentTarget.style.color = "var(--text-primary)")}
+              onMouseLeave={(e) => (e.currentTarget.style.color = "var(--text-secondary)")}
+            >
+              {t.footer.links.cookies}
+            </Link>
+            <button
+              onClick={handleOpenCookiePreferences}
+              style={{
+                background: "none",
+                border: "none",
+                padding: 0,
+                color: "var(--text-secondary)",
+                fontSize: "0.9375rem",
+                cursor: "pointer",
+                transition: "color 150ms ease",
+              }}
+              onMouseEnter={(e) => (e.currentTarget.style.color = "var(--text-primary)")}
+              onMouseLeave={(e) => (e.currentTarget.style.color = "var(--text-secondary)")}
+            >
+              {t.footer.links.cookieSettings}
+            </button>
             <a
               href="https://github.com/lom3e/aether"
               target="_blank"
@@ -132,7 +170,7 @@ export function Footer() {
           </div>
         </div>
 
-        {/* Bottom Attribution Line with LMLabs */}
+        {/* Bottom Attribution Line with LMLabs & Privacy Links */}
         <div
           style={{
             borderTop: "1px solid var(--border-subtle)",
@@ -146,8 +184,8 @@ export function Footer() {
             color: "var(--text-muted)",
           }}
         >
-          <div>
-            {t.footer.copy}
+          <div style={{ display: "flex", alignItems: "center", gap: 16, flexWrap: "wrap" }}>
+            <span>{t.footer.copy}</span>
           </div>
 
           <div>
