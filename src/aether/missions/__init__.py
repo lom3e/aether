@@ -10,12 +10,14 @@ from aether.missions.models import (
     Mission,
     MissionGraph,
     MissionStatus,
+    Deliverable,
 )
 from aether.missions.store import MissionStore
 
 __all__ = [
     "Mission",
     "Milestone",
+    "Deliverable",
     "MissionStatus",
     "MilestoneStatus",
     "GraphNode",

@@ -18,6 +18,7 @@ from aether.missions.models import (
     Mission,
     MissionGraph,
     MissionStatus,
+    Deliverable,
 )
 from aether.missions.store import MissionStore
 from aether.server.app import app
@@ -32,6 +33,9 @@ from aether.server.routes import (
     update_mission_milestone,
     delete_mission_milestone,
     get_mission_graph,
+    list_mission_deliverables,
+    create_mission_deliverable,
+    CreateDeliverablePayload,
     CreateMissionPayload,
     UpdateMissionPayload,
     CreateMilestonePayload,
@@ -105,6 +109,30 @@ def test_mission_graph_models():
     assert len(g_dict["nodes"]) == 2
     assert len(g_dict["edges"]) == 1
     assert g_dict["edges"][0]["type"] == "contains"
+
+
+def test_deliverable_models_serialization():
+    d = Deliverable(
+        id="d1",
+        mission_id="m1",
+        name="architecture_audit.pdf",
+        path="reports/architecture_audit.pdf",
+        type="document",
+        size_bytes=10240,
+        status="verified",
+        metadata={"author": "auditor"},
+    )
+    d_dict = d.to_dict()
+    assert d_dict["id"] == "d1"
+    assert d_dict["name"] == "architecture_audit.pdf"
+    assert d_dict["status"] == "verified"
+
+    rehydrated = Deliverable.from_dict(d_dict)
+    assert rehydrated.id == "d1"
+    assert rehydrated.name == "architecture_audit.pdf"
+    assert rehydrated.type == "document"
+    assert rehydrated.size_bytes == 10240
+    assert rehydrated.status == "verified"
 
 
 # ---------------------------------------------------------------------------
@@ -217,6 +245,52 @@ def test_mission_graph_generation(tmp_path: Path):
     assert "contains" in edge_types
     assert "depends_on" in edge_types
 
+    # Add a deliverable and re-check graph
+    d = Deliverable(
+        id="del1",
+        mission_id=mission.id,
+        name="cluster_config.yaml",
+        path="configs/cluster_config.yaml",
+        type="code",
+        size_bytes=2048,
+        status="verified",
+    )
+    assert store.add_deliverable(mission.id, d) is True
+    updated_graph = store.get_mission_graph(mission.id)
+    assert updated_graph is not None
+    assert len(updated_graph.nodes) == 4  # mission + 2 milestones + 1 deliverable
+    assert any(n.type == "deliverable" and n.label == "cluster_config.yaml" for n in updated_graph.nodes)
+    assert any(e.type == "produced" for e in updated_graph.edges)
+
+
+def test_mission_deliverables_persistence(tmp_path: Path):
+    db_path = tmp_path / "deliv_test.db"
+    store = MissionStore(db_path)
+
+    mission = store.create_mission(
+        title="Security Audit",
+        objective="Verify system hardening",
+    )
+    assert store.list_deliverables(mission.id) == []
+
+    d1 = Deliverable(
+        id="d1",
+        mission_id=mission.id,
+        name="audit_report.md",
+        path="reports/audit_report.md",
+        type="document",
+        size_bytes=5120,
+        status="verified",
+    )
+    assert store.add_deliverable(mission.id, d1) is True
+
+    d_list = store.list_deliverables(mission.id)
+    assert len(d_list) == 1
+    assert d_list[0].id == "d1"
+    assert d_list[0].name == "audit_report.md"
+    assert d_list[0].size_bytes == 5120
+
+
 
 # ---------------------------------------------------------------------------
 # Server REST API Async Tests
@@ -305,6 +379,28 @@ async def test_missions_api_lifecycle(workspace_env):
     assert graph["mission_id"] == mission_id
     assert len(graph["nodes"]) == 4  # 1 root + 3 milestones
     assert len(graph["edges"]) >= 3
+
+    # 8b. Deliverables API: initially empty, create deliverable, list deliverables
+    initial_delivs = await list_mission_deliverables(req, mission_id)
+    assert initial_delivs == []
+
+    new_deliv = await create_mission_deliverable(
+        req,
+        mission_id,
+        CreateDeliverablePayload(
+            name="pipeline_spec.json",
+            path="specs/pipeline_spec.json",
+            type="data",
+            size_bytes=1024,
+            status="verified",
+        ),
+    )
+    assert new_deliv["name"] == "pipeline_spec.json"
+    assert new_deliv["status"] == "verified"
+
+    delivs = await list_mission_deliverables(req, mission_id)
+    assert len(delivs) == 1
+    assert delivs[0]["name"] == "pipeline_spec.json"
 
     # 9. DELETE /api/missions/{id}/milestones/{milestone_id}
     del_m_res = await delete_mission_milestone(req, mission_id, m3["id"])

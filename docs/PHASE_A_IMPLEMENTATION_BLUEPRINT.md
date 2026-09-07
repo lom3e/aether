@@ -879,3 +879,33 @@ To deliver immediate value, establish end-to-end integration, and validate the a
 4. **No Simulated Execution:** Removed all fake active execution copy (*"Aether is working on this mission"*), fake agent pulses, and fake in-progress milestone animations. Persisted states are communicated truthfully (*"Mission marked as running"*, *"Mission marked as paused"*) with clear disclosure that runtime execution arrives in upcoming execution slices.
 5. **Progressive Disclosure:** Replaced raw debug telemetry cards with a clean `Inspect` trigger opening an Execution Graph Inspector modal.
 6. **Automated End-to-End Verification:** Validated complete lifecycle and truthful state feedback via `tests/test_missions_playwright_e2e.py` and unit test suite.
+
+### **Phase A Mission Cockpit Completion (Slices 2B, 2C, 2D, 2E)**
+
+1. **Slice 2B — Human-Centered Workforce & Role Presence:**
+   - Real Workforce Resolution: Dynamic resolution of the assigned team (`team_name`) via `GET /api/teams`.
+   - Lead Specialist & Role Presence: Distinct designated Lead card displaying agent role, provider/model configuration, and truthful `Assigned (Standby)` badge with note `"Awaiting mission execution dispatch"`.
+   - Assigned Specialists Roster: Compact grid of specialized team members with role badges and interactive click handler opening full Role Specs.
+   - Specialist Role Popover: Deep disclosure modal detailing the specialist's role, model, responsibilities (system instructions), capabilities (tools & skills), and standby notice.
+   - Unassigned Workforce Fallback: Clean empty state with team selector to bind active workforces to missions.
+
+2. **Slice 2C — Outcome Stage Pipeline & Milestone Refinement:**
+   - Stage Pipeline Overview Bar: Real-time aggregated metrics displaying counts for Completed, In Progress, Pending, and Blocked/Failed stages.
+   - Refined Stage Cards: Milestones reimagined as outcome stages (`Stage {n}`), displaying stage title, description, clickable state toggle, completion timestamp, and hover-activated deletion.
+
+3. **Slice 2D — Deliverables Dossier Component:**
+   - Real Deliverables Domain & Storage: Added `Deliverable` model and SQLite persistence (`deliverables` table, `list_deliverables`, `add_deliverable`) integrated into the mission execution graph.
+   - REST Endpoints: Added `GET /api/missions/{id}/deliverables` and `POST /api/missions/{id}/deliverables`.
+   - Dossier View: Rich deliverable cards displaying file type icons (code, document, data, archive), deliverable name, file path, formatted size (`KB/MB`), status badge (`Verified`, `Draft`), and copy-path action with visual feedback.
+   - Truthful Empty State: Descriptive notice detailing that automated deliverable extraction will be enabled by the upcoming Mission Runtime.
+
+4. **Slice 2E — Slide-Over Advanced Inspector:**
+   - Slide-Over Sheet Architecture: Replaced centered modal with an executive right-anchored slide-over panel with smooth backdrop.
+   - Deep Inspection Tabs:
+     - `Execution Graph`: Full topology metrics (nodes/edges count) and node cards with status badges and deep metadata inspection.
+     - `Activity Trace`: Chronological timeline of sanitized observable events (`GET /api/missions/{id}/activities`) with strict privacy enforcement (zero internal LLM reasoning or chain-of-thought).
+     - `Telemetry & Specs`: Comprehensive mission metadata (IDs, workspace, timestamps, workforce config) with disclosure of upcoming runtime metrics.
+
+5. **Strict Architectural Boundary Preserved:**
+   - Zero Mission Runtime execution engine, autonomous dispatch workers, or fake execution loops were introduced.
+   - Persisted SQLite data and truthfulness semantics remain intact across all views.

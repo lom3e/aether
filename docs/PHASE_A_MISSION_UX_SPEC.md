@@ -623,4 +623,37 @@ Slice 2A delivers the largest immediate product impact by resolving all major vi
 * `tests/test_missions_playwright_e2e.py` (End-to-end browser verification of single-pane cockpit, contextual actions, and truthful state transitions).
 
 ---
-*Specification approved for Phase A implementation.*
+
+## P. Phase A Mission Cockpit Completion (Slices 2B, 2C, 2D, 2E)
+
+The unified Phase A Mission Cockpit pass has been fully implemented and verified against this specification, completing:
+
+* **Slice 2B — Human-Centered Workforce & Role Presence:**
+  - Real workforce team resolution via `GET /api/teams` mapped to `selectedMission.team_name`.
+  - Mission Lead card with agent avatar, role description, provider/model settings, and truthful `Assigned (Standby)` badge with note *"Awaiting mission execution dispatch"*.
+  - Assigned Specialists grid showing member names and roles.
+  - Interactive Specialist Role Specs modal displaying role, model, prompt instructions, tools & capabilities, and standby status.
+  - Graceful fallback with workforce team selector when no workforce is assigned.
+
+* **Slice 2C — High-Level Stage Pipeline & Milestone Refinement:**
+  - Outcome Stage Pipeline header with aggregate counters (`Completed`, `In Progress`, `Pending`, `Blocked / Failed`).
+  - Sequenced Stage cards (`Stage {n}`) with stage title, description, status toggle, completion timestamps, and hover-activated deletion.
+
+* **Slice 2D — Deliverables Dossier:**
+  - Deliverables domain model (`Deliverable`), SQLite persistence, and REST endpoints (`GET/POST /api/missions/{id}/deliverables`).
+  - Deliverable cards with file type icons (code, document, data, archive), deliverable name, path, formatted size (`KB/MB`), status badge (`Verified`, `Draft`), and copy-path button with toast notification.
+  - Truthful empty state disclosing that automated extraction is activated in upcoming Mission Runtime execution slices.
+
+* **Slice 2E — Slide-Over Advanced Inspector:**
+  - Right-anchored slide-over panel replacing the centered modal.
+  - Three inspection tabs:
+    1. `Execution Graph`: Node topology count, interactive node list, click-to-inspect node IDs and metadata.
+    2. `Activity Trace`: Sanitized event stream (`GET /api/missions/{id}/activities`) with strict privacy enforcement (zero internal reasoning or chain-of-thought).
+    3. `Telemetry & Specs`: Comprehensive mission metadata (IDs, workspace, timestamps, workforce config) and notice of upcoming runtime metrics.
+
+* **Truthfulness & Runtime Boundary:**
+  - The Mission Runtime Execution Engine has **not** been introduced in this pass.
+  - All status semantics remain strictly truthful to persisted SQLite state.
+
+---
+*Specification approved and implemented for Phase A.*

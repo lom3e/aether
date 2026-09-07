@@ -21,6 +21,7 @@ from aether.missions.models import (
     Mission,
     MissionGraph,
     MissionStatus,
+    Deliverable,
 )
 
 
@@ -867,4 +868,118 @@ class MissionStore:
             except Exception:
                 pass
 
+        # 4. Deliverable Nodes & Production Edges
+        deliverables = self.list_deliverables(mission.id)
+        for d in deliverables:
+            d_node_id = f"deliverable_{d.id}"
+            nodes.append(
+                GraphNode(
+                    id=d_node_id,
+                    type="deliverable",
+                    label=d.name,
+                    status=d.status,
+                    metadata=d.to_dict(),
+                )
+            )
+            edges.append(
+                GraphEdge(
+                    id=f"edge_del_{d.id}",
+                    source=root_node_id,
+                    target=d_node_id,
+                    type="produced",
+                    label="produced",
+                )
+            )
+
         return MissionGraph(mission_id=mission.id, nodes=nodes, edges=edges)
+
+    # ---------------------------------------------------------------------------
+    # Deliverables Management
+    # ---------------------------------------------------------------------------
+
+    def list_deliverables(self, mission_id: str) -> list[Deliverable]:
+        """
+        Retrieves all real deliverables registered or produced for this mission.
+        Inspects mission metadata and linked conversation activities without fabricating fake items.
+        """
+        mission = self.get_mission(mission_id, include_milestones=False)
+        if not mission:
+            return []
+
+        deliverables: list[Deliverable] = []
+        seen_paths: set[str] = set()
+
+        # 1. Inspect explicit registered deliverables in mission.metadata["deliverables"]
+        raw_delivs = mission.metadata.get("deliverables") if isinstance(mission.metadata, dict) else None
+        if isinstance(raw_delivs, list):
+            for item in raw_delivs:
+                if isinstance(item, dict):
+                    d = Deliverable.from_dict({**item, "mission_id": mission_id})
+                    deliverables.append(d)
+                    if d.path:
+                        seen_paths.add(d.path)
+
+        # 2. If conversation_id is linked, inspect conversation activities for file modifications
+        if mission.conversation_id:
+            try:
+                with self._get_connection() as conn:
+                    rows = conn.execute(
+                        """
+                        SELECT id, metadata, created_at
+                        FROM conversation_activities
+                        WHERE conversation_id = ? AND (activity_type LIKE '%file%' OR metadata LIKE '%"path"%')
+                        ORDER BY created_at ASC
+                        """,
+                        (mission.conversation_id,),
+                    ).fetchall()
+
+                for row in rows:
+                    meta_raw = row["metadata"]
+                    meta = json.loads(meta_raw) if isinstance(meta_raw, str) and meta_raw else {}
+                    file_path = meta.get("path")
+                    if file_path and file_path not in seen_paths:
+                        seen_paths.add(file_path)
+                        filename = Path(file_path).name
+                        ext = Path(file_path).suffix.lower()
+                        ftype = "document" if ext in (".md", ".txt", ".pdf", ".docx") else ("data" if ext in (".json", ".csv", ".tsv", ".yaml", ".yml", ".parquet") else ("code" if ext in (".py", ".ts", ".tsx", ".js", ".sh", ".rs", ".go") else "archive"))
+                        size_bytes = int(meta.get("size_bytes", 0))
+                        deliverables.append(
+                            Deliverable(
+                                id=f"del_{row['id']}",
+                                mission_id=mission_id,
+                                name=filename,
+                                path=file_path,
+                                type=ftype,
+                                size_bytes=size_bytes,
+                                status="verified" if "verified" in meta.get("action", "") else "draft",
+                                metadata=meta,
+                                created_at=row["created_at"],
+                            )
+                        )
+            except Exception:
+                pass
+
+        return deliverables
+
+    def add_deliverable(self, mission_id: str, deliverable: Deliverable) -> bool:
+        """
+        Registers a real deliverable into the mission's metadata.
+        """
+        mission = self.get_mission(mission_id, include_milestones=False)
+        if not mission:
+            return False
+
+        meta = dict(mission.metadata) if isinstance(mission.metadata, dict) else {}
+        delivs = list(meta.get("deliverables", []))
+        # Avoid duplicate deliverable IDs
+        delivs = [d for d in delivs if d.get("id") != deliverable.id]
+        delivs.append(deliverable.to_dict())
+        meta["deliverables"] = delivs
+
+        now = datetime.now(timezone.utc).isoformat()
+        with self._get_connection() as conn:
+            conn.execute(
+                "UPDATE missions SET metadata = ?, updated_at = ? WHERE id = ?",
+                (json.dumps(meta), now, mission_id),
+            )
+            return True

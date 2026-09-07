@@ -90,8 +90,16 @@ def test_playwright_missions_e2e_flow(tmp_path, monkeypatch):
             assert page.is_visible("text=Design Distributed Vector Index")
             assert page.is_visible("text=Outcome Charter")
             assert page.is_visible("text=What are we trying to accomplish?")
-            assert page.is_visible("text=Milestone Progression")
+            assert page.is_visible("text=Assigned Workforce")
+            assert page.is_visible("text=Outcome Stage Pipeline")
             assert page.is_visible("text=Deliverables Dossier")
+
+            # Verify Slice 2B: Human-Centered Workforce & Role Presence
+            if page.is_visible("button:has-text('Role Specs')"):
+                page.click("button:has-text('Role Specs')")
+                page.wait_for_selector("text=Underlying Model", timeout=5000)
+                assert page.is_visible("text=Underlying Model")
+                page.click("button:has-text('Close')")
 
             # Verify contextual actions in Draft state (No developer select dropdown)
             assert page.is_visible("button:has-text('Start Mission')")
@@ -116,7 +124,7 @@ def test_playwright_missions_e2e_flow(tmp_path, monkeypatch):
             page.click("button:has-text('Resume Mission')")
             page.wait_for_selector("button:has-text('Pause')", timeout=5000)
 
-            # 8. Add second milestone inline using "+ Add Step"
+            # 8. Add second milestone inline using "+ Add Step" (Slice 2C)
             page.click("button:has-text('Add Step')")
             page.wait_for_selector("input[placeholder='Milestone Title']", timeout=5000)
             page.fill("input[placeholder='Milestone Title']", "Run Latency Benchmarks")
@@ -125,6 +133,8 @@ def test_playwright_missions_e2e_flow(tmp_path, monkeypatch):
 
             page.wait_for_selector("text=Run Latency Benchmarks", timeout=5000)
             assert page.is_visible("text=Run Latency Benchmarks")
+            assert page.is_visible("text=Stage 1")
+            assert page.is_visible("text=Stage 2")
 
             # 9. Complete First Milestone (click check circle)
             milestone_item = page.locator("div:has-text('Setup Vector Test Dataset')").first
@@ -132,10 +142,27 @@ def test_playwright_missions_e2e_flow(tmp_path, monkeypatch):
             toggle_btn.click()
             page.wait_for_selector("text=Completed", timeout=5000)
 
-            # 10. Test Progressive Disclosure Inspector Modal
+            # Verify Slice 2D: Deliverables Dossier
+            assert page.is_visible("text=Deliverables Dossier")
+
+            # 10. Test Progressive Disclosure Slide-Over Inspector (Slice 2E)
             page.click("button:has-text('Inspect')")
-            page.wait_for_selector("text=Execution Graph Inspector", timeout=5000)
-            assert page.is_visible("text=Execution Graph Inspector")
+            page.wait_for_selector("text=Mission Execution Inspector", timeout=5000)
+            assert page.is_visible("text=Mission Execution Inspector")
+            assert page.is_visible("text=Execution Graph")
+            assert page.is_visible("text=Activity Trace")
+            assert page.is_visible("text=Telemetry & Specs")
+
+            # Click Activity Trace tab
+            page.click("button:has-text('Activity Trace')")
+            page.wait_for_selector("text=No observable activity logged", timeout=5000)
+            assert page.is_visible("text=No observable activity logged")
+
+            # Click Telemetry & Specs tab
+            page.click("button:has-text('Telemetry & Specs')")
+            page.wait_for_selector("text=Mission ID", timeout=5000)
+            assert page.is_visible("text=Mission ID")
+
             page.click("button:has-text('Close Inspector')")
 
             # 11. Backward compatibility test: Navigate to Chat and verify normal conversation flow

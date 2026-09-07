@@ -145,6 +145,46 @@ class Mission:
 
 
 @dataclass(slots=True)
+class Deliverable:
+    id: str
+    mission_id: str
+    name: str
+    path: str
+    type: str = "document"  # "document", "code", "data", "archive"
+    size_bytes: int = 0
+    status: str = "draft"  # "verified", "draft", "final"
+    metadata: dict[str, Any] = field(default_factory=dict)
+    created_at: str = field(default_factory=lambda: datetime.now(timezone.utc).isoformat())
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "id": self.id,
+            "mission_id": self.mission_id,
+            "name": self.name,
+            "path": self.path,
+            "type": self.type,
+            "size_bytes": self.size_bytes,
+            "status": self.status,
+            "metadata": self.metadata,
+            "created_at": self.created_at,
+        }
+
+    @classmethod
+    def from_dict(cls, data: dict[str, Any]) -> Deliverable:
+        return cls(
+            id=data.get("id") or uuid.uuid4().hex,
+            mission_id=data.get("mission_id", ""),
+            name=data.get("name", "Untitled Deliverable"),
+            path=data.get("path", ""),
+            type=data.get("type", "document"),
+            size_bytes=int(data.get("size_bytes", 0)),
+            status=data.get("status", "draft"),
+            metadata=data.get("metadata") or {},
+            created_at=data.get("created_at") or datetime.now(timezone.utc).isoformat(),
+        )
+
+
+@dataclass(slots=True)
 class GraphNode:
     id: str
     type: str  # "mission", "milestone", "task", "agent", "tool", "deliverable"

@@ -2859,3 +2859,82 @@ async def get_mission_graph(request: Request, mission_id: str):
     if not graph:
         raise HTTPException(status_code=404, detail="Mission not found.")
     return graph.to_dict()
+
+
+class CreateDeliverablePayload(BaseModel):
+    name: str = Field(min_length=1, max_length=255)
+    path: str = Field(default="")
+    type: str = Field(default="document")
+    size_bytes: int = Field(default=0, ge=0)
+    status: str = Field(default="draft")
+    metadata: dict[str, Any] = Field(default_factory=dict)
+
+
+@router.get("/missions/{mission_id}/deliverables")
+async def list_mission_deliverables(request: Request, mission_id: str):
+    ws = getattr(request.app.state, "workspace", None)
+    if not ws:
+        raise HTTPException(status_code=503, detail="Workspace not initialized.")
+    mission = ws.missions.get_mission(mission_id, include_milestones=False)
+    if not mission:
+        raise HTTPException(status_code=404, detail="Mission not found.")
+    deliverables = ws.missions.list_deliverables(mission_id)
+    return [d.to_dict() for d in deliverables]
+
+
+@router.post("/missions/{mission_id}/deliverables")
+async def create_mission_deliverable(request: Request, mission_id: str, payload: CreateDeliverablePayload):
+    ws = getattr(request.app.state, "workspace", None)
+    if not ws:
+        raise HTTPException(status_code=503, detail="Workspace not initialized.")
+    mission = ws.missions.get_mission(mission_id, include_milestones=False)
+    if not mission:
+        raise HTTPException(status_code=404, detail="Mission not found.")
+
+    from aether.missions.models import Deliverable
+    import uuid
+
+    deliverable = Deliverable(
+        id=uuid.uuid4().hex,
+        mission_id=mission_id,
+        name=payload.name,
+        path=payload.path,
+        type=payload.type,
+        size_bytes=payload.size_bytes,
+        status=payload.status,
+        metadata=payload.metadata,
+    )
+    success = ws.missions.add_deliverable(mission_id, deliverable)
+    if not success:
+        raise HTTPException(status_code=500, detail="Failed to register deliverable.")
+    return deliverable.to_dict()
+
+
+@router.get("/missions/{mission_id}/activities")
+async def list_mission_activities(request: Request, mission_id: str):
+    ws = getattr(request.app.state, "workspace", None)
+    if not ws:
+        raise HTTPException(status_code=503, detail="Workspace not initialized.")
+    mission = ws.missions.get_mission(mission_id, include_milestones=False)
+    if not mission:
+        raise HTTPException(status_code=404, detail="Mission not found.")
+    if not mission.conversation_id:
+        return []
+    conv = ws.conversations.get_conversation(mission.conversation_id)
+    if not conv:
+        return []
+    cleaned = []
+    for act in conv.get("activities", []):
+        meta = dict(act.get("metadata") or {})
+        meta.pop("thinking", None)
+        meta.pop("thought", None)
+        meta.pop("chain_of_thought", None)
+        cleaned.append({
+            "id": act.get("id"),
+            "agent": act.get("agent"),
+            "activity_type": act.get("type"),
+            "message": act.get("message"),
+            "metadata": meta,
+            "created_at": act.get("timestamp"),
+        })
+    return cleaned

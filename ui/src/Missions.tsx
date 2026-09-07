@@ -3,12 +3,59 @@ import {
   Target, Plus, CheckCircle, Circle, Play, AlertCircle, Trash2,
   Users, Layers, Sparkles, X, RefreshCw, Pause,
   Square, RotateCcw, FileText, MessageSquare, Check, ArrowLeft,
-  Clock, ShieldAlert, ChevronRight
+  Clock, ShieldAlert, ChevronRight, FileCode, Table, FolderArchive,
+  Copy, Activity, Terminal, Workflow, User
 } from 'lucide-react';
 import { apiUrl } from './api';
 import { useTranslation } from './i18n';
 import { ToastContext } from './toast';
 import { Tooltip } from './Tooltip';
+
+interface AgentInfo {
+  name: string;
+  role: string;
+  instructions?: string;
+  provider?: string;
+  model?: string;
+  icon?: string;
+  color?: string;
+  skills?: string[];
+  tools?: string[];
+  delegates_to?: string[];
+}
+
+interface TeamInfo {
+  name: string;
+  agents: number;
+  agent_count: number;
+  agents_list: AgentInfo[];
+  icon?: string;
+  color?: string;
+  default_provider?: string;
+  default_model?: string;
+  filename?: string;
+}
+
+interface Deliverable {
+  id: string;
+  mission_id: string;
+  name: string;
+  path: string;
+  type: 'document' | 'code' | 'data' | 'archive';
+  size_bytes: number;
+  status: 'verified' | 'draft' | 'final';
+  metadata: Record<string, any>;
+  created_at: string;
+}
+
+interface ActivityItem {
+  id: string;
+  agent: string;
+  activity_type: string;
+  message: string;
+  metadata?: Record<string, any>;
+  created_at: string;
+}
 
 interface Milestone {
   id: string;
@@ -101,6 +148,19 @@ export function Missions({ navigate, initialMissionId }: MissionsProps) {
 
   // Teams list for selector
   const [availableTeams, setAvailableTeams] = useState<string[]>([]);
+  const [teams, setTeams] = useState<TeamInfo[]>([]);
+  const [selectedSpecialistForPopover, setSelectedSpecialistForPopover] = useState<AgentInfo | null>(null);
+
+  // Deliverables (Slice 2D)
+  const [deliverables, setDeliverables] = useState<Deliverable[]>([]);
+  const [loadingDeliverables, setLoadingDeliverables] = useState(false);
+  const [copiedPath, setCopiedPath] = useState<string | null>(null);
+
+  // Inspector & Activities (Slice 2E)
+  const [activeInspectorTab, setActiveInspectorTab] = useState<'graph' | 'trace' | 'telemetry'>('graph');
+  const [activities, setActivities] = useState<ActivityItem[]>([]);
+  const [loadingActivities, setLoadingActivities] = useState(false);
+  const [selectedGraphNode, setSelectedGraphNode] = useState<GraphNode | null>(null);
 
   const selectedMissionRef = useRef<Mission | null>(selectedMission);
   selectedMissionRef.current = selectedMission;
@@ -134,6 +194,7 @@ export function Missions({ navigate, initialMissionId }: MissionsProps) {
       if (res.ok) {
         const data = await res.json();
         if (Array.isArray(data)) {
+          setTeams(data);
           setAvailableTeams(data.map((tm: any) => tm.name || tm.id));
           if (data.length > 0 && !newTeam) {
             setNewTeam(data[0].name || data[0].id);
@@ -166,13 +227,51 @@ export function Missions({ navigate, initialMissionId }: MissionsProps) {
     }
   }, []);
 
+  const fetchDeliverables = useCallback(async (missionId: string) => {
+    try {
+      setLoadingDeliverables(true);
+      const res = await fetch(apiUrl(`/api/missions/${missionId}/deliverables`));
+      if (res.ok) {
+        const data = await res.json();
+        setDeliverables(Array.isArray(data) ? data : []);
+      }
+    } catch (err) {
+      console.error(err);
+      setDeliverables([]);
+    } finally {
+      setLoadingDeliverables(false);
+    }
+  }, []);
+
+  const fetchActivities = useCallback(async (missionId: string) => {
+    try {
+      setLoadingActivities(true);
+      const res = await fetch(apiUrl(`/api/missions/${missionId}/activities`));
+      if (res.ok) {
+        const data = await res.json();
+        setActivities(Array.isArray(data) ? data : []);
+      }
+    } catch (err) {
+      console.error(err);
+      setActivities([]);
+    } finally {
+      setLoadingActivities(false);
+    }
+  }, []);
+
   useEffect(() => {
     if (selectedMission) {
       loadGraph(selectedMission.id);
+      fetchDeliverables(selectedMission.id);
+      fetchActivities(selectedMission.id);
     } else {
       setGraphData(null);
+      setDeliverables([]);
+      setActivities([]);
+      setSelectedSpecialistForPopover(null);
+      setSelectedGraphNode(null);
     }
-  }, [selectedMission?.id, loadGraph]);
+  }, [selectedMission?.id, loadGraph, fetchDeliverables, fetchActivities]);
 
   const handleCreateMission = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -242,6 +341,42 @@ export function Missions({ navigate, initialMissionId }: MissionsProps) {
     } catch (err: any) {
       showToast?.(err.message, 'error');
     }
+  };
+
+  const handleUpdateTeam = async (teamName: string) => {
+    if (!selectedMission) return;
+    try {
+      const res = await fetch(apiUrl(`/api/missions/${selectedMission.id}`), {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ team_name: teamName }),
+      });
+      if (!res.ok) throw new Error('Failed to update workforce');
+      const updated = await res.json();
+      setSelectedMission(updated);
+      setMissions(prev => prev.map(m => m.id === updated.id ? updated : m));
+      showToast?.('Workforce team assigned', 'success');
+      loadGraph(updated.id);
+    } catch (err: any) {
+      showToast?.(err.message, 'error');
+    }
+  };
+
+  const handleCopyPath = (id: string, path: string) => {
+    navigator.clipboard?.writeText(path);
+    setCopiedPath(id);
+    showToast?.(t('pathCopied'), 'success');
+    setTimeout(() => {
+      setCopiedPath(null);
+    }, 2000);
+  };
+
+  const formatBytes = (bytes: number) => {
+    if (!bytes || bytes === 0) return '0 B';
+    const k = 1024;
+    const sizes = ['B', 'KB', 'MB', 'GB'];
+    const i = Math.floor(Math.log(bytes) / Math.log(k));
+    return parseFloat((bytes / Math.pow(k, i)).toFixed(1)) + ' ' + sizes[i];
   };
 
   const confirmDeleteMission = async () => {
@@ -403,13 +538,31 @@ export function Missions({ navigate, initialMissionId }: MissionsProps) {
     return true;
   });
 
-  // Calculate specialists list for human workforce display
-  const specialists = useMemo(() => {
-    if (!selectedMission?.team_name) {
-      return ['Strategic Lead', 'Research Specialist', 'Quality Reviewer'];
-    }
-    return ['Domain Lead', 'Autonomous Specialist', 'Verification Auditor'];
-  }, [selectedMission?.team_name]);
+  // Real Workforce resolution (Slice 2B)
+  const currentTeam = useMemo(() => {
+    if (!selectedMission?.team_name) return null;
+    return teams.find(t => t.name === selectedMission.team_name) || null;
+  }, [selectedMission?.team_name, teams]);
+
+  const missionLead = useMemo(() => {
+    if (!currentTeam || !currentTeam.agents_list || currentTeam.agents_list.length === 0) return null;
+    return currentTeam.agents_list[0];
+  }, [currentTeam]);
+
+  const assignedSpecialists = useMemo(() => {
+    if (!currentTeam || !currentTeam.agents_list || currentTeam.agents_list.length <= 1) return [];
+    return currentTeam.agents_list.slice(1);
+  }, [currentTeam]);
+
+  const pipelineStats = useMemo(() => {
+    if (!selectedMission || !selectedMission.milestones) return { completed: 0, running: 0, pending: 0, blocked: 0 };
+    return {
+      completed: selectedMission.milestones.filter(m => m.status === 'completed').length,
+      running: selectedMission.milestones.filter(m => m.status === 'running').length,
+      pending: selectedMission.milestones.filter(m => m.status === 'pending').length,
+      blocked: selectedMission.milestones.filter(m => m.status === 'failed').length,
+    };
+  }, [selectedMission]);
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', height: '100%', overflow: 'hidden', backgroundColor: 'hsl(var(--bg))' }}>
@@ -911,94 +1064,284 @@ export function Missions({ navigate, initialMissionId }: MissionsProps) {
                 </div>
               </div>
 
-              {/* 2. OUTCOME CHARTER CARD */}
+              {/* 2. OUTCOME CHARTER & WORKFORCE ROSTER (Slice 2B) */}
               <div style={{
                 padding: '20px',
                 borderRadius: '12px',
                 border: '1px solid hsl(var(--border))',
-                backgroundColor: 'hsl(var(--card))'
+                backgroundColor: 'hsl(var(--card))',
+                display: 'flex',
+                flexDirection: 'column',
+                gap: '16px'
               }}>
-                <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '8px' }}>
-                  <Target size={16} className="text-primary" />
-                  <span style={{ fontSize: '12px', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.05em', color: 'hsl(var(--primary))' }}>
-                    {t('outcomeCharter')}
-                  </span>
+                <div>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '8px' }}>
+                    <Target size={16} className="text-primary" />
+                    <span style={{ fontSize: '12px', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.05em', color: 'hsl(var(--primary))' }}>
+                      {t('outcomeCharter')}
+                    </span>
+                  </div>
+
+                  <h3 style={{ fontSize: '16px', fontWeight: 600, margin: '0 0 10px', color: 'hsl(var(--fg))' }}>
+                    {t('whatAreWeAchieving')}
+                  </h3>
+
+                  <p style={{
+                    fontSize: '14px',
+                    color: 'hsl(var(--fg))',
+                    lineHeight: 1.6,
+                    margin: 0,
+                    whiteSpace: 'pre-wrap'
+                  }}>
+                    {selectedMission.objective}
+                  </p>
                 </div>
 
-                <h3 style={{ fontSize: '16px', fontWeight: 600, margin: '0 0 10px', color: 'hsl(var(--fg))' }}>
-                  {t('whatAreWeAchieving')}
-                </h3>
-
-                <p style={{
-                  fontSize: '14px',
-                  color: 'hsl(var(--fg))',
-                  lineHeight: 1.6,
-                  margin: '0 0 16px',
-                  whiteSpace: 'pre-wrap'
-                }}>
-                  {selectedMission.objective}
-                </p>
-
-                {/* Workforce & Specialists Stack */}
+                {/* Workforce & Specialists Roster */}
                 <div style={{
                   borderTop: '1px solid hsl(var(--border))',
                   paddingTop: '14px',
                   display: 'flex',
-                  alignItems: 'center',
-                  justifyContent: 'space-between',
-                  flexWrap: 'wrap',
-                  gap: '10px'
+                  flexDirection: 'column',
+                  gap: '12px'
                 }}>
-                  <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap' }}>
-                    <span style={{ fontSize: '12px', color: 'hsl(var(--muted-fg))', fontWeight: 500 }}>
-                      {t('assignedWorkforceLabel')}: <strong>{selectedMission.team_name || t('defaultWorkforce')}</strong>
-                    </span>
-                    <span style={{ color: 'hsl(var(--border))' }}>•</span>
-                    <span style={{ fontSize: '12px', color: 'hsl(var(--muted-fg))' }}>{t('specialistsMobilized')}:</span>
-                    {specialists.map((role, idx) => (
-                      <span
-                        key={idx}
-                        style={{
-                          fontSize: '11px',
-                          padding: '2px 8px',
-                          borderRadius: '12px',
-                          backgroundColor: 'hsl(var(--muted))',
-                          color: 'hsl(var(--fg))',
-                          fontWeight: 500
-                        }}
-                      >
-                        {role}
+                  <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: '8px' }}>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                      <Users size={16} className="text-primary" />
+                      <span style={{ fontSize: '13px', fontWeight: 600, color: 'hsl(var(--fg))' }}>
+                        {t('assignedWorkforceLabel')}: {selectedMission.team_name || t('noWorkforceAssigned')}
                       </span>
-                    ))}
+                    </div>
+
+                    {currentTeam && (
+                      <span style={{
+                        fontSize: '11px',
+                        padding: '2px 8px',
+                        borderRadius: '12px',
+                        backgroundColor: 'hsl(var(--muted))',
+                        color: 'hsl(var(--muted-fg))',
+                        fontWeight: 500
+                      }}>
+                        {t('statusAssigned')} ({t('statusStandby')})
+                      </span>
+                    )}
                   </div>
+
+                  {currentTeam ? (
+                    <div style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
+                      {/* Mission Lead Card */}
+                      {missionLead && (
+                        <div style={{
+                          padding: '12px 14px',
+                          borderRadius: '8px',
+                          backgroundColor: 'hsl(var(--bg))',
+                          border: '1px solid hsl(var(--border))',
+                          display: 'flex',
+                          alignItems: 'center',
+                          justifyContent: 'space-between',
+                          flexWrap: 'wrap',
+                          gap: '10px'
+                        }}>
+                          <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+                            <div style={{
+                              width: '32px',
+                              height: '32px',
+                              borderRadius: '8px',
+                              backgroundColor: 'hsl(var(--primary) / 0.15)',
+                              color: 'hsl(var(--primary))',
+                              display: 'flex',
+                              alignItems: 'center',
+                              justifyContent: 'center',
+                              fontWeight: 700,
+                              fontSize: '13px'
+                            }}>
+                              {missionLead.name.slice(0, 1).toUpperCase()}
+                            </div>
+                            <div>
+                              <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+                                <span style={{ fontSize: '13px', fontWeight: 600, color: 'hsl(var(--fg))' }}>
+                                  {missionLead.name}
+                                </span>
+                                <span style={{
+                                  fontSize: '10px',
+                                  textTransform: 'uppercase',
+                                  fontWeight: 700,
+                                  padding: '1px 6px',
+                                  borderRadius: '4px',
+                                  backgroundColor: 'hsl(var(--primary) / 0.2)',
+                                  color: 'hsl(var(--primary))'
+                                }}>
+                                  {t('missionLead')}
+                                </span>
+                              </div>
+                              <div style={{ fontSize: '11px', color: 'hsl(var(--muted-fg))', marginTop: '2px' }}>
+                                {missionLead.role} • {missionLead.provider || currentTeam.default_provider || 'OpenAI'} ({missionLead.model || currentTeam.default_model || 'gpt-4o'})
+                              </div>
+                            </div>
+                          </div>
+
+                          <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+                            <span style={{
+                              fontSize: '11px',
+                              padding: '2px 8px',
+                              borderRadius: '6px',
+                              backgroundColor: 'hsl(var(--muted))',
+                              color: 'hsl(var(--muted-fg))',
+                              fontWeight: 500
+                            }}>
+                              {t('statusStandby')}
+                            </span>
+                            <button
+                              onClick={() => setSelectedSpecialistForPopover(missionLead)}
+                              className="btn btn-ghost"
+                              style={{ fontSize: '11px', padding: '3px 8px' }}
+                            >
+                              Role Specs
+                            </button>
+                          </div>
+                        </div>
+                      )}
+
+                      {/* Assigned Specialists Grid */}
+                      {assignedSpecialists.length > 0 && (
+                        <div>
+                          <div style={{ fontSize: '11px', fontWeight: 600, color: 'hsl(var(--muted-fg))', textTransform: 'uppercase', letterSpacing: '0.05em', marginBottom: '8px' }}>
+                            {t('assignedSpecialists')} ({assignedSpecialists.length})
+                          </div>
+                          <div style={{ display: 'flex', flexWrap: 'wrap', gap: '8px' }}>
+                            {assignedSpecialists.map((agent, idx) => (
+                              <button
+                                key={idx}
+                                onClick={() => setSelectedSpecialistForPopover(agent)}
+                                style={{
+                                  display: 'flex',
+                                  alignItems: 'center',
+                                  gap: '8px',
+                                  padding: '6px 12px',
+                                  borderRadius: '8px',
+                                  backgroundColor: 'hsl(var(--bg))',
+                                  border: '1px solid hsl(var(--border))',
+                                  cursor: 'pointer',
+                                  textAlign: 'left',
+                                  transition: 'border-color 0.15s ease'
+                                }}
+                                className="hover:border-primary"
+                              >
+                                <div style={{
+                                  width: '20px',
+                                  height: '20px',
+                                  borderRadius: '50%',
+                                  backgroundColor: 'hsl(var(--muted))',
+                                  display: 'flex',
+                                  alignItems: 'center',
+                                  justifyContent: 'center',
+                                  fontSize: '10px',
+                                  fontWeight: 600,
+                                  color: 'hsl(var(--fg))'
+                                }}>
+                                  {agent.name.slice(0, 1).toUpperCase()}
+                                </div>
+                                <div>
+                                  <div style={{ fontSize: '12px', fontWeight: 600, color: 'hsl(var(--fg))' }}>
+                                    {agent.name}
+                                  </div>
+                                  <div style={{ fontSize: '10px', color: 'hsl(var(--muted-fg))' }}>
+                                    {agent.role}
+                                  </div>
+                                </div>
+                              </button>
+                            ))}
+                          </div>
+                        </div>
+                      )}
+                    </div>
+                  ) : (
+                    <div style={{
+                      padding: '16px',
+                      borderRadius: '8px',
+                      backgroundColor: 'hsl(var(--bg))',
+                      border: '1px dashed hsl(var(--border))',
+                      display: 'flex',
+                      alignItems: 'center',
+                      justifyContent: 'space-between',
+                      flexWrap: 'wrap',
+                      gap: '12px'
+                    }}>
+                      <div>
+                        <div style={{ fontSize: '13px', fontWeight: 500, color: 'hsl(var(--fg))' }}>
+                          {t('noWorkforceAssigned')}
+                        </div>
+                        <div style={{ fontSize: '11px', color: 'hsl(var(--muted-fg))', marginTop: '2px' }}>
+                          {t('noWorkforceDesc')}
+                        </div>
+                      </div>
+
+                      {availableTeams.length > 0 && (
+                        <select
+                          value=""
+                          onChange={(e) => { if (e.target.value) handleUpdateTeam(e.target.value); }}
+                          className="form-input"
+                          style={{ fontSize: '12px', padding: '4px 8px', maxWidth: '220px' }}
+                        >
+                          <option value="" disabled>Assign workforce team...</option>
+                          {availableTeams.map(tm => (
+                            <option key={tm} value={tm}>{tm}</option>
+                          ))}
+                        </select>
+                      )}
+                    </div>
+                  )}
                 </div>
               </div>
 
-              {/* 3. MILESTONE PROGRESSION STEPPER (Single unified list, no side-by-side duplicate) */}
+              {/* 3. OUTCOME STAGE PIPELINE (Slice 2C) */}
               <div style={{
                 padding: '20px',
                 borderRadius: '12px',
                 border: '1px solid hsl(var(--border))',
                 backgroundColor: 'hsl(var(--card))'
               }}>
-                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '16px' }}>
+                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '16px', flexWrap: 'wrap', gap: '10px' }}>
                   <div>
-                    <h3 style={{ fontSize: '15px', fontWeight: 600, margin: 0, color: 'hsl(var(--fg))' }}>
-                      {t('milestoneProgression')}
-                    </h3>
-                    <span style={{ fontSize: '12px', color: 'hsl(var(--muted-fg))' }}>
-                      {selectedMission.milestones.filter(m => m.status === 'completed').length} {t('ofMilestones')} {selectedMission.milestones.length} {t('completedCount')}
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                      <Workflow size={16} className="text-primary" />
+                      <h3 style={{ fontSize: '15px', fontWeight: 600, margin: 0, color: 'hsl(var(--fg))' }}>
+                        {t('stagePipeline')}
+                      </h3>
+                    </div>
+                    <span style={{ fontSize: '12px', color: 'hsl(var(--muted-fg))', marginTop: '2px', display: 'block' }}>
+                      {pipelineStats.completed} {t('ofMilestones')} {selectedMission.milestones.length} {t('completedCount')}
                     </span>
                   </div>
 
-                  <button
-                    onClick={() => setIsAddingMilestone(!isAddingMilestone)}
-                    className="btn btn-ghost"
-                    style={{ fontSize: '12px', display: 'flex', alignItems: 'center', gap: '5px', padding: '4px 10px' }}
-                  >
-                    <Plus size={14} />
-                    <span>{t('addStep')}</span>
-                  </button>
+                  {/* Pipeline Overview Status Bar */}
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap' }}>
+                    <span style={{ fontSize: '11px', padding: '2px 8px', borderRadius: '12px', backgroundColor: 'rgba(16, 185, 129, 0.12)', color: '#10b981', fontWeight: 600 }}>
+                      {pipelineStats.completed} {t('pipelineCompleted')}
+                    </span>
+                    {pipelineStats.running > 0 && (
+                      <span style={{ fontSize: '11px', padding: '2px 8px', borderRadius: '12px', backgroundColor: 'hsl(var(--primary) / 0.15)', color: 'hsl(var(--primary))', fontWeight: 600 }}>
+                        {pipelineStats.running} {t('pipelineRunning')}
+                      </span>
+                    )}
+                    {pipelineStats.blocked > 0 && (
+                      <span style={{ fontSize: '11px', padding: '2px 8px', borderRadius: '12px', backgroundColor: 'rgba(239, 68, 68, 0.12)', color: '#ef4444', fontWeight: 600 }}>
+                        {pipelineStats.blocked} {t('pipelineBlocked')}
+                      </span>
+                    )}
+                    <span style={{ fontSize: '11px', padding: '2px 8px', borderRadius: '12px', backgroundColor: 'hsl(var(--muted))', color: 'hsl(var(--muted-fg))', fontWeight: 500 }}>
+                      {pipelineStats.pending} {t('pipelinePending')}
+                    </span>
+
+                    <button
+                      onClick={() => setIsAddingMilestone(!isAddingMilestone)}
+                      className="btn btn-ghost"
+                      style={{ fontSize: '12px', display: 'flex', alignItems: 'center', gap: '5px', padding: '4px 10px', marginLeft: '4px' }}
+                    >
+                      <Plus size={14} />
+                      <span>{t('addStep')}</span>
+                    </button>
+                  </div>
                 </div>
 
                 {/* Inline Milestone Creation Form */}
@@ -1054,7 +1397,7 @@ export function Missions({ navigate, initialMissionId }: MissionsProps) {
                   </form>
                 )}
 
-                {/* Milestones Stepper Sequence */}
+                {/* Stage Sequence */}
                 <div style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
                   {selectedMission.milestones.length === 0 ? (
                     <div style={{
@@ -1065,7 +1408,7 @@ export function Missions({ navigate, initialMissionId }: MissionsProps) {
                       border: '1px dashed hsl(var(--border))',
                       borderRadius: '8px'
                     }}>
-                      No milestones created yet. Add steps to track verifiable progression.
+                      No stages defined yet. Add steps to establish verifiable execution boundaries.
                     </div>
                   ) : (
                     selectedMission.milestones.map((m, idx) => {
@@ -1098,7 +1441,7 @@ export function Missions({ navigate, initialMissionId }: MissionsProps) {
                           {/* Status Clickable Checkbox/Action */}
                           <button
                             onClick={() => handleToggleMilestone(m)}
-                            title="Toggle milestone state"
+                            title="Toggle stage state"
                             style={{
                               background: 'none',
                               border: 'none',
@@ -1125,8 +1468,17 @@ export function Missions({ navigate, initialMissionId }: MissionsProps) {
                                 color: isDone ? 'hsl(var(--muted-fg))' : 'hsl(var(--fg))',
                                 textDecoration: isDone ? 'line-through' : 'none'
                               }}>
-                                <span style={{ color: 'hsl(var(--muted-fg))', marginRight: '6px', fontSize: '12px', fontWeight: 400 }}>
-                                  #{idx + 1}
+                                <span style={{
+                                  fontSize: '10px',
+                                  textTransform: 'uppercase',
+                                  fontWeight: 700,
+                                  padding: '1px 5px',
+                                  borderRadius: '4px',
+                                  backgroundColor: 'hsl(var(--muted))',
+                                  color: 'hsl(var(--muted-fg))',
+                                  marginRight: '8px'
+                                }}>
+                                  {t('stage')} {idx + 1}
                                 </span>
                                 {m.title}
                               </div>
@@ -1143,7 +1495,7 @@ export function Missions({ navigate, initialMissionId }: MissionsProps) {
                                   </span>
                                 )}
 
-                                {/* Hover-activated deletion (No persistent trash icons) */}
+                                {/* Hover-activated deletion */}
                                 {hoveredMilestoneId === m.id && (
                                   <button
                                     onClick={() => setMilestoneToDelete(m.id)}
@@ -1176,35 +1528,135 @@ export function Missions({ navigate, initialMissionId }: MissionsProps) {
                 </div>
               </div>
 
-              {/* 4. DELIVERABLES DOSSIER PLACEHOLDER (Slice 2D Preparation) */}
+              {/* 4. DELIVERABLES DOSSIER (Slice 2D) */}
               <div style={{
                 padding: '20px',
                 borderRadius: '12px',
                 border: '1px solid hsl(var(--border))',
                 backgroundColor: 'hsl(var(--card))'
               }}>
-                <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '8px' }}>
-                  <FileText size={16} className="text-primary" />
-                  <h3 style={{ fontSize: '15px', fontWeight: 600, margin: 0, color: 'hsl(var(--fg))' }}>
-                    {t('deliverablesDossier')}
-                  </h3>
+                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '14px' }}>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                    <FileText size={16} className="text-primary" />
+                    <h3 style={{ fontSize: '15px', fontWeight: 600, margin: 0, color: 'hsl(var(--fg))' }}>
+                      {t('deliverablesDossier')}
+                    </h3>
+                    <span style={{
+                      fontSize: '11px',
+                      padding: '1px 6px',
+                      borderRadius: '10px',
+                      backgroundColor: 'hsl(var(--muted))',
+                      color: 'hsl(var(--muted-fg))',
+                      fontWeight: 600
+                    }}>
+                      {deliverables.length}
+                    </span>
+                  </div>
                 </div>
 
-                <div style={{
-                  padding: '24px 16px',
-                  borderRadius: '8px',
-                  border: '1px dashed hsl(var(--border))',
-                  textAlign: 'center',
-                  color: 'hsl(var(--muted-fg))'
-                }}>
-                  <FileText size={28} style={{ margin: '0 auto 10px', opacity: 0.3 }} />
-                  <div style={{ fontSize: '13px', fontWeight: 500, color: 'hsl(var(--fg))' }}>
-                    {t('deliverablesPlaceholderTitle')}
+                {loadingDeliverables ? (
+                  <div style={{ padding: '24px', textAlign: 'center', color: 'hsl(var(--muted-fg))', fontSize: '12px' }}>
+                    <RefreshCw size={16} className="animate-spin" style={{ margin: '0 auto 8px' }} />
+                    Loading deliverables...
                   </div>
-                  <div style={{ fontSize: '12px', marginTop: '4px', maxWidth: '420px', marginInline: 'auto' }}>
-                    {t('deliverablesPlaceholderDesc')}
+                ) : deliverables.length === 0 ? (
+                  <div style={{
+                    padding: '24px 16px',
+                    borderRadius: '8px',
+                    border: '1px dashed hsl(var(--border))',
+                    textAlign: 'center',
+                    color: 'hsl(var(--muted-fg))'
+                  }}>
+                    <FileText size={28} style={{ margin: '0 auto 10px', opacity: 0.3 }} />
+                    <div style={{ fontSize: '13px', fontWeight: 500, color: 'hsl(var(--fg))' }}>
+                      {t('deliverablesEmptyTitle')}
+                    </div>
+                    <div style={{ fontSize: '12px', marginTop: '4px', maxWidth: '440px', marginInline: 'auto' }}>
+                      {t('deliverablesEmptyDesc')}
+                    </div>
+                    <div style={{ fontSize: '11px', marginTop: '8px', color: 'hsl(var(--muted-fg))', opacity: 0.8 }}>
+                      {t('deliverablesRuntimeNotice')}
+                    </div>
                   </div>
-                </div>
+                ) : (
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
+                    {deliverables.map((del) => {
+                      const renderTypeIcon = () => {
+                        switch (del.type) {
+                          case 'code': return <FileCode size={16} className="text-sky-500" />;
+                          case 'data': return <Table size={16} className="text-amber-500" />;
+                          case 'archive': return <FolderArchive size={16} className="text-purple-500" />;
+                          default: return <FileText size={16} className="text-primary" />;
+                        }
+                      };
+
+                      return (
+                        <div
+                          key={del.id}
+                          style={{
+                            padding: '12px 14px',
+                            borderRadius: '8px',
+                            backgroundColor: 'hsl(var(--bg))',
+                            border: '1px solid hsl(var(--border))',
+                            display: 'flex',
+                            alignItems: 'center',
+                            justifyContent: 'space-between',
+                            gap: '12px'
+                          }}
+                        >
+                          <div style={{ display: 'flex', alignItems: 'center', gap: '12px', minWidth: 0, flex: 1 }}>
+                            <div style={{
+                              width: '32px',
+                              height: '32px',
+                              borderRadius: '8px',
+                              backgroundColor: 'hsl(var(--card))',
+                              border: '1px solid hsl(var(--border))',
+                              display: 'flex',
+                              alignItems: 'center',
+                              justifyContent: 'center',
+                              flexShrink: 0
+                            }}>
+                              {renderTypeIcon()}
+                            </div>
+                            <div style={{ minWidth: 0, flex: 1 }}>
+                              <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                                <span style={{ fontSize: '13px', fontWeight: 600, color: 'hsl(var(--fg))', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                                  {del.name}
+                                </span>
+                                <span style={{
+                                  fontSize: '10px',
+                                  padding: '1px 6px',
+                                  borderRadius: '4px',
+                                  backgroundColor: del.status === 'verified' ? 'rgba(16, 185, 129, 0.15)' : 'hsl(var(--muted))',
+                                  color: del.status === 'verified' ? '#10b981' : 'hsl(var(--muted-fg))',
+                                  fontWeight: 600,
+                                  textTransform: 'uppercase'
+                                }}>
+                                  {del.status}
+                                </span>
+                              </div>
+                              <div style={{ fontSize: '11px', color: 'hsl(var(--muted-fg))', marginTop: '2px', fontFamily: 'monospace', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                                {del.path} • {formatBytes(del.size_bytes)}
+                              </div>
+                            </div>
+                          </div>
+
+                          <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+                            <button
+                              onClick={() => handleCopyPath(del.id, del.path)}
+                              className="btn btn-ghost"
+                              style={{ display: 'flex', alignItems: 'center', gap: '4px', fontSize: '11px', padding: '4px 8px' }}
+                              title={t('deliverableActionCopyPath')}
+                            >
+                              {copiedPath === del.id ? <Check size={13} className="text-emerald-500" /> : <Copy size={13} />}
+                              <span>{copiedPath === del.id ? t('copied') : t('deliverableActionCopyPath')}</span>
+                            </button>
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                )}
               </div>
 
               {/* 5. PROGRESSIVE DISCLOSURE INSPECTOR GATEWAY */}
@@ -1242,8 +1694,371 @@ export function Missions({ navigate, initialMissionId }: MissionsProps) {
         ) : null}
       </div>
 
-      {/* Progressive Disclosure Inspector Modal / Drawer */}
+      {/* Slide-over Advanced Inspector Sheet (Slice 2E) */}
       {isInspectorOpen && selectedMission && (
+        <div style={{
+          position: 'fixed',
+          inset: 0,
+          zIndex: 60,
+          display: 'flex',
+          justifyContent: 'flex-end',
+          backgroundColor: 'rgba(0,0,0,0.5)',
+          backdropFilter: 'blur(2px)'
+        }}>
+          <div style={{
+            width: '100%',
+            maxWidth: '640px',
+            height: '100%',
+            backgroundColor: 'hsl(var(--card))',
+            borderLeft: '1px solid hsl(var(--border))',
+            boxShadow: '-8px 0 25px -5px rgba(0,0,0,0.3)',
+            display: 'flex',
+            flexDirection: 'column',
+            overflow: 'hidden'
+          }}>
+            {/* Header */}
+            <div style={{ padding: '16px 20px', borderBottom: '1px solid hsl(var(--border))', display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+                <Layers size={18} className="text-primary" />
+                <div>
+                  <h3 style={{ fontSize: '15px', fontWeight: 600, margin: 0, color: 'hsl(var(--fg))' }}>
+                    {t('inspectorSlideOverTitle')}
+                  </h3>
+                  <p style={{ fontSize: '11px', color: 'hsl(var(--muted-fg))', margin: '2px 0 0', maxWidth: '380px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                    {selectedMission.title}
+                  </p>
+                </div>
+              </div>
+              <button onClick={() => setIsInspectorOpen(false)} className="btn btn-ghost" style={{ padding: '4px' }}>
+                <X size={18} />
+              </button>
+            </div>
+
+            {/* Tab Navigation */}
+            <div style={{
+              display: 'flex',
+              borderBottom: '1px solid hsl(var(--border))',
+              backgroundColor: 'hsl(var(--bg))',
+              padding: '0 16px'
+            }}>
+              <button
+                onClick={() => setActiveInspectorTab('graph')}
+                style={{
+                  padding: '10px 14px',
+                  fontSize: '12px',
+                  fontWeight: 600,
+                  color: activeInspectorTab === 'graph' ? 'hsl(var(--primary))' : 'hsl(var(--muted-fg))',
+                  borderBottom: activeInspectorTab === 'graph' ? '2px solid hsl(var(--primary))' : '2px solid transparent',
+                  background: 'none',
+                  border: 'none',
+                  borderBottomWidth: '2px',
+                  borderBottomStyle: 'solid',
+                  borderBottomColor: activeInspectorTab === 'graph' ? 'hsl(var(--primary))' : 'transparent',
+                  cursor: 'pointer',
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: '6px'
+                }}
+              >
+                <Workflow size={14} />
+                <span>{t('tabGraph')}</span>
+                {graphData?.nodes && (
+                  <span style={{ fontSize: '10px', padding: '1px 5px', borderRadius: '10px', backgroundColor: 'hsl(var(--muted))' }}>
+                    {graphData.nodes.length}
+                  </span>
+                )}
+              </button>
+
+              <button
+                onClick={() => setActiveInspectorTab('trace')}
+                style={{
+                  padding: '10px 14px',
+                  fontSize: '12px',
+                  fontWeight: 600,
+                  color: activeInspectorTab === 'trace' ? 'hsl(var(--primary))' : 'hsl(var(--muted-fg))',
+                  background: 'none',
+                  border: 'none',
+                  borderBottomWidth: '2px',
+                  borderBottomStyle: 'solid',
+                  borderBottomColor: activeInspectorTab === 'trace' ? 'hsl(var(--primary))' : 'transparent',
+                  cursor: 'pointer',
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: '6px'
+                }}
+              >
+                <Activity size={14} />
+                <span>{t('tabTrace')}</span>
+                {activities.length > 0 && (
+                  <span style={{ fontSize: '10px', padding: '1px 5px', borderRadius: '10px', backgroundColor: 'hsl(var(--muted))' }}>
+                    {activities.length}
+                  </span>
+                )}
+              </button>
+
+              <button
+                onClick={() => setActiveInspectorTab('telemetry')}
+                style={{
+                  padding: '10px 14px',
+                  fontSize: '12px',
+                  fontWeight: 600,
+                  color: activeInspectorTab === 'telemetry' ? 'hsl(var(--primary))' : 'hsl(var(--muted-fg))',
+                  background: 'none',
+                  border: 'none',
+                  borderBottomWidth: '2px',
+                  borderBottomStyle: 'solid',
+                  borderBottomColor: activeInspectorTab === 'telemetry' ? 'hsl(var(--primary))' : 'transparent',
+                  cursor: 'pointer',
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: '6px'
+                }}
+              >
+                <Terminal size={14} />
+                <span>{t('tabTelemetry')}</span>
+              </button>
+            </div>
+
+            {/* Tab Body */}
+            <div style={{ padding: '20px', overflowY: 'auto', flex: 1, display: 'flex', flexDirection: 'column', gap: '16px' }}>
+              {/* Tab 1: Execution Graph */}
+              {activeInspectorTab === 'graph' && (
+                <>
+                  <div style={{
+                    padding: '10px 14px',
+                    borderRadius: '6px',
+                    backgroundColor: 'hsl(var(--muted))',
+                    fontSize: '12px',
+                    color: 'hsl(var(--muted-fg))'
+                  }}>
+                    {t('inspectPlaceholderNotice')}
+                  </div>
+
+                  {loadingGraph ? (
+                    <div style={{ padding: '32px', textAlign: 'center', color: 'hsl(var(--muted-fg))', fontSize: '13px' }}>
+                      <RefreshCw size={20} className="animate-spin" style={{ margin: '0 auto 8px' }} />
+                      Compiling node graph...
+                    </div>
+                  ) : !graphData || graphData.nodes.length === 0 ? (
+                    <div style={{ padding: '32px', textAlign: 'center', color: 'hsl(var(--muted-fg))', fontSize: '12px' }}>
+                      No execution nodes registered yet.
+                    </div>
+                  ) : (
+                    <div style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
+                      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', fontSize: '11px', color: 'hsl(var(--muted-fg))', padding: '0 4px' }}>
+                        <span>Topology: {graphData.nodes.length} {t('graphNodesCount')} · {graphData.edges.length} {t('graphEdgesCount')}</span>
+                        {selectedGraphNode && (
+                          <button onClick={() => setSelectedGraphNode(null)} className="btn btn-ghost" style={{ padding: '1px 6px', fontSize: '10px' }}>
+                            Clear selection
+                          </button>
+                        )}
+                      </div>
+
+                      {graphData.nodes.map(node => {
+                        const isSelected = selectedGraphNode?.id === node.id;
+                        return (
+                          <div
+                            key={node.id}
+                            onClick={() => setSelectedGraphNode(isSelected ? null : node)}
+                            style={{
+                              padding: '12px 14px',
+                              borderRadius: '8px',
+                              backgroundColor: isSelected
+                                ? 'hsl(var(--primary) / 0.1)'
+                                : node.type === 'mission'
+                                ? 'hsl(var(--primary) / 0.05)'
+                                : 'hsl(var(--bg))',
+                              border: isSelected
+                                ? '1px solid hsl(var(--primary))'
+                                : '1px solid hsl(var(--border))',
+                              cursor: 'pointer',
+                              transition: 'all 0.15s ease'
+                            }}
+                          >
+                            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+                              <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+                                <span style={{
+                                  fontSize: '10px',
+                                  textTransform: 'uppercase',
+                                  fontWeight: 700,
+                                  padding: '2px 6px',
+                                  borderRadius: '4px',
+                                  backgroundColor: 'hsl(var(--muted))',
+                                  color: 'hsl(var(--fg))'
+                                }}>
+                                  {node.type}
+                                </span>
+                                <span style={{ fontSize: '13px', fontWeight: 600, color: 'hsl(var(--fg))' }}>
+                                  {node.label}
+                                </span>
+                              </div>
+                              {getStatusBadge(node.status)}
+                            </div>
+
+                            {isSelected && (
+                              <div style={{
+                                marginTop: '10px',
+                                paddingTop: '10px',
+                                borderTop: '1px solid hsl(var(--border))',
+                                fontSize: '11px',
+                                color: 'hsl(var(--muted-fg))'
+                              }}>
+                                <div style={{ fontFamily: 'monospace', marginBottom: '4px' }}>
+                                  ID: {node.id}
+                                </div>
+                                {node.metadata && Object.keys(node.metadata).length > 0 && (
+                                  <pre style={{
+                                    backgroundColor: 'hsl(var(--card))',
+                                    padding: '8px',
+                                    borderRadius: '4px',
+                                    fontSize: '10px',
+                                    overflowX: 'auto',
+                                    margin: 0
+                                  }}>
+                                    {JSON.stringify(node.metadata, null, 2)}
+                                  </pre>
+                                )}
+                              </div>
+                            )}
+                          </div>
+                        );
+                      })}
+                    </div>
+                  )}
+                </>
+              )}
+
+              {/* Tab 2: Activity Trace */}
+              {activeInspectorTab === 'trace' && (
+                <>
+                  {loadingActivities ? (
+                    <div style={{ padding: '32px', textAlign: 'center', color: 'hsl(var(--muted-fg))', fontSize: '13px' }}>
+                      <RefreshCw size={20} className="animate-spin" style={{ margin: '0 auto 8px' }} />
+                      Loading activity trace...
+                    </div>
+                  ) : activities.length === 0 ? (
+                    <div style={{
+                      padding: '32px 16px',
+                      borderRadius: '8px',
+                      border: '1px dashed hsl(var(--border))',
+                      textAlign: 'center',
+                      color: 'hsl(var(--muted-fg))'
+                    }}>
+                      <Activity size={28} style={{ margin: '0 auto 10px', opacity: 0.3 }} />
+                      <div style={{ fontSize: '13px', fontWeight: 500, color: 'hsl(var(--fg))' }}>
+                        {t('traceEmptyTitle')}
+                      </div>
+                      <div style={{ fontSize: '12px', marginTop: '4px', maxWidth: '400px', marginInline: 'auto' }}>
+                        {t('traceEmptyDesc')}
+                      </div>
+                    </div>
+                  ) : (
+                    <div style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
+                      {activities.map((act) => (
+                        <div
+                          key={act.id}
+                          style={{
+                            padding: '12px 14px',
+                            borderRadius: '8px',
+                            backgroundColor: 'hsl(var(--bg))',
+                            border: '1px solid hsl(var(--border))',
+                            fontSize: '12px'
+                          }}
+                        >
+                          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '4px' }}>
+                            <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+                              <span style={{ fontWeight: 600, color: 'hsl(var(--fg))' }}>
+                                {act.agent || 'System'}
+                              </span>
+                              <span style={{
+                                fontSize: '10px',
+                                padding: '1px 5px',
+                                borderRadius: '4px',
+                                backgroundColor: 'hsl(var(--muted))',
+                                color: 'hsl(var(--muted-fg))'
+                              }}>
+                                {act.activity_type}
+                              </span>
+                            </div>
+                            <span style={{ fontSize: '10px', color: 'hsl(var(--muted-fg))' }}>
+                              {new Date(act.created_at).toLocaleTimeString()}
+                            </span>
+                          </div>
+                          <div style={{ color: 'hsl(var(--fg))', lineHeight: 1.4 }}>
+                            {act.message}
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </>
+              )}
+
+              {/* Tab 3: Telemetry & Specs */}
+              {activeInspectorTab === 'telemetry' && (
+                <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
+                  <div style={{
+                    padding: '12px',
+                    borderRadius: '8px',
+                    backgroundColor: 'hsl(var(--bg))',
+                    border: '1px solid hsl(var(--border))',
+                    display: 'flex',
+                    flexDirection: 'column',
+                    gap: '8px',
+                    fontSize: '12px'
+                  }}>
+                    <div style={{ display: 'flex', justifyContent: 'space-between' }}>
+                      <span style={{ color: 'hsl(var(--muted-fg))' }}>{t('telemetryMissionId')}</span>
+                      <span style={{ fontFamily: 'monospace', fontWeight: 500 }}>{selectedMission.id}</span>
+                    </div>
+                    <div style={{ display: 'flex', justifyContent: 'space-between' }}>
+                      <span style={{ color: 'hsl(var(--muted-fg))' }}>{t('telemetryWorkspaceId')}</span>
+                      <span style={{ fontFamily: 'monospace', fontWeight: 500 }}>{selectedMission.workspace_id}</span>
+                    </div>
+                    <div style={{ display: 'flex', justifyContent: 'space-between' }}>
+                      <span style={{ color: 'hsl(var(--muted-fg))' }}>{t('missionStatus')}</span>
+                      <span>{selectedMission.status}</span>
+                    </div>
+                    <div style={{ display: 'flex', justifyContent: 'space-between' }}>
+                      <span style={{ color: 'hsl(var(--muted-fg))' }}>{t('telemetryTeamConfig')}</span>
+                      <span style={{ fontWeight: 500 }}>{selectedMission.team_name || 'None'}</span>
+                    </div>
+                    <div style={{ display: 'flex', justifyContent: 'space-between' }}>
+                      <span style={{ color: 'hsl(var(--muted-fg))' }}>{t('telemetryCreated')}</span>
+                      <span>{new Date(selectedMission.created_at).toLocaleString()}</span>
+                    </div>
+                    <div style={{ display: 'flex', justifyContent: 'space-between' }}>
+                      <span style={{ color: 'hsl(var(--muted-fg))' }}>{t('telemetryUpdated')}</span>
+                      <span>{new Date(selectedMission.updated_at).toLocaleString()}</span>
+                    </div>
+                  </div>
+
+                  <div style={{
+                    padding: '12px',
+                    borderRadius: '8px',
+                    backgroundColor: 'hsl(var(--muted))',
+                    fontSize: '11px',
+                    color: 'hsl(var(--muted-fg))',
+                    lineHeight: 1.5
+                  }}>
+                    {t('telemetryRuntimeNotice')}
+                  </div>
+                </div>
+              )}
+            </div>
+
+            {/* Footer */}
+            <div style={{ padding: '12px 20px', borderTop: '1px solid hsl(var(--border))', display: 'flex', justifyContent: 'flex-end' }}>
+              <button onClick={() => setIsInspectorOpen(false)} className="btn btn-secondary" style={{ fontSize: '12px' }}>
+                {t('closeInspector')}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Specialist Details Modal (Slice 2B) */}
+      {selectedSpecialistForPopover && (
         <div style={{
           position: 'fixed',
           inset: 0,
@@ -1251,101 +2066,113 @@ export function Missions({ navigate, initialMissionId }: MissionsProps) {
           display: 'flex',
           alignItems: 'center',
           justifyContent: 'center',
-          zIndex: 60,
-          padding: '20px'
+          zIndex: 70,
+          padding: '16px'
         }}>
           <div style={{
             width: '100%',
-            maxWidth: '680px',
-            maxHeight: '85vh',
+            maxWidth: '500px',
             backgroundColor: 'hsl(var(--card))',
             borderRadius: '12px',
             border: '1px solid hsl(var(--border))',
-            boxShadow: '0 25px 50px -12px rgba(0,0,0,0.4)',
-            display: 'flex',
-            flexDirection: 'column',
+            boxShadow: '0 20px 25px -5px rgba(0,0,0,0.3)',
             overflow: 'hidden'
           }}>
             <div style={{ padding: '16px 20px', borderBottom: '1px solid hsl(var(--border))', display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
               <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-                <Layers size={18} className="text-primary" />
-                <div>
-                  <h3 style={{ fontSize: '15px', fontWeight: 600, margin: 0, color: 'hsl(var(--fg))' }}>
-                    {t('inspectModalTitle')}
-                  </h3>
-                  <p style={{ fontSize: '11px', color: 'hsl(var(--muted-fg))', margin: '2px 0 0' }}>
-                    {t('inspectModalSubtitle')}
-                  </p>
-                </div>
+                <User size={18} className="text-primary" />
+                <h3 style={{ fontSize: '15px', fontWeight: 600, margin: 0, color: 'hsl(var(--fg))' }}>
+                  {selectedSpecialistForPopover.name}
+                </h3>
               </div>
-              <button onClick={() => setIsInspectorOpen(false)} className="btn btn-ghost" style={{ padding: '4px' }}>
+              <button onClick={() => setSelectedSpecialistForPopover(null)} className="btn btn-ghost" style={{ padding: '4px' }}>
                 <X size={16} />
               </button>
             </div>
 
-            <div style={{ padding: '20px', overflowY: 'auto', flex: 1 }}>
-              {/* Notice that full interactive 2D canvas comes in Slice 2E */}
-              <div style={{
-                padding: '10px 14px',
-                borderRadius: '6px',
-                backgroundColor: 'hsl(var(--muted))',
-                fontSize: '12px',
-                color: 'hsl(var(--muted-fg))',
-                marginBottom: '16px'
-              }}>
-                {t('inspectPlaceholderNotice')}
+            <div style={{ padding: '20px', display: 'flex', flexDirection: 'column', gap: '14px', fontSize: '13px' }}>
+              <div>
+                <div style={{ fontSize: '11px', fontWeight: 600, color: 'hsl(var(--muted-fg))', textTransform: 'uppercase', marginBottom: '4px' }}>
+                  {t('specialistRole')}
+                </div>
+                <div style={{ color: 'hsl(var(--fg))', fontWeight: 500 }}>
+                  {selectedSpecialistForPopover.role}
+                </div>
               </div>
 
-              {loadingGraph ? (
-                <div style={{ padding: '32px', textAlign: 'center', color: 'hsl(var(--muted-fg))', fontSize: '13px' }}>
-                  <RefreshCw size={20} className="animate-spin" style={{ margin: '0 auto 8px' }} />
-                  Compiling node graph...
+              <div>
+                <div style={{ fontSize: '11px', fontWeight: 600, color: 'hsl(var(--muted-fg))', textTransform: 'uppercase', marginBottom: '4px' }}>
+                  {t('specialistModel')}
                 </div>
-              ) : !graphData || graphData.nodes.length === 0 ? (
-                <div style={{ padding: '32px', textAlign: 'center', color: 'hsl(var(--muted-fg))', fontSize: '12px' }}>
-                  No execution nodes registered yet.
+                <div style={{ color: 'hsl(var(--fg))' }}>
+                  {selectedSpecialistForPopover.provider || currentTeam?.default_provider || 'OpenAI'} ({selectedSpecialistForPopover.model || currentTeam?.default_model || 'gpt-4o'})
                 </div>
-              ) : (
-                <div style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
-                  {graphData.nodes.map(node => (
-                    <div
-                      key={node.id}
-                      style={{
-                        padding: '12px 14px',
-                        borderRadius: '8px',
-                        backgroundColor: node.type === 'mission' ? 'hsl(var(--primary) / 0.08)' : 'hsl(var(--bg))',
-                        border: '1px solid hsl(var(--border))',
-                        display: 'flex',
-                        alignItems: 'center',
-                        justifyContent: 'space-between'
-                      }}
-                    >
-                      <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
-                        <span style={{
-                          fontSize: '10px',
-                          textTransform: 'uppercase',
-                          fontWeight: 700,
-                          padding: '2px 6px',
+              </div>
+
+              {selectedSpecialistForPopover.instructions && (
+                <div>
+                  <div style={{ fontSize: '11px', fontWeight: 600, color: 'hsl(var(--muted-fg))', textTransform: 'uppercase', marginBottom: '4px' }}>
+                    {t('specialistResponsibilities')}
+                  </div>
+                  <div style={{
+                    color: 'hsl(var(--fg))',
+                    backgroundColor: 'hsl(var(--bg))',
+                    padding: '10px 12px',
+                    borderRadius: '6px',
+                    border: '1px solid hsl(var(--border))',
+                    fontSize: '12px',
+                    lineHeight: 1.5,
+                    maxHeight: '140px',
+                    overflowY: 'auto',
+                    whiteSpace: 'pre-wrap'
+                  }}>
+                    {selectedSpecialistForPopover.instructions}
+                  </div>
+                </div>
+              )}
+
+              {selectedSpecialistForPopover.tools && selectedSpecialistForPopover.tools.length > 0 && (
+                <div>
+                  <div style={{ fontSize: '11px', fontWeight: 600, color: 'hsl(var(--muted-fg))', textTransform: 'uppercase', marginBottom: '6px' }}>
+                    {t('specialistCapabilities')}
+                  </div>
+                  <div style={{ display: 'flex', flexWrap: 'wrap', gap: '6px' }}>
+                    {selectedSpecialistForPopover.tools.map((tl, i) => (
+                      <span
+                        key={i}
+                        style={{
+                          fontSize: '11px',
+                          padding: '2px 8px',
                           borderRadius: '4px',
                           backgroundColor: 'hsl(var(--muted))',
                           color: 'hsl(var(--fg))'
-                        }}>
-                          {node.type}
-                        </span>
-                        <span style={{ fontSize: '13px', fontWeight: 600, color: 'hsl(var(--fg))' }}>
-                          {node.label}
-                        </span>
-                      </div>
-                      {getStatusBadge(node.status)}
-                    </div>
-                  ))}
+                        }}
+                      >
+                        {tl}
+                      </span>
+                    ))}
+                  </div>
                 </div>
               )}
+
+              <div style={{
+                padding: '10px 12px',
+                borderRadius: '6px',
+                backgroundColor: 'hsl(var(--muted))',
+                fontSize: '11px',
+                color: 'hsl(var(--muted-fg))'
+              }}>
+                ℹ️ {t('specialistStandbyNote')}
+              </div>
             </div>
 
             <div style={{ padding: '12px 20px', borderTop: '1px solid hsl(var(--border))', display: 'flex', justifyContent: 'flex-end' }}>
-              <button onClick={() => setIsInspectorOpen(false)} className="btn btn-secondary" style={{ fontSize: '12px' }}>
-                {t('closeInspector')}
+              <button
+                onClick={() => setSelectedSpecialistForPopover(null)}
+                className="btn btn-secondary"
+                style={{ fontSize: '12px' }}
+              >
+                {t('close')}
               </button>
             </div>
           </div>
