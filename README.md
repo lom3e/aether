@@ -287,7 +287,13 @@ print(result.output)
 The CLI provides power-user access to the same local workspace configuration:
 
 ```bash
-# Run a task through the active team
+# Start an interactive multi-turn REPL chat with your workforce
+aether chat
+
+# Target a specific workspace and team
+aether chat --workspace path/to/workspace --team "research-team"
+
+# Run a single task through the active team
 aether run "Summarize recent quarterly reports"
 
 # Inspect active team and agents
@@ -299,6 +305,30 @@ aether knowledge search "robotics"
 # Ingest new documents
 aether knowledge add ./my-documents/
 ```
+
+---
+
+## ⚙️ Runtime Capabilities & Lifecycle
+
+### 🛑 Task Lifecycle & Cancellation
+- **Cooperative Cancellation**: When you click **Stop** in the UI, execute `POST /api/conversations/{id}/stop`, or press interrupt signals, Aether triggers a thread-safe `cancellation_token` propagated to active LLM token streaming generators and ReAct loops, aborting execution immediately without orphaned background processes.
+- **Interrupted State & Recovery**: Interrupted conversations transition cleanly to `interrupted` status rather than hanging in a zombie `working` state. Users can seamlessly submit follow-up prompts to continue execution from where the task was halted.
+- **Application Restart Recovery**: If the Aether process terminates unexpectedly during an active execution, the startup lifecycle detects stale `working` sessions and recovers them safely with an informative note (`interrupted by application restart`), keeping user messages intact and re-enabling the prompt input.
+
+### 🤝 Multi-Agent Delegation & Tool Execution
+- **Real Delegation Execution**: Coordinators delegate tasks by invoking native function tools (`delegate_to_<Agent>`). The runtime validates tool execution and prevents coordinators from falsely reporting completion without actually executing the delegated subtask.
+- **Capability Awareness**: Delegation tool schemas inform coordinators of the exact skills and tools possessed by each specialist on the team.
+- **Provider-Safe Function Naming**: Agent and tool names with spaces or special characters are automatically normalized (e.g., `Market Researcher` becomes `delegate_to_Market_Researcher`) to satisfy strict tool calling schemas across OpenAI, Anthropic, Gemini, and Ollama.
+
+### 📁 Workspace Capabilities & Filesystem Sandboxing
+- **Workspace-Scoped Tools**: Agents equipped with `filesystem` capabilities can read, write, and list files strictly sandboxed within the active workspace root or attached project directory.
+- **Artifact Tracking**: File creation and modification operations update execution artifacts and emit real-time activity events to the UI.
+- **Knowledge Retrieval**: Agents with `search_knowledge` capabilities perform semantic queries against indexed workspace documentation (PDF, Markdown, TXT) and system reference docs.
+
+### 🌐 REST API Endpoints
+- `POST /api/conversations/{id}/stop`: Cooperatively cancels an in-flight task execution.
+- `PATCH /api/conversations/{id}`: Switches the active workforce team or updates metadata for an existing conversation.
+- `POST /api/teams/{name}/select`: Dynamically changes the active team in the workspace.
 
 ---
 

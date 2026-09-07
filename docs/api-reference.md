@@ -209,3 +209,33 @@ Aether exposes a unified error hierarchy for robust application development.
   - **`AetherFatalError`**: Raised for unrecoverable internal framework errors.
 
 *(Note: Standard Python `KeyboardInterrupt` and `SystemExit` bypass `AetherError` for standard process management.)*
+
+---
+
+## 7. HTTP REST Endpoints
+
+Aether exposes a local HTTP API serving the web workspace and programmatic integrations. Key runtime lifecycle endpoints include:
+
+### `POST /api/conversations/{id}/stop`
+Cooperatively aborts any in-flight task execution in the specified conversation.
+- **Mechanism**: Sets the active task's `cancellation_token`, interrupting streaming LLM requests and agent loops.
+- **Side Effects**: Marks the conversation status as `interrupted`, records an assistant summary note, and broadcasts a cancellation event over WebSocket.
+- **Response**: `200 OK` with `{"success": true, "conversation_id": "<id>"}`.
+
+### `PATCH /api/conversations/{id}`
+Updates conversation metadata, including dynamic workforce/team switching.
+- **Payload**:
+  ```json
+  {
+    "team_name": "Market & Competitor Intelligence",
+    "title": "Renamed Session"
+  }
+  ```
+- **Side Effects**: Persists the assigned `team_name` into SQLite so future turns route to the selected team.
+- **Response**: `200 OK` with updated conversation object.
+
+### `POST /api/teams/{name}/select`
+Switches the globally active team for the current workspace.
+- **URL Parameter**: `name` (URL-encoded team name).
+- **Side Effects**: Updates workspace active team state and notifies connected clients.
+- **Response**: `200 OK` with `{"success": true, "active_team": "<name>"}`.
