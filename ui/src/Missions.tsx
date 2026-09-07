@@ -39,13 +39,51 @@ interface TeamInfo {
 interface Deliverable {
   id: string;
   mission_id: string;
+  execution_id?: string | null;
+  milestone_id?: string | null;
   name: string;
   path: string;
   type: 'document' | 'code' | 'data' | 'archive';
   size_bytes: number;
+  sha256?: string | null;
   status: 'verified' | 'draft' | 'final';
   metadata: Record<string, any>;
   created_at: string;
+  updated_at?: string;
+}
+
+interface ExecutionMilestoneState {
+  milestone_id: string;
+  status: 'pending' | 'running' | 'completed' | 'failed' | 'skipped';
+  started_at?: string | null;
+  completed_at?: string | null;
+  output?: string | null;
+  error_message?: string | null;
+}
+
+interface MissionExecution {
+  id: string;
+  mission_id: string;
+  run_number: number;
+  status: 'pending' | 'running' | 'awaiting_approval' | 'verifying' | 'completed' | 'failed' | 'interrupted' | 'cancelled';
+  current_milestone_id?: string | null;
+  team_name?: string | null;
+  started_at: string;
+  completed_at?: string | null;
+  duration_seconds: number;
+  recovery_state: string;
+  pending_approval?: {
+    id: string;
+    milestone_id: string;
+    milestone_title: string;
+    prompt: string;
+    requested_at: string;
+  } | null;
+  approval_history: any[];
+  milestone_states: ExecutionMilestoneState[];
+  metadata: Record<string, any>;
+  created_at: string;
+  updated_at: string;
 }
 
 interface ActivityItem {
@@ -79,6 +117,8 @@ interface Mission {
   team_name?: string | null;
   conversation_id?: string | null;
   project_id?: string | null;
+  active_execution_id?: string | null;
+  active_execution?: MissionExecution | null;
   milestones: Milestone[];
   metadata: Record<string, any>;
   created_at: string;
@@ -156,6 +196,11 @@ export function Missions({ navigate, initialMissionId }: MissionsProps) {
   const [loadingDeliverables, setLoadingDeliverables] = useState(false);
   const [copiedPath, setCopiedPath] = useState<string | null>(null);
 
+  // Executions (Runs) State (Phase A - Mission Runtime)
+  const [executions, setExecutions] = useState<MissionExecution[]>([]);
+  const [selectedExecutionId, setSelectedExecutionId] = useState<string | null>(null);
+  const [actionLoading, setActionLoading] = useState<string | null>(null);
+
   // Inspector & Activities (Slice 2E)
   const [activeInspectorTab, setActiveInspectorTab] = useState<'graph' | 'trace' | 'telemetry'>('graph');
   const [activities, setActivities] = useState<ActivityItem[]>([]);
@@ -227,10 +272,33 @@ export function Missions({ navigate, initialMissionId }: MissionsProps) {
     }
   }, []);
 
-  const fetchDeliverables = useCallback(async (missionId: string) => {
+  const fetchExecutions = useCallback(async (missionId: string) => {
+    try {
+      const res = await fetch(apiUrl(`/api/missions/${missionId}/executions`));
+      if (res.ok) {
+        const data = await res.json();
+        const runs: MissionExecution[] = Array.isArray(data) ? data : [];
+        setExecutions(runs);
+        if (runs.length > 0) {
+          setSelectedExecutionId(prev => {
+            if (prev && runs.some(r => r.id === prev)) return prev;
+            return runs[runs.length - 1].id;
+          });
+        } else {
+          setSelectedExecutionId(null);
+        }
+      }
+    } catch (err) {
+      console.error(err);
+      setExecutions([]);
+    }
+  }, []);
+
+  const fetchDeliverables = useCallback(async (missionId: string, executionId?: string | null) => {
     try {
       setLoadingDeliverables(true);
-      const res = await fetch(apiUrl(`/api/missions/${missionId}/deliverables`));
+      const q = executionId ? `?execution_id=${encodeURIComponent(executionId)}` : '';
+      const res = await fetch(apiUrl(`/api/missions/${missionId}/deliverables${q}`));
       if (res.ok) {
         const data = await res.json();
         setDeliverables(Array.isArray(data) ? data : []);
@@ -262,16 +330,86 @@ export function Missions({ navigate, initialMissionId }: MissionsProps) {
   useEffect(() => {
     if (selectedMission) {
       loadGraph(selectedMission.id);
-      fetchDeliverables(selectedMission.id);
+      fetchExecutions(selectedMission.id);
+      fetchDeliverables(selectedMission.id, selectedExecutionId);
       fetchActivities(selectedMission.id);
     } else {
       setGraphData(null);
       setDeliverables([]);
       setActivities([]);
+      setExecutions([]);
+      setSelectedExecutionId(null);
       setSelectedSpecialistForPopover(null);
       setSelectedGraphNode(null);
     }
-  }, [selectedMission?.id, loadGraph, fetchDeliverables, fetchActivities]);
+  }, [selectedMission?.id, loadGraph, fetchExecutions, fetchDeliverables, fetchActivities]);
+
+  useEffect(() => {
+    if (selectedMission?.id && selectedExecutionId) {
+      fetchDeliverables(selectedMission.id, selectedExecutionId);
+    }
+  }, [selectedMission?.id, selectedExecutionId, fetchDeliverables]);
+
+  // Real-time polling when mission execution is active
+  useEffect(() => {
+    if (!selectedMission) return;
+    const isLive = selectedMission.status === 'running' || selectedMission.status === 'verifying';
+    if (!isLive) return;
+
+    const interval = setInterval(async () => {
+      try {
+        const res = await fetch(apiUrl(`/api/missions/${selectedMission.id}`));
+        if (res.ok) {
+          const fresh = await res.json();
+          setSelectedMission(fresh);
+          setMissions(prev => prev.map(m => m.id === fresh.id ? fresh : m));
+          fetchExecutions(fresh.id);
+          fetchActivities(fresh.id);
+          loadGraph(fresh.id);
+        }
+      } catch (err) {
+        // ignore polling failures
+      }
+    }, 2500);
+
+    return () => clearInterval(interval);
+  }, [selectedMission?.id, selectedMission?.status, fetchExecutions, fetchActivities, loadGraph]);
+
+  const handleMissionAction = async (actionName: string, endpoint: string, body?: any) => {
+    if (!selectedMission) return;
+    setActionLoading(endpoint);
+    try {
+      const res = await fetch(apiUrl(`/api/missions/${selectedMission.id}/${endpoint}`), {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(body || {}),
+      });
+      if (!res.ok) {
+        const errData = await res.json().catch(() => ({}));
+        throw new Error(errData.detail || `Failed to ${endpoint}`);
+      }
+      const data = await res.json();
+      const updatedMission = data.mission || {
+        ...selectedMission,
+        status: data.execution?.status || selectedMission.status,
+        active_execution_id: data.execution?.id || selectedMission.active_execution_id,
+      };
+      setSelectedMission(updatedMission);
+      setMissions(prev => prev.map(m => m.id === updatedMission.id ? updatedMission : m));
+      showToast?.(`${actionName} triggered`, 'success');
+      await fetchExecutions(updatedMission.id);
+      if (data.execution?.id) {
+        setSelectedExecutionId(data.execution.id);
+      }
+      loadGraph(updatedMission.id);
+      fetchDeliverables(updatedMission.id, data.execution?.id);
+      fetchActivities(updatedMission.id);
+    } catch (err: any) {
+      showToast?.(err.message, 'error');
+    } finally {
+      setActionLoading(null);
+    }
+  };
 
   const handleCreateMission = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -321,25 +459,6 @@ export function Missions({ navigate, initialMissionId }: MissionsProps) {
       showToast?.(err.message || 'Failed to create mission', 'error');
     } finally {
       setCreating(false);
-    }
-  };
-
-  const handleUpdateStatus = async (status: string) => {
-    if (!selectedMission) return;
-    try {
-      const res = await fetch(apiUrl(`/api/missions/${selectedMission.id}`), {
-        method: 'PATCH',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ status }),
-      });
-      if (!res.ok) throw new Error('Failed to update mission status');
-      const updated = await res.json();
-      setSelectedMission(updated);
-      setMissions(prev => prev.map(m => m.id === updated.id ? updated : m));
-      showToast?.(`Mission status: ${status}`, 'success');
-      loadGraph(updated.id);
-    } catch (err: any) {
-      showToast?.(err.message, 'error');
     }
   };
 
@@ -851,20 +970,64 @@ export function Missions({ navigate, initialMissionId }: MissionsProps) {
                       {selectedMission.title}
                     </h2>
                     {getStatusBadge(selectedMission.status)}
+
+                    {/* Run Identity Badge & Run History Selector */}
+                    {executions.length > 0 && (
+                      <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+                        <span style={{
+                          fontSize: '11px',
+                          fontWeight: 700,
+                          backgroundColor: 'hsl(var(--primary) / 0.14)',
+                          color: 'hsl(var(--primary))',
+                          padding: '2px 8px',
+                          borderRadius: '999px',
+                          display: 'inline-flex',
+                          alignItems: 'center',
+                          gap: '4px'
+                        }}>
+                          <Layers size={11} />
+                          <span>{t('runNumber')}{executions.find(e => e.id === selectedExecutionId)?.run_number || executions[executions.length - 1].run_number}</span>
+                        </span>
+
+                        {executions.length > 1 && (
+                          <select
+                            value={selectedExecutionId || ''}
+                            onChange={(e) => setSelectedExecutionId(e.target.value)}
+                            style={{
+                              fontSize: '11px',
+                              padding: '2px 8px',
+                              height: '24px',
+                              borderRadius: '6px',
+                              backgroundColor: 'hsl(var(--card))',
+                              borderColor: 'hsl(var(--border))',
+                              color: 'hsl(var(--fg))'
+                            }}
+                            title={t('missionRunsHistory')}
+                          >
+                            {executions.map((ex) => (
+                              <option key={ex.id} value={ex.id}>
+                                Run #{ex.run_number} ({ex.status})
+                              </option>
+                            ))}
+                          </select>
+                        )}
+                      </div>
+                    )}
                   </div>
                 </div>
 
-                {/* Context-Driven Action Buttons (Eliminated Developer Select Dropdown) */}
+                {/* Context-Driven Action Buttons (Truthful Mission Runtime) */}
                 <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap' }}>
                   {/* DRAFT STATE */}
                   {selectedMission.status === 'draft' && (
                     <button
-                      onClick={() => handleUpdateStatus('running')}
+                      onClick={() => handleMissionAction(t('startMission'), 'start')}
+                      disabled={actionLoading === 'start'}
                       className="btn btn-primary"
                       style={{ display: 'flex', alignItems: 'center', gap: '6px', fontSize: '13px', fontWeight: 600 }}
                     >
                       <Play size={14} fill="currentColor" />
-                      <span>{t('startMission')}</span>
+                      <span>{actionLoading === 'start' ? 'Starting...' : t('startMission')}</span>
                     </button>
                   )}
 
@@ -872,20 +1035,22 @@ export function Missions({ navigate, initialMissionId }: MissionsProps) {
                   {selectedMission.status === 'running' && (
                     <>
                       <button
-                        onClick={() => handleUpdateStatus('interrupted')}
+                        onClick={() => handleMissionAction(t('pauseMission'), 'pause')}
+                        disabled={actionLoading === 'pause'}
                         className="btn btn-secondary"
                         style={{ display: 'flex', alignItems: 'center', gap: '6px', fontSize: '13px' }}
                       >
                         <Pause size={14} />
-                        <span>{t('pauseMission')}</span>
+                        <span>{actionLoading === 'pause' ? 'Pausing...' : t('pauseMission')}</span>
                       </button>
                       <button
-                        onClick={() => handleUpdateStatus('cancelled')}
+                        onClick={() => handleMissionAction(t('stopMission'), 'cancel')}
+                        disabled={actionLoading === 'cancel'}
                         className="btn btn-ghost text-rose-500 hover:bg-rose-500/10"
                         style={{ display: 'flex', alignItems: 'center', gap: '6px', fontSize: '13px' }}
                       >
                         <Square size={14} />
-                        <span>{t('stopMission')}</span>
+                        <span>{actionLoading === 'cancel' ? 'Stopping...' : t('stopMission')}</span>
                       </button>
                     </>
                   )}
@@ -894,20 +1059,22 @@ export function Missions({ navigate, initialMissionId }: MissionsProps) {
                   {selectedMission.status === 'interrupted' && (
                     <>
                       <button
-                        onClick={() => handleUpdateStatus('running')}
+                        onClick={() => handleMissionAction(t('resumeMission'), 'resume')}
+                        disabled={actionLoading === 'resume'}
                         className="btn btn-primary"
                         style={{ display: 'flex', alignItems: 'center', gap: '6px', fontSize: '13px' }}
                       >
                         <Play size={14} fill="currentColor" />
-                        <span>{t('resumeMission')}</span>
+                        <span>{actionLoading === 'resume' ? 'Resuming...' : t('resumeMission')}</span>
                       </button>
                       <button
-                        onClick={() => handleUpdateStatus('cancelled')}
+                        onClick={() => handleMissionAction(t('cancelMission'), 'cancel')}
+                        disabled={actionLoading === 'cancel'}
                         className="btn btn-ghost text-rose-500 hover:bg-rose-500/10"
                         style={{ display: 'flex', alignItems: 'center', gap: '6px', fontSize: '13px' }}
                       >
                         <Square size={14} />
-                        <span>{t('cancelMission')}</span>
+                        <span>{actionLoading === 'cancel' ? 'Cancelling...' : t('cancelMission')}</span>
                       </button>
                     </>
                   )}
@@ -916,20 +1083,22 @@ export function Missions({ navigate, initialMissionId }: MissionsProps) {
                   {selectedMission.status === 'awaiting_approval' && (
                     <>
                       <button
-                        onClick={() => handleUpdateStatus('running')}
+                        onClick={() => handleMissionAction(t('approveMission'), 'approve')}
+                        disabled={actionLoading === 'approve'}
                         className="btn btn-primary"
                         style={{ display: 'flex', alignItems: 'center', gap: '6px', fontSize: '13px', backgroundColor: '#10b981' }}
                       >
                         <Check size={15} />
-                        <span>{t('approveMission')}</span>
+                        <span>{actionLoading === 'approve' ? 'Approving...' : t('approveMission')}</span>
                       </button>
                       <button
-                        onClick={() => handleUpdateStatus('cancelled')}
+                        onClick={() => handleMissionAction(t('rejectMission'), 'reject')}
+                        disabled={actionLoading === 'reject'}
                         className="btn btn-ghost text-rose-500 hover:bg-rose-500/10"
                         style={{ display: 'flex', alignItems: 'center', gap: '6px', fontSize: '13px' }}
                       >
                         <X size={15} />
-                        <span>{t('rejectMission')}</span>
+                        <span>{actionLoading === 'reject' ? 'Rejecting...' : t('rejectMission')}</span>
                       </button>
                     </>
                   )}
@@ -938,37 +1107,51 @@ export function Missions({ navigate, initialMissionId }: MissionsProps) {
                   {selectedMission.status === 'completed' && (
                     <>
                       <button
-                        onClick={() => handleUpdateStatus('running')}
+                        onClick={() => handleMissionAction(t('rerunMission'), 'rerun')}
+                        disabled={actionLoading === 'rerun'}
                         className="btn btn-secondary"
                         style={{ display: 'flex', alignItems: 'center', gap: '6px', fontSize: '13px' }}
                       >
                         <RotateCcw size={13} />
-                        <span>{t('rerunMission')}</span>
+                        <span>{actionLoading === 'rerun' ? 'Re-running...' : t('rerunMission')}</span>
                       </button>
                     </>
                   )}
 
                   {/* FAILED STATE */}
                   {selectedMission.status === 'failed' && (
-                    <button
-                      onClick={() => handleUpdateStatus('running')}
-                      className="btn btn-secondary text-rose-500"
-                      style={{ display: 'flex', alignItems: 'center', gap: '6px', fontSize: '13px' }}
-                    >
-                      <RotateCcw size={13} />
-                      <span>{t('retryStep')}</span>
-                    </button>
+                    <>
+                      <button
+                        onClick={() => handleMissionAction(t('retryStep'), 'retry')}
+                        disabled={actionLoading === 'retry'}
+                        className="btn btn-secondary text-rose-500"
+                        style={{ display: 'flex', alignItems: 'center', gap: '6px', fontSize: '13px' }}
+                      >
+                        <RotateCcw size={13} />
+                        <span>{actionLoading === 'retry' ? 'Retrying...' : t('retryStep')}</span>
+                      </button>
+                      <button
+                        onClick={() => handleMissionAction(t('rerunMission'), 'rerun')}
+                        disabled={actionLoading === 'rerun'}
+                        className="btn btn-secondary"
+                        style={{ display: 'flex', alignItems: 'center', gap: '6px', fontSize: '13px' }}
+                      >
+                        <RotateCcw size={13} />
+                        <span>{actionLoading === 'rerun' ? 'Re-running...' : t('rerunMission')}</span>
+                      </button>
+                    </>
                   )}
 
                   {/* CANCELLED STATE */}
                   {selectedMission.status === 'cancelled' && (
                     <button
-                      onClick={() => handleUpdateStatus('draft')}
+                      onClick={() => handleMissionAction(t('rerunMission'), 'rerun')}
+                      disabled={actionLoading === 'rerun'}
                       className="btn btn-secondary"
                       style={{ display: 'flex', alignItems: 'center', gap: '6px', fontSize: '13px' }}
                     >
                       <RotateCcw size={13} />
-                      <span>{t('rerunMission')}</span>
+                      <span>{actionLoading === 'rerun' ? 'Re-running...' : t('rerunMission')}</span>
                     </button>
                   )}
 
@@ -1063,6 +1246,51 @@ export function Missions({ navigate, initialMissionId }: MissionsProps) {
                   </span>
                 </div>
               </div>
+
+              {/* APPROVAL GATE BANNER (When Awaiting Signoff) */}
+              {selectedMission.status === 'awaiting_approval' && (
+                <div style={{
+                  padding: '16px 20px',
+                  borderRadius: '12px',
+                  border: '1px solid #f59e0b',
+                  backgroundColor: 'rgba(245, 158, 11, 0.08)',
+                  display: 'flex',
+                  flexDirection: 'column',
+                  gap: '12px'
+                }}>
+                  <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: '10px' }}>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                      <ShieldAlert size={18} className="text-amber-500" />
+                      <span style={{ fontSize: '13px', fontWeight: 700, color: '#f59e0b', textTransform: 'uppercase', letterSpacing: '0.05em' }}>
+                        {t('gateApprovalRequired')}
+                      </span>
+                    </div>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                      <button
+                        onClick={() => handleMissionAction(t('approveMission'), 'approve')}
+                        disabled={actionLoading === 'approve'}
+                        className="btn btn-sm btn-primary"
+                        style={{ display: 'flex', alignItems: 'center', gap: '5px', backgroundColor: '#10b981', borderColor: '#10b981' }}
+                      >
+                        <Check size={14} />
+                        <span>{actionLoading === 'approve' ? 'Approving...' : t('approveAndProceed')}</span>
+                      </button>
+                      <button
+                        onClick={() => handleMissionAction(t('rejectMission'), 'reject')}
+                        disabled={actionLoading === 'reject'}
+                        className="btn btn-sm btn-ghost text-rose-500 hover:bg-rose-500/10"
+                        style={{ display: 'flex', alignItems: 'center', gap: '5px' }}
+                      >
+                        <X size={14} />
+                        <span>{actionLoading === 'reject' ? 'Rejecting...' : t('rejectChanges')}</span>
+                      </button>
+                    </div>
+                  </div>
+                  <p style={{ margin: 0, fontSize: '13px', color: 'hsl(var(--fg))', lineHeight: 1.5 }}>
+                    {executions.find(e => e.id === selectedExecutionId)?.pending_approval?.prompt || t('operationalPulseApproval')}
+                  </p>
+                </div>
+              )}
 
               {/* 2. OUTCOME CHARTER & WORKFORCE ROSTER (Slice 2B) */}
               <div style={{
@@ -1411,119 +1639,175 @@ export function Missions({ navigate, initialMissionId }: MissionsProps) {
                       No stages defined yet. Add steps to establish verifiable execution boundaries.
                     </div>
                   ) : (
-                    selectedMission.milestones.map((m, idx) => {
-                      const isDone = m.status === 'completed';
-                      const isRunning = m.status === 'running';
+                    (() => {
+                      const activeExec = executions.find(e => e.id === selectedExecutionId) || executions[executions.length - 1];
+                      const execMilestoneMap = new Map((activeExec?.milestone_states || []).map(s => [s.milestone_id, s]));
 
-                      return (
-                        <div
-                          key={m.id}
-                          className="group"
-                          onMouseEnter={() => setHoveredMilestoneId(m.id)}
-                          onMouseLeave={() => setHoveredMilestoneId(null)}
-                          style={{
-                            display: 'flex',
-                            alignItems: 'flex-start',
-                            gap: '12px',
-                            padding: '12px 14px',
-                            borderRadius: '8px',
-                            backgroundColor: isDone
-                              ? 'hsl(var(--card) / 0.5)'
-                              : isRunning
-                              ? 'hsl(var(--primary) / 0.04)'
-                              : 'hsl(var(--card))',
-                            border: isRunning
-                              ? '1px solid hsl(var(--primary) / 0.4)'
-                              : '1px solid hsl(var(--border))',
-                            transition: 'all 0.15s ease'
-                          }}
-                        >
-                          {/* Status Clickable Checkbox/Action */}
-                          <button
-                            onClick={() => handleToggleMilestone(m)}
-                            title="Toggle stage state"
+                      return selectedMission.milestones.map((m, idx) => {
+                        const execState = execMilestoneMap.get(m.id);
+                        const effectiveStatus = execState ? execState.status : m.status;
+                        const isDone = effectiveStatus === 'completed';
+                        const isRunning = effectiveStatus === 'running';
+                        const isFailed = effectiveStatus === 'failed';
+
+                        return (
+                          <div
+                            key={m.id}
+                            className="group"
+                            onMouseEnter={() => setHoveredMilestoneId(m.id)}
+                            onMouseLeave={() => setHoveredMilestoneId(null)}
                             style={{
-                              background: 'none',
-                              border: 'none',
-                              padding: 0,
-                              cursor: 'pointer',
-                              color: isDone ? '#10b981' : isRunning ? 'hsl(var(--primary))' : 'hsl(var(--muted-fg))',
-                              marginTop: '2px'
+                              display: 'flex',
+                              alignItems: 'flex-start',
+                              gap: '12px',
+                              padding: '12px 14px',
+                              borderRadius: '8px',
+                              backgroundColor: isDone
+                                ? 'hsl(var(--card) / 0.5)'
+                                : isRunning
+                                ? 'hsl(var(--primary) / 0.04)'
+                                : isFailed
+                                ? 'rgba(239, 68, 68, 0.04)'
+                                : 'hsl(var(--card))',
+                              border: isRunning
+                                ? '1px solid hsl(var(--primary) / 0.4)'
+                                : isFailed
+                                ? '1px solid rgba(239, 68, 68, 0.4)'
+                                : '1px solid hsl(var(--border))',
+                              transition: 'all 0.15s ease'
                             }}
                           >
-                            {isDone ? (
-                              <CheckCircle size={18} />
-                            ) : isRunning ? (
-                              <Play size={16} fill="currentColor" />
-                            ) : (
-                              <Circle size={18} />
-                            )}
-                          </button>
+                            {/* Status Clickable Checkbox/Action */}
+                            <button
+                              onClick={() => handleToggleMilestone(m)}
+                              title="Toggle stage state"
+                              style={{
+                                background: 'none',
+                                border: 'none',
+                                padding: 0,
+                                cursor: 'pointer',
+                                color: isDone ? '#10b981' : isRunning ? 'hsl(var(--primary))' : isFailed ? '#ef4444' : 'hsl(var(--muted-fg))',
+                                marginTop: '2px'
+                              }}
+                            >
+                              {isDone ? (
+                                <CheckCircle size={18} />
+                              ) : isRunning ? (
+                                <Play size={16} fill="currentColor" />
+                              ) : isFailed ? (
+                                <AlertCircle size={18} />
+                              ) : (
+                                <Circle size={18} />
+                              )}
+                            </button>
 
-                          <div style={{ flex: 1 }}>
-                            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '8px' }}>
-                              <div style={{
-                                fontSize: '13.5px',
-                                fontWeight: isRunning ? 600 : 500,
-                                color: isDone ? 'hsl(var(--muted-fg))' : 'hsl(var(--fg))',
-                                textDecoration: isDone ? 'line-through' : 'none'
-                              }}>
-                                <span style={{
-                                  fontSize: '10px',
-                                  textTransform: 'uppercase',
-                                  fontWeight: 700,
-                                  padding: '1px 5px',
-                                  borderRadius: '4px',
-                                  backgroundColor: 'hsl(var(--muted))',
-                                  color: 'hsl(var(--muted-fg))',
-                                  marginRight: '8px'
+                            <div style={{ flex: 1 }}>
+                              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '8px' }}>
+                                <div style={{
+                                  fontSize: '13.5px',
+                                  fontWeight: isRunning ? 600 : 500,
+                                  color: isDone ? 'hsl(var(--muted-fg))' : 'hsl(var(--fg))',
+                                  textDecoration: isDone ? 'line-through' : 'none'
                                 }}>
-                                  {t('stage')} {idx + 1}
-                                </span>
-                                {m.title}
+                                  <span style={{
+                                    fontSize: '10px',
+                                    textTransform: 'uppercase',
+                                    fontWeight: 700,
+                                    padding: '1px 5px',
+                                    borderRadius: '4px',
+                                    backgroundColor: 'hsl(var(--muted))',
+                                    color: 'hsl(var(--muted-fg))',
+                                    marginRight: '8px'
+                                  }}>
+                                    {t('stage')} {idx + 1}
+                                  </span>
+                                  {m.title}
+                                </div>
+
+                                <div style={{ display: 'flex', alignItems: 'center', gap: '6px', minHeight: '24px' }}>
+                                  {isDone && (
+                                    <span style={{ fontSize: '11px', color: '#10b981', fontWeight: 500 }}>
+                                      {t('completedAt')}
+                                    </span>
+                                  )}
+                                  {isRunning && (
+                                    <span style={{ fontSize: '11px', color: 'hsl(var(--primary))', fontWeight: 600 }}>
+                                      {t('statusRunning')}
+                                    </span>
+                                  )}
+                                  {isFailed && (
+                                    <span style={{ fontSize: '11px', color: '#ef4444', fontWeight: 600 }}>
+                                      Failed
+                                    </span>
+                                  )}
+
+                                  {/* Hover-activated deletion */}
+                                  {hoveredMilestoneId === m.id && (
+                                    <button
+                                      onClick={() => setMilestoneToDelete(m.id)}
+                                      className="btn btn-ghost text-muted-fg hover:text-rose-500"
+                                      style={{ padding: '2px 4px', borderRadius: '4px' }}
+                                      title="Delete milestone"
+                                    >
+                                      <Trash2 size={13} />
+                                    </button>
+                                  )}
+                                </div>
                               </div>
 
-                              <div style={{ display: 'flex', alignItems: 'center', gap: '6px', minHeight: '24px' }}>
-                                {isDone && (
-                                  <span style={{ fontSize: '11px', color: '#10b981', fontWeight: 500 }}>
-                                    {t('completedAt')}
-                                  </span>
-                                )}
-                                {isRunning && (
-                                  <span style={{ fontSize: '11px', color: 'hsl(var(--primary))', fontWeight: 600 }}>
-                                    {t('statusRunning')}
-                                  </span>
-                                )}
+                              {m.description && (
+                                <div style={{ fontSize: '12px', color: 'hsl(var(--muted-fg))', marginTop: '4px', lineHeight: 1.4 }}>
+                                  {m.description}
+                                </div>
+                              )}
 
-                                {/* Hover-activated deletion */}
-                                {hoveredMilestoneId === m.id && (
-                                  <button
-                                    onClick={() => setMilestoneToDelete(m.id)}
-                                    className="btn btn-ghost text-muted-fg hover:text-rose-500"
-                                    style={{ padding: '2px 4px', borderRadius: '4px' }}
-                                    title="Delete milestone"
-                                  >
-                                    <Trash2 size={13} />
-                                  </button>
-                                )}
-                              </div>
+                              {execState?.output && (
+                                <div style={{
+                                  fontSize: '11.5px',
+                                  color: 'hsl(var(--fg))',
+                                  marginTop: '6px',
+                                  padding: '6px 8px',
+                                  borderRadius: '6px',
+                                  backgroundColor: 'hsl(var(--muted) / 0.5)',
+                                  border: '1px solid hsl(var(--border))',
+                                  fontFamily: 'monospace',
+                                  whiteSpace: 'pre-wrap',
+                                  maxHeight: '120px',
+                                  overflowY: 'auto'
+                                }}>
+                                  {execState.output}
+                                </div>
+                              )}
+
+                              {execState?.error_message && (
+                                <div style={{
+                                  fontSize: '11.5px',
+                                  color: '#ef4444',
+                                  marginTop: '6px',
+                                  padding: '6px 8px',
+                                  borderRadius: '6px',
+                                  backgroundColor: 'rgba(239, 68, 68, 0.08)',
+                                  border: '1px solid rgba(239, 68, 68, 0.2)'
+                                }}>
+                                  {execState.error_message}
+                                </div>
+                              )}
+
+                              {m.completed_at && !execState?.completed_at && (
+                                <div style={{ fontSize: '11px', color: 'hsl(var(--muted-fg))', marginTop: '4px' }}>
+                                  {t('completedAt')} {new Date(m.completed_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+                                </div>
+                              )}
+                              {execState?.completed_at && (
+                                <div style={{ fontSize: '11px', color: '#10b981', marginTop: '4px' }}>
+                                  {t('completedAt')} {new Date(execState.completed_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+                                </div>
+                              )}
                             </div>
-
-                            {m.description && (
-                              <div style={{ fontSize: '12px', color: 'hsl(var(--muted-fg))', marginTop: '4px', lineHeight: 1.4 }}>
-                                {m.description}
-                              </div>
-                            )}
-
-                            {m.completed_at && (
-                              <div style={{ fontSize: '11px', color: 'hsl(var(--muted-fg))', marginTop: '4px' }}>
-                                {t('completedAt')} {new Date(m.completed_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
-                              </div>
-                            )}
                           </div>
-                        </div>
-                      );
-                    })
+                        );
+                      });
+                    })()
                   )}
                 </div>
               </div>
@@ -1680,7 +1964,10 @@ export function Missions({ navigate, initialMissionId }: MissionsProps) {
                 </div>
 
                 <button
-                  onClick={() => setIsInspectorOpen(true)}
+                  onClick={() => {
+                    setIsInspectorOpen(true);
+                    if (selectedMission) fetchActivities(selectedMission.id);
+                  }}
                   className="btn btn-secondary"
                   style={{ display: 'flex', alignItems: 'center', gap: '6px', fontSize: '13px' }}
                 >
@@ -1770,7 +2057,10 @@ export function Missions({ navigate, initialMissionId }: MissionsProps) {
               </button>
 
               <button
-                onClick={() => setActiveInspectorTab('trace')}
+                onClick={() => {
+                  setActiveInspectorTab('trace');
+                  if (selectedMission) fetchActivities(selectedMission.id);
+                }}
                 style={{
                   padding: '10px 14px',
                   fontSize: '12px',

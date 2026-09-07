@@ -5,7 +5,7 @@ and read-only DAG graph synthesis.
 """
 from __future__ import annotations
 
-from datetime import datetime, timezone
+from datetime import datetime, timezone, timedelta
 import json
 from pathlib import Path
 import sqlite3
@@ -14,20 +14,24 @@ import uuid
 
 from aether.core.sqlite import get_sqlite_connection
 from aether.missions.models import (
+    Deliverable,
+    ExecutionMilestone,
+    ExecutionStatus,
     GraphEdge,
     GraphNode,
     Milestone,
+    MilestoneExecutionStatus,
     MilestoneStatus,
     Mission,
+    MissionExecution,
     MissionGraph,
     MissionStatus,
-    Deliverable,
 )
 
 
 class MissionStore:
     """
-    Manages persistent Missions, Milestones, and Read-Only Execution Graph models.
+    Manages persistent Missions, Milestones, Executions, Deliverables, and Execution Graph models.
     Operates on the shared conversations database in the workspace data directory.
     """
 
@@ -42,6 +46,20 @@ class MissionStore:
 
     def _init_db(self) -> None:
         with self._get_connection() as conn:
+            # 0. Conversations table (for activity FK lineage)
+            conn.execute(
+                """
+                CREATE TABLE IF NOT EXISTS conversations (
+                    id TEXT PRIMARY KEY,
+                    title TEXT NOT NULL,
+                    team_name TEXT DEFAULT NULL,
+                    status TEXT NOT NULL DEFAULT 'active',
+                    created_at TEXT NOT NULL,
+                    updated_at TEXT NOT NULL
+                )
+                """
+            )
+
             # 1. Missions table
             conn.execute(
                 """
@@ -54,6 +72,7 @@ class MissionStore:
                     team_name TEXT DEFAULT NULL,
                     conversation_id TEXT DEFAULT NULL,
                     project_id TEXT DEFAULT NULL,
+                    active_execution_id TEXT DEFAULT NULL,
                     metadata TEXT DEFAULT '{}',
                     created_at TEXT NOT NULL,
                     updated_at TEXT NOT NULL
@@ -61,7 +80,7 @@ class MissionStore:
                 """
             )
 
-            # 2. Mission Milestones table
+            # 2. Mission Milestones table (Durable Stage Templates)
             conn.execute(
                 """
                 CREATE TABLE IF NOT EXISTS mission_milestones (
@@ -80,16 +99,156 @@ class MissionStore:
                 """
             )
 
-            # 3. Performance Indexes
+            # 3. Mission Executions table (Authoritative Execution Identity & Runs)
+            conn.execute(
+                """
+                CREATE TABLE IF NOT EXISTS mission_executions (
+                    id TEXT PRIMARY KEY,
+                    mission_id TEXT NOT NULL,
+                    run_number INTEGER NOT NULL,
+                    status TEXT NOT NULL DEFAULT 'pending',
+                    current_milestone_id TEXT DEFAULT NULL,
+                    team_name TEXT DEFAULT NULL,
+                    started_at TEXT NOT NULL,
+                    completed_at TEXT DEFAULT NULL,
+                    interrupted_at TEXT DEFAULT NULL,
+                    duration_seconds REAL DEFAULT 0.0,
+                    error_message TEXT DEFAULT NULL,
+                    error_details TEXT DEFAULT NULL,
+                    lease_owner TEXT DEFAULT NULL,
+                    lease_expires_at TEXT DEFAULT NULL,
+                    heartbeat_at TEXT DEFAULT NULL,
+                    recovery_state TEXT DEFAULT 'none',
+                    pending_approval TEXT DEFAULT NULL,
+                    approval_history TEXT DEFAULT '[]',
+                    milestone_states TEXT DEFAULT '[]',
+                    metadata TEXT DEFAULT '{}',
+                    created_at TEXT NOT NULL,
+                    updated_at TEXT NOT NULL,
+                    FOREIGN KEY(mission_id) REFERENCES missions(id) ON DELETE CASCADE,
+                    FOREIGN KEY(current_milestone_id) REFERENCES mission_milestones(id) ON DELETE SET NULL
+                )
+                """
+            )
+
+            # 4. Mission Execution Milestones table (Per-Run Milestone States)
+            conn.execute(
+                """
+                CREATE TABLE IF NOT EXISTS mission_execution_milestones (
+                    id TEXT PRIMARY KEY,
+                    execution_id TEXT NOT NULL,
+                    milestone_id TEXT NOT NULL,
+                    status TEXT NOT NULL DEFAULT 'pending',
+                    started_at TEXT DEFAULT NULL,
+                    completed_at TEXT DEFAULT NULL,
+                    duration_seconds REAL DEFAULT 0.0,
+                    error TEXT DEFAULT NULL,
+                    output TEXT DEFAULT NULL,
+                    metadata TEXT DEFAULT '{}',
+                    created_at TEXT NOT NULL,
+                    updated_at TEXT NOT NULL,
+                    FOREIGN KEY(execution_id) REFERENCES mission_executions(id) ON DELETE CASCADE,
+                    FOREIGN KEY(milestone_id) REFERENCES mission_milestones(id) ON DELETE CASCADE
+                )
+                """
+            )
+
+            # 5. Mission Deliverables table (Authoritative Relational Lineage)
+            conn.execute(
+                """
+                CREATE TABLE IF NOT EXISTS mission_deliverables (
+                    id TEXT PRIMARY KEY,
+                    mission_id TEXT NOT NULL,
+                    execution_id TEXT DEFAULT NULL,
+                    milestone_id TEXT DEFAULT NULL,
+                    name TEXT NOT NULL,
+                    path TEXT NOT NULL,
+                    type TEXT NOT NULL DEFAULT 'document',
+                    size_bytes INTEGER NOT NULL DEFAULT 0,
+                    sha256 TEXT DEFAULT NULL,
+                    status TEXT NOT NULL DEFAULT 'draft',
+                    metadata TEXT DEFAULT '{}',
+                    created_at TEXT NOT NULL,
+                    updated_at TEXT NOT NULL,
+                    FOREIGN KEY(mission_id) REFERENCES missions(id) ON DELETE CASCADE,
+                    FOREIGN KEY(execution_id) REFERENCES mission_executions(id) ON DELETE SET NULL,
+                    FOREIGN KEY(milestone_id) REFERENCES mission_milestones(id) ON DELETE SET NULL
+                )
+                """
+            )
+
+            # 6. Ensure conversation_activities table exists for activity logging
+            conn.execute(
+                """
+                CREATE TABLE IF NOT EXISTS conversation_activities (
+                    id TEXT PRIMARY KEY,
+                    conversation_id TEXT NOT NULL,
+                    agent TEXT NOT NULL,
+                    activity_type TEXT NOT NULL,
+                    message TEXT,
+                    metadata TEXT,
+                    created_at TEXT NOT NULL
+                )
+                """
+            )
+
+            # Performance Indexes
             conn.execute("CREATE INDEX IF NOT EXISTS idx_missions_status ON missions(status)")
             conn.execute("CREATE INDEX IF NOT EXISTS idx_missions_updated ON missions(updated_at DESC)")
             conn.execute("CREATE INDEX IF NOT EXISTS idx_missions_conv ON missions(conversation_id)")
             conn.execute("CREATE INDEX IF NOT EXISTS idx_missions_project ON missions(project_id)")
             conn.execute("CREATE INDEX IF NOT EXISTS idx_milestones_mission ON mission_milestones(mission_id, order_idx ASC)")
+            conn.execute("CREATE INDEX IF NOT EXISTS idx_mission_exec_lookup ON mission_executions(mission_id, run_number DESC)")
+            conn.execute("CREATE INDEX IF NOT EXISTS idx_mission_exec_status ON mission_executions(status)")
+            conn.execute("CREATE INDEX IF NOT EXISTS idx_mission_exec_lease ON mission_executions(status, lease_expires_at)")
+            conn.execute("CREATE INDEX IF NOT EXISTS idx_exec_milestones_lookup ON mission_execution_milestones(execution_id, milestone_id)")
+            conn.execute("CREATE INDEX IF NOT EXISTS idx_mission_deliv_lookup ON mission_deliverables(mission_id, created_at DESC)")
+            conn.execute("CREATE INDEX IF NOT EXISTS idx_mission_deliv_exec ON mission_deliverables(execution_id)")
+            conn.execute("CREATE INDEX IF NOT EXISTS idx_mission_deliv_path ON mission_deliverables(mission_id, path)")
 
-            # 4. Safe migration for conversations table if present
+            # Safe migrations for existing tables
+            try:
+                conn.execute("ALTER TABLE missions ADD COLUMN active_execution_id TEXT DEFAULT NULL")
+            except Exception:
+                pass
             try:
                 conn.execute("ALTER TABLE conversations ADD COLUMN mission_id TEXT DEFAULT NULL")
+            except Exception:
+                pass
+
+            # Safe backfill of legacy deliverables from missions.metadata["deliverables"]
+            try:
+                rows = conn.execute("SELECT id, metadata, created_at FROM missions").fetchall()
+                for r in rows:
+                    mid = r["id"]
+                    m_meta_raw = r["metadata"]
+                    m_meta = json.loads(m_meta_raw) if m_meta_raw else {}
+                    legacy_delivs = m_meta.get("deliverables")
+                    if isinstance(legacy_delivs, list):
+                        for ld in legacy_delivs:
+                            if isinstance(ld, dict) and ld.get("id"):
+                                conn.execute(
+                                    """
+                                    INSERT OR IGNORE INTO mission_deliverables
+                                    (id, mission_id, execution_id, milestone_id, name, path, type, size_bytes, sha256, status, metadata, created_at, updated_at)
+                                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                                    """,
+                                    (
+                                        ld["id"],
+                                        mid,
+                                        ld.get("execution_id"),
+                                        ld.get("milestone_id"),
+                                        ld.get("name", "Deliverable"),
+                                        ld.get("path", ""),
+                                        ld.get("type", "document"),
+                                        int(ld.get("size_bytes", 0)),
+                                        ld.get("sha256"),
+                                        ld.get("status", "draft"),
+                                        json.dumps(ld.get("metadata") or {}),
+                                        ld.get("created_at") or r["created_at"],
+                                        ld.get("updated_at") or r["created_at"],
+                                    ),
+                                )
             except Exception:
                 pass
 
@@ -122,10 +281,19 @@ class MissionStore:
         status_val = status.value if isinstance(status, MissionStatus) else str(status)
         now = datetime.now(timezone.utc).isoformat()
         meta_json = json.dumps(metadata or {})
+        conv_id = conversation_id or f"conv_{mid}"
 
         created_milestones: list[Milestone] = []
 
         with self._get_connection() as conn:
+            conn.execute(
+                """
+                INSERT OR IGNORE INTO conversations (
+                    id, title, team_name, status, created_at, updated_at
+                ) VALUES (?, ?, ?, 'active', ?, ?)
+                """,
+                (conv_id, f"Mission: {clean_title}", team_name or "Workforce", now, now),
+            )
             conn.execute(
                 """
                 INSERT INTO missions (
@@ -142,7 +310,7 @@ class MissionStore:
                     clean_objective,
                     status_val,
                     team_name,
-                    conversation_id,
+                    conv_id,
                     project_id,
                     meta_json,
                     now,
@@ -223,12 +391,12 @@ class MissionStore:
         )
 
     def get_mission(self, mission_id: str, include_milestones: bool = True) -> Mission | None:
-        """Retrieve a mission by ID with its milestones."""
+        """Retrieve a mission by ID with its milestones and active execution overlay."""
         with self._get_connection() as conn:
             row = conn.execute(
                 """
                 SELECT id, workspace_id, title, objective, status,
-                       team_name, conversation_id, project_id, metadata,
+                       team_name, conversation_id, project_id, active_execution_id, metadata,
                        created_at, updated_at
                 FROM missions
                 WHERE id = ?
@@ -238,6 +406,19 @@ class MissionStore:
 
             if not row:
                 return None
+
+            active_exec_id = row["active_execution_id"] if "active_execution_id" in row.keys() else None
+            exec_milestone_map: dict[str, tuple[str, str | None]] = {}
+            if active_exec_id:
+                try:
+                    em_rows = conn.execute(
+                        "SELECT milestone_id, status, completed_at FROM mission_execution_milestones WHERE execution_id = ?",
+                        (active_exec_id,),
+                    ).fetchall()
+                    for em in em_rows:
+                        exec_milestone_map[em["milestone_id"]] = (em["status"], em["completed_at"])
+                except Exception:
+                    pass
 
             milestones: list[Milestone] = []
             if include_milestones:
@@ -259,6 +440,10 @@ class MissionStore:
                     except Exception:
                         pass
                     st_val = mr["status"]
+                    comp_at = mr["completed_at"]
+                    if mr["id"] in exec_milestone_map:
+                        st_val, comp_at = exec_milestone_map[mr["id"]]
+
                     milestones.append(
                         Milestone(
                             id=mr["id"],
@@ -268,7 +453,7 @@ class MissionStore:
                             status=MilestoneStatus(st_val) if st_val in MilestoneStatus._value2member_map_ else MilestoneStatus.PENDING,
                             order_idx=mr["order_idx"],
                             dependencies=deps,
-                            completed_at=mr["completed_at"],
+                            completed_at=comp_at,
                             created_at=mr["created_at"],
                             updated_at=mr["updated_at"],
                         )
@@ -281,6 +466,8 @@ class MissionStore:
             pass
 
         st_val = row["status"]
+        active_exec = self.get_execution(active_exec_id) if active_exec_id else None
+
         return Mission(
             id=row["id"],
             workspace_id=row["workspace_id"],
@@ -290,6 +477,8 @@ class MissionStore:
             team_name=row["team_name"],
             conversation_id=row["conversation_id"],
             project_id=row["project_id"],
+            active_execution_id=active_exec_id,
+            active_execution=active_exec,
             milestones=milestones,
             metadata=meta,
             created_at=row["created_at"],
@@ -307,7 +496,7 @@ class MissionStore:
         """List missions with optional filtering, ordered by updated_at DESC."""
         query = """
             SELECT id, workspace_id, title, objective, status,
-                   team_name, conversation_id, project_id, metadata,
+                   team_name, conversation_id, project_id, active_execution_id, metadata,
                    created_at, updated_at
             FROM missions
             WHERE 1=1
@@ -348,6 +537,20 @@ class MissionStore:
                 mission_ids,
             ).fetchall()
 
+            active_exec_ids = [r["active_execution_id"] for r in rows if "active_execution_id" in r.keys() and r["active_execution_id"]]
+            exec_milestone_map: dict[str, dict[str, tuple[str, str | None]]] = {}
+            if active_exec_ids:
+                try:
+                    pl = ",".join("?" for _ in active_exec_ids)
+                    em_rows = conn.execute(
+                        f"SELECT execution_id, milestone_id, status, completed_at FROM mission_execution_milestones WHERE execution_id IN ({pl})",
+                        active_exec_ids,
+                    ).fetchall()
+                    for em in em_rows:
+                        exec_milestone_map.setdefault(em["execution_id"], {})[em["milestone_id"]] = (em["status"], em["completed_at"])
+                except Exception:
+                    pass
+
         milestones_by_mission: dict[str, list[Milestone]] = {mid: [] for mid in mission_ids}
         for mr in m_rows:
             deps = []
@@ -379,6 +582,33 @@ class MissionStore:
             except Exception:
                 pass
             st_val = r["status"]
+            active_eid = r["active_execution_id"] if "active_execution_id" in r.keys() else None
+            m_milestones = milestones_by_mission.get(r["id"], [])
+
+            if active_eid and active_eid in exec_milestone_map:
+                e_map = exec_milestone_map[active_eid]
+                updated_ms = []
+                for m in m_milestones:
+                    if m.id in e_map:
+                        st, cat = e_map[m.id]
+                        updated_ms.append(
+                            Milestone(
+                                id=m.id,
+                                mission_id=m.mission_id,
+                                title=m.title,
+                                description=m.description,
+                                status=MilestoneStatus(st) if st in MilestoneStatus._value2member_map_ else MilestoneStatus.PENDING,
+                                order_idx=m.order_idx,
+                                dependencies=m.dependencies,
+                                completed_at=cat,
+                                created_at=m.created_at,
+                                updated_at=m.updated_at,
+                            )
+                        )
+                    else:
+                        updated_ms.append(m)
+                m_milestones = updated_ms
+
             results.append(
                 Mission(
                     id=r["id"],
@@ -389,7 +619,8 @@ class MissionStore:
                     team_name=r["team_name"],
                     conversation_id=r["conversation_id"],
                     project_id=r["project_id"],
-                    milestones=milestones_by_mission.get(r["id"], []),
+                    active_execution_id=active_eid,
+                    milestones=m_milestones,
                     metadata=meta,
                     created_at=r["created_at"],
                     updated_at=r["updated_at"],
@@ -407,9 +638,10 @@ class MissionStore:
         team_name: str | None = None,
         conversation_id: str | None = None,
         project_id: str | None = None,
+        active_execution_id: str | None = None,
         metadata: dict[str, Any] | None = None,
     ) -> Mission | None:
-        """Update an existing mission's metadata or status."""
+        """Update an existing mission's metadata, status, or active execution pointer."""
         updates: list[str] = []
         params: list[Any] = []
 
@@ -443,6 +675,10 @@ class MissionStore:
         if project_id is not None:
             updates.append("project_id = ?")
             params.append(project_id or None)
+
+        if active_execution_id is not None:
+            updates.append("active_execution_id = ?")
+            params.append(active_execution_id or None)
 
         if metadata is not None:
             updates.append("metadata = ?")
@@ -894,14 +1130,60 @@ class MissionStore:
         return MissionGraph(mission_id=mission.id, nodes=nodes, edges=edges)
 
     # ---------------------------------------------------------------------------
-    # Deliverables Management
+    # Deliverables Management & Lineage
     # ---------------------------------------------------------------------------
 
-    def list_deliverables(self, mission_id: str) -> list[Deliverable]:
+    def list_deliverables(self, mission_id: str, execution_id: str | None = None) -> list[Deliverable]:
         """
-        Retrieves all real deliverables registered or produced for this mission.
-        Inspects mission metadata and linked conversation activities without fabricating fake items.
+        Retrieves all real deliverables registered or produced for this mission,
+        optionally filtered by execution_id.
         """
+        with self._get_connection() as conn:
+            query = """
+                SELECT id, mission_id, execution_id, milestone_id, name, path,
+                       type, size_bytes, sha256, status, metadata, created_at, updated_at
+                FROM mission_deliverables
+                WHERE mission_id = ?
+            """
+            params: list[Any] = [mission_id]
+            if execution_id and isinstance(execution_id, str):
+                query += " AND execution_id = ?"
+                params.append(execution_id)
+            query += " ORDER BY created_at ASC"
+
+            rows = conn.execute(query, params).fetchall()
+            if rows:
+                deliverables: list[Deliverable] = []
+                for r in rows:
+                    meta = {}
+                    if r["metadata"]:
+                        try:
+                            meta = json.loads(r["metadata"])
+                        except Exception:
+                            pass
+                    deliverables.append(
+                        Deliverable(
+                            id=r["id"],
+                            mission_id=r["mission_id"],
+                            execution_id=r["execution_id"],
+                            milestone_id=r["milestone_id"],
+                            name=r["name"],
+                            path=r["path"],
+                            type=r["type"],
+                            size_bytes=int(r["size_bytes"] or 0),
+                            sha256=r["sha256"],
+                            status=r["status"],
+                            metadata=meta,
+                            created_at=r["created_at"],
+                            updated_at=r["updated_at"],
+                        )
+                    )
+                return deliverables
+
+        return self._list_deliverables_legacy(mission_id)
+
+    def _list_deliverables_legacy(self, mission_id: str) -> list[Deliverable]:
+        """Fallback for un-migrated missions or dynamic activity inspection."""
         mission = self.get_mission(mission_id, include_milestones=False)
         if not mission:
             return []
@@ -909,7 +1191,6 @@ class MissionStore:
         deliverables: list[Deliverable] = []
         seen_paths: set[str] = set()
 
-        # 1. Inspect explicit registered deliverables in mission.metadata["deliverables"]
         raw_delivs = mission.metadata.get("deliverables") if isinstance(mission.metadata, dict) else None
         if isinstance(raw_delivs, list):
             for item in raw_delivs:
@@ -919,7 +1200,6 @@ class MissionStore:
                     if d.path:
                         seen_paths.add(d.path)
 
-        # 2. If conversation_id is linked, inspect conversation activities for file modifications
         if mission.conversation_id:
             try:
                 with self._get_connection() as conn:
@@ -963,23 +1243,682 @@ class MissionStore:
 
     def add_deliverable(self, mission_id: str, deliverable: Deliverable) -> bool:
         """
-        Registers a real deliverable into the mission's metadata.
+        Registers or updates a deliverable in the mission_deliverables table
+        and syncs legacy metadata for backward compatibility.
         """
-        mission = self.get_mission(mission_id, include_milestones=False)
-        if not mission:
-            return False
-
-        meta = dict(mission.metadata) if isinstance(mission.metadata, dict) else {}
-        delivs = list(meta.get("deliverables", []))
-        # Avoid duplicate deliverable IDs
-        delivs = [d for d in delivs if d.get("id") != deliverable.id]
-        delivs.append(deliverable.to_dict())
-        meta["deliverables"] = delivs
-
         now = datetime.now(timezone.utc).isoformat()
+        meta_json = json.dumps(deliverable.metadata or {})
+
         with self._get_connection() as conn:
             conn.execute(
-                "UPDATE missions SET metadata = ?, updated_at = ? WHERE id = ?",
-                (json.dumps(meta), now, mission_id),
+                """
+                INSERT INTO mission_deliverables (
+                    id, mission_id, execution_id, milestone_id, name, path,
+                    type, size_bytes, sha256, status, metadata, created_at, updated_at
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                ON CONFLICT(id) DO UPDATE SET
+                    execution_id = COALESCE(excluded.execution_id, mission_deliverables.execution_id),
+                    milestone_id = COALESCE(excluded.milestone_id, mission_deliverables.milestone_id),
+                    name = excluded.name,
+                    path = excluded.path,
+                    type = excluded.type,
+                    size_bytes = excluded.size_bytes,
+                    sha256 = COALESCE(excluded.sha256, mission_deliverables.sha256),
+                    status = excluded.status,
+                    metadata = excluded.metadata,
+                    updated_at = excluded.updated_at
+                """,
+                (
+                    deliverable.id,
+                    mission_id,
+                    deliverable.execution_id,
+                    deliverable.milestone_id,
+                    deliverable.name,
+                    deliverable.path,
+                    deliverable.type,
+                    deliverable.size_bytes,
+                    deliverable.sha256,
+                    deliverable.status,
+                    meta_json,
+                    deliverable.created_at or now,
+                    deliverable.updated_at or now,
+                ),
+            )
+
+        # Sync to mission.metadata["deliverables"] for backward compatibility
+        try:
+            mission = self.get_mission(mission_id, include_milestones=False)
+            if mission:
+                meta = dict(mission.metadata) if isinstance(mission.metadata, dict) else {}
+                delivs = list(meta.get("deliverables", []))
+                delivs = [d for d in delivs if d.get("id") != deliverable.id]
+                delivs.append(deliverable.to_dict())
+                meta["deliverables"] = delivs
+                with self._get_connection() as conn:
+                    conn.execute(
+                        "UPDATE missions SET metadata = ?, updated_at = ? WHERE id = ?",
+                        (json.dumps(meta), now, mission_id),
+                    )
+        except Exception:
+            pass
+
+        return True
+
+    def get_deliverable(self, deliverable_id: str) -> Deliverable | None:
+        """Fetch a single deliverable by ID."""
+        with self._get_connection() as conn:
+            r = conn.execute(
+                """
+                SELECT id, mission_id, execution_id, milestone_id, name, path,
+                       type, size_bytes, sha256, status, metadata, created_at, updated_at
+                FROM mission_deliverables
+                WHERE id = ?
+                """,
+                (deliverable_id,),
+            ).fetchone()
+            if not r:
+                return None
+            meta = {}
+            if r["metadata"]:
+                try:
+                    meta = json.loads(r["metadata"])
+                except Exception:
+                    pass
+            return Deliverable(
+                id=r["id"],
+                mission_id=r["mission_id"],
+                execution_id=r["execution_id"],
+                milestone_id=r["milestone_id"],
+                name=r["name"],
+                path=r["path"],
+                type=r["type"],
+                size_bytes=int(r["size_bytes"] or 0),
+                sha256=r["sha256"],
+                status=r["status"],
+                metadata=meta,
+                created_at=r["created_at"],
+                updated_at=r["updated_at"],
+            )
+
+    # ---------------------------------------------------------------------------
+    # Execution Lifecycle & Lease Management
+    # ---------------------------------------------------------------------------
+
+    def create_execution(
+        self,
+        mission_id: str,
+        team_name: str | None = None,
+        run_number: int | None = None,
+        status: ExecutionStatus = ExecutionStatus.PENDING,
+        metadata: dict[str, Any] | None = None,
+    ) -> MissionExecution:
+        """
+        Creates a new MissionExecution record and initializes its execution-scoped milestone states
+        from the durable mission_milestones template.
+        """
+        now = datetime.now(timezone.utc).isoformat()
+        status_val = status.value if isinstance(status, ExecutionStatus) else str(status)
+        with self._get_connection() as conn:
+            if run_number is None:
+                row = conn.execute(
+                    "SELECT COALESCE(MAX(run_number), 0) + 1 FROM mission_executions WHERE mission_id = ?",
+                    (mission_id,),
+                ).fetchone()
+                run_num = row[0] if row else 1
+            else:
+                run_num = run_number
+
+            exec_id = f"exec_{uuid.uuid4().hex[:12]}"
+            meta_json = json.dumps(metadata or {})
+
+            conn.execute(
+                """
+                INSERT INTO mission_executions (
+                    id, mission_id, run_number, status, current_milestone_id,
+                    team_name, started_at, duration_seconds, recovery_state,
+                    pending_approval, approval_history, milestone_states, metadata,
+                    created_at, updated_at
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    exec_id,
+                    mission_id,
+                    run_num,
+                    status_val,
+                    None,
+                    team_name,
+                    now,
+                    0.0,
+                    "none",
+                    None,
+                    "[]",
+                    "[]",
+                    meta_json,
+                    now,
+                    now,
+                ),
+            )
+
+            # Copy template milestones into execution-scoped milestone states
+            tmpl_rows = conn.execute(
+                """
+                SELECT id, order_idx FROM mission_milestones
+                WHERE mission_id = ?
+                ORDER BY order_idx ASC, created_at ASC
+                """,
+                (mission_id,),
+            ).fetchall()
+
+            for mr in tmpl_rows:
+                em_id = f"em_{exec_id}_{mr['id']}"
+                conn.execute(
+                    """
+                    INSERT INTO mission_execution_milestones (
+                        id, execution_id, milestone_id, status, created_at, updated_at
+                    ) VALUES (?, ?, ?, ?, ?, ?)
+                    """,
+                    (em_id, exec_id, mr["id"], MilestoneExecutionStatus.PENDING.value, now, now),
+                )
+
+            # Update parent mission active_execution_id
+            conn.execute(
+                "UPDATE missions SET active_execution_id = ?, updated_at = ? WHERE id = ?",
+                (exec_id, now, mission_id),
+            )
+
+        return MissionExecution(
+            id=exec_id,
+            mission_id=mission_id,
+            run_number=run_num,
+            status=ExecutionStatus.PENDING,
+            current_milestone_id=None,
+            team_name=team_name,
+            started_at=now,
+            metadata=metadata or {},
+            created_at=now,
+            updated_at=now,
+        )
+
+    def get_execution(self, execution_id: str) -> MissionExecution | None:
+        """Retrieve a specific execution run by ID."""
+        with self._get_connection() as conn:
+            row = conn.execute(
+                """
+                SELECT id, mission_id, run_number, status, current_milestone_id,
+                       team_name, started_at, completed_at, interrupted_at,
+                       duration_seconds, error_message, error_details,
+                       lease_owner, lease_expires_at, heartbeat_at, recovery_state,
+                       pending_approval, approval_history, milestone_states, metadata,
+                       created_at, updated_at
+                FROM mission_executions
+                WHERE id = ?
+                """,
+                (execution_id,),
+            ).fetchone()
+
+            if not row:
+                return None
+
+            return self._row_to_execution(row)
+
+    def _row_to_execution(self, row: sqlite3.Row) -> MissionExecution:
+        st_val = row["status"]
+        status = ExecutionStatus(st_val) if st_val in ExecutionStatus._value2member_map_ else ExecutionStatus.PENDING
+
+        pending_appr = None
+        if row["pending_approval"]:
+            try:
+                pending_appr = json.loads(row["pending_approval"])
+            except Exception:
+                pass
+
+        appr_hist = []
+        if row["approval_history"]:
+            try:
+                appr_hist = json.loads(row["approval_history"])
+            except Exception:
+                pass
+
+        ms_states = []
+        if row["milestone_states"]:
+            try:
+                ms_states = json.loads(row["milestone_states"])
+            except Exception:
+                pass
+
+        meta = {}
+        if row["metadata"]:
+            try:
+                meta = json.loads(row["metadata"])
+            except Exception:
+                pass
+
+        return MissionExecution(
+            id=row["id"],
+            mission_id=row["mission_id"],
+            run_number=row["run_number"],
+            status=status,
+            current_milestone_id=row["current_milestone_id"],
+            team_name=row["team_name"],
+            started_at=row["started_at"],
+            completed_at=row["completed_at"],
+            interrupted_at=row["interrupted_at"],
+            duration_seconds=float(row["duration_seconds"] or 0.0),
+            error_message=row["error_message"],
+            error_details=row["error_details"],
+            lease_owner=row["lease_owner"],
+            lease_expires_at=row["lease_expires_at"],
+            heartbeat_at=row["heartbeat_at"],
+            recovery_state=row["recovery_state"] or "none",
+            pending_approval=pending_appr,
+            approval_history=appr_hist,
+            milestone_states=ms_states,
+            metadata=meta,
+            created_at=row["created_at"],
+            updated_at=row["updated_at"],
+        )
+
+    def get_active_execution(self, mission_id: str) -> MissionExecution | None:
+        """Retrieves the active or most recent execution for a mission."""
+        with self._get_connection() as conn:
+            m_row = conn.execute(
+                "SELECT active_execution_id FROM missions WHERE id = ?",
+                (mission_id,),
+            ).fetchone()
+            if m_row and m_row["active_execution_id"]:
+                return self.get_execution(m_row["active_execution_id"])
+
+            row = conn.execute(
+                """
+                SELECT id, mission_id, run_number, status, current_milestone_id,
+                       team_name, started_at, completed_at, interrupted_at,
+                       duration_seconds, error_message, error_details,
+                       lease_owner, lease_expires_at, heartbeat_at, recovery_state,
+                       pending_approval, approval_history, milestone_states, metadata,
+                       created_at, updated_at
+                FROM mission_executions
+                WHERE mission_id = ?
+                ORDER BY run_number DESC LIMIT 1
+                """,
+                (mission_id,),
+            ).fetchone()
+            if row:
+                return self._row_to_execution(row)
+            return None
+
+    def list_executions(self, mission_id: str) -> list[MissionExecution]:
+        """List all execution runs for a mission, ordered by run_number DESC."""
+        with self._get_connection() as conn:
+            rows = conn.execute(
+                """
+                SELECT id, mission_id, run_number, status, current_milestone_id,
+                       team_name, started_at, completed_at, interrupted_at,
+                       duration_seconds, error_message, error_details,
+                       lease_owner, lease_expires_at, heartbeat_at, recovery_state,
+                       pending_approval, approval_history, milestone_states, metadata,
+                       created_at, updated_at
+                FROM mission_executions
+                WHERE mission_id = ?
+                ORDER BY run_number DESC
+                """,
+                (mission_id,),
+            ).fetchall()
+            return [self._row_to_execution(r) for r in rows]
+
+    def update_execution(
+        self,
+        execution_id: str,
+        status: ExecutionStatus | str | None = None,
+        current_milestone_id: str | None = None,
+        team_name: str | None = None,
+        completed_at: str | None = None,
+        interrupted_at: str | None = None,
+        duration_seconds: float | None = None,
+        error_message: str | None = None,
+        error_details: str | None = None,
+        recovery_state: str | None = None,
+        pending_approval: dict[str, Any] | None = None,
+        approval_history: list[dict[str, Any]] | None = None,
+        milestone_states: list[dict[str, Any]] | None = None,
+        metadata: dict[str, Any] | None = None,
+    ) -> MissionExecution | None:
+        """Update fields on a mission execution."""
+        updates: list[str] = []
+        params: list[Any] = []
+
+        if status is not None:
+            st_val = status.value if isinstance(status, ExecutionStatus) else str(status)
+            updates.append("status = ?")
+            params.append(st_val)
+        if current_milestone_id is not None:
+            updates.append("current_milestone_id = ?")
+            params.append(current_milestone_id or None)
+        if team_name is not None:
+            updates.append("team_name = ?")
+            params.append(team_name or None)
+        if completed_at is not None:
+            updates.append("completed_at = ?")
+            params.append(completed_at or None)
+        if interrupted_at is not None:
+            updates.append("interrupted_at = ?")
+            params.append(interrupted_at or None)
+        if duration_seconds is not None:
+            updates.append("duration_seconds = ?")
+            params.append(float(duration_seconds))
+        if error_message is not None:
+            updates.append("error_message = ?")
+            params.append(error_message or None)
+        if error_details is not None:
+            updates.append("error_details = ?")
+            params.append(error_details or None)
+        if recovery_state is not None:
+            updates.append("recovery_state = ?")
+            params.append(recovery_state)
+        if pending_approval is not None:
+            updates.append("pending_approval = ?")
+            params.append(json.dumps(pending_approval) if pending_approval else None)
+        if approval_history is not None:
+            updates.append("approval_history = ?")
+            params.append(json.dumps(approval_history))
+        if milestone_states is not None:
+            updates.append("milestone_states = ?")
+            params.append(json.dumps(milestone_states))
+        if metadata is not None:
+            updates.append("metadata = ?")
+            params.append(json.dumps(metadata))
+
+        if not updates:
+            return self.get_execution(execution_id)
+
+        now = datetime.now(timezone.utc).isoformat()
+        updates.append("updated_at = ?")
+        params.append(now)
+        params.append(execution_id)
+
+        with self._get_connection() as conn:
+            conn.execute(
+                f"UPDATE mission_executions SET {', '.join(updates)} WHERE id = ?",
+                params,
+            )
+        return self.get_execution(execution_id)
+
+    def acquire_execution_lease(
+        self,
+        mission_id: str,
+        execution_id: str,
+        owner_token: str,
+        ttl_seconds: int = 60,
+    ) -> bool:
+        """
+        Atomically acquires a durable execution lease for an execution.
+        Guarantees mutual exclusion: returns False if another execution for this mission
+        holds a valid unexpired lease.
+        """
+        now = datetime.now(timezone.utc)
+        now_iso = now.isoformat()
+        expires_iso = (now + timedelta(seconds=ttl_seconds)).isoformat()
+
+        with self._get_connection() as conn:
+            # Check for active lease held by any OTHER execution for this mission
+            conflict = conn.execute(
+                """
+                SELECT id, lease_owner, lease_expires_at
+                FROM mission_executions
+                WHERE mission_id = ? AND status IN ('running', 'verifying')
+                  AND id != ? AND lease_expires_at > ?
+                """,
+                (mission_id, execution_id, now_iso),
+            ).fetchone()
+
+            if conflict:
+                return False
+
+            # Grant lease to this execution
+            res = conn.execute(
+                """
+                UPDATE mission_executions
+                SET status = 'running',
+                    lease_owner = ?,
+                    lease_expires_at = ?,
+                    heartbeat_at = ?,
+                    updated_at = ?
+                WHERE id = ?
+                """,
+                (owner_token, expires_iso, now_iso, now_iso, execution_id),
+            )
+            if res.rowcount == 0:
+                return False
+
+            # Keep parent mission status in sync
+            conn.execute(
+                "UPDATE missions SET status = 'running', active_execution_id = ?, updated_at = ? WHERE id = ?",
+                (execution_id, now_iso, mission_id),
             )
             return True
+
+    def renew_execution_lease(
+        self,
+        execution_id: str,
+        owner_token: str,
+        ttl_seconds: int = 60,
+    ) -> bool:
+        """Heartbeat renewal of an active execution lease."""
+        now = datetime.now(timezone.utc)
+        now_iso = now.isoformat()
+        expires_iso = (now + timedelta(seconds=ttl_seconds)).isoformat()
+
+        with self._get_connection() as conn:
+            res = conn.execute(
+                """
+                UPDATE mission_executions
+                SET lease_expires_at = ?,
+                    heartbeat_at = ?,
+                    updated_at = ?
+                WHERE id = ? AND lease_owner = ? AND status IN ('running', 'verifying')
+                """,
+                (expires_iso, now_iso, now_iso, execution_id, owner_token),
+            )
+            return res.rowcount > 0
+
+    def release_execution_lease(
+        self,
+        execution_id: str,
+        owner_token: str | None = None,
+    ) -> bool:
+        """Releases the execution lease when a run completes, pauses, or terminates."""
+        now_iso = datetime.now(timezone.utc).isoformat()
+        with self._get_connection() as conn:
+            query = "UPDATE mission_executions SET lease_owner = NULL, lease_expires_at = NULL, updated_at = ? WHERE id = ?"
+            params: list[Any] = [now_iso, execution_id]
+            if owner_token:
+                query += " AND lease_owner = ?"
+                params.append(owner_token)
+            res = conn.execute(query, params)
+            return res.rowcount > 0
+
+    def get_execution_milestones(self, execution_id: str) -> list[ExecutionMilestone]:
+        """Returns execution-scoped milestone states for a given execution run."""
+        with self._get_connection() as conn:
+            rows = conn.execute(
+                """
+                SELECT id, execution_id, milestone_id, status, started_at, completed_at,
+                       duration_seconds, error, output, metadata, created_at, updated_at
+                FROM mission_execution_milestones
+                WHERE execution_id = ?
+                ORDER BY created_at ASC
+                """,
+                (execution_id,),
+            ).fetchall()
+
+            res: list[ExecutionMilestone] = []
+            for r in rows:
+                st_val = r["status"]
+                status = MilestoneExecutionStatus(st_val) if st_val in MilestoneExecutionStatus._value2member_map_ else MilestoneExecutionStatus.PENDING
+                meta = {}
+                if r["metadata"]:
+                    try:
+                        meta = json.loads(r["metadata"])
+                    except Exception:
+                        pass
+                res.append(
+                    ExecutionMilestone(
+                        id=r["id"],
+                        execution_id=r["execution_id"],
+                        milestone_id=r["milestone_id"],
+                        status=status,
+                        started_at=r["started_at"],
+                        completed_at=r["completed_at"],
+                        duration_seconds=float(r["duration_seconds"] or 0.0),
+                        error=r["error"],
+                        output=r["output"],
+                        metadata=meta,
+                        created_at=r["created_at"],
+                        updated_at=r["updated_at"],
+                    )
+                )
+            return res
+
+    def update_execution_milestone(
+        self,
+        execution_id: str,
+        milestone_id: str,
+        status: MilestoneExecutionStatus | str | None = None,
+        started_at: str | None = None,
+        completed_at: str | None = None,
+        duration_seconds: float | None = None,
+        error: str | None = None,
+        output: str | None = None,
+        metadata: dict[str, Any] | None = None,
+    ) -> ExecutionMilestone | None:
+        """Updates the status and output of a specific milestone within an execution run."""
+        updates: list[str] = []
+        params: list[Any] = []
+
+        if status is not None:
+            st_val = status.value if isinstance(status, MilestoneExecutionStatus) else str(status)
+            updates.append("status = ?")
+            params.append(st_val)
+        if started_at is not None:
+            updates.append("started_at = ?")
+            params.append(started_at or None)
+        if completed_at is not None:
+            updates.append("completed_at = ?")
+            params.append(completed_at or None)
+        if duration_seconds is not None:
+            updates.append("duration_seconds = ?")
+            params.append(float(duration_seconds))
+        if error is not None:
+            updates.append("error = ?")
+            params.append(error or None)
+        if output is not None:
+            updates.append("output = ?")
+            params.append(output or None)
+        if metadata is not None:
+            updates.append("metadata = ?")
+            params.append(json.dumps(metadata))
+
+        if not updates:
+            return None
+
+        now = datetime.now(timezone.utc).isoformat()
+        updates.append("updated_at = ?")
+        params.append(now)
+        params.append(execution_id)
+        params.append(milestone_id)
+
+        with self._get_connection() as conn:
+            conn.execute(
+                f"UPDATE mission_execution_milestones SET {', '.join(updates)} WHERE execution_id = ? AND milestone_id = ?",
+                params,
+            )
+
+        milestones = self.get_execution_milestones(execution_id)
+        for em in milestones:
+            if em.milestone_id == milestone_id:
+                return em
+        return None
+
+    def recover_stale_executions(self) -> list[str]:
+        """
+        Crash recovery: inspects mission_executions on startup.
+        Any execution left in 'running' or 'verifying' is transitioned to 'interrupted',
+        its running milestone reset to 'pending', and leases cleared.
+        Executions in 'awaiting_approval' are preserved.
+        """
+        recovered_ids: list[str] = []
+        now = datetime.now(timezone.utc).isoformat()
+
+        with self._get_connection() as conn:
+            stale_rows = conn.execute(
+                """
+                SELECT id, mission_id, run_number, current_milestone_id
+                FROM mission_executions
+                WHERE status IN ('running', 'verifying')
+                """
+            ).fetchall()
+
+            for r in stale_rows:
+                exec_id = r["id"]
+                mid = r["mission_id"]
+                curr_ms = r["current_milestone_id"]
+
+                conn.execute(
+                    """
+                    UPDATE mission_executions
+                    SET status = 'interrupted',
+                        interrupted_at = ?,
+                        recovery_state = 'recovered_from_crash',
+                        error_message = 'Execution interrupted by application restart. Ready to resume.',
+                        lease_owner = NULL,
+                        lease_expires_at = NULL,
+                        updated_at = ?
+                    WHERE id = ?
+                    """,
+                    (now, now, exec_id),
+                )
+
+                conn.execute(
+                    """
+                    UPDATE mission_execution_milestones
+                    SET status = 'pending',
+                        updated_at = ?
+                    WHERE execution_id = ? AND status = 'running'
+                    """,
+                    (now, exec_id),
+                )
+
+                conn.execute(
+                    """
+                    UPDATE missions
+                    SET status = 'interrupted',
+                        updated_at = ?
+                    WHERE id = ?
+                    """,
+                    (now, mid),
+                )
+
+                act_id = f"act_{uuid.uuid4().hex[:12]}"
+                meta_act = json.dumps({
+                    "execution_id": exec_id,
+                    "milestone_id": curr_ms,
+                    "reason": "crash_recovery",
+                })
+                conn.execute(
+                    """
+                    INSERT INTO conversation_activities (
+                        id, conversation_id, agent, activity_type, message, metadata, created_at
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?)
+                    """,
+                    (
+                        act_id,
+                        mid,
+                        "System",
+                        "execution_interrupted",
+                        f"Execution Run #{r['run_number']} was interrupted by application restart. Ready to resume.",
+                        meta_act,
+                        now,
+                    ),
+                )
+                recovered_ids.append(exec_id)
+
+        return recovered_ids

@@ -1,6 +1,6 @@
 import asyncio
 import json
-from fastapi import APIRouter, Request, HTTPException, UploadFile, File, Form, status
+from fastapi import APIRouter, Request, HTTPException, UploadFile, File, Form, status, Query
 from pydantic import BaseModel, Field
 from typing import Any
 import hashlib
@@ -2871,14 +2871,18 @@ class CreateDeliverablePayload(BaseModel):
 
 
 @router.get("/missions/{mission_id}/deliverables")
-async def list_mission_deliverables(request: Request, mission_id: str):
+async def list_mission_deliverables(
+    request: Request,
+    mission_id: str,
+    execution_id: str | None = None,
+):
     ws = getattr(request.app.state, "workspace", None)
     if not ws:
         raise HTTPException(status_code=503, detail="Workspace not initialized.")
     mission = ws.missions.get_mission(mission_id, include_milestones=False)
     if not mission:
         raise HTTPException(status_code=404, detail="Mission not found.")
-    deliverables = ws.missions.list_deliverables(mission_id)
+    deliverables = ws.missions.list_deliverables(mission_id, execution_id=execution_id)
     return [d.to_dict() for d in deliverables]
 
 
@@ -2918,23 +2922,292 @@ async def list_mission_activities(request: Request, mission_id: str):
     mission = ws.missions.get_mission(mission_id, include_milestones=False)
     if not mission:
         raise HTTPException(status_code=404, detail="Mission not found.")
-    if not mission.conversation_id:
-        return []
-    conv = ws.conversations.get_conversation(mission.conversation_id)
-    if not conv:
-        return []
-    cleaned = []
-    for act in conv.get("activities", []):
-        meta = dict(act.get("metadata") or {})
-        meta.pop("thinking", None)
-        meta.pop("thought", None)
-        meta.pop("chain_of_thought", None)
-        cleaned.append({
-            "id": act.get("id"),
-            "agent": act.get("agent"),
-            "activity_type": act.get("type"),
-            "message": act.get("message"),
-            "metadata": meta,
-            "created_at": act.get("timestamp"),
-        })
-    return cleaned
+
+    activities: list[dict[str, Any]] = []
+    target_ids = [mission_id, f"conv_{mission_id}"]
+    if mission.conversation_id and mission.conversation_id not in target_ids:
+        target_ids.append(mission.conversation_id)
+
+    with ws.missions._get_connection() as conn:
+        placeholders = ",".join("?" for _ in target_ids)
+        rows = conn.execute(
+            f"""
+            SELECT id, agent, activity_type, message, metadata, created_at
+            FROM conversation_activities
+            WHERE conversation_id IN ({placeholders})
+            ORDER BY created_at ASC
+            """,
+            tuple(target_ids),
+        ).fetchall()
+        for r in rows:
+            meta = {}
+            if r["metadata"]:
+                try:
+                    meta = json.loads(r["metadata"])
+                except Exception:
+                    pass
+            activities.append({
+                "id": r["id"],
+                "agent": r["agent"],
+                "activity_type": r["activity_type"],
+                "message": r["message"],
+                "metadata": meta,
+                "created_at": r["created_at"],
+            })
+
+    if not activities and mission.conversation_id:
+        conv = ws.conversations.get(mission.conversation_id)
+        if conv:
+            for act in conv.get("activities", []):
+                meta = dict(act.get("metadata") or {})
+                meta.pop("thinking", None)
+                meta.pop("thought", None)
+                meta.pop("chain_of_thought", None)
+                activities.append({
+                    "id": act.get("id"),
+                    "agent": act.get("agent"),
+                    "activity_type": act.get("type"),
+                    "message": act.get("message"),
+                    "metadata": meta,
+                    "created_at": act.get("timestamp"),
+                })
+    return activities
+
+
+# ============================================================================
+# MISSION RUNTIME ACTION ENDPOINTS
+# ============================================================================
+
+
+class MissionActionStartPayload(BaseModel):
+    team_name: str | None = None
+
+
+class MissionActionPausePayload(BaseModel):
+    reason: str | None = None
+
+
+class MissionActionCancelPayload(BaseModel):
+    reason: str | None = None
+
+
+class MissionActionRetryPayload(BaseModel):
+    milestone_id: str | None = None
+
+
+class MissionActionApprovePayload(BaseModel):
+    notes: str | None = None
+
+
+class MissionActionRejectPayload(BaseModel):
+    feedback: str | None = None
+
+
+def _resolve_mission_runtime(request: Request):
+    ws = getattr(request.app.state, "workspace", None)
+    if not ws:
+        raise HTTPException(status_code=503, detail="Workspace not initialized.")
+    runtime = getattr(request.app.state, "mission_runtime", None)
+    if not runtime:
+        from aether.missions.runtime import MissionRuntime
+        runtime = MissionRuntime(ws)
+        request.app.state.mission_runtime = runtime
+    return runtime
+
+
+@router.post("/missions/{mission_id}/start")
+async def start_mission_route(request: Request, mission_id: str, payload: MissionActionStartPayload | None = None):
+    runtime = _resolve_mission_runtime(request)
+    from aether.missions.runtime import NotFoundError, ConflictError
+    team_name = payload.team_name if payload else None
+    try:
+        execution = await runtime.start_mission(mission_id, team_name=team_name)
+        mission = runtime.store.get_mission(mission_id)
+        return {
+            "execution": execution.to_dict(),
+            "mission": mission.to_dict() if mission else None,
+        }
+    except NotFoundError as e:
+        raise HTTPException(status_code=404, detail=str(e))
+    except ConflictError as e:
+        raise HTTPException(status_code=409, detail=str(e))
+    except ValueError as e:
+        raise HTTPException(status_code=422, detail=str(e))
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.post("/missions/{mission_id}/rerun")
+async def rerun_mission_route(request: Request, mission_id: str, payload: MissionActionStartPayload | None = None):
+    runtime = _resolve_mission_runtime(request)
+    from aether.missions.runtime import NotFoundError, ConflictError
+    team_name = payload.team_name if payload else None
+    try:
+        execution = await runtime.rerun_mission(mission_id, team_name=team_name)
+        mission = runtime.store.get_mission(mission_id)
+        return {
+            "execution": execution.to_dict(),
+            "mission": mission.to_dict() if mission else None,
+        }
+    except NotFoundError as e:
+        raise HTTPException(status_code=404, detail=str(e))
+    except ConflictError as e:
+        raise HTTPException(status_code=409, detail=str(e))
+    except ValueError as e:
+        raise HTTPException(status_code=422, detail=str(e))
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.post("/missions/{mission_id}/pause")
+async def pause_mission_route(request: Request, mission_id: str, payload: MissionActionPausePayload | None = None):
+    runtime = _resolve_mission_runtime(request)
+    from aether.missions.runtime import NotFoundError, ConflictError
+    reason = payload.reason if payload else None
+    try:
+        execution = await runtime.pause_mission(mission_id, reason=reason)
+        mission = runtime.store.get_mission(mission_id)
+        return {
+            "execution": execution.to_dict(),
+            "mission": mission.to_dict() if mission else None,
+        }
+    except NotFoundError as e:
+        raise HTTPException(status_code=404, detail=str(e))
+    except ConflictError as e:
+        raise HTTPException(status_code=409, detail=str(e))
+    except ValueError as e:
+        raise HTTPException(status_code=422, detail=str(e))
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.post("/missions/{mission_id}/resume")
+async def resume_mission_route(request: Request, mission_id: str):
+    runtime = _resolve_mission_runtime(request)
+    from aether.missions.runtime import NotFoundError, ConflictError
+    try:
+        execution = await runtime.resume_mission(mission_id)
+        mission = runtime.store.get_mission(mission_id)
+        return {
+            "execution": execution.to_dict(),
+            "mission": mission.to_dict() if mission else None,
+        }
+    except NotFoundError as e:
+        raise HTTPException(status_code=404, detail=str(e))
+    except ConflictError as e:
+        raise HTTPException(status_code=409, detail=str(e))
+    except ValueError as e:
+        raise HTTPException(status_code=422, detail=str(e))
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.post("/missions/{mission_id}/cancel")
+async def cancel_mission_route(request: Request, mission_id: str, payload: MissionActionCancelPayload | None = None):
+    runtime = _resolve_mission_runtime(request)
+    from aether.missions.runtime import NotFoundError, ConflictError
+    reason = payload.reason if payload else None
+    try:
+        execution = await runtime.cancel_mission(mission_id, reason=reason)
+        mission = runtime.store.get_mission(mission_id)
+        return {
+            "execution": execution.to_dict(),
+            "mission": mission.to_dict() if mission else None,
+        }
+    except NotFoundError as e:
+        raise HTTPException(status_code=404, detail=str(e))
+    except ConflictError as e:
+        raise HTTPException(status_code=409, detail=str(e))
+    except ValueError as e:
+        raise HTTPException(status_code=422, detail=str(e))
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.post("/missions/{mission_id}/retry")
+async def retry_mission_route(request: Request, mission_id: str, payload: MissionActionRetryPayload | None = None):
+    runtime = _resolve_mission_runtime(request)
+    from aether.missions.runtime import NotFoundError, ConflictError
+    milestone_id = payload.milestone_id if payload else None
+    try:
+        execution = await runtime.retry_mission(mission_id, milestone_id=milestone_id)
+        mission = runtime.store.get_mission(mission_id)
+        return {
+            "execution": execution.to_dict(),
+            "mission": mission.to_dict() if mission else None,
+        }
+    except NotFoundError as e:
+        raise HTTPException(status_code=404, detail=str(e))
+    except ConflictError as e:
+        raise HTTPException(status_code=409, detail=str(e))
+    except ValueError as e:
+        raise HTTPException(status_code=422, detail=str(e))
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.post("/missions/{mission_id}/approve")
+async def approve_mission_route(request: Request, mission_id: str, payload: MissionActionApprovePayload | None = None):
+    runtime = _resolve_mission_runtime(request)
+    from aether.missions.runtime import NotFoundError, ConflictError
+    notes = payload.notes if payload else None
+    try:
+        execution = await runtime.approve_gate(mission_id, notes=notes)
+        mission = runtime.store.get_mission(mission_id)
+        return {
+            "execution": execution.to_dict(),
+            "mission": mission.to_dict() if mission else None,
+        }
+    except NotFoundError as e:
+        raise HTTPException(status_code=404, detail=str(e))
+    except ConflictError as e:
+        raise HTTPException(status_code=409, detail=str(e))
+    except ValueError as e:
+        raise HTTPException(status_code=422, detail=str(e))
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.post("/missions/{mission_id}/reject")
+async def reject_mission_route(request: Request, mission_id: str, payload: MissionActionRejectPayload | None = None):
+    runtime = _resolve_mission_runtime(request)
+    from aether.missions.runtime import NotFoundError, ConflictError
+    feedback = payload.feedback if payload else None
+    try:
+        execution = await runtime.reject_gate(mission_id, feedback=feedback)
+        mission = runtime.store.get_mission(mission_id)
+        return {
+            "execution": execution.to_dict(),
+            "mission": mission.to_dict() if mission else None,
+        }
+    except NotFoundError as e:
+        raise HTTPException(status_code=404, detail=str(e))
+    except ConflictError as e:
+        raise HTTPException(status_code=409, detail=str(e))
+    except ValueError as e:
+        raise HTTPException(status_code=422, detail=str(e))
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.get("/missions/{mission_id}/executions")
+async def list_mission_executions(request: Request, mission_id: str):
+    ws = getattr(request.app.state, "workspace", None)
+    if not ws:
+        raise HTTPException(status_code=503, detail="Workspace not initialized.")
+    mission = ws.missions.get_mission(mission_id, include_milestones=False)
+    if not mission:
+        raise HTTPException(status_code=404, detail="Mission not found.")
+    execs = ws.missions.list_executions(mission_id)
+    return [e.to_dict() for e in execs]
+
+
+@router.get("/missions/{mission_id}/executions/{execution_id}")
+async def get_mission_execution(request: Request, mission_id: str, execution_id: str):
+    ws = getattr(request.app.state, "workspace", None)
+    if not ws:
+        raise HTTPException(status_code=503, detail="Workspace not initialized.")
+    execution = ws.missions.get_execution(execution_id)
+    if not execution or execution.mission_id != mission_id:
+        raise HTTPException(status_code=404, detail="Execution not found.")
+    return execution.to_dict()

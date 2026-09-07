@@ -104,27 +104,21 @@ def test_playwright_missions_e2e_flow(tmp_path, monkeypatch):
             # Verify contextual actions in Draft state (No developer select dropdown)
             assert page.is_visible("button:has-text('Start Mission')")
 
-            # 7. Test Contextual Actions: Draft -> Running -> Paused -> Resumed
+            # 7. Test Mission Runtime Execution: Draft -> Start -> Real Execution Run #1
             page.click("button:has-text('Start Mission')")
-            page.wait_for_selector("button:has-text('Pause')", timeout=5000)
-            assert page.is_visible("button:has-text('Pause')")
-            assert page.is_visible("button:has-text('Stop Mission')")
+            page.wait_for_selector("text=Run #1", timeout=5000)
+            assert page.is_visible("text=Run #1")
 
-            # Verify truthful lifecycle state: no fake active execution messaging
-            page.wait_for_selector("text=Mission marked as running", timeout=5000)
-            assert page.is_visible("text=Mission marked as running")
-            assert not page.is_visible("text=Aether is working on this mission")
-            assert not page.is_visible("text=Working...")
-            assert page.is_visible("text=Mission runtime execution will be enabled in an upcoming execution phase")
+            # Wait for execution run to complete and show Re-run action
+            page.wait_for_selector("button:has-text('Re-run Mission')", timeout=10000)
+            assert page.is_visible("button:has-text('Re-run Mission')")
 
-            page.click("button:has-text('Pause')")
-            page.wait_for_selector("button:has-text('Resume Mission')", timeout=5000)
-            assert page.is_visible("button:has-text('Resume Mission')")
+            # 8. Test Re-run -> Dispatches Execution Run #2
+            page.click("button:has-text('Re-run Mission')")
+            page.wait_for_selector("text=Run #2", timeout=5000)
+            assert page.is_visible("text=Run #2")
 
-            page.click("button:has-text('Resume Mission')")
-            page.wait_for_selector("button:has-text('Pause')", timeout=5000)
-
-            # 8. Add second milestone inline using "+ Add Step" (Slice 2C)
+            # 9. Add second milestone inline using "+ Add Step" (Slice 2C)
             page.click("button:has-text('Add Step')")
             page.wait_for_selector("input[placeholder='Milestone Title']", timeout=5000)
             page.fill("input[placeholder='Milestone Title']", "Run Latency Benchmarks")
@@ -135,12 +129,6 @@ def test_playwright_missions_e2e_flow(tmp_path, monkeypatch):
             assert page.is_visible("text=Run Latency Benchmarks")
             assert page.is_visible("text=Stage 1")
             assert page.is_visible("text=Stage 2")
-
-            # 9. Complete First Milestone (click check circle)
-            milestone_item = page.locator("div:has-text('Setup Vector Test Dataset')").first
-            toggle_btn = milestone_item.locator("button").first
-            toggle_btn.click()
-            page.wait_for_selector("text=Completed", timeout=5000)
 
             # Verify Slice 2D: Deliverables Dossier
             assert page.is_visible("text=Deliverables Dossier")
@@ -153,10 +141,10 @@ def test_playwright_missions_e2e_flow(tmp_path, monkeypatch):
             assert page.is_visible("text=Activity Trace")
             assert page.is_visible("text=Telemetry & Specs")
 
-            # Click Activity Trace tab
+            # Click Activity Trace tab (verifying real runtime activities logged)
             page.click("button:has-text('Activity Trace')")
-            page.wait_for_selector("text=No observable activity logged", timeout=5000)
-            assert page.is_visible("text=No observable activity logged")
+            page.wait_for_selector("text=Execution Run #", timeout=5000)
+            assert page.is_visible("text=Execution Run #")
 
             # Click Telemetry & Specs tab
             page.click("button:has-text('Telemetry & Specs')")

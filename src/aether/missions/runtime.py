@@ -1,0 +1,915 @@
+"""
+MissionRuntime — Asynchronous Execution Engine for Aether Missions.
+Coordinates milestone dispatch, workforce routing, boundary-safe pause/resume,
+event emission, deliverable harvesting, and distributed lease locking.
+"""
+from __future__ import annotations
+
+import asyncio
+from dataclasses import dataclass, field
+from datetime import datetime, timezone
+import hashlib
+import json
+import logging
+import os
+from pathlib import Path
+import socket
+import threading
+import time
+from typing import Any, Callable
+import uuid
+
+from aether.coordination.events import EventType
+from aether.core.execution import ExecutionResult, ExecutionStatus as CoreExecStatus
+from aether.missions.models import (
+    Deliverable,
+    ExecutionMilestone,
+    ExecutionStatus,
+    MilestoneExecutionStatus,
+    Mission,
+    MissionExecution,
+    MissionStatus,
+)
+from aether.missions.store import MissionStore
+from aether.workspace.workspace import Workspace
+
+logger = logging.getLogger(__name__)
+
+
+class ConflictError(Exception):
+    """Raised when an operation conflicts with current execution state or lease."""
+    pass
+
+
+class NotFoundError(Exception):
+    """Raised when a requested resource is not found."""
+    pass
+
+
+@dataclass
+class MissionExecutionHandle:
+    """In-memory active execution state handle."""
+    execution_id: str
+    mission_id: str
+    cancellation_token: threading.Event
+    owner_token: str
+    task: asyncio.Task[Any] | None = None
+    heartbeat_task: asyncio.Task[Any] | None = None
+    started_at: float = field(default_factory=time.time)
+
+
+class MissionRuntime:
+    """
+    The authoritative engine driving Mission Execution.
+    Guarantees:
+      - 1 Mission Execution -> 1 Authoritative Execution ID.
+      - Dual-layer mutual exclusion (atomic SQLite lease + in-memory handle).
+      - Boundary-safe pause and cancellation via cooperative tokens.
+      - Automatic file deliverable harvesting with SHA-256 and lineage.
+      - Truthful state: execution only reported running when worker lease is active.
+    """
+
+    def __init__(
+        self,
+        workspace: Workspace,
+        broadcaster: Callable[[dict[str, Any]], None] | None = None,
+    ) -> None:
+        self.workspace = workspace
+        self.store: MissionStore = workspace.missions
+        self.broadcaster = broadcaster
+        self._active_executions: dict[str, MissionExecutionHandle] = {}
+        self._lock = asyncio.Lock()
+        self._instance_id = f"{socket.gethostname()}:{os.getpid()}:{uuid.uuid4().hex[:8]}"
+        self._is_shutting_down = False
+
+    @property
+    def instance_id(self) -> str:
+        return self._instance_id
+
+    # ---------------------------------------------------------------------------
+    # Lifecycle & Recovery
+    # ---------------------------------------------------------------------------
+
+    def recover_stale_executions(self) -> list[str]:
+        """
+        Crash recovery hook called on server boot.
+        Resets any execution left in running/verifying to interrupted,
+        clearing orphaned leases and logging recovery activities.
+        """
+        recovered = self.store.recover_stale_executions()
+        if recovered:
+            logger.info(
+                "MissionRuntime recovered %d orphaned executions from previous crash: %s",
+                len(recovered),
+                recovered,
+            )
+        return recovered
+
+    async def shutdown(self) -> None:
+        """Gracefully shuts down active execution workers and leases."""
+        self._is_shutting_down = True
+        handles = list(self._active_executions.values())
+        for h in handles:
+            h.cancellation_token.set()
+            if h.heartbeat_task and not h.heartbeat_task.done():
+                h.heartbeat_task.cancel()
+            self.store.release_execution_lease(h.execution_id, h.owner_token)
+
+        running_tasks = [h.task for h in handles if h.task and not h.task.done()]
+        if running_tasks:
+            await asyncio.gather(*running_tasks, return_exceptions=True)
+        self._active_executions.clear()
+
+    # ---------------------------------------------------------------------------
+    # Public Intent Endpoints
+    # ---------------------------------------------------------------------------
+
+    async def start_mission(self, mission_id: str, team_name: str | None = None) -> MissionExecution:
+        """
+        Starts execution of a mission.
+        Authoritative sequence:
+        1. Validates no active execution holds lease.
+        2. Creates or identifies execution.
+        3. Acquires durable SQLite lease.
+        4. Launches background runtime loop.
+        5. Exposes execution as running.
+        """
+        async with self._lock:
+            mission = self.store.get_mission(mission_id)
+            if not mission:
+                raise NotFoundError(f"Mission {mission_id} not found.")
+
+            active = self.store.get_active_execution(mission_id)
+            if active and active.status == ExecutionStatus.RUNNING and active.lease_owner:
+                if active.id in self._active_executions:
+                    return active
+                raise ConflictError(f"Mission execution {active.id} is already running under lease {active.lease_owner}.")
+
+            if active and active.status == ExecutionStatus.INTERRUPTED:
+                exec_milestones = self.store.get_execution_milestones(active.id)
+                has_pending = any(em.status in (MilestoneExecutionStatus.PENDING, MilestoneExecutionStatus.RUNNING) for em in exec_milestones)
+                if has_pending:
+                    return await self._launch_execution(active, mission, team_name)
+
+            execution = self.store.create_execution(
+                mission_id=mission_id,
+                team_name=team_name or mission.team_name,
+            )
+            return await self._launch_execution(execution, mission, team_name)
+
+    async def rerun_mission(self, mission_id: str, team_name: str | None = None) -> MissionExecution:
+        """
+        Dispatches a brand new Execution Run (Run #N+1) for a Mission.
+        Preserves all past runs, past deliverables, and past activity records.
+        """
+        async with self._lock:
+            mission = self.store.get_mission(mission_id)
+            if not mission:
+                raise NotFoundError(f"Mission {mission_id} not found.")
+
+            active = self.store.get_active_execution(mission_id)
+            if active and active.status == ExecutionStatus.RUNNING and active.lease_owner:
+                raise ConflictError("Cannot re-run while an active execution is currently running.")
+
+            execution = self.store.create_execution(
+                mission_id=mission_id,
+                team_name=team_name or mission.team_name,
+            )
+            return await self._launch_execution(execution, mission, team_name)
+
+    async def pause_mission(self, mission_id: str, reason: str | None = None) -> MissionExecution:
+        """
+        Boundary-safe pause.
+        Signals cooperative cancellation to the active execution handle.
+        Worker finishes active write cleanly, transitions execution to INTERRUPTED,
+        and clears lease.
+        """
+        async with self._lock:
+            active = self.store.get_active_execution(mission_id)
+            if not active:
+                raise NotFoundError(f"No execution found for mission {mission_id}.")
+
+            if active.id in self._active_executions:
+                handle = self._active_executions[active.id]
+                handle.cancellation_token.set()
+                logger.info("Signaled cooperative pause to execution %s", active.id)
+
+            now = datetime.now(timezone.utc).isoformat()
+            updated = self.store.update_execution(
+                active.id,
+                status=ExecutionStatus.INTERRUPTED,
+                interrupted_at=now,
+            )
+            self.store.update_mission(mission_id, status=MissionStatus.INTERRUPTED)
+            self.store.release_execution_lease(active.id)
+
+            msg = f"Mission paused: {reason}" if reason else f"Mission paused by user during Run #{active.run_number}."
+            meta = {"execution_id": active.id, "reason": reason} if reason else {"execution_id": active.id}
+            self._log_activity(
+                mission_id=mission_id,
+                agent="System",
+                activity_type="mission_paused",
+                message=msg,
+                metadata=meta,
+            )
+            self._broadcast({
+                "type": "mission_paused",
+                "mission_id": mission_id,
+                "execution_id": active.id,
+            })
+            return updated or active
+
+    async def resume_mission(self, mission_id: str) -> MissionExecution:
+        """
+        Resumes an interrupted execution from its first uncompleted milestone.
+        """
+        async with self._lock:
+            mission = self.store.get_mission(mission_id)
+            if not mission:
+                raise NotFoundError(f"Mission {mission_id} not found.")
+
+            active = self.store.get_active_execution(mission_id)
+            if not active:
+                raise NotFoundError(f"No execution found for mission {mission_id}.")
+
+            if active.status == ExecutionStatus.RUNNING and active.id in self._active_executions:
+                return active
+
+            if active.status not in (ExecutionStatus.INTERRUPTED, ExecutionStatus.PENDING):
+                raise ConflictError(f"Cannot resume execution in status {active.status.value}.")
+
+            return await self._launch_execution(active, mission, active.team_name)
+
+    async def cancel_mission(self, mission_id: str, reason: str | None = None) -> MissionExecution:
+        """
+        Terminates the active execution and cancels the mission.
+        """
+        async with self._lock:
+            active = self.store.get_active_execution(mission_id)
+            if not active:
+                raise NotFoundError(f"No execution found for mission {mission_id}.")
+
+            if active.id in self._active_executions:
+                handle = self._active_executions[active.id]
+                handle.cancellation_token.set()
+                if handle.heartbeat_task and not handle.heartbeat_task.done():
+                    handle.heartbeat_task.cancel()
+                del self._active_executions[active.id]
+
+            now = datetime.now(timezone.utc).isoformat()
+            updated = self.store.update_execution(
+                active.id,
+                status=ExecutionStatus.CANCELLED,
+                interrupted_at=now,
+                error_message=reason or "Mission cancelled by user.",
+            )
+            self.store.update_mission(mission_id, status=MissionStatus.CANCELLED)
+            self.store.release_execution_lease(active.id)
+
+            self._log_activity(
+                mission_id=mission_id,
+                agent="System",
+                activity_type="mission_cancelled",
+                message=f"Mission cancelled by user during Run #{active.run_number}.",
+                metadata={"execution_id": active.id, "reason": reason},
+            )
+            self._broadcast({
+                "type": "mission_cancelled",
+                "mission_id": mission_id,
+                "execution_id": active.id,
+            })
+            return updated or active
+
+    async def retry_mission(self, mission_id: str, milestone_id: str | None = None) -> MissionExecution:
+        """
+        Resets failed milestone(s) to pending and resumes execution.
+        """
+        async with self._lock:
+            active = self.store.get_active_execution(mission_id)
+            if not active:
+                raise NotFoundError(f"No execution found for mission {mission_id}.")
+
+            if milestone_id:
+                self.store.update_execution_milestone(
+                    active.id,
+                    milestone_id,
+                    status=MilestoneExecutionStatus.PENDING,
+                    error=None,
+                )
+            else:
+                em_list = self.store.get_execution_milestones(active.id)
+                for em in em_list:
+                    if em.status == MilestoneExecutionStatus.FAILED:
+                        self.store.update_execution_milestone(
+                            active.id,
+                            em.milestone_id,
+                            status=MilestoneExecutionStatus.PENDING,
+                            error=None,
+                        )
+
+            self.store.update_execution(active.id, status=ExecutionStatus.INTERRUPTED, error_message=None)
+            mission = self.store.get_mission(mission_id)
+            return await self._launch_execution(active, mission, active.team_name)
+
+    async def approve_gate(
+        self,
+        mission_id: str,
+        approval_id: str | None = None,
+        notes: str | None = None,
+    ) -> MissionExecution:
+        """
+        Approves an active HITL gate and resumes execution.
+        """
+        async with self._lock:
+            active = self.store.get_active_execution(mission_id)
+            if not active:
+                raise NotFoundError(f"No execution found for mission {mission_id}.")
+
+            if active.status != ExecutionStatus.AWAITING_APPROVAL:
+                raise ConflictError(f"Execution {active.id} is not awaiting approval.")
+
+            pending = active.pending_approval or {}
+            target_id = pending.get("id")
+            if not target_id:
+                raise ConflictError(f"No pending approval recorded for execution {active.id}.")
+            if approval_id and target_id != approval_id:
+                raise ConflictError(f"Approval ID mismatch. Expected {target_id}, got {approval_id}.")
+
+            now = datetime.now(timezone.utc).isoformat()
+            history = list(active.approval_history)
+            history.append({
+                **pending,
+                "decision": "approved",
+                "notes": notes,
+                "responded_at": now,
+            })
+
+            self.store.update_execution(
+                active.id,
+                status=ExecutionStatus.RUNNING,
+                pending_approval=None,
+                approval_history=history,
+            )
+
+            self._log_activity(
+                mission_id=mission_id,
+                agent="User",
+                activity_type="approval_granted",
+                message=f"Approved stage gate: {pending.get('prompt', 'Milestone approved')}",
+                metadata={"execution_id": active.id, "approval_id": target_id, "notes": notes},
+            )
+            self._broadcast({
+                "type": "approval_granted",
+                "mission_id": mission_id,
+                "execution_id": active.id,
+                "approval_id": target_id,
+            })
+
+            mission = self.store.get_mission(mission_id)
+            return await self._launch_execution(active, mission, active.team_name)
+
+    async def reject_gate(
+        self,
+        mission_id: str,
+        approval_id: str | None = None,
+        feedback: str | None = None,
+    ) -> MissionExecution:
+        """
+        Rejects an active HITL gate, moving execution to INTERRUPTED with feedback.
+        """
+        async with self._lock:
+            active = self.store.get_active_execution(mission_id)
+            if not active:
+                raise NotFoundError(f"No execution found for mission {mission_id}.")
+
+            pending = active.pending_approval or {}
+            target_id = pending.get("id")
+            if not target_id:
+                raise ConflictError(f"No pending approval recorded for execution {active.id}.")
+            if approval_id and target_id != approval_id:
+                raise ConflictError(f"Approval ID mismatch. Expected {target_id}, got {approval_id}.")
+
+            now = datetime.now(timezone.utc).isoformat()
+            history = list(active.approval_history)
+            history.append({
+                **pending,
+                "decision": "rejected",
+                "feedback": feedback,
+                "responded_at": now,
+            })
+
+            updated = self.store.update_execution(
+                active.id,
+                status=ExecutionStatus.INTERRUPTED,
+                pending_approval=None,
+                approval_history=history,
+                error_message=f"Changes requested: {feedback}" if feedback else "Stage rejected by user.",
+            )
+            self.store.update_mission(mission_id, status=MissionStatus.INTERRUPTED)
+            self.store.release_execution_lease(active.id)
+
+            self._log_activity(
+                mission_id=mission_id,
+                agent="User",
+                activity_type="approval_rejected",
+                message=f"Rejected stage gate: {feedback or 'Changes requested'}",
+                metadata={"execution_id": active.id, "approval_id": approval_id, "feedback": feedback},
+            )
+            self._broadcast({
+                "type": "approval_rejected",
+                "mission_id": mission_id,
+                "execution_id": active.id,
+                "approval_id": approval_id,
+            })
+            return updated or active
+
+    # ---------------------------------------------------------------------------
+    # Internal Dispatcher & Runner
+    # ---------------------------------------------------------------------------
+
+    async def _launch_execution(
+        self,
+        execution: MissionExecution,
+        mission: Mission,
+        team_name: str | None = None,
+    ) -> MissionExecution:
+        """
+        Acquires lease, creates in-memory handle, and starts execution background task.
+        """
+        acquired = self.store.acquire_execution_lease(
+            mission_id=mission.id,
+            execution_id=execution.id,
+            owner_token=self._instance_id,
+            ttl_seconds=60,
+        )
+        if not acquired:
+            raise ConflictError(
+                f"Failed to acquire execution lease for mission {mission.id}. "
+                "Another runner may actively hold the lease."
+            )
+
+        cancel_token = threading.Event()
+        handle = MissionExecutionHandle(
+            execution_id=execution.id,
+            mission_id=mission.id,
+            cancellation_token=cancel_token,
+            owner_token=self._instance_id,
+            started_at=time.time(),
+        )
+
+        handle.heartbeat_task = asyncio.create_task(self._heartbeat_loop(execution.id, self._instance_id))
+        handle.task = asyncio.create_task(self._run_execution_loop(handle, team_name))
+        self._active_executions[execution.id] = handle
+
+        self._broadcast({
+            "type": "mission_started",
+            "mission_id": mission.id,
+            "execution_id": execution.id,
+            "run_number": execution.run_number,
+        })
+        self._log_activity(
+            mission_id=mission.id,
+            agent="System",
+            activity_type="execution_started",
+            message=f"Execution Run #{execution.run_number} started.",
+            metadata={"execution_id": execution.id},
+        )
+
+        refreshed = self.store.get_execution(execution.id)
+        return refreshed or execution
+
+    async def _heartbeat_loop(self, execution_id: str, owner_token: str) -> None:
+        """Maintains distributed lease ownership every 15 seconds."""
+        try:
+            while not self._is_shutting_down:
+                await asyncio.sleep(15)
+                renewed = self.store.renew_execution_lease(execution_id, owner_token, ttl_seconds=60)
+                if not renewed:
+                    logger.warning("Heartbeat failed to renew lease for execution %s", execution_id)
+                    break
+        except asyncio.CancelledError:
+            pass
+
+    async def _run_execution_loop(self, handle: MissionExecutionHandle, team_name: str | None = None) -> None:
+        """
+        Core milestone dispatcher loop executing against workforce Team.run().
+        """
+        exec_id = handle.execution_id
+        mid = handle.mission_id
+        try:
+            mission = self.store.get_mission(mid)
+            if not mission:
+                return
+
+            exec_milestones = self.store.get_execution_milestones(exec_id)
+            template_map = {m.id: m for m in mission.milestones}
+
+            resolved_team_name = team_name or mission.team_name
+            try:
+                team = self.workspace.load_team(resolved_team_name)
+            except Exception as exc:
+                logger.error("Failed to load team %s for mission %s: %s", resolved_team_name, mid, exc)
+                self.store.update_execution(
+                    exec_id,
+                    status=ExecutionStatus.FAILED,
+                    error_message=f"Failed to load workforce '{resolved_team_name}': {exc}",
+                )
+                self.store.update_mission(mid, status=MissionStatus.FAILED)
+                return
+
+            created_files: list[dict[str, Any]] = []
+
+            def _on_file_event(event: Any) -> None:
+                try:
+                    data = getattr(event, "metadata", None) or getattr(event, "data", {}) or {}
+                    path = data.get("path")
+                    if path:
+                        created_files.append({
+                            "path": path,
+                            "action": data.get("action", "created"),
+                            "size_bytes": data.get("size_bytes", 0),
+                        })
+                except Exception:
+                    pass
+
+            def _on_tool_event(event: Any) -> None:
+                try:
+                    data = getattr(event, "metadata", None) or getattr(event, "data", {}) or {}
+                    t_name = data.get("tool_name", "tool")
+                    args = data.get("arguments") or {}
+                    agent = getattr(event, "agent_name", None) or getattr(event, "agent", "Workforce")
+                    self._log_activity(
+                        mission_id=mid,
+                        agent=agent,
+                        activity_type="tool_called",
+                        message=f"Executed {t_name}",
+                        metadata={"tool_name": t_name, "arguments": args, "execution_id": exec_id},
+                    )
+                except Exception:
+                    pass
+
+            if hasattr(team, "emitter") and team.emitter:
+                team.emitter.on(EventType.FILE_CREATED, _on_file_event)
+                team.emitter.on(EventType.FILE_MODIFIED, _on_file_event)
+                team.emitter.on(EventType.TOOL_CALLED, _on_tool_event)
+
+            completed_context: list[str] = []
+
+            for em in exec_milestones:
+                if em.status in (MilestoneExecutionStatus.COMPLETED, MilestoneExecutionStatus.SKIPPED):
+                    if em.output:
+                        completed_context.append(f"Stage '{template_map.get(em.milestone_id, em).title}': {em.output}")
+                    continue
+
+                if handle.cancellation_token.is_set():
+                    self._handle_interrupted(exec_id, mid)
+                    return
+
+                tmpl_m = template_map.get(em.milestone_id)
+                if not tmpl_m:
+                    continue
+
+                req_appr = (
+                    tmpl_m.description.lower().startswith("[approval]")
+                    or "require_approval" in (mission.metadata or {})
+                    or "approval" in tmpl_m.title.lower()
+                )
+                if req_appr and em.status == MilestoneExecutionStatus.PENDING and not self._is_approved(exec_id, tmpl_m.id):
+                    approval_req = {
+                        "id": f"appr_{uuid.uuid4().hex[:8]}",
+                        "milestone_id": tmpl_m.id,
+                        "milestone_title": tmpl_m.title,
+                        "prompt": f"Please review and approve stage: {tmpl_m.title}",
+                        "requested_at": datetime.now(timezone.utc).isoformat(),
+                    }
+                    self.store.update_execution(
+                        exec_id,
+                        status=ExecutionStatus.AWAITING_APPROVAL,
+                        current_milestone_id=tmpl_m.id,
+                        pending_approval=approval_req,
+                    )
+                    self.store.update_mission(mid, status=MissionStatus.AWAITING_APPROVAL)
+                    self._log_activity(
+                        mission_id=mid,
+                        agent="System",
+                        activity_type="approval_requested",
+                        message=approval_req["prompt"],
+                        metadata={"execution_id": exec_id, "approval_id": approval_req["id"]},
+                    )
+                    self._broadcast({
+                        "type": "approval_requested",
+                        "mission_id": mid,
+                        "execution_id": exec_id,
+                        "approval": approval_req,
+                    })
+                    return
+
+                now_start = datetime.now(timezone.utc).isoformat()
+                t0 = time.time()
+                self.store.update_execution(exec_id, current_milestone_id=tmpl_m.id)
+                self.store.update_execution_milestone(
+                    exec_id,
+                    tmpl_m.id,
+                    status=MilestoneExecutionStatus.RUNNING,
+                    started_at=now_start,
+                )
+
+                self._log_activity(
+                    mission_id=mid,
+                    agent="Workforce Lead",
+                    activity_type="milestone_started",
+                    message=f"Starting stage: {tmpl_m.title}",
+                    metadata={"execution_id": exec_id, "milestone_id": tmpl_m.id},
+                )
+                self._broadcast({
+                    "type": "milestone_started",
+                    "mission_id": mid,
+                    "execution_id": exec_id,
+                    "milestone_id": tmpl_m.id,
+                })
+
+                prior_summary = "\n".join(completed_context[-3:]) if completed_context else "None"
+                task_instruction = (
+                    f"MISSION: {mission.title}\n"
+                    f"OBJECTIVE: {mission.objective}\n\n"
+                    f"CURRENT STAGE: {tmpl_m.title}\n"
+                    f"INSTRUCTIONS: {tmpl_m.description}\n\n"
+                    f"PRIOR COMPLETED STAGES:\n{prior_summary}\n\n"
+                    f"Please complete this stage diligently and generate necessary deliverables."
+                )
+
+                target_agent = None
+                desc_lower = tmpl_m.description.lower()
+                if "research" in desc_lower or "analyst" in desc_lower:
+                    for a in getattr(team.config, "agents", []):
+                        if "research" in a.name.lower() or "analyst" in a.name.lower():
+                            target_agent = a.name
+                            break
+                elif "developer" in desc_lower or "code" in desc_lower or "test" in desc_lower:
+                    for a in getattr(team.config, "agents", []):
+                        if "dev" in a.name.lower() or "engineer" in a.name.lower():
+                            target_agent = a.name
+                            break
+
+                created_files.clear()
+                def _run_step():
+                    try:
+                        return team.run(
+                            task_instruction,
+                            session_id=mid,
+                            target_agent=target_agent,
+                            cancellation_token=handle.cancellation_token,
+                        )
+                    except TypeError:
+                        return team.run(task_instruction, session_id=mid)
+
+                result: ExecutionResult = await asyncio.to_thread(_run_step)
+                duration = time.time() - t0
+
+                if handle.cancellation_token.is_set() or (
+                    result and getattr(result, "status", None) and getattr(result.status, "value", None) == "interrupted"
+                ):
+                    self._handle_interrupted(exec_id, mid)
+                    return
+
+                self._harvest_deliverables(mid, exec_id, tmpl_m.id, created_files)
+
+                if result and result.success:
+                    out_text = result.output or f"Stage '{tmpl_m.title}' completed successfully."
+                    now_done = datetime.now(timezone.utc).isoformat()
+                    self.store.update_execution_milestone(
+                        exec_id,
+                        tmpl_m.id,
+                        status=MilestoneExecutionStatus.COMPLETED,
+                        completed_at=now_done,
+                        duration_seconds=duration,
+                        output=out_text[:2000],
+                    )
+                    completed_context.append(f"Stage '{tmpl_m.title}': {out_text[:300]}")
+
+                    self._log_activity(
+                        mission_id=mid,
+                        agent="Workforce Lead",
+                        activity_type="milestone_completed",
+                        message=f"Completed stage: {tmpl_m.title}",
+                        metadata={"execution_id": exec_id, "milestone_id": tmpl_m.id, "duration": duration},
+                    )
+                    self._broadcast({
+                        "type": "milestone_completed",
+                        "mission_id": mid,
+                        "execution_id": exec_id,
+                        "milestone_id": tmpl_m.id,
+                    })
+                else:
+                    err_msg = (result.error if result else None) or "Stage execution failed."
+                    self.store.update_execution_milestone(
+                        exec_id,
+                        tmpl_m.id,
+                        status=MilestoneExecutionStatus.FAILED,
+                        error=err_msg,
+                        duration_seconds=duration,
+                    )
+                    self.store.update_execution(
+                        exec_id,
+                        status=ExecutionStatus.FAILED,
+                        error_message=f"Failed at stage '{tmpl_m.title}': {err_msg}",
+                    )
+                    self.store.update_mission(mid, status=MissionStatus.FAILED)
+                    self._log_activity(
+                        mission_id=mid,
+                        agent="System",
+                        activity_type="execution_failed",
+                        message=f"Stage '{tmpl_m.title}' failed: {err_msg}",
+                        metadata={"execution_id": exec_id, "milestone_id": tmpl_m.id, "error": err_msg},
+                    )
+                    self._broadcast({
+                        "type": "execution_failed",
+                        "mission_id": mid,
+                        "execution_id": exec_id,
+                        "error": err_msg,
+                    })
+                    return
+
+            now_finish = datetime.now(timezone.utc).isoformat()
+            total_duration = time.time() - handle.started_at
+
+            terminal_states = [em.to_dict() for em in self.store.get_execution_milestones(exec_id)]
+
+            self.store.update_execution(
+                exec_id,
+                status=ExecutionStatus.COMPLETED,
+                completed_at=now_finish,
+                duration_seconds=total_duration,
+                current_milestone_id=None,
+                milestone_states=terminal_states,
+            )
+            self.store.update_mission(mid, status=MissionStatus.COMPLETED)
+
+            self._log_activity(
+                mission_id=mid,
+                agent="System",
+                activity_type="mission_completed",
+                message=f"Mission completed successfully in Run #{handle.execution_id}.",
+                metadata={"execution_id": exec_id, "duration": total_duration},
+            )
+            self._broadcast({
+                "type": "mission_completed",
+                "mission_id": mid,
+                "execution_id": exec_id,
+                "duration_seconds": total_duration,
+            })
+
+        except Exception as exc:
+            logger.exception("Unexpected error in mission execution loop: %s", exc)
+            self.store.update_execution(
+                exec_id,
+                status=ExecutionStatus.FAILED,
+                error_message=str(exc),
+            )
+            self.store.update_mission(mid, status=MissionStatus.FAILED)
+        finally:
+            if handle.heartbeat_task and not handle.heartbeat_task.done():
+                handle.heartbeat_task.cancel()
+            self.store.release_execution_lease(exec_id, handle.owner_token)
+            self._active_executions.pop(exec_id, None)
+
+    def _handle_interrupted(self, exec_id: str, mid: str) -> None:
+        now = datetime.now(timezone.utc).isoformat()
+        self.store.update_execution(exec_id, status=ExecutionStatus.INTERRUPTED, interrupted_at=now)
+        self.store.update_mission(mid, status=MissionStatus.INTERRUPTED)
+        self._log_activity(
+            mission_id=mid,
+            agent="System",
+            activity_type="execution_interrupted",
+            message="Execution cleanly paused at step boundary.",
+            metadata={"execution_id": exec_id},
+        )
+        self._broadcast({
+            "type": "mission_paused",
+            "mission_id": mid,
+            "execution_id": exec_id,
+        })
+
+    def _is_approved(self, execution_id: str, milestone_id: str) -> bool:
+        exec_obj = self.store.get_execution(execution_id)
+        if not exec_obj or not exec_obj.approval_history:
+            return False
+        for appr in exec_obj.approval_history:
+            if appr.get("milestone_id") == milestone_id and appr.get("decision") == "approved":
+                return True
+        return False
+
+    def _harvest_deliverables(
+        self,
+        mission_id: str,
+        execution_id: str,
+        milestone_id: str,
+        file_events: list[dict[str, Any]],
+    ) -> None:
+        """
+        Hashes and registers real filesystem deliverables created during milestone execution.
+        """
+        seen_paths: set[str] = set()
+        for fe in file_events:
+            path_str = fe.get("path")
+            if not path_str or path_str in seen_paths:
+                continue
+            seen_paths.add(path_str)
+
+            p = Path(path_str)
+            if not p.exists() or not p.is_file():
+                continue
+
+            try:
+                content = p.read_bytes()
+                sha256_hash = hashlib.sha256(content).hexdigest()
+                size_bytes = len(content)
+                ext = p.suffix.lower()
+
+                ftype = "document" if ext in (".md", ".txt", ".pdf", ".docx") else (
+                    "data" if ext in (".json", ".csv", ".tsv", ".yaml", ".yml", ".parquet") else (
+                        "code" if ext in (".py", ".ts", ".tsx", ".js", ".sh", ".rs", ".go") else "archive"
+                    )
+                )
+
+                deliv = Deliverable(
+                    id=f"del_{uuid.uuid4().hex[:12]}",
+                    mission_id=mission_id,
+                    execution_id=execution_id,
+                    milestone_id=milestone_id,
+                    name=p.name,
+                    path=str(p.resolve()),
+                    type=ftype,
+                    size_bytes=size_bytes,
+                    sha256=sha256_hash,
+                    status="verified",
+                    metadata={"harvested_from_action": fe.get("action", "created")},
+                )
+                self.store.add_deliverable(mission_id, deliv)
+                self._log_activity(
+                    mission_id=mission_id,
+                    agent="Deliverable Harvester",
+                    activity_type="deliverable_produced",
+                    message=f"Captured deliverable: {p.name} ({size_bytes} bytes)",
+                    metadata={"path": str(p), "execution_id": execution_id, "milestone_id": milestone_id},
+                )
+                self._broadcast({
+                    "type": "deliverable_added",
+                    "mission_id": mission_id,
+                    "deliverable": deliv.to_dict(),
+                })
+            except Exception as exc:
+                logger.warning("Could not harvest deliverable %s: %s", path_str, exc)
+
+    def _log_activity(
+        self,
+        mission_id: str,
+        agent: str,
+        activity_type: str,
+        message: str,
+        metadata: dict[str, Any],
+    ) -> None:
+        try:
+            mission = self.store.get_mission(mission_id)
+            conv_id = (mission.conversation_id if mission else None) or f"conv_{mission_id}"
+            now = datetime.now(timezone.utc).isoformat()
+            with self.store._get_connection() as conn:
+                conn.execute(
+                    """
+                    INSERT OR IGNORE INTO conversations (
+                        id, title, team_name, status, created_at, updated_at
+                    ) VALUES (?, ?, 'Workforce', 'active', ?, ?)
+                    """,
+                    (conv_id, f"Mission: {mission.title if mission else mission_id}", now, now),
+                )
+                conn.execute(
+                    """
+                    INSERT INTO conversation_activities (
+                        id, conversation_id, agent, activity_type, message, metadata, created_at
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?)
+                    """,
+                    (
+                        f"act_{uuid.uuid4().hex[:12]}",
+                        conv_id,
+                        agent,
+                        activity_type,
+                        message,
+                        json.dumps(metadata),
+                        now,
+                    ),
+                )
+        except Exception as exc:
+            logger.error("Failed to log mission activity: %s", exc)
+
+    def _broadcast(self, payload: dict[str, Any]) -> None:
+        if self.broadcaster:
+            try:
+                res = self.broadcaster(payload)
+                if asyncio.iscoroutine(res):
+                    try:
+                        loop = asyncio.get_running_loop()
+                        loop.create_task(res)
+                    except RuntimeError:
+                        pass
+            except Exception as exc:
+                logger.debug("Failed to broadcast mission event: %s", exc)

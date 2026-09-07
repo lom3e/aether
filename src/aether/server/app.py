@@ -1,6 +1,7 @@
 import os
 import asyncio
 from pathlib import Path
+from typing import Any
 from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
@@ -145,6 +146,30 @@ async def startup_event():
             app.state.scheduler = scheduler
         except Exception as exc:
             print(f"Warning: could not start automation scheduler: {exc}")
+
+        # Initialize Mission Runtime
+        try:
+            from aether.missions.runtime import MissionRuntime
+
+            async def _mission_broadcaster(payload: dict[str, Any]) -> None:
+                chat_sockets = getattr(app.state, "chat_sockets", set())
+                dead = set()
+                for ws_conn in list(chat_sockets):
+                    try:
+                        await ws_conn.send_json(payload)
+                    except Exception:
+                        dead.add(ws_conn)
+                for ws_conn in dead:
+                    chat_sockets.discard(ws_conn)
+
+            mission_runtime = MissionRuntime(ws, broadcaster=_mission_broadcaster)
+            recovered = mission_runtime.recover_stale_executions()
+            if recovered:
+                print(f"MissionRuntime recovered {recovered} stale execution(s) on startup.")
+            app.state.mission_runtime = mission_runtime
+        except Exception as exc:
+            print(f"Warning: could not initialize MissionRuntime: {exc}")
+            app.state.mission_runtime = None
     except Exception as e:
         print(f"Error initializing workspace: {e}")
         app.state.workspace = None
@@ -167,6 +192,14 @@ async def shutdown_event():
     if scheduler:
         try:
             await scheduler.stop()
+        except Exception:
+            pass
+
+    # 0.5. Shutdown Mission Runtime
+    mission_runtime = getattr(app.state, "mission_runtime", None)
+    if mission_runtime:
+        try:
+            await mission_runtime.shutdown()
         except Exception:
             pass
 
