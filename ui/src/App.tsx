@@ -8,6 +8,7 @@ import { Teams } from './Teams';
 import { Automations } from './Automations';
 import { Skills } from './Skills';
 import { Home } from './Home';
+import { Missions } from './Missions';
 import { Marketplace } from './Marketplace';
 import { AgentProfile } from './AgentProfile';
 import { CommandPalette } from './CommandPalette';
@@ -276,6 +277,9 @@ function MainApp() {
             conversations={conversations}
             onOpenWorkspaceModal={() => handleOpenWorkspaceModal('create')}
           />
+        )}
+        {currentView === 'missions' && (
+          <Missions navigate={navigate} initialMissionId={viewParams} />
         )}
         {currentView === 'chat' && (
           <Chat

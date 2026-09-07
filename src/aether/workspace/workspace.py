@@ -146,6 +146,13 @@ class Workspace:
         return ConversationStore(self.conversations_db_path)
 
     @property
+    def missions(self):
+        """Return the MissionStore for this workspace."""
+        from aether.missions.store import MissionStore
+        Path(self.conversations_db_path).parent.mkdir(parents=True, exist_ok=True)
+        return MissionStore(self.conversations_db_path)
+
+    @property
     def automations_db_path(self) -> str:
         """Path to the persistent automations database."""
         if self.data_dir.exists() or self.config_path.exists():

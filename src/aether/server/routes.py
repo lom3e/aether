@@ -1931,6 +1931,7 @@ class CreateConversationPayload(BaseModel):
     team_name: str | None = None
     pinned: bool = False
     project_id: str | None = None
+    mission_id: str | None = None
 
 
 class UpdateConversationPayload(BaseModel):
@@ -1940,6 +1941,8 @@ class UpdateConversationPayload(BaseModel):
     pinned: bool | None = None
     project_id: str | None = None
     clear_project: bool = False
+    mission_id: str | None = None
+    clear_mission: bool = False
 
 
 
@@ -2005,6 +2008,7 @@ async def create_conversation(request: Request, data: CreateConversationPayload)
             agents=agents,
             pinned=data.pinned,
             project_id=data.project_id,
+            mission_id=data.mission_id,
         )
         return conv
     except ValueError as e:
@@ -2106,6 +2110,8 @@ async def update_conversation(request: Request, conv_id: str, data: UpdateConver
             project_id=data.project_id,
             clear_project=data.clear_project,
             team_name=data.team_name,
+            mission_id=data.mission_id,
+            clear_mission=data.clear_mission,
         )
 
         if not updated:
@@ -2590,3 +2596,266 @@ async def apply_architect_workforce(request: Request, data: ApplyArchitectWorkfo
             ],
         },
     }
+
+
+# ------------------------------------------------------------------
+# Missions & Milestones API (Phase A — Slice 1)
+# ------------------------------------------------------------------
+
+class CreateMissionPayload(BaseModel):
+    title: str = Field(min_length=1, max_length=255)
+    objective: str = Field(min_length=1)
+    team_name: str | None = None
+    project_id: str | None = None
+    conversation_id: str | None = None
+    status: str = "draft"
+    metadata: dict[str, Any] = Field(default_factory=dict)
+    milestones: list[dict[str, Any]] = Field(default_factory=list)
+
+
+class UpdateMissionPayload(BaseModel):
+    title: str | None = Field(default=None, max_length=255)
+    objective: str | None = None
+    status: str | None = None
+    team_name: str | None = None
+    conversation_id: str | None = None
+    project_id: str | None = None
+    metadata: dict[str, Any] | None = None
+
+
+class CreateMilestonePayload(BaseModel):
+    title: str = Field(min_length=1, max_length=255)
+    description: str = ""
+    status: str = "pending"
+    order_idx: int | None = None
+    dependencies: list[str] = Field(default_factory=list)
+
+
+class UpdateMilestonePayload(BaseModel):
+    title: str | None = Field(default=None, max_length=255)
+    description: str | None = None
+    status: str | None = None
+    order_idx: int | None = None
+    dependencies: list[str] | None = None
+
+
+@router.get("/missions")
+async def list_missions(
+    request: Request,
+    status: str | None = None,
+    project_id: str | None = None,
+    conversation_id: str | None = None,
+    limit: int = 100,
+):
+    ws = getattr(request.app.state, "workspace", None)
+    if not ws:
+        return []
+    missions = ws.missions.list_missions(
+        status=status,
+        project_id=project_id,
+        conversation_id=conversation_id,
+        limit=limit,
+    )
+    return [m.to_dict() for m in missions]
+
+
+@router.post("/missions")
+async def create_mission(request: Request, data: CreateMissionPayload):
+    ws = getattr(request.app.state, "workspace", None)
+    if not ws:
+        raise HTTPException(status_code=503, detail="Workspace not initialized.")
+
+    team = getattr(request.app.state, "team", None)
+    team_name = data.team_name or (team.config.name if team else None)
+
+    try:
+        mission = ws.missions.create_mission(
+            title=data.title,
+            objective=data.objective,
+            team_name=team_name,
+            project_id=data.project_id,
+            conversation_id=data.conversation_id,
+            status=data.status,
+            metadata=data.metadata,
+            milestones=data.milestones,
+        )
+
+        # Emit MISSION_STARTED event if created in active/running state
+        event_bus = getattr(request.app.state, "event_bus", None)
+        if event_bus:
+            from aether.coordination.events import AgentEvent, EventType
+            try:
+                event_bus.emit(
+                    AgentEvent(
+                        event_type=EventType.MISSION_STARTED,
+                        agent_name=team_name or "Workforce",
+                        task_id=mission.id,
+                        metadata={"mission_id": mission.id, "title": mission.title, "status": mission.status.value},
+                    )
+                )
+            except Exception:
+                pass
+
+        return mission.to_dict()
+    except ValueError as e:
+        raise HTTPException(status_code=422, detail=str(e))
+
+
+@router.get("/missions/{mission_id}")
+async def get_mission(request: Request, mission_id: str):
+    ws = getattr(request.app.state, "workspace", None)
+    if not ws:
+        raise HTTPException(status_code=503, detail="Workspace not initialized.")
+    mission = ws.missions.get_mission(mission_id)
+    if not mission:
+        raise HTTPException(status_code=404, detail="Mission not found.")
+    return mission.to_dict()
+
+
+@router.patch("/missions/{mission_id}")
+async def update_mission(request: Request, mission_id: str, data: UpdateMissionPayload):
+    ws = getattr(request.app.state, "workspace", None)
+    if not ws:
+        raise HTTPException(status_code=503, detail="Workspace not initialized.")
+    try:
+        updated = ws.missions.update_mission(
+            mission_id,
+            title=data.title,
+            objective=data.objective,
+            status=data.status,
+            team_name=data.team_name,
+            conversation_id=data.conversation_id,
+            project_id=data.project_id,
+            metadata=data.metadata,
+        )
+        if not updated:
+            raise HTTPException(status_code=404, detail="Mission not found.")
+
+        # Emit MISSION_COMPLETED event if transitioned to completed
+        if updated.status.value == "completed":
+            event_bus = getattr(request.app.state, "event_bus", None)
+            if event_bus:
+                from aether.coordination.events import AgentEvent, EventType
+                try:
+                    event_bus.emit(
+                        AgentEvent(
+                            event_type=EventType.MISSION_COMPLETED,
+                            agent_name=updated.team_name or "Workforce",
+                            task_id=updated.id,
+                            metadata={"mission_id": updated.id, "title": updated.title},
+                        )
+                    )
+                except Exception:
+                    pass
+
+        return updated.to_dict()
+    except ValueError as e:
+        raise HTTPException(status_code=422, detail=str(e))
+
+
+@router.delete("/missions/{mission_id}")
+async def delete_mission(request: Request, mission_id: str):
+    ws = getattr(request.app.state, "workspace", None)
+    if not ws:
+        raise HTTPException(status_code=503, detail="Workspace not initialized.")
+    success = ws.missions.delete_mission(mission_id)
+    if not success:
+        raise HTTPException(status_code=404, detail="Mission not found.")
+    return {"status": "deleted", "id": mission_id}
+
+
+@router.get("/missions/{mission_id}/milestones")
+async def list_mission_milestones(request: Request, mission_id: str):
+    ws = getattr(request.app.state, "workspace", None)
+    if not ws:
+        raise HTTPException(status_code=503, detail="Workspace not initialized.")
+    mission = ws.missions.get_mission(mission_id, include_milestones=False)
+    if not mission:
+        raise HTTPException(status_code=404, detail="Mission not found.")
+    milestones = ws.missions.list_milestones(mission_id)
+    return [m.to_dict() for m in milestones]
+
+
+@router.post("/missions/{mission_id}/milestones")
+async def create_mission_milestone(request: Request, mission_id: str, data: CreateMilestonePayload):
+    ws = getattr(request.app.state, "workspace", None)
+    if not ws:
+        raise HTTPException(status_code=503, detail="Workspace not initialized.")
+    try:
+        milestone = ws.missions.create_milestone(
+            mission_id=mission_id,
+            title=data.title,
+            description=data.description,
+            status=data.status,
+            order_idx=data.order_idx,
+            dependencies=data.dependencies,
+        )
+        return milestone.to_dict()
+    except ValueError as e:
+        raise HTTPException(status_code=422, detail=str(e))
+
+
+@router.patch("/missions/{mission_id}/milestones/{milestone_id}")
+async def update_mission_milestone(
+    request: Request,
+    mission_id: str,
+    milestone_id: str,
+    data: UpdateMilestonePayload,
+):
+    ws = getattr(request.app.state, "workspace", None)
+    if not ws:
+        raise HTTPException(status_code=503, detail="Workspace not initialized.")
+    try:
+        updated = ws.missions.update_milestone(
+            milestone_id=milestone_id,
+            title=data.title,
+            description=data.description,
+            status=data.status,
+            order_idx=data.order_idx,
+            dependencies=data.dependencies,
+        )
+        if not updated:
+            raise HTTPException(status_code=404, detail="Milestone not found.")
+
+        # Emit MILESTONE_COMPLETED event if completed
+        if updated.status.value == "completed":
+            event_bus = getattr(request.app.state, "event_bus", None)
+            if event_bus:
+                from aether.coordination.events import AgentEvent, EventType
+                try:
+                    event_bus.emit(
+                        AgentEvent(
+                            event_type=EventType.MILESTONE_COMPLETED,
+                            agent_name="Workforce",
+                            task_id=milestone_id,
+                            metadata={"mission_id": mission_id, "milestone_id": milestone_id, "title": updated.title},
+                        )
+                    )
+                except Exception:
+                    pass
+
+        return updated.to_dict()
+    except ValueError as e:
+        raise HTTPException(status_code=422, detail=str(e))
+
+
+@router.delete("/missions/{mission_id}/milestones/{milestone_id}")
+async def delete_mission_milestone(request: Request, mission_id: str, milestone_id: str):
+    ws = getattr(request.app.state, "workspace", None)
+    if not ws:
+        raise HTTPException(status_code=503, detail="Workspace not initialized.")
+    success = ws.missions.delete_milestone(milestone_id)
+    if not success:
+        raise HTTPException(status_code=404, detail="Milestone not found.")
+    return {"status": "deleted", "id": milestone_id}
+
+
+@router.get("/missions/{mission_id}/graph")
+async def get_mission_graph(request: Request, mission_id: str):
+    ws = getattr(request.app.state, "workspace", None)
+    if not ws:
+        raise HTTPException(status_code=503, detail="Workspace not initialized.")
+    graph = ws.missions.get_mission_graph(mission_id)
+    if not graph:
+        raise HTTPException(status_code=404, detail="Mission not found.")
+    return graph.to_dict()

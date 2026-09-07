@@ -3,7 +3,7 @@ import {
   Sparkles, MessageSquare, Bot, Users, Database, Settings, ShoppingBag,
   Plus, ChevronLeft, Moon, Sun, Globe, Trash2, Search,
   ChevronDown, MoreVertical, Archive, Copy, Edit2, Check,
-  Pin, Folder, GitBranch, ExternalLink, RefreshCw, X, Zap, Puzzle
+  Pin, Folder, GitBranch, ExternalLink, RefreshCw, X, Zap, Puzzle, Target
 } from 'lucide-react';
 import { useTranslation } from './i18n';
 import { useTheme } from './theme';
@@ -680,6 +680,18 @@ export function Sidebar({
               >
                 <Sparkles size={15} />
                 {!collapsed && <span>{t('navHome')}</span>}
+              </button>
+            </Tooltip>
+
+            <Tooltip content={t('navMissions')} position={collapsed ? 'right' : 'top'} disabled={!collapsed}>
+              <button
+                data-testid="nav-missions"
+                className={`btn btn-ghost ${currentView === 'missions' ? 'active' : ''}`}
+                style={{ width: '100%', justifyContent: collapsed ? 'center' : 'flex-start', padding: '7px 8px', fontSize: '13px', marginTop: '2px' }}
+                onClick={() => onNavigate('missions')}
+              >
+                <Target size={15} />
+                {!collapsed && <span>{t('navMissions')}</span>}
               </button>
             </Tooltip>
           </div>

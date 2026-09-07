@@ -132,6 +132,10 @@ class ConversationStore:
                 conn.execute("ALTER TABLE projects ADD COLUMN github_repository TEXT DEFAULT NULL")
             except Exception:
                 pass
+            try:
+                conn.execute("ALTER TABLE conversations ADD COLUMN mission_id TEXT DEFAULT NULL")
+            except Exception:
+                pass
 
             # 3. UI Messages & Activities
             conn.execute(
@@ -163,7 +167,44 @@ class ConversationStore:
                 """
             )
 
-            # 4. Performance Indexes
+            # 4. Missions & Milestones Tables
+            conn.execute(
+                """
+                CREATE TABLE IF NOT EXISTS missions (
+                    id TEXT PRIMARY KEY,
+                    workspace_id TEXT NOT NULL DEFAULT 'default',
+                    title TEXT NOT NULL,
+                    objective TEXT NOT NULL,
+                    status TEXT NOT NULL DEFAULT 'draft',
+                    team_name TEXT DEFAULT NULL,
+                    conversation_id TEXT DEFAULT NULL,
+                    project_id TEXT DEFAULT NULL,
+                    metadata TEXT DEFAULT '{}',
+                    created_at TEXT NOT NULL,
+                    updated_at TEXT NOT NULL
+                )
+                """
+            )
+
+            conn.execute(
+                """
+                CREATE TABLE IF NOT EXISTS mission_milestones (
+                    id TEXT PRIMARY KEY,
+                    mission_id TEXT NOT NULL,
+                    title TEXT NOT NULL,
+                    description TEXT DEFAULT '',
+                    status TEXT NOT NULL DEFAULT 'pending',
+                    order_idx INTEGER NOT NULL DEFAULT 0,
+                    dependencies TEXT DEFAULT '[]',
+                    completed_at TEXT DEFAULT NULL,
+                    created_at TEXT NOT NULL,
+                    updated_at TEXT NOT NULL,
+                    FOREIGN KEY(mission_id) REFERENCES missions(id) ON DELETE CASCADE
+                )
+                """
+            )
+
+            # 5. Performance Indexes
             conn.execute("CREATE INDEX IF NOT EXISTS idx_conv_updated ON conversations(updated_at DESC)")
             conn.execute("CREATE INDEX IF NOT EXISTS idx_conv_pinned ON conversations(pinned DESC, updated_at DESC)")
             conn.execute("CREATE INDEX IF NOT EXISTS idx_conv_project ON conversations(project_id)")
@@ -172,6 +213,11 @@ class ConversationStore:
             conn.execute("CREATE INDEX IF NOT EXISTS idx_msg_conv ON conversation_ui_messages(conversation_id, created_at ASC)")
             conn.execute("CREATE INDEX IF NOT EXISTS idx_msg_content ON conversation_ui_messages(content)")
             conn.execute("CREATE INDEX IF NOT EXISTS idx_act_conv ON conversation_activities(conversation_id, created_at ASC)")
+            conn.execute("CREATE INDEX IF NOT EXISTS idx_missions_status ON missions(status)")
+            conn.execute("CREATE INDEX IF NOT EXISTS idx_missions_updated ON missions(updated_at DESC)")
+            conn.execute("CREATE INDEX IF NOT EXISTS idx_missions_conv ON missions(conversation_id)")
+            conn.execute("CREATE INDEX IF NOT EXISTS idx_missions_project ON missions(project_id)")
+            conn.execute("CREATE INDEX IF NOT EXISTS idx_milestones_mission ON mission_milestones(mission_id, order_idx ASC)")
 
     # ---------------------------------------------------------------------------
     # Project CRUD Operations
@@ -373,6 +419,7 @@ class ConversationStore:
         agents: list[str] | None = None,
         pinned: bool = False,
         project_id: str | None = None,
+        mission_id: str | None = None,
     ) -> dict[str, Any]:
         cid = conv_id or uuid.uuid4().hex
         now = datetime.now(timezone.utc).isoformat()
@@ -388,12 +435,12 @@ class ConversationStore:
         with self._get_connection() as conn:
             conn.execute(
                 """
-                INSERT INTO conversations (id, title, team_name, status, created_at, updated_at, last_message, agents, unread, pinned, project_id)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, 0, ?, ?)
+                INSERT INTO conversations (id, title, team_name, status, created_at, updated_at, last_message, agents, unread, pinned, project_id, mission_id)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, 0, ?, ?, ?)
                 ON CONFLICT(id) DO UPDATE SET
                     updated_at = excluded.updated_at
                 """,
-                (cid, title, team_name, status, now, now, "", agents_json, 1 if pinned else 0, project_id),
+                (cid, title, team_name, status, now, now, "", agents_json, 1 if pinned else 0, project_id, mission_id),
             )
 
         return {
@@ -408,6 +455,7 @@ class ConversationStore:
             "unread": False,
             "pinned": bool(pinned),
             "project_id": project_id,
+            "mission_id": mission_id,
             "messages": [],
             "activities": [],
         }
@@ -461,9 +509,10 @@ class ConversationStore:
         include_archived: bool = False,
         project_id: str | None = None,
         pinned: bool | None = None,
+        mission_id: str | None = None,
         limit: int = 100,
     ) -> list[dict[str, Any]]:
-        query = "SELECT id, title, team_name, status, created_at, updated_at, last_message, agents, unread, pinned, project_id FROM conversations WHERE 1=1"
+        query = "SELECT id, title, team_name, status, created_at, updated_at, last_message, agents, unread, pinned, project_id, mission_id FROM conversations WHERE 1=1"
         params: list[Any] = []
 
         if not include_archived:
@@ -479,6 +528,13 @@ class ConversationStore:
             else:
                 query += " AND project_id = ?"
                 params.append(project_id)
+
+        if mission_id is not None:
+            if mission_id in ("none", "unassigned", ""):
+                query += " AND (mission_id IS NULL OR mission_id = '')"
+            else:
+                query += " AND mission_id = ?"
+                params.append(mission_id)
 
         if pinned is not None:
             query += " AND pinned = ?"
@@ -520,13 +576,14 @@ class ConversationStore:
                 "unread": bool(r["unread"] if "unread" in r.keys() else 0),
                 "pinned": bool(r["pinned"] if "pinned" in r.keys() else 0),
                 "project_id": r["project_id"] if "project_id" in r.keys() else None,
+                "mission_id": r["mission_id"] if "mission_id" in r.keys() else None,
             })
         return results
 
     def get(self, conv_id: str) -> dict[str, Any] | None:
         with self._get_connection() as conn:
             row = conn.execute(
-                "SELECT id, title, team_name, status, created_at, updated_at, last_message, agents, unread, pinned, project_id FROM conversations WHERE id = ?",
+                "SELECT id, title, team_name, status, created_at, updated_at, last_message, agents, unread, pinned, project_id, mission_id FROM conversations WHERE id = ?",
                 (conv_id,),
             ).fetchone()
             if not row:
@@ -592,6 +649,7 @@ class ConversationStore:
             "unread": bool(row["unread"] if "unread" in row.keys() else 0),
             "pinned": bool(row["pinned"] if "pinned" in row.keys() else 0),
             "project_id": row["project_id"] if "project_id" in row.keys() else None,
+            "mission_id": row["mission_id"] if "mission_id" in row.keys() else None,
             "messages": messages,
             "activities": activities,
         }
@@ -638,6 +696,8 @@ class ConversationStore:
         project_id: str | None = None,
         clear_project: bool = False,
         team_name: str | None = None,
+        mission_id: str | None = None,
+        clear_mission: bool = False,
     ) -> dict[str, Any] | None:
         now = datetime.now(timezone.utc).isoformat()
 
@@ -650,7 +710,7 @@ class ConversationStore:
 
         with self._get_connection() as conn:
             row = conn.execute(
-                "SELECT title, status, last_message, agents, unread, pinned, project_id, team_name FROM conversations WHERE id = ?",
+                "SELECT title, status, last_message, agents, unread, pinned, project_id, team_name, mission_id FROM conversations WHERE id = ?",
                 (conv_id,),
             ).fetchone()
             if not row:
@@ -671,13 +731,20 @@ class ConversationStore:
             else:
                 new_project_id = row["project_id"] if "project_id" in row.keys() else None
 
+            if clear_mission:
+                new_mission_id = None
+            elif mission_id is not None:
+                new_mission_id = mission_id
+            else:
+                new_mission_id = row["mission_id"] if "mission_id" in row.keys() else None
+
             conn.execute(
                 """
                 UPDATE conversations
-                SET title = ?, status = ?, last_message = ?, agents = ?, unread = ?, pinned = ?, project_id = ?, team_name = ?, updated_at = ?
+                SET title = ?, status = ?, last_message = ?, agents = ?, unread = ?, pinned = ?, project_id = ?, team_name = ?, mission_id = ?, updated_at = ?
                 WHERE id = ?
                 """,
-                (new_title, new_status, new_last, new_agents, new_unread, new_pinned, new_project_id, new_team_name, now, conv_id),
+                (new_title, new_status, new_last, new_agents, new_unread, new_pinned, new_project_id, new_team_name, new_mission_id, now, conv_id),
             )
 
         return self.get(conv_id)

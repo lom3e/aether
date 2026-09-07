@@ -19,6 +19,9 @@ class EventType(Enum):
     FILE_DELETED = "file_deleted"
     TOKEN_STREAM = "token_stream"
     AGENT_THINKING = "agent_thinking"
+    MISSION_STARTED = "mission_started"
+    MISSION_COMPLETED = "mission_completed"
+    MILESTONE_COMPLETED = "milestone_completed"
 
 
 @dataclass(slots=True)

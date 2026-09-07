@@ -6,6 +6,9 @@ It provides a complete cognitive runtime — from goal decomposition and multi-a
 
 Aether runs 100% locally with **Ollama** or seamlessly connects to cloud providers (**OpenAI**, **Anthropic**, **Gemini**).
 
+> **Core Philosophy: Complexity is capability, not interface.**  
+> Aether handles the heavy lifting of multi-agent delegation, execution graphs, and tool verification under the hood. The user interface remains simple, focused, and outcome-driven—with full technical inspection always available on demand. *Simple to use, powerful to inspect.*
+
 ---
 
 ## ⚡️ Quick Start
