@@ -334,6 +334,11 @@ class Agent:
         """
         self.lifecycle.start()
         metadata: dict[str, Any] = {"task_id": task.id, "agent_name": self.name, "instruction": task.instruction}
+        if getattr(task, "metadata", None):
+            if "parent_task_id" in task.metadata:
+                metadata["parent_task_id"] = task.metadata["parent_task_id"]
+            if "session_id" in task.metadata:
+                metadata["session_id"] = task.metadata["session_id"]
 
         if getattr(self, "events", None):
             from aether.coordination.events import AgentEvent, EventType
@@ -380,14 +385,14 @@ class Agent:
             metadata = self._build_metadata(task, agent_context)
 
             if self.provider is None:
-                self.lifecycle.complete()
-                user_content = next(
-                    (m.content for m in reversed(agent_context.messages) if m.role == "user"),
-                    task.instruction,
+                err_msg = (
+                    f"No AI provider configured for agent '{self.name}'. "
+                    "Please configure a valid provider and API key in Settings or environment variables."
                 )
+                self.lifecycle.fail(err_msg)
                 return ExecutionResult(
-                    success=True,
-                    output=f"{self.name} received: {user_content}",
+                    success=False,
+                    error=err_msg,
                     metadata=metadata,
                 )
 
@@ -401,7 +406,13 @@ class Agent:
                     except KeyError:
                         pass
 
+            cancellation_token = (task.metadata or {}).get("cancellation_token")
+            if cancellation_token is not None:
+                agent_context.metadata["cancellation_token"] = cancellation_token
+                self._active_cancellation_token = cancellation_token
+
             # 3. Run the ReAct loop
+            self._last_agent_context = agent_context
             return self._run_loop(task, agent_context, tools_schema)
         except Exception as exc:  # pragma: no cover
             self.lifecycle.fail()
@@ -424,8 +435,23 @@ class Agent:
         """
         metadata = self._build_metadata(task, agent_context)
         tool_calls_count = 0
+        cancellation_token = agent_context.metadata.get("cancellation_token")
 
         while True:
+            # Cancellation check
+            if cancellation_token and cancellation_token.is_set():
+                self.lifecycle.fail("Execution cancelled by user.")
+                metadata = self._build_metadata(task, agent_context)
+                metadata["agent_state"] = self.lifecycle.state.value
+                metadata["turns"] = agent_context.current_turn
+                metadata["tool_calls"] = tool_calls_count
+                return ExecutionResult(
+                    success=False,
+                    status=ExecutionStatus.INTERRUPTED,
+                    error="Execution cancelled by user.",
+                    metadata=metadata,
+                )
+
             # Turn check
             if agent_context.current_turn >= self.max_turns:
                 self.lifecycle.fail()
@@ -449,6 +475,20 @@ class Agent:
 
             # Generate provider response (with streaming chunk emission if supported)
             response = self._generate_step(agent_context.messages, tools_schema, task)
+
+            # Check cancellation immediately after generate step
+            if cancellation_token and cancellation_token.is_set():
+                self.lifecycle.fail("Execution cancelled by user.")
+                metadata = self._build_metadata(task, agent_context)
+                metadata["agent_state"] = self.lifecycle.state.value
+                metadata["turns"] = agent_context.current_turn
+                metadata["tool_calls"] = tool_calls_count
+                return ExecutionResult(
+                    success=False,
+                    status=ExecutionStatus.INTERRUPTED,
+                    error="Execution cancelled by user.",
+                    metadata=metadata,
+                )
 
             # Accumulate token usage in AgentContext
             if response.usage:
@@ -486,7 +526,17 @@ class Agent:
             if response.finish_reason == "tool_calls" or msg_tool_calls:
                 calls_to_execute = msg_tool_calls or []
                 if not calls_to_execute:
-                    break
+                    self.lifecycle.fail("Model requested tool call but provided no executable tool call data.")
+                    metadata = self._build_metadata(task, agent_context)
+                    metadata["agent_state"] = self.lifecycle.state.value
+                    metadata["provider_usage"] = agent_context.token_usage
+                    metadata["turns"] = agent_context.current_turn
+                    metadata["tool_calls"] = tool_calls_count
+                    return ExecutionResult(
+                        success=False,
+                        error="Model requested tool call but provided no executable tool call data.",
+                        metadata=metadata,
+                    )
 
                 # Tool calls limit check
                 if tool_calls_count + len(calls_to_execute) > self.max_tool_calls:
@@ -503,6 +553,7 @@ class Agent:
                     )
 
                 tool_calls_count += len(calls_to_execute)
+                agent_context.metadata.pop("pending_delegation_target", None)
 
                 if getattr(self, "verbose", False):
                     print(f"[{self.name}] TOOL CALLS: {[c.tool_name for c in calls_to_execute]}")
@@ -518,6 +569,19 @@ class Agent:
                         ))
 
                 # Dynamic tool execution by ExecutionEngine
+                if cancellation_token and cancellation_token.is_set():
+                    self.lifecycle.fail("Execution cancelled by user.")
+                    metadata = self._build_metadata(task, agent_context)
+                    metadata["agent_state"] = self.lifecycle.state.value
+                    metadata["turns"] = agent_context.current_turn
+                    metadata["tool_calls"] = tool_calls_count
+                    return ExecutionResult(
+                        success=False,
+                        status=ExecutionStatus.INTERRUPTED,
+                        error="Execution cancelled by user.",
+                        metadata=metadata,
+                    )
+
                 try:
                     tool_results = self.execution_engine.execute_tool_calls(calls_to_execute, agent_context)
                 except AgentInterrupt as interrupt:
@@ -567,6 +631,40 @@ class Agent:
                 # Continue the loop
                 continue
             else:
+                # Enforce truthful completion:
+                # 1. If a delegation was requested in a previous turn and never executed, fail the run.
+                pending_target = agent_context.metadata.get("pending_delegation_target")
+                if pending_target:
+                    err_msg = (
+                        f"Agent '{self.name}' requested delegation to '{pending_target}' "
+                        f"but failed to invoke the delegation tool."
+                    )
+                    self.lifecycle.fail(err_msg)
+                    metadata = self._build_metadata(task, agent_context)
+                    metadata["agent_state"] = self.lifecycle.state.value
+                    metadata["turns"] = agent_context.current_turn
+                    metadata["tool_calls"] = tool_calls_count
+                    return ExecutionResult(
+                        success=False,
+                        error=err_msg,
+                        metadata=metadata,
+                    )
+
+                # 2. Check if the model claims delegation in prose without invoking the tool
+                claimed_target = self._detect_unfulfilled_delegation(response.content, agent_context)
+                if claimed_target:
+                    agent_context.metadata["pending_delegation_target"] = claimed_target.name
+                    tool_fn = getattr(claimed_target, "function_name", claimed_target.name)
+                    agent_context.messages.append(Message(
+                        role="user",
+                        content=(
+                            f"System Notice: You stated an intention to delegate to '{claimed_target.name}', "
+                            f"but you did not invoke the '{tool_fn}' tool. "
+                            f"To execute this delegation, you MUST call the '{tool_fn}' tool function now with the instruction."
+                        ),
+                    ))
+                    continue
+
                 break
 
         metadata = self._build_metadata(task, agent_context)
@@ -586,7 +684,48 @@ class Agent:
             success=True,
             output=output,
             metadata=metadata,
+            artifacts=list(agent_context.artifacts) if hasattr(agent_context, "artifacts") else [],
         )
+
+    def _detect_unfulfilled_delegation(
+        self,
+        content: str | None,
+        agent_context: AgentContext,
+    ) -> Any | None:
+        """
+        Detect if the model output prose stating intent to delegate to an available
+        specialist tool without having emitted a tool call.
+        """
+        if not content or not str(content).strip():
+            return None
+
+        registry = agent_context.tool_registry
+        if not registry:
+            return None
+
+        from aether.tools.agent_tool import AgentTool
+        from aether.tools.cognitive_agent_tool import CognitiveAgentTool
+
+        delegation_tools = [
+            t for t in registry.list_tools()
+            if isinstance(t, (AgentTool, CognitiveAgentTool))
+        ]
+        if not delegation_tools:
+            return None
+
+        content_lower = content.lower()
+        delegation_verbs = ("delegate", "delegating", "delegation", "assign to", "assigning to", "ask our")
+        if not any(v in content_lower for v in delegation_verbs):
+            return None
+
+        for tool in delegation_tools:
+            name_lower = tool.name.lower()
+            fn_lower = getattr(tool, "function_name", "").lower()
+            if name_lower in content_lower or (fn_lower and fn_lower in content_lower):
+                return tool
+
+        return None
+
 
     def _generate_step(
         self,
@@ -603,71 +742,88 @@ class Agent:
             getattr(self.provider, "generate_stream", None)
         )
 
-        if supports_streaming and self.events is not None:
-            try:
-                from aether.coordination.events import AgentEvent, EventType
+        if supports_streaming:
+            from aether.coordination.events import AgentEvent, EventType
 
-                if hasattr(self.events, "emit"):
-                    self.events.emit(
-                        AgentEvent(
-                            event_type=EventType.AGENT_THINKING,
-                            agent_name=self.name,
-                            task_id=task.id,
-                            metadata={"status": "thinking"},
-                        )
+            if self.events is not None and hasattr(self.events, "emit"):
+                self.events.emit(
+                    AgentEvent(
+                        event_type=EventType.AGENT_THINKING,
+                        agent_name=self.name,
+                        task_id=task.id,
+                        metadata={"status": "thinking"},
                     )
+                )
 
-                chunks: list[str] = []
-                last_chunk = None
+            chunks: list[str] = []
+            all_tool_calls: list[ToolCall] = []
+            last_chunk = None
 
-                for chunk in self.provider.generate_stream(messages, tools=provider_tools):
-                    last_chunk = chunk
-                    if chunk.text:
-                        chunks.append(chunk.text)
-                        if hasattr(self.events, "emit"):
-                            self.events.emit(
-                                AgentEvent(
-                                    event_type=EventType.TOKEN_STREAM,
-                                    agent_name=self.name,
-                                    task_id=task.id,
-                                    metadata={"delta": chunk.text},
-                                )
+            cancellation_token = getattr(self, "_active_cancellation_token", None) or (task.metadata or {}).get("cancellation_token")
+            for chunk in self.provider.generate_stream(messages, tools=provider_tools):
+                if cancellation_token and cancellation_token.is_set():
+                    break
+                last_chunk = chunk
+                if chunk.text:
+                    chunks.append(chunk.text)
+                    if self.events is not None and hasattr(self.events, "emit"):
+                        self.events.emit(
+                            AgentEvent(
+                                event_type=EventType.TOKEN_STREAM,
+                                agent_name=self.name,
+                                task_id=task.id,
+                                metadata={"delta": chunk.text},
                             )
+                        )
+                if chunk.tool_calls:
+                    all_tool_calls.extend(chunk.tool_calls)
 
-                content = "".join(chunks)
-                if content or (last_chunk and last_chunk.finish_reason):
+            content = "".join(chunks)
+            if content or (last_chunk and last_chunk.finish_reason) or all_tool_calls or (cancellation_token and cancellation_token.is_set()):
+                if all_tool_calls:
+                    finish_reason = "tool_calls"
+                else:
                     finish_reason = (last_chunk.finish_reason if last_chunk else None) or "stop"
-                    usage = (last_chunk.usage if last_chunk else None) or {}
+                usage = (last_chunk.usage if last_chunk else None) or {}
 
-                    tool_calls = (last_chunk.tool_calls if last_chunk and last_chunk.tool_calls else None) or []
-                    if not tool_calls and content.startswith('{"name"'):
-                        try:
-                            import json
-                            from aether.core.execution import ToolCall
-                            data = json.loads(content)
-                            tool_calls = [
-                                ToolCall(
-                                    call_id="call-1",
-                                    tool_name=data.get("name", ""),
-                                    arguments=data.get("arguments", {}),
-                                )
-                            ]
-                            finish_reason = "tool_calls"
-                            content = ""
-                        except Exception:
-                            pass
+                tool_calls = all_tool_calls or (last_chunk.tool_calls if last_chunk and last_chunk.tool_calls else None) or []
+                if not tool_calls and content.startswith('{"name"'):
+                    try:
+                        import json
+                        from aether.core.execution import ToolCall
+                        data = json.loads(content)
+                        tool_calls = [
+                            ToolCall(
+                                call_id="call-1",
+                                tool_name=data.get("name", ""),
+                                arguments=data.get("arguments", {}),
+                            )
+                        ]
+                        finish_reason = "tool_calls"
+                        content = ""
+                    except Exception:
+                        pass
 
-                    msg = (last_chunk.message if (last_chunk and last_chunk.message) else None) or Message(role="assistant", content=content, tool_calls=tool_calls)
-                    model_name = getattr(self.provider, "_model", getattr(getattr(self.provider, "config", None), "model", "default"))
-                    return ProviderResponse(
-                        content=content,
-                        model=model_name or "default",
-                        usage=usage,
-                        finish_reason=finish_reason,
-                        message=msg,
-                    )
-            except Exception:
-                pass
+                msg = (last_chunk.message if (last_chunk and last_chunk.message) else None) or Message(role="assistant", content=content, tool_calls=tool_calls if tool_calls else None)
+                if tool_calls and not msg.tool_calls:
+                    msg.tool_calls = tool_calls
+
+                model_name = (
+                    getattr(last_chunk, "model", None)
+                    or getattr(self.provider, "_model", None)
+                    or (getattr(self.provider, "config", None) and getattr(self.provider.config, "model", None))
+                    or getattr(self.provider, "MOCK_MODEL", None)
+                    or getattr(self.provider, "default_model", None)
+                    or getattr(self, "model", None)
+                    or "default"
+                )
+                return ProviderResponse(
+                    content=content,
+                    model=model_name or "default",
+                    usage=usage,
+                    finish_reason=finish_reason,
+                    message=msg,
+                )
 
         return self.provider.generate(messages, tools=provider_tools)
 
@@ -863,6 +1019,50 @@ class Agent:
                     ),
                 )
             )
+
+        has_kb = "search_knowledge" in self.tools or (
+            self.tool_registry
+            and any(getattr(t, "name", "") == "search_knowledge" for t in self.tool_registry.list_tools())
+        )
+        ws_name = self.metadata.get("workspace_name") if self.metadata else None
+        if has_kb:
+            if ws_name:
+                kb_msg = (
+                    f"You are operating within the '{ws_name}' workspace. The workspace knowledge base contains "
+                    f"official records for {ws_name}. For any questions regarding {ws_name}, its services, offerings, "
+                    f"location, or internal business details, ALWAYS query the workspace knowledge base first using "
+                    f"the 'search_knowledge' tool before attempting generic external searches."
+                )
+            else:
+                kb_msg = (
+                    "A workspace knowledge base is connected. For any questions about the workspace, "
+                    "company, business identity, services, documents, or internal domain records, "
+                    "always query the internal knowledge base first using the 'search_knowledge' tool "
+                    "before attempting generic external web searches."
+                )
+            messages.append(Message(role="system", content=kb_msg))
+
+        # Inject delegation protocol guidance if delegation tools are present
+        if self.tool_registry:
+            from aether.tools.agent_tool import AgentTool
+            from aether.tools.cognitive_agent_tool import CognitiveAgentTool
+            delegation_tools = [
+                t for t in self.tool_registry.list_tools()
+                if isinstance(t, (AgentTool, CognitiveAgentTool))
+            ]
+            if delegation_tools:
+                team_lines = [f"- {t.name}: {t.description}" for t in delegation_tools]
+                delegation_content = (
+                    "## Delegation & Team Coordination Protocol:\n"
+                    "You have specialist team members available to execute delegated tasks:\n"
+                    + "\n".join(team_lines) + "\n\n"
+                    "CRITICAL RULES FOR DELEGATION:\n"
+                    "1. When a task requires research, domain expertise, or execution from a specialist, "
+                    "you MUST invoke their tool function. Describing delegation in prose does NOT execute the task.\n"
+                    "2. You MUST call the specialist's tool function to actually execute the delegation.\n"
+                    "3. Once the specialist executes, their output will return to you as a tool result so you can synthesize the final findings."
+                )
+                messages.append(Message(role="system", content=delegation_content))
 
         # Inject active skill instructions
         resolved_skills = context.skills if context.skills else self.resolve_skills()

@@ -64,6 +64,12 @@ SUPPORTED_AGENT_ICONS: tuple[str, ...] = (
 )
 
 
+class DelegationsList(list):
+    """A list of agent names that also acts as a callable returning list[str] for backward compatibility."""
+    def __call__(self) -> list[str]:
+        return list(self)
+
+
 @dataclass
 class AgentConfig:
     """
@@ -97,6 +103,8 @@ class AgentConfig:
         Optional theme accent color (e.g. ``"violet"``, ``"emerald"``, ``"blue"``).
     metadata:
         Arbitrary extra metadata — preserved for application use.
+    delegates_to:
+        Convenience list of target agent names this agent delegates to.
     """
     name: str
     role: str = "assistant"
@@ -109,14 +117,16 @@ class AgentConfig:
     icon: str | None = None
     color: str | None = None
     metadata: dict = field(default_factory=dict)
+    delegates_to: list[str] | DelegationsList | None = None
 
-    # ------------------------------------------------------------------
-    # Convenience helpers
-    # ------------------------------------------------------------------
+    def __post_init__(self) -> None:
+        if self.delegates_to is not None:
+            for target in self.delegates_to:
+                if not any(r.target == target and r.type == "delegates_to" for r in self.relationships):
+                    self.relationships.append(Relationship(type="delegates_to", target=target))
 
-    def delegates_to(self) -> list[str]:
-        """Return names of agents this agent delegates to."""
-        return [r.target for r in self.relationships if r.type == "delegates_to"]
+        targets = [r.target for r in self.relationships if r.type == "delegates_to"]
+        self.delegates_to = DelegationsList(targets)
 
     def collaborates_with(self) -> list[str]:
         """Return names of agents this agent collaborates with."""

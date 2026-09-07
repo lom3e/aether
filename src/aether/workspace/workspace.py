@@ -335,6 +335,7 @@ class Workspace:
             agent_store=agent_store,
             conversation_db_path=self.conversations_db_path,
             project_id=project_id,
+            workspace_name=self.name,
         )
 
     def set_default_team(self, team_name: str) -> None:

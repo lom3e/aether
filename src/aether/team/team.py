@@ -91,27 +91,31 @@ class Team:
         provider: AIProvider | None = None,
         *,
         knowledge_store: KnowledgeStore | None = None,
+        knowledge: KnowledgeStore | None = None,
         sandbox: Any | None = None,
         agent_store: Any | None = None,
         conversation_db_path: str | None = None,
         skill_registry: Any | None = None,
         feed: ActivityFeed | None = None,
+        emitter: EventEmitter | None = None,
         project_id: str | None = None,
+        workspace_name: str | None = None,
         verbose: bool = False,
     ) -> None:
         self.config = config
-        self.provider = provider
+        self._provider = provider
         self.verbose = verbose
         self.conversation_db_path = conversation_db_path
         self.sandbox = sandbox
         self.project_id = str(project_id).strip() if project_id and str(project_id).strip() else None
+        self.workspace_name = str(workspace_name).strip() if workspace_name and str(workspace_name).strip() else None
 
         # ---- Skills Registry ----
         from aether.skills.builtin import get_default_skill_registry
         self.skill_registry = skill_registry if skill_registry is not None else get_default_skill_registry()
 
         # ---- Knowledge ----
-        self.knowledge: KnowledgeStore | None = knowledge_store
+        self.knowledge: KnowledgeStore | None = knowledge_store or knowledge
         if self.knowledge is None and config.knowledge_path:
             self.knowledge = self._build_knowledge(config.knowledge_path)
 
@@ -119,7 +123,7 @@ class Team:
         self.agent_store = agent_store
 
         # ---- Event infrastructure ----
-        self.emitter = EventEmitter()
+        self.emitter = emitter if emitter is not None else EventEmitter()
         self.tracker = TaskTracker()
         self.message_bus = AgentMessageBus()
 
@@ -150,11 +154,17 @@ class Team:
     # Public API
     # ------------------------------------------------------------------
 
-    def run(self, task_instruction: str, session_id: str | None = None) -> ExecutionResult:
+    def run(
+        self,
+        task_instruction: str,
+        session_id: str | None = None,
+        target_agent: str | None = None,
+        cancellation_token: Any | None = None,
+    ) -> ExecutionResult:
         """
         Run *task_instruction* through the team.
 
-        Routes the task to the entry agent (the first agent that declares
+        Routes the task to *target_agent* if specified, or the entry agent (the first agent that declares
         ``delegates_to`` relationships, or the first agent in the config).
 
         HITL interrupts are handled interactively via ``input()`` on
@@ -164,13 +174,23 @@ class Team:
         ----------
         task_instruction:
             Natural-language task description.
+        session_id:
+            Optional session or conversation ID.
+        target_agent:
+            Optional agent name to execute the task directly.
+        cancellation_token:
+            Optional threading.Event or cancellation token to abort execution promptly.
 
         Returns
         -------
         ExecutionResult
-            The final result from the entry agent.
+            The final result from the executed agent.
         """
-        entry = self.config.entry_agent()
+        entry = None
+        if target_agent:
+            entry = self.config.get_agent(target_agent)
+        if entry is None:
+            entry = self.config.entry_agent()
         if entry is None:
             return ExecutionResult(
                 success=False,
@@ -178,10 +198,14 @@ class Team:
             )
 
         start_ms = int(time.time() * 1000)
+        meta = {"cancellation_token": cancellation_token} if cancellation_token is not None else {}
+        if session_id:
+            meta["session_id"] = session_id
         task = Task(
             instruction=task_instruction,
             agent_name=entry.name,
             id=session_id or uuid4().hex,
+            metadata=meta,
         )
 
         try:
@@ -203,6 +227,21 @@ class Team:
     def agents(self) -> list[Agent]:
         """Return all assembled agents."""
         return list(self._agents.values())
+
+    @property
+    def provider(self) -> AIProvider | None:
+        """Active default AIProvider for the team."""
+        return self._provider
+
+    @provider.setter
+    def provider(self, new_provider: AIProvider | None) -> None:
+        self._provider = new_provider
+        if hasattr(self, "_agents"):
+            for agent_config in self.config.agents:
+                agent = self._agents.get(agent_config.name)
+                if agent and not agent_config.provider:
+                    agent.provider = new_provider
+
 
     def set_model(
         self,
@@ -290,7 +329,16 @@ class Team:
         agent = self._agents[agent_name]
         session_id: str | None = None
 
+        cancellation_token = (task.metadata or {}).get("cancellation_token")
         while True:
+            if cancellation_token and cancellation_token.is_set():
+                from aether.core.execution import ExecutionStatus
+                return ExecutionResult(
+                    success=False,
+                    status=ExecutionStatus.INTERRUPTED,
+                    error="Execution cancelled by user.",
+                )
+
             if session_id is None:
                 result = agent.execute(task)
             else:
@@ -401,12 +449,16 @@ class Team:
             # We store in metadata so the agent can use it on _build_messages
             if system_prompt:
                 agent.metadata["system_prompt"] = system_prompt
+            if self.workspace_name:
+                agent.metadata["workspace_name"] = self.workspace_name
+
+            all_tool_skills = set(agent_config.tools or []) | set(agent_config.skills or [])
 
             # ---- Knowledge Tool ----
             if self.knowledge:
                 from aether.knowledge.tool import create_knowledge_tool
                 knowledge_tool = create_knowledge_tool(self.knowledge, project_id=self.project_id)
-                if not agent_config.tools or "search_knowledge" in agent_config.tools:
+                if (not agent_config.tools and not agent_config.skills) or "search_knowledge" in all_tool_skills:
                     try:
                         agent.tool_registry.register(knowledge_tool)
                         if knowledge_tool.name not in agent.tools:
@@ -420,9 +472,9 @@ class Team:
                 fs_tools = create_filesystem_tools(self.sandbox, emitter=self.emitter)
                 for fs_tool in fs_tools:
                     should_register = False
-                    if not agent_config.tools:
+                    if not agent_config.tools and not agent_config.skills:
                         should_register = True
-                    elif "filesystem" in agent_config.tools or fs_tool.name in agent_config.tools:
+                    elif "filesystem" in all_tool_skills or "filesystem_tools" in all_tool_skills or fs_tool.name in all_tool_skills:
                         should_register = True
 
                     if should_register:
@@ -434,7 +486,7 @@ class Team:
                             pass
 
             # ---- Web Search Tool ----
-            if "search_web" in agent_config.tools or "web_search" in agent_config.tools:
+            if any(t in all_tool_skills for t in ("search_web", "web_search")):
                 from aether.tools.web_search import create_web_search_tool
                 web_tool = create_web_search_tool()
                 try:
@@ -445,10 +497,16 @@ class Team:
                     pass
 
             # Load / assign skills if configured
+            builtin_tool_names = {
+                "search_knowledge", "web_search", "search_web", "filesystem", "filesystem_tools",
+                "read_file", "write_file", "list_dir", "list_directory", "patch_file", "delete_file", "file_exists"
+            }
             for skill_ref in agent_config.skills:
                 if not skill_ref or not str(skill_ref).strip():
                     continue
                 clean_ref = str(skill_ref).strip()
+                if clean_ref in builtin_tool_names:
+                    continue
                 if self.skill_registry and self.skill_registry.has(clean_ref):
                     try:
                         agent.assign_registered_skill(clean_ref)
@@ -489,8 +547,10 @@ class Team:
 
                 if rel.type == "delegates_to":
                     target_config = self.config.get_agent(rel.target)
+                    target_tools_str = ", ".join(target_agent.tools) if target_agent.tools else "none"
                     description = (
                         f"Delegate to {target_agent.name} ({target_agent.role}). "
+                        f"Tools: [{target_tools_str}]. "
                         + (target_config.instructions if target_config else "")
                     ).strip()
 

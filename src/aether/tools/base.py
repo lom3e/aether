@@ -14,6 +14,7 @@ class ToolExecutionContext:
     agent_name: str | None = None
     task_id: str | None = None
     metadata: dict[str, Any] = field(default_factory=dict)
+    artifacts: list[dict[str, Any]] = field(default_factory=list)
 
 
 class Tool(ABC):

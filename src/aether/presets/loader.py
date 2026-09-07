@@ -73,7 +73,15 @@ class PresetLoader:
                     if manifest_file.exists():
                         try:
                             manifest = PresetManifest.from_yaml(manifest_file)
-                            if manifest.id == clean_id:
+                            norm_clean = clean_id.lower().replace("-", "_")
+                            norm_manifest = manifest.id.lower().replace("-", "_")
+                            norm_entry = entry.name.lower().replace("-", "_")
+                            if (
+                                manifest.id == clean_id
+                                or entry.name == clean_id
+                                or norm_manifest == norm_clean
+                                or norm_entry == norm_clean
+                            ):
                                 return manifest, entry
                         except Exception:
                             continue

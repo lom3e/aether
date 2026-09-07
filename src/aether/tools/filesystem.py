@@ -107,6 +107,13 @@ def create_filesystem_tools(
                 )
             )
 
+        if context is not None and hasattr(context, "artifacts") and isinstance(context.artifacts, list):
+            context.artifacts.append({
+                "path": rel_path,
+                "action": action,
+                "size_bytes": size_bytes,
+            })
+
         return f"Successfully {action} file '{rel_path}' ({size_bytes} bytes)."
 
     @tool(
@@ -147,6 +154,13 @@ def create_filesystem_tools(
                     metadata={"path": rel_path, "action": "patched"},
                 )
             )
+
+        if context is not None and hasattr(context, "artifacts") and isinstance(context.artifacts, list):
+            context.artifacts.append({
+                "path": rel_path,
+                "action": "patched",
+                "size_bytes": len(new_content.encode("utf-8")),
+            })
 
         return f"Successfully patched '{rel_path}' (replaced 1 of {occurrence_count} occurrences)."
 

@@ -77,7 +77,7 @@ def build_heuristic_workforce(goal: str) -> ArchitectWorkforceBlueprint:
                     icon="Compass",
                     color="emerald",
                     delegates_to=["Market Researcher", "Pricing Analyst", "Report Writer"],
-                    skills=["web_search", "search_knowledge"],
+                    skills=["web_search", "search_knowledge", "filesystem_tools"],
                     system_prompt=(
                         "You are the Intelligence Lead. Your mission is to orchestrate deep market & competitor intelligence tasks.\n\n"
                         "## Core Responsibilities:\n"
@@ -155,7 +155,7 @@ def build_heuristic_workforce(goal: str) -> ArchitectWorkforceBlueprint:
                     icon="Code",
                     color="blue",
                     delegates_to=["Code Specialist", "QA & Test Engineer"],
-                    skills=["filesystem_tools", "terminal_sandbox", "search_knowledge"],
+                    skills=["filesystem", "search_knowledge"],
                     system_prompt=(
                         "You are the Tech Lead. You orchestrate software engineering, architectural compliance, and code quality.\n\n"
                         "## Workflow:\n"
@@ -171,7 +171,7 @@ def build_heuristic_workforce(goal: str) -> ArchitectWorkforceBlueprint:
                     icon="Terminal",
                     color="indigo",
                     delegates_to=[],
-                    skills=["filesystem_tools", "terminal_sandbox"],
+                    skills=["filesystem"],
                     system_prompt=(
                         "You are the Code Specialist. You write robust, maintainable, idiomatic code adhering to best practices.\n\n"
                         "## Standards:\n"
@@ -185,7 +185,7 @@ def build_heuristic_workforce(goal: str) -> ArchitectWorkforceBlueprint:
                     icon="ShieldCheck",
                     color="emerald",
                     delegates_to=[],
-                    skills=["filesystem_tools", "terminal_sandbox"],
+                    skills=["filesystem"],
                     system_prompt=(
                         "You are the QA & Test Engineer. Your objective is 100% test coverage and resilience verification.\n\n"
                         "## Standards:\n"
@@ -597,7 +597,7 @@ def build_heuristic_agent_draft(
 ) -> ArchitectAgentBlueprint:
     """Deterministic fallback to draft an agent configuration from a user goal."""
     g = goal.lower()
-    skills_pool = available_skills or ["search_knowledge", "web_search", "filesystem_tools", "run_command"]
+    skills_pool = available_skills or ["search_knowledge", "web_search", "filesystem"]
     candidates = available_agents or []
 
     if any(k in g for k in ("ricerca", "research", "studia", "cerca", "search", "notizie", "news", "trend")):
@@ -611,25 +611,25 @@ def build_heuristic_agent_draft(
         role = "Technical & Executive Synthesizer"
         icon = "FileText"
         color = "violet"
-        matched_skills = [s for s in ["search_knowledge", "filesystem_tools"] if s in skills_pool] or ["search_knowledge"]
+        matched_skills = [s for s in ["search_knowledge", "filesystem"] if s in skills_pool] or ["search_knowledge"]
     elif any(k in g for k in ("codice", "code", "dev", "program", "script", "python", "bug", "software")):
         name = "Developer Specialist"
         role = "Software Engineer & Code Architect"
         icon = "Cpu"
         color = "blue"
-        matched_skills = [s for s in ["filesystem_tools", "run_command", "search_knowledge"] if s in skills_pool] or ["filesystem_tools"]
+        matched_skills = [s for s in ["filesystem", "search_knowledge"] if s in skills_pool] or ["filesystem"]
     elif any(k in g for k in ("dati", "data", "finanz", "analis", "analyst", "excel", "bilanc", "prezz", "price")):
         name = "Data Analyst"
         role = "Quantitative & Structured Data Analyst"
         icon = "Database"
         color = "emerald"
-        matched_skills = [s for s in ["filesystem_tools", "search_knowledge", "web_search"] if s in skills_pool] or ["search_knowledge"]
+        matched_skills = [s for s in ["filesystem", "search_knowledge", "web_search"] if s in skills_pool] or ["search_knowledge"]
     elif any(k in g for k in ("sicurezza", "guard", "audit", "check", "review", "qualit")):
         name = "Quality & Safety Auditor"
         role = "Compliance & Verification Reviewer"
         icon = "ShieldCheck"
         color = "rose"
-        matched_skills = [s for s in ["search_knowledge", "filesystem_tools"] if s in skills_pool] or ["search_knowledge"]
+        matched_skills = [s for s in ["search_knowledge", "filesystem"] if s in skills_pool] or ["search_knowledge"]
     else:
         name = "Autonomous Specialist"
         role = "Domain Task Execution Expert"
@@ -671,7 +671,7 @@ async def generate_agent_draft(
     if not provider:
         return build_heuristic_agent_draft(goal, available_skills, available_agents)
 
-    skills_hint = f"Available skills in workspace: {', '.join(available_skills)}" if available_skills else "Common skills: search_knowledge, web_search, filesystem_tools, run_command"
+    skills_hint = f"Available skills in workspace: {', '.join(available_skills)}" if available_skills else "Common skills: search_knowledge, web_search, filesystem"
     agents_hint = f"Other available agents in team: {', '.join(available_agents)}" if available_agents else "No other agents currently registered in team."
 
     system_instruction = (

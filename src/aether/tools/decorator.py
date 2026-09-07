@@ -158,16 +158,26 @@ class FunctionTool(Tool):
             if p not in ("context", "self")
         ]
 
-        # Try to parse input_data as JSON dict first
-        try:
-            kwargs: dict[str, Any] = json.loads(input_data)
-        except (json.JSONDecodeError, TypeError):
-            kwargs = {}
+        # Parse input_data: support direct dict or JSON-encoded string
+        if isinstance(input_data, dict):
+            kwargs: dict[str, Any] = dict(input_data)
+        else:
+            try:
+                parsed = json.loads(input_data)
+                kwargs = parsed if isinstance(parsed, dict) else {}
+            except (json.JSONDecodeError, TypeError):
+                kwargs = {}
 
-        # If the function has a single param and we got an empty dict,
-        # pass input_data as the positional argument
-        if not kwargs and len(params) == 1:
-            kwargs = {params[0]: input_data}
+
+        # If the function has a single required parameter without a default and we got an empty dict,
+        # pass input_data as that required argument
+        required_params = [
+            p for p, p_obj in sig.parameters.items()
+            if p not in ("context", "self") and p_obj.default is inspect.Parameter.empty
+        ]
+        if not kwargs and (len(params) == 1 or len(required_params) == 1):
+            key = required_params[0] if len(required_params) == 1 else params[0]
+            kwargs = {key: input_data}
 
         # Inject context if the function declares it
         if "context" in sig.parameters:

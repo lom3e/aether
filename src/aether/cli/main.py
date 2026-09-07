@@ -148,6 +148,70 @@ def _cmd_run(args) -> None:
         sys.exit(1)
 
 
+def _cmd_chat(args) -> None:
+    try:
+        ws = _workspace_from_context()
+        team = ws.load_team()
+    except Exception as exc:
+        print(f"Error loading Workspace/Team: {exc}", file=sys.stderr)
+        sys.exit(1)
+
+    provider = _build_provider(team.config, args)
+    if provider is not None:
+        team.provider = provider
+    elif team.config.default_provider in {"openai", "anthropic", "gemini"}:
+        sys.exit(1)
+
+    print("=" * 60)
+    print(f"  🌌 Aether Workforce Chat — {team.config.name}")
+    print(f"  Collaborators: {', '.join(a.name for a in team.agents())}")
+    print("  Type your prompt and press Enter. Commands: /clear, /exit, /quit")
+    print("=" * 60)
+    print()
+
+    if hasattr(team, "emitter") and team.emitter is not None:
+        from aether.coordination.events import EventType
+
+        def _on_started(ev):
+            print(f"\n🤖 [{ev.agent_name}] working...")
+
+        def _on_tool(ev):
+            tool = ev.metadata.get("tool_name", "tool")
+            print(f"  🔧 [{ev.agent_name}] calling tool: {tool}")
+
+        def _on_tool_done(ev):
+            tool = ev.metadata.get("tool_name", "tool")
+            print(f"  ✓ [{ev.agent_name}] tool completed: {tool}")
+
+        team.emitter.on(EventType.AGENT_STARTED, _on_started)
+        team.emitter.on(EventType.TOOL_CALLED, _on_tool)
+        team.emitter.on(EventType.TOOL_COMPLETED, _on_tool_done)
+
+    while True:
+        try:
+            user_input = input("👤 You > ").strip()
+        except (EOFError, KeyboardInterrupt):
+            print("\nExiting Aether chat.")
+            break
+
+        if not user_input:
+            continue
+        if user_input.lower() in {"/exit", "/quit", "exit", "quit"}:
+            print("Goodbye!")
+            break
+        if user_input.lower() in {"/clear", "clear"}:
+            print("\033[H\033[J", end="")
+            print(f"  🌌 Aether Workforce Chat — {team.config.name}\n")
+            continue
+
+        result = team.run(user_input)
+        print()
+        if result.success:
+            print(f"✨ Workforce:\n{result.output}\n")
+        else:
+            print(f"❌ Error: {result.error}\n", file=sys.stderr)
+
+
 def _build_provider(config, args):
     """Instantiate the provider from config + CLI overrides."""
     provider_name = getattr(args, "provider", None) or config.default_provider
@@ -415,6 +479,12 @@ def main() -> None:
                        help="Override provider")
     run_p.add_argument("--model", help="Override model")
 
+    # ---- chat ----
+    chat_p = subparsers.add_parser("chat", help="Start an interactive terminal chat with the workforce")
+    chat_p.add_argument("--provider", choices=["openai", "anthropic", "ollama", "gemini"],
+                        help="Override provider")
+    chat_p.add_argument("--model", help="Override model")
+
     # ---- ui ----
     ui_p = subparsers.add_parser("ui", help="Start the Aether Web UI / Desktop runtime")
     ui_p.add_argument("--host", default="127.0.0.1", help="Host address to bind (default: 127.0.0.1)")
@@ -453,6 +523,7 @@ def main() -> None:
     dispatch = {
         "init": _cmd_init,
         "run": _cmd_run,
+        "chat": _cmd_chat,
         "knowledge": {
             "add": _cmd_knowledge_add,
             "list": _cmd_knowledge_list,
