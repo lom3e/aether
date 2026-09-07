@@ -162,6 +162,15 @@ class TestFunctionToolExecution:
         result = add.execute(json.dumps({"a": 3, "b": 4}))
         assert result == "7"
 
+    def test_execute_with_dict(self):
+        @tool
+        def add(a: int, b: int) -> str:
+            return str(a + b)
+
+        result = add.execute({"a": 10, "b": 25})
+        assert result == "35"
+
+
     def test_execute_single_param_fallback(self):
         """When input_data is not valid JSON and fn has 1 param, use raw input_data."""
         @tool

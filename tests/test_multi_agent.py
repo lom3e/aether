@@ -290,12 +290,14 @@ def test_agent_tool_context_isolation() -> None:
 
 
 def test_agent_tool_no_provider_delegation() -> None:
-    """Agent without provider still works via AgentTool."""
+    """Agent without provider returns truthful error via AgentTool."""
     child = Agent(name="Simple", role="worker")
     tool = AgentTool(agent=child)
 
     result = tool.execute("Do something.")
-    assert "Simple received" in result
+    assert "[AGENT ERROR]" in result
+    assert "No AI provider configured" in result
+
 
 
 def test_agent_tool_child_error_handling() -> None:

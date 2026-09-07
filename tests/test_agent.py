@@ -36,21 +36,22 @@ def test_agent_execution():
     assert agent.lifecycle.state == AgentLifecycleState.COMPLETED
 
 
-def test_agent_execution_without_provider_preserves_fallback():
+def test_agent_execution_without_provider_fails_truthfully():
     agent = Agent(name="Assistant Agent")
     task = Task(agent_name="Assistant Agent", instruction="Hello Aether")
 
     result = agent.execute(task)
 
-    assert result.success is True
-    assert result.output == "Assistant Agent received: Hello Aether"
+    assert result.success is False
+    assert "No AI provider configured" in result.error
+    assert agent.lifecycle.state == AgentLifecycleState.FAILED
 
 
 def test_agent_executes_tool():
     registry = ToolRegistry()
     registry.register(DummyTool())
 
-    agent = Agent(name="Tool Agent", tool_registry=registry)
+    agent = Agent(name="Tool Agent", tool_registry=registry, provider=MockProvider())
     task = Task(
         agent_name="Tool Agent",
         instruction="Hello",
@@ -59,8 +60,7 @@ def test_agent_executes_tool():
 
     result = agent.execute(task)
     assert result.success is True
-    # No provider: output echoes the user instruction
-    assert "Hello" in result.output
+    assert "Mock response" in result.output
 
 
 def test_agent_executes_tool_failure():
@@ -109,7 +109,7 @@ def test_agent_execute_delegates_orchestration_to_engine():
     mock_engine.build_plan.return_value = ExecutionPlan(units=[])
     mock_engine.run.return_value = []
 
-    agent = Agent(name="Delegating Agent", execution_engine=mock_engine)
+    agent = Agent(name="Delegating Agent", execution_engine=mock_engine, provider=MockProvider())
     task = Task(agent_name="Delegating Agent", instruction="Run task")
     result = agent.execute(task)
 
