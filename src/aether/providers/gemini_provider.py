@@ -221,6 +221,45 @@ class GeminiProvider(AIProvider):
         except Exception as exc:
             raise self._handle_error(exc) from exc
 
+    def _parse_stream_chunk(self, chunk: Any) -> ProviderStreamChunk:
+        try:
+            text = chunk.text or ""
+        except Exception:
+            text = ""
+
+        tool_calls = None
+        if hasattr(chunk, "function_calls") and chunk.function_calls:
+            tool_calls = []
+            for i, fc in enumerate(chunk.function_calls):
+                tool_calls.append(
+                    ToolCall(
+                        call_id=f"call_{i}",
+                        tool_name=fc.name,
+                        arguments=dict(fc.args) if hasattr(fc, "args") and fc.args else {},
+                    )
+                )
+
+        finish_reason = None
+        if hasattr(chunk, "candidates") and chunk.candidates:
+            reason = chunk.candidates[0].finish_reason
+            if reason:
+                reason_str = str(reason).upper()
+                if "MAX_TOKENS" in reason_str:
+                    finish_reason = "length"
+                elif "SAFETY" in reason_str:
+                    finish_reason = "content_filter"
+                elif "STOP" in reason_str:
+                    finish_reason = "tool_calls" if tool_calls else "stop"
+
+        if tool_calls and not finish_reason:
+            finish_reason = "tool_calls"
+
+        return ProviderStreamChunk(
+            text=text,
+            finish_reason=finish_reason,
+            tool_calls=tool_calls,
+        )
+
     def generate_stream(
         self,
         messages: list[Message],
@@ -231,8 +270,7 @@ class GeminiProvider(AIProvider):
         try:
             stream = self._client.models.generate_content_stream(**kwargs)
             for chunk in stream:
-                text = chunk.text or ""
-                yield ProviderStreamChunk(text=text)
+                yield self._parse_stream_chunk(chunk)
         except Exception as exc:
             raise self._handle_error(exc) from exc
 
@@ -246,7 +284,6 @@ class GeminiProvider(AIProvider):
         try:
             stream = await self._client.aio.models.generate_content_stream(**kwargs)
             async for chunk in stream:
-                text = chunk.text or ""
-                yield ProviderStreamChunk(text=text)
+                yield self._parse_stream_chunk(chunk)
         except Exception as exc:
             raise self._handle_error(exc) from exc

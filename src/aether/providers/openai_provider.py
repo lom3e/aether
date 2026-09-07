@@ -221,6 +221,19 @@ class OpenAIProvider(AIProvider):
         except Exception as exc:
             raise self._handle_error(exc) from exc
 
+    @staticmethod
+    def _build_stream_tool_calls(accumulated: dict[int, dict[str, Any]]) -> list[ToolCall]:
+        results: list[ToolCall] = []
+        for idx in sorted(accumulated.keys()):
+            item = accumulated[idx]
+            arg_str = item["arguments"]
+            try:
+                args = json.loads(arg_str) if arg_str else {}
+            except json.JSONDecodeError:
+                args = {"input": arg_str}
+            results.append(ToolCall(call_id=item["id"], tool_name=item["name"], arguments=args))
+        return results
+
     def generate_stream(
         self,
         messages: list[Message],
@@ -230,17 +243,54 @@ class OpenAIProvider(AIProvider):
         kwargs = self._build_kwargs(messages, tools, output_schema, stream=True)
         try:
             stream = self._client.chat.completions.create(**kwargs)
+            accumulated_tools: dict[int, dict[str, Any]] = {}
+            last_finish_reason: str | None = None
             for chunk in stream:
                 if not chunk.choices:
                     continue
                 choice = chunk.choices[0]
                 text = choice.delta.content or ""
 
-                # OpenAI sends usage in the last chunk or a separate chunk if requested,
-                # but for simplicity we capture finish_reason.
+                delta_tools = getattr(choice.delta, "tool_calls", None)
+                if delta_tools:
+                    for tc in delta_tools:
+                        idx = getattr(tc, "index", 0) if getattr(tc, "index", None) is not None else 0
+                        if idx not in accumulated_tools:
+                            accumulated_tools[idx] = {
+                                "id": getattr(tc, "id", None) or f"call_{uuid.uuid4().hex[:8]}",
+                                "name": "",
+                                "arguments": "",
+                            }
+                        if getattr(tc, "id", None):
+                            accumulated_tools[idx]["id"] = tc.id
+                        func = getattr(tc, "function", None)
+                        if func:
+                            if getattr(func, "name", None):
+                                accumulated_tools[idx]["name"] += func.name
+                            if getattr(func, "arguments", None):
+                                accumulated_tools[idx]["arguments"] += func.arguments
+
+                finish_reason = choice.finish_reason
+                if finish_reason:
+                    last_finish_reason = finish_reason
+                tool_calls_to_yield = None
+                if finish_reason == "tool_calls" or (finish_reason and accumulated_tools):
+                    tool_calls_to_yield = self._build_stream_tool_calls(accumulated_tools)
+                    if not finish_reason:
+                        finish_reason = "tool_calls"
+                    last_finish_reason = finish_reason
+
                 yield ProviderStreamChunk(
                     text=text,
-                    finish_reason=choice.finish_reason,
+                    finish_reason=finish_reason,
+                    tool_calls=tool_calls_to_yield,
+                )
+
+            if accumulated_tools and last_finish_reason != "tool_calls":
+                yield ProviderStreamChunk(
+                    text="",
+                    finish_reason="tool_calls",
+                    tool_calls=self._build_stream_tool_calls(accumulated_tools),
                 )
         except Exception as exc:
             raise self._handle_error(exc) from exc
@@ -254,15 +304,54 @@ class OpenAIProvider(AIProvider):
         kwargs = self._build_kwargs(messages, tools, output_schema, stream=True)
         try:
             stream = await self._aclient.chat.completions.create(**kwargs)
+            accumulated_tools: dict[int, dict[str, Any]] = {}
+            last_finish_reason: str | None = None
             async for chunk in stream:
                 if not chunk.choices:
                     continue
                 choice = chunk.choices[0]
                 text = choice.delta.content or ""
 
+                delta_tools = getattr(choice.delta, "tool_calls", None)
+                if delta_tools:
+                    for tc in delta_tools:
+                        idx = getattr(tc, "index", 0) if getattr(tc, "index", None) is not None else 0
+                        if idx not in accumulated_tools:
+                            accumulated_tools[idx] = {
+                                "id": getattr(tc, "id", None) or f"call_{uuid.uuid4().hex[:8]}",
+                                "name": "",
+                                "arguments": "",
+                            }
+                        if getattr(tc, "id", None):
+                            accumulated_tools[idx]["id"] = tc.id
+                        func = getattr(tc, "function", None)
+                        if func:
+                            if getattr(func, "name", None):
+                                accumulated_tools[idx]["name"] += func.name
+                            if getattr(func, "arguments", None):
+                                accumulated_tools[idx]["arguments"] += func.arguments
+
+                finish_reason = choice.finish_reason
+                if finish_reason:
+                    last_finish_reason = finish_reason
+                tool_calls_to_yield = None
+                if finish_reason == "tool_calls" or (finish_reason and accumulated_tools):
+                    tool_calls_to_yield = self._build_stream_tool_calls(accumulated_tools)
+                    if not finish_reason:
+                        finish_reason = "tool_calls"
+                    last_finish_reason = finish_reason
+
                 yield ProviderStreamChunk(
                     text=text,
-                    finish_reason=choice.finish_reason,
+                    finish_reason=finish_reason,
+                    tool_calls=tool_calls_to_yield,
+                )
+
+            if accumulated_tools and last_finish_reason != "tool_calls":
+                yield ProviderStreamChunk(
+                    text="",
+                    finish_reason="tool_calls",
+                    tool_calls=self._build_stream_tool_calls(accumulated_tools),
                 )
         except Exception as exc:
             raise self._handle_error(exc) from exc

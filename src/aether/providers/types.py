@@ -11,7 +11,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 
 
-from aether.core.execution import Message
+from aether.core.execution import Message, ToolCall
 
 
 

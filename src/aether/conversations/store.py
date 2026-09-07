@@ -412,6 +412,48 @@ class ConversationStore:
             "activities": [],
         }
 
+    def reset_stale_active_conversations(self) -> int:
+        """
+        Reset any conversation with status 'active' to 'interrupted' after a restart,
+        ensuring truthful assistant messages and activity logs are preserved without losing user messages.
+        """
+        with self._get_connection() as conn:
+            rows = conn.execute(
+                "SELECT id, title FROM conversations WHERE status = 'active'"
+            ).fetchall()
+
+        if not rows:
+            return 0
+
+        count = 0
+        for r in rows:
+            cid = r["id"]
+            messages = self.get_messages(cid)
+            # If the last message was from user without a bot response, append an interrupted assistant message
+            if messages and messages[-1].get("role") == "user":
+                self.add_message(
+                    conv_id=cid,
+                    role="assistant",
+                    content="Execution interrupted by application restart.",
+                    agent_name="Workforce",
+                    metadata={"interrupted": True, "interrupted_by": "restart"},
+                )
+            self.add_activity(
+                conv_id=cid,
+                agent="Workforce",
+                activity_type="task_interrupted",
+                message="Execution interrupted by application restart.",
+                metadata={"status": "interrupted"},
+            )
+            self.update(
+                cid,
+                status="interrupted",
+                last_message="Execution interrupted by application restart.",
+            )
+            count += 1
+
+        return count
+
     def list(
         self,
         search: str | None = None,
@@ -595,6 +637,7 @@ class ConversationStore:
         pinned: bool | None = None,
         project_id: str | None = None,
         clear_project: bool = False,
+        team_name: str | None = None,
     ) -> dict[str, Any] | None:
         now = datetime.now(timezone.utc).isoformat()
 
@@ -607,7 +650,7 @@ class ConversationStore:
 
         with self._get_connection() as conn:
             row = conn.execute(
-                "SELECT title, status, last_message, agents, unread, pinned, project_id FROM conversations WHERE id = ?",
+                "SELECT title, status, last_message, agents, unread, pinned, project_id, team_name FROM conversations WHERE id = ?",
                 (conv_id,),
             ).fetchone()
             if not row:
@@ -619,6 +662,7 @@ class ConversationStore:
             new_agents = json.dumps(agents) if agents is not None else row["agents"]
             new_unread = int(unread) if unread is not None else (row["unread"] if "unread" in row.keys() else 0)
             new_pinned = int(pinned) if pinned is not None else (row["pinned"] if "pinned" in row.keys() else 0)
+            new_team_name = team_name if team_name is not None else (row["team_name"] if "team_name" in row.keys() else None)
 
             if clear_project:
                 new_project_id = None
@@ -630,13 +674,14 @@ class ConversationStore:
             conn.execute(
                 """
                 UPDATE conversations
-                SET title = ?, status = ?, last_message = ?, agents = ?, unread = ?, pinned = ?, project_id = ?, updated_at = ?
+                SET title = ?, status = ?, last_message = ?, agents = ?, unread = ?, pinned = ?, project_id = ?, team_name = ?, updated_at = ?
                 WHERE id = ?
                 """,
-                (new_title, new_status, new_last, new_agents, new_unread, new_pinned, new_project_id, now, conv_id),
+                (new_title, new_status, new_last, new_agents, new_unread, new_pinned, new_project_id, new_team_name, now, conv_id),
             )
 
         return self.get(conv_id)
+
 
     def pin(self, conv_id: str, pinned: bool = True) -> dict[str, Any] | None:
         """Pin or unpin a conversation."""

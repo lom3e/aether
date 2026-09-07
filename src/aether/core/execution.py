@@ -129,6 +129,7 @@ class ExecutionResult:
     metadata: dict[str, Any] = field(default_factory=dict)
     status: ExecutionStatus = ExecutionStatus.COMPLETED
     interrupt: AgentInterrupt | None = None
+    artifacts: list[dict[str, Any]] = field(default_factory=list)
 
     def __post_init__(self):
         # Backward compatibility: automatically set status if not provided explicitly
@@ -174,6 +175,7 @@ class AgentContext(ExecutionContext):
     )
     execution_state: str = "pending"
     current_turn: int = 0
+    artifacts: list[dict[str, Any]] = field(default_factory=list)
 
     @classmethod
     def from_context(

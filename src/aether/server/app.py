@@ -128,6 +128,12 @@ async def startup_event():
             app.state.team = None
             app.state.active_team_name = None
 
+        # Reset any stale active conversations left from previous crash/interruption
+        try:
+            ws.conversations.reset_stale_active_conversations()
+        except Exception:
+            pass
+
         # Start Automation Scheduler
         try:
             from aether.automation.scheduler import AutomationScheduler

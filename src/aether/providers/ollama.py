@@ -229,10 +229,34 @@ class OllamaProvider(AIProvider):
             if usage:
                 usage["total_tokens"] = usage.get("prompt_tokens", 0) + usage.get("completion_tokens", 0)
 
+        # Parse tool calls if present
+        tool_calls = None
+        raw_calls = message.get("tool_calls")
+        if raw_calls:
+            tool_calls = []
+            for tc in raw_calls:
+                func = tc.get("function", {})
+                name = func.get("name", "")
+                args = func.get("arguments", {})
+                if isinstance(args, str):
+                    try:
+                        args = json.loads(args)
+                    except json.JSONDecodeError:
+                        args = {"input": args}
+                call_id = tc.get("id") or f"call_{uuid.uuid4().hex[:8]}"
+                tool_calls.append(ToolCall(call_id=call_id, tool_name=name, arguments=args))
+
+        finish_reason = None
+        if done:
+            finish_reason = "tool_calls" if tool_calls else "stop"
+        elif tool_calls:
+            finish_reason = "tool_calls"
+
         return ProviderStreamChunk(
             text=content,
-            finish_reason="stop" if done else None,
+            finish_reason=finish_reason,
             usage=usage,
+            tool_calls=tool_calls,
         )
 
     def _build_payload(

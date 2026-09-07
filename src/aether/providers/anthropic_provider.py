@@ -227,6 +227,15 @@ class AnthropicProvider(AIProvider):
             with self._client.messages.stream(**kwargs) as stream:
                 for text in stream.text_stream:
                     yield ProviderStreamChunk(text=text)
+                if hasattr(stream, "get_final_message"):
+                    final_response = stream.get_final_message()
+                    parsed = self._parse_response(final_response)
+                    tool_calls = parsed.message.tool_calls if parsed.message else None
+                    yield ProviderStreamChunk(
+                        text="",
+                        finish_reason=parsed.finish_reason or ("tool_calls" if tool_calls else "stop"),
+                        tool_calls=tool_calls,
+                    )
         except Exception as exc:
             raise self._handle_error(exc) from exc
 
@@ -241,5 +250,14 @@ class AnthropicProvider(AIProvider):
             async with self._aclient.messages.stream(**kwargs) as stream:
                 async for text in stream.text_stream:
                     yield ProviderStreamChunk(text=text)
+                if hasattr(stream, "get_final_message"):
+                    final_response = await stream.get_final_message()
+                    parsed = self._parse_response(final_response)
+                    tool_calls = parsed.message.tool_calls if parsed.message else None
+                    yield ProviderStreamChunk(
+                        text="",
+                        finish_reason=parsed.finish_reason or ("tool_calls" if tool_calls else "stop"),
+                        tool_calls=tool_calls,
+                    )
         except Exception as exc:
             raise self._handle_error(exc) from exc

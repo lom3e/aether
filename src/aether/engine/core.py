@@ -68,6 +68,8 @@ class ExecutionEngine:
             tool_context = ToolExecutionContext(
                 agent_name=context.agent_name,
                 task_id=context.task.id,
+                metadata=context.metadata if hasattr(context, "metadata") and context.metadata is not None else {},
+                artifacts=context.artifacts if hasattr(context, "artifacts") and context.artifacts is not None else [],
             )
 
             # Resolve input arguments (Tool.execute accepts a string)

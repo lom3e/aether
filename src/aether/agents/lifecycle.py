@@ -36,6 +36,6 @@ class AgentLifecycle:
         self.state = AgentLifecycleState.COMPLETED
         return self.state
 
-    def fail(self) -> AgentLifecycleState:
+    def fail(self, reason: str | None = None) -> AgentLifecycleState:
         self.state = AgentLifecycleState.FAILED
         return self.state

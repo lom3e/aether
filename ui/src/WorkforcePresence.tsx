@@ -26,6 +26,8 @@ interface WorkforcePresenceProps {
     name?: string;
     exists?: boolean;
   } | null;
+  availableTeams?: string[];
+  onSelectTeam?: (teamName: string) => void;
 }
 
 export function WorkforcePresence({
@@ -33,7 +35,9 @@ export function WorkforcePresence({
   agents,
   activeAgents = [],
   waitingAgent = null,
-  project = null
+  project = null,
+  availableTeams = [],
+  onSelectTeam
 }: WorkforcePresenceProps) {
   const { t } = useTranslation();
 
@@ -57,8 +61,34 @@ export function WorkforcePresence({
       <div style={{ display: 'flex', alignItems: 'center', gap: '10px', flexShrink: 0 }}>
         <div style={{ display: 'flex', alignItems: 'center', gap: '6px', fontWeight: 600, color: 'hsl(var(--muted-fg))', textTransform: 'uppercase', fontSize: '11px' }}>
           <Cpu size={15} className="text-primary" />
-          <span>{teamName || 'Workforce'}:</span>
+          {availableTeams && availableTeams.length > 1 && onSelectTeam ? (
+            <select
+              aria-label="Select workforce team"
+              value={teamName || ''}
+              onChange={e => onSelectTeam(e.target.value)}
+              style={{
+                background: 'hsl(var(--card))',
+                border: '1px solid hsl(var(--border))',
+                borderRadius: '6px',
+                color: 'hsl(var(--fg))',
+                fontSize: '11.5px',
+                fontWeight: 600,
+                padding: '2px 8px',
+                cursor: 'pointer',
+                outline: 'none',
+              }}
+            >
+              {availableTeams.map(name => (
+                <option key={name} value={name} style={{ background: 'hsl(var(--card))', color: 'hsl(var(--fg))' }}>
+                  {name}
+                </option>
+              ))}
+            </select>
+          ) : (
+            <span>{teamName || 'Workforce'}:</span>
+          )}
         </div>
+
 
         {project && project.name && (
           <Tooltip content={project.path || project.name} position="bottom">

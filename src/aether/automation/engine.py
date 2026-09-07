@@ -124,7 +124,7 @@ class AutomationEngine:
                 try:
                     # Run via team or agent
                     if hasattr(team, "run"):
-                        result = await asyncio.to_thread(team.run, prompt)
+                        result = await asyncio.to_thread(team.run, prompt, target_agent=step.agent_name)
                         step_output = result.output if hasattr(result, "output") else str(result)
                         if hasattr(result, "success") and not result.success:
                             step_status = "failed"

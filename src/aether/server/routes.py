@@ -431,14 +431,26 @@ async def upload_knowledge(
         for f in files:
             if getattr(f, "filename", None):
                 upload_list.append(f)
-    elif getattr(files, "filename", None):
-        upload_list.append(files)
-
     if getattr(file, "filename", None) and file not in upload_list:
         upload_list.append(file)
 
     if not upload_list:
+        try:
+            form = await request.form()
+
+            for key, val in form.multi_items():
+                if getattr(val, "filename", None):
+                    upload_list.append(val)
+                elif key == "scope" and (not scope or scope == "workspace" or hasattr(scope, "default")):
+                    scope = str(val)
+                elif key == "project_id" and (not project_id or hasattr(project_id, "default")):
+                    project_id = str(val)
+        except Exception:
+            pass
+
+    if not upload_list:
         raise HTTPException(status_code=400, detail="No files provided for upload.")
+
 
     is_legacy = bool(request.scope.get("path", "").endswith("/upload"))
     clean_scope = str(scope) if (scope and not hasattr(scope, "default")) else "workspace"
@@ -529,7 +541,10 @@ async def get_preset(preset_id: str):
         raise HTTPException(status_code=404, detail=f"Preset '{preset_id}' not found.")
 
 @router.post("/presets/{preset_id}/apply")
-async def apply_preset(request: Request, preset_id: str, payload: ApplyPresetPayload):
+@router.post("/presets/{preset_id}/install")
+async def apply_preset(request: Request, preset_id: str, payload: ApplyPresetPayload | None = None):
+    if payload is None:
+        payload = ApplyPresetPayload()
     ws = getattr(request.app.state, "workspace", None)
     if not ws:
         raise HTTPException(status_code=500, detail="Workspace not initialized.")
@@ -903,6 +918,19 @@ async def connect_workspace_project(request: Request, data: ProjectConfigRequest
     if not clean_path:
         raise HTTPException(status_code=422, detail="Project path cannot be empty.")
     resolved = Path(clean_path).expanduser().resolve()
+    forbidden_roots = {Path("/"), Path.home()}
+    for forbidden in ["/System", "/etc", "/usr", "/bin", "/sbin", "/var", "/Windows", "/Program Files"]:
+        try:
+            forbidden_roots.add(Path(forbidden).resolve())
+        except Exception:
+            pass
+
+    if resolved in forbidden_roots or resolved == resolved.parent:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Cannot connect sensitive system or root directory '{resolved}'. Please choose a dedicated project folder.",
+        )
+
     if not resolved.exists() or not resolved.is_dir():
         raise HTTPException(
             status_code=422,
@@ -1336,6 +1364,22 @@ async def get_team(request: Request, team_name: str):
     except Exception as exc:
         raise HTTPException(status_code=422, detail="This team configuration could not be read.") from exc
     return _team_response(config)
+
+
+@router.post("/teams/{team_name}/select")
+async def select_team(request: Request, team_name: str):
+    ws, _ = _runtime(request)
+    from aether.team.loader import TeamLoader
+
+    try:
+        config = TeamLoader.from_yaml(_team_path(ws, team_name))
+    except FileNotFoundError as exc:
+        raise HTTPException(status_code=404, detail="Team not found.") from exc
+
+    request.app.state.team = ws.load_team(config.name)
+    ws.set_default_team(config.name)
+    request.app.state.active_team_name = config.name
+    return {"status": "ok", "team": _team_response(config)}
 
 
 @router.put("/teams/{team_name}")
@@ -1892,9 +1936,11 @@ class CreateConversationPayload(BaseModel):
 class UpdateConversationPayload(BaseModel):
     title: str | None = Field(default=None, max_length=200)
     status: str | None = Field(default=None, max_length=50)
+    team_name: str | None = None
     pinned: bool | None = None
     project_id: str | None = None
     clear_project: bool = False
+
 
 
 class PinConversationPayload(BaseModel):
@@ -1987,6 +2033,65 @@ async def mark_conversation_read(request: Request, conv_id: str):
     return {"status": "ok", "conv_id": conv_id, "unread": False}
 
 
+@router.post("/conversations/{conv_id}/stop")
+async def stop_conversation_task(request: Request, conv_id: str):
+    ws = request.app.state.workspace
+    if not ws:
+        raise HTTPException(status_code=500, detail="Workspace not initialized")
+
+    # 1. Trigger cancellation token if active
+    tokens = getattr(request.app.state, "cancellation_tokens", {})
+    if conv_id in tokens:
+        tokens[conv_id].set()
+
+    # 2. Cancel active asyncio task if present
+    tasks = getattr(request.app.state, "active_tasks", {})
+    if conv_id in tasks:
+        tasks[conv_id].cancel()
+
+    # 3. Mark conversation as interrupted in SQLite
+    ws.conversations.update(
+        conv_id=conv_id,
+        status="interrupted",
+        last_message="Execution stopped by user",
+    )
+    ws.conversations.add_activity(
+        conv_id=conv_id,
+        agent="Workforce",
+        activity_type="task_interrupted",
+        message="Execution stopped by user",
+        metadata={"status": "interrupted"},
+    )
+
+    # 4. If the last message is from the user without a response, add truthful interrupted assistant message
+    messages = ws.conversations.get_messages(conv_id)
+    if messages and messages[-1].get("role") == "user":
+        ws.conversations.add_message(
+            conv_id=conv_id,
+            role="assistant",
+            content="Execution stopped by user.",
+            agent_name="Workforce",
+            metadata={"interrupted": True, "interrupted_by": "user"},
+        )
+
+    # 5. Broadcast task_stopped to connected sockets
+    chat_sockets = getattr(request.app.state, "chat_sockets", set())
+    for socket in list(chat_sockets):
+        try:
+            ws_session = getattr(socket.state, "session_id", None) if hasattr(socket, "state") else None
+            if not ws_session or ws_session == conv_id:
+                asyncio.create_task(socket.send_json({
+                    "type": "task_stopped",
+                    "session_id": conv_id,
+                    "status": "interrupted",
+                    "message": "Task stopped by user.",
+                }))
+        except Exception:
+            pass
+
+    return {"status": "ok", "conv_id": conv_id}
+
+
 @router.patch("/conversations/{conv_id}")
 async def update_conversation(request: Request, conv_id: str, data: UpdateConversationPayload):
     ws = request.app.state.workspace
@@ -2000,7 +2105,9 @@ async def update_conversation(request: Request, conv_id: str, data: UpdateConver
             pinned=data.pinned,
             project_id=data.project_id,
             clear_project=data.clear_project,
+            team_name=data.team_name,
         )
+
         if not updated:
             raise HTTPException(status_code=404, detail="Conversation not found")
         return updated

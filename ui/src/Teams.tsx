@@ -618,8 +618,10 @@ function PresetPickerModal({ onClose, onInstalled }: { onClose: () => void; onIn
     if (!selectedId) return;
     setApplying(true);
     try {
-      const response = await fetch(apiUrl(`/api/presets/${encodeURIComponent(selectedId)}/install`), {
+      const response = await fetch(apiUrl(`/api/presets/${encodeURIComponent(selectedId)}/apply`), {
         method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ seed_knowledge: true }),
       });
       if (!response.ok) {
         throw await apiError(response, 'Unable to install this preset.');

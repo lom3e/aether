@@ -30,6 +30,7 @@ export function Chat({
   const [input, setInput] = useState('');
   const [loading, setLoading] = useState(false);
   const [teamInfo, setTeamInfo] = useState<{ name: string; agents: any[]; project?: any }>({ name: 'Workforce', agents: [] });
+  const [availableTeams, setAvailableTeams] = useState<string[]>([]);
   const [activeAgents, setActiveAgents] = useState<string[]>([]);
   const [waitingAgent, setWaitingAgent] = useState<string | null>(null);
   const [agentStatus, setAgentStatus] = useState<{ agent: string; status: string } | null>(null);
@@ -44,6 +45,8 @@ export function Chat({
   const reconnectTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
+  const activeSessionIdRef = useRef<string | null>(conversationId);
+  const conversationIdRef = useRef<string | null>(conversationId);
   const showToast = useContext(ToastContext);
   const { t, language } = useTranslation();
 
@@ -62,6 +65,15 @@ export function Chat({
       })
       .catch(console.error);
 
+    fetch(apiUrl('/api/teams'))
+      .then(res => res.json())
+      .then(data => {
+        if (Array.isArray(data)) {
+          setAvailableTeams(data.map((t: any) => t.name).filter(Boolean));
+        }
+      })
+      .catch(console.error);
+
     fetch(apiUrl('/api/commands'))
       .then(res => res.json())
       .then(data => {
@@ -72,40 +84,92 @@ export function Chat({
       .catch(console.error);
   }, []);
 
-  // Load conversation messages and persisted activities from SQLite when conversationId changes
+  // Load conversation messages, team, and persisted activities from SQLite when conversationId changes
   useEffect(() => {
+    activeSessionIdRef.current = conversationId;
+    conversationIdRef.current = conversationId;
+
     if (!conversationId) {
       setMessages([]);
       setActivities([]);
       setTaskStatus('active');
       setLoading(false);
+      fetch(apiUrl('/api/workspace'))
+        .then(res => res.json())
+        .then(data => {
+          if (data) {
+            setTeamInfo(prev => ({
+              ...prev,
+              name: data.name || 'Workforce',
+              agents: data.agents || [],
+              project: data.project || null
+            }));
+          }
+        })
+        .catch(console.error);
       return;
+    }
+
+    if (socketRef.current && socketRef.current.readyState === WebSocket.OPEN) {
+      socketRef.current.send(JSON.stringify({ type: 'join_session', session_id: conversationId }));
     }
 
     fetch(apiUrl(`/api/conversations/${conversationId}`))
       .then(res => res.json())
       .then(data => {
         if (data && data.messages) {
-          setMessages(data.messages);
-          setActivities(data.activities || []);
+          setMessages(prev => (loading && prev.length > 0 && data.messages.length === 0 ? prev : data.messages));
+          if (data.activities && data.activities.length > 0) {
+            setActivities(data.activities);
+          }
           setTaskStatus(data.status || 'completed');
-          setLoading(data.status === 'active' && data.messages.length > 0);
-        } else {
+          if (data.status !== 'active') {
+            setLoading(false);
+          } else if (data.messages.length > 0) {
+            setLoading(true);
+          }
+
+          if (data.team_name) {
+            fetch(apiUrl(`/api/teams/${encodeURIComponent(data.team_name)}`))
+              .then(res => (res.ok ? res.json() : null))
+              .then(tData => {
+                if (tData) {
+                  setTeamInfo(prev => ({
+                    ...prev,
+                    name: tData.name || data.team_name,
+                    agents: tData.agents || []
+                  }));
+                }
+              })
+              .catch(console.error);
+          } else {
+            fetch(apiUrl('/api/workspace'))
+              .then(res => res.json())
+              .then(wData => {
+                if (wData) {
+                  setTeamInfo(prev => ({
+                    ...prev,
+                    name: wData.name || 'Workforce',
+                    agents: wData.agents || [],
+                    project: wData.project || null
+                  }));
+                }
+              })
+              .catch(console.error);
+          }
+        }
+      })
+      .catch(() => {
+        if (!loading) {
           setMessages([]);
           setActivities([]);
           setTaskStatus('active');
           setLoading(false);
         }
-      })
-      .catch(() => {
-        setMessages([]);
-        setActivities([]);
-        setTaskStatus('active');
-        setLoading(false);
       });
   }, [conversationId]);
 
-  // Connect WebSocket with resilient auto-reconnect
+  // Connect WebSocket with resilient auto-reconnect once on mount
   useEffect(() => {
     let isMounted = true;
 
@@ -121,8 +185,9 @@ export function Chat({
         if (!isMounted) return;
         setIsConnected(true);
         reconnectAttemptsRef.current = 0;
-        if (conversationId) {
-          ws.send(JSON.stringify({ type: 'join_session', session_id: conversationId }));
+        const currentSession = activeSessionIdRef.current || conversationIdRef.current;
+        if (currentSession) {
+          ws.send(JSON.stringify({ type: 'join_session', session_id: currentSession }));
         }
       };
 
@@ -130,73 +195,68 @@ export function Chat({
         if (!isMounted) return;
         try {
           const data = JSON.parse(event.data);
+          const currentSession = activeSessionIdRef.current || conversationIdRef.current;
+          const isSessionMatch = !data.session_id || !currentSession || data.session_id === currentSession;
+          if (!isSessionMatch) return;
 
           if (data.type === 'task_started') {
-            if (!data.session_id || data.session_id === conversationId) {
-              setLoading(true);
-              setTaskStatus('active');
-              setActiveAgents(['manager']);
-              setAgentStatus({ agent: 'manager', status: 'started' });
-            }
+            setLoading(true);
+            setTaskStatus('active');
+            setActiveAgents(['manager']);
+            setAgentStatus({ agent: 'manager', status: 'started' });
             onConversationUpdated();
           } else if (data.type === 'token_chunk') {
-            if (!data.session_id || data.session_id === conversationId) {
-              const delta = data.delta || '';
-              const agent = data.agent || 'Workforce';
-              const streamId = `streaming-${data.session_id || conversationId || 'active'}`;
+            const delta = data.delta || '';
+            const agent = data.agent || 'Workforce';
+            const streamId = `streaming-${data.session_id || currentSession || 'active'}`;
 
-              setMessages(prev => {
-                const existingIndex = prev.findIndex(m => m.id === streamId);
-                if (existingIndex >= 0) {
-                  const updated = [...prev];
-                  updated[existingIndex] = {
-                    ...updated[existingIndex],
-                    content: updated[existingIndex].content + delta,
-                    agent_name: agent,
-                  };
-                  return updated;
-                } else {
-                  const newStreamMsg: ChatMessage = {
-                    id: streamId,
-                    role: 'assistant',
-                    agent_name: agent,
-                    content: delta,
-                    created_at: new Date().toISOString(),
-                  };
-                  return [...prev, newStreamMsg];
-                }
-              });
-            }
-          } else if (data.type === 'agent_status') {
-            if (!data.session_id || data.session_id === conversationId) {
-              const agent = data.agent || 'Workforce';
-              const status = data.status || 'thinking';
-              setAgentStatus({ agent, status });
-              if (agent && !activeAgents.includes(agent)) {
-                setActiveAgents(prev => Array.from(new Set([...prev, agent])));
+            setMessages(prev => {
+              const existingIndex = prev.findIndex(m => m.id === streamId);
+              if (existingIndex >= 0) {
+                const updated = [...prev];
+                updated[existingIndex] = {
+                  ...updated[existingIndex],
+                  content: updated[existingIndex].content + delta,
+                  agent_name: agent,
+                };
+                return updated;
+              } else {
+                const newStreamMsg: ChatMessage = {
+                  id: streamId,
+                  role: 'assistant',
+                  agent_name: agent,
+                  content: delta,
+                  created_at: new Date().toISOString(),
+                };
+                return [...prev, newStreamMsg];
               }
+            });
+          } else if (data.type === 'agent_status') {
+            const agent = data.agent || 'Workforce';
+            const status = data.status || 'thinking';
+            setAgentStatus({ agent, status });
+            if (agent && !activeAgents.includes(agent)) {
+              setActiveAgents(prev => Array.from(new Set([...prev, agent])));
             }
           } else if (data.type === 'file_action') {
-            if (!data.session_id || data.session_id === conversationId) {
-              const action = data.action || 'modified';
-              const path = data.path || '';
-              const actionLabel = action === 'created'
-                ? (language === 'it' ? 'Ha creato il file' : 'Created file')
-                : (action === 'modified'
-                  ? (language === 'it' ? 'Ha modificato il file' : 'Modified file')
-                  : (language === 'it' ? 'Ha eliminato il file' : 'Deleted file'));
-              const newAct: ActivityItem = {
-                id: String(Date.now() + Math.random()),
-                agent: data.agent || 'Workforce',
-                type: `file_${action}`,
-                message: path ? `${actionLabel}: ${path}` : actionLabel,
-                timestamp: new Date().toISOString(),
-                metadata: { path, action }
-              };
-              setActivities(prev => [...prev, newAct]);
-              if (data.agent && !activeAgents.includes(data.agent)) {
-                setActiveAgents(prev => Array.from(new Set([...prev, data.agent])));
-              }
+            const action = data.action || 'modified';
+            const path = data.path || '';
+            const actionLabel = action === 'created'
+              ? (language === 'it' ? 'Ha creato il file' : 'Created file')
+              : (action === 'modified'
+                ? (language === 'it' ? 'Ha modificato il file' : 'Modified file')
+                : (language === 'it' ? 'Ha eliminato il file' : 'Deleted file'));
+            const newAct: ActivityItem = {
+              id: String(Date.now() + Math.random()),
+              agent: data.agent || 'Workforce',
+              type: `file_${action}`,
+              message: path ? `${actionLabel}: ${path}` : actionLabel,
+              timestamp: new Date().toISOString(),
+              metadata: { path, action }
+            };
+            setActivities(prev => [...prev, newAct]);
+            if (data.agent && !activeAgents.includes(data.agent)) {
+              setActiveAgents(prev => Array.from(new Set([...prev, data.agent])));
             }
           } else if (data.type === 'activity') {
             const newAct: ActivityItem = {
@@ -213,156 +273,149 @@ export function Chat({
               setActiveAgents(prev => Array.from(new Set([...prev, data.agent])));
             }
           } else if (data.type === 'interrupt') {
-            if (!data.session_id || data.session_id === conversationId) {
-              setWaitingAgent(data.agent || 'manager');
-              const interruptMsg: ChatMessage = {
-                id: data.interrupt_id || String(Date.now()),
-                role: 'assistant',
-                agent_name: data.agent || 'Workforce Coordinator',
-                content: data.message || '',
-                interrupt: {
-                  type: data.interrupt_type || 'approval',
-                  message: data.message || '',
-                  interrupt_id: data.interrupt_id
-                }
-              };
-              setMessages(prev => [...prev, interruptMsg]);
-            }
+            setWaitingAgent(data.agent || 'manager');
+            const interruptMsg: ChatMessage = {
+              id: data.interrupt_id || String(Date.now()),
+              role: 'assistant',
+              agent_name: data.agent || 'Workforce Coordinator',
+              content: data.message || '',
+              interrupt: {
+                type: data.interrupt_type || 'approval',
+                message: data.message || '',
+                interrupt_id: data.interrupt_id
+              }
+            };
+            setMessages(prev => [...prev, interruptMsg]);
           } else if (data.type === 'task_completed') {
-            if (!data.session_id || data.session_id === conversationId) {
-              setLoading(false);
-              setTaskStatus(data.success ? 'completed' : 'failed');
-              setActiveAgents([]);
-              setWaitingAgent(null);
-              setAgentStatus(null);
+            setLoading(false);
+            setTaskStatus(data.success ? 'completed' : 'failed');
+            setActiveAgents([]);
+            setWaitingAgent(null);
+            setAgentStatus(null);
 
-              if (conversationId) {
-                fetch(apiUrl(`/api/conversations/${conversationId}`))
-                  .then(res => res.json())
-                  .then(convData => {
-                    if (convData && convData.messages) {
-                      setMessages(convData.messages);
-                      if (convData.activities) setActivities(convData.activities);
-                    }
-                  })
-                  .catch(console.error);
-              } else {
-                const streamId = `streaming-${data.session_id || conversationId || 'active'}`;
-                if (data.success) {
-                  const finalContent = data.content;
-                  setMessages(prev => {
-                    const filtered = prev.filter(m => m.id !== streamId);
-                    if (finalContent) {
-                      const botMsg: ChatMessage = {
-                        id: String(Date.now()),
-                        role: 'assistant',
-                        agent_name: data.agent || 'Manager',
-                        content: finalContent,
-                        created_at: new Date().toISOString()
-                      };
-                      return [...filtered, botMsg];
-                    }
-                    return filtered;
-                  });
-                } else {
-                  const errorDetails = data.error_details || { message: data.error || 'Task failed.' };
-                  setMessages(prev => {
-                    const filtered = prev.filter(m => m.id !== streamId);
-                    const errorMsg: ChatMessage = {
+            const targetId = data.session_id || currentSession;
+            if (targetId) {
+              fetch(apiUrl(`/api/conversations/${targetId}`))
+                .then(res => res.json())
+                .then(convData => {
+                  if (convData && convData.messages) {
+                    setMessages(convData.messages);
+                    if (convData.activities) setActivities(convData.activities);
+                  }
+                })
+                .catch(console.error);
+            } else {
+              const streamId = `streaming-${data.session_id || currentSession || 'active'}`;
+              if (data.success) {
+                const finalContent = data.content;
+                setMessages(prev => {
+                  const filtered = prev.filter(m => m.id !== streamId);
+                  if (finalContent) {
+                    const botMsg: ChatMessage = {
                       id: String(Date.now()),
                       role: 'assistant',
-                      agent_name: data.agent || 'Workforce',
-                      content: '',
-                      created_at: new Date().toISOString(),
-                      metadata: {
-                        is_error: true,
-                        error: errorDetails
-                      }
+                      agent_name: data.agent || 'Manager',
+                      content: finalContent,
+                      created_at: new Date().toISOString()
                     };
-                    return [...filtered, errorMsg];
-                  });
-                }
-              }
-            }
-            onConversationUpdated();
-          } else if (data.type === 'command_result') {
-            if (!data.session_id || data.session_id === conversationId) {
-              setLoading(false);
-              setTaskStatus(data.success ? 'completed' : 'failed');
-              setActiveAgents([]);
-              setWaitingAgent(null);
-              setAgentStatus(null);
-
-              if (data.ui_action === 'clear_chat') {
-                setMessages([]);
-                setActivities([]);
-              } else if (data.ui_action === 'new_conversation') {
-                if (onNewConversation) onNewConversation();
-              } else if (data.ui_action === 'rename_conversation') {
-                onConversationUpdated();
-              } else if (data.ui_action === 'select_conversation' && data.data?.conversation_id) {
-                if (onSelectConversation) onSelectConversation(data.data.conversation_id);
-              }
-            }
-            onConversationUpdated();
-          } else if (data.type === 'task_stopped') {
-            if (!data.session_id || data.session_id === conversationId) {
-              setLoading(false);
-              setTaskStatus('interrupted');
-              setActiveAgents([]);
-              setWaitingAgent(null);
-              setAgentStatus(null);
-              showToast('Task execution stopped by user.', 'info');
-              if (conversationId) {
-                fetch(apiUrl(`/api/conversations/${conversationId}`))
-                  .then(res => res.json())
-                  .then(convData => {
-                    if (convData) {
-                      if (convData.messages) setMessages(convData.messages);
-                      if (convData.activities) setActivities(convData.activities);
-                    }
-                  })
-                  .catch(console.error);
-              }
-            }
-            onConversationUpdated();
-          } else if (data.type === 'error') {
-            if (!data.session_id || data.session_id === conversationId) {
-              setLoading(false);
-              setTaskStatus('failed');
-              setActiveAgents([]);
-              setWaitingAgent(null);
-              setAgentStatus(null);
-              const errMsg = data.message || 'Task encountered an error.';
-              showToast(errMsg, 'error');
-              if (conversationId) {
-                fetch(apiUrl(`/api/conversations/${conversationId}`))
-                  .then(res => res.json())
-                  .then(convData => {
-                    if (convData && convData.messages) {
-                      setMessages(convData.messages);
-                      if (convData.activities) setActivities(convData.activities);
-                    }
-                  })
-                  .catch(console.error);
+                    return [...filtered, botMsg];
+                  }
+                  return filtered;
+                });
               } else {
-                const streamId = `streaming-${data.session_id || conversationId || 'active'}`;
+                const errorDetails = data.error_details || { message: data.error || 'Task failed.' };
                 setMessages(prev => {
                   const filtered = prev.filter(m => m.id !== streamId);
                   const errorMsg: ChatMessage = {
                     id: String(Date.now()),
                     role: 'assistant',
-                    agent_name: 'Workforce',
+                    agent_name: data.agent || 'Workforce',
                     content: '',
                     created_at: new Date().toISOString(),
                     metadata: {
                       is_error: true,
-                      error: { message: errMsg, code: 'TASK_FAILED', retryable: true }
+                      error: errorDetails
                     }
                   };
                   return [...filtered, errorMsg];
                 });
               }
+            }
+            onConversationUpdated();
+          } else if (data.type === 'command_result') {
+            setLoading(false);
+            setTaskStatus(data.success ? 'completed' : 'failed');
+            setActiveAgents([]);
+            setWaitingAgent(null);
+            setAgentStatus(null);
+
+            if (data.ui_action === 'clear_chat') {
+              setMessages([]);
+              setActivities([]);
+            } else if (data.ui_action === 'new_conversation') {
+              if (onNewConversation) onNewConversation();
+            } else if (data.ui_action === 'rename_conversation') {
+              onConversationUpdated();
+            } else if (data.ui_action === 'select_conversation' && data.data?.conversation_id) {
+              if (onSelectConversation) onSelectConversation(data.data.conversation_id);
+            }
+            onConversationUpdated();
+          } else if (data.type === 'task_stopped') {
+            setLoading(false);
+            setTaskStatus('interrupted');
+            setActiveAgents([]);
+            setWaitingAgent(null);
+            setAgentStatus(null);
+            showToast('Task execution stopped by user.', 'info');
+            const targetId = data.session_id || currentSession;
+            if (targetId) {
+              fetch(apiUrl(`/api/conversations/${targetId}`))
+                .then(res => res.json())
+                .then(convData => {
+                  if (convData) {
+                    if (convData.messages) setMessages(convData.messages);
+                    if (convData.activities) setActivities(convData.activities);
+                  }
+                })
+                .catch(console.error);
+            }
+            onConversationUpdated();
+          } else if (data.type === 'error') {
+            setLoading(false);
+            setTaskStatus('failed');
+            setActiveAgents([]);
+            setWaitingAgent(null);
+            setAgentStatus(null);
+            const errMsg = data.message || 'Task encountered an error.';
+            showToast(errMsg, 'error');
+            const targetId = data.session_id || currentSession;
+            if (targetId) {
+              fetch(apiUrl(`/api/conversations/${targetId}`))
+                .then(res => res.json())
+                .then(convData => {
+                  if (convData && convData.messages) {
+                    setMessages(convData.messages);
+                    if (convData.activities) setActivities(convData.activities);
+                  }
+                })
+                .catch(console.error);
+            } else {
+              const streamId = `streaming-${data.session_id || currentSession || 'active'}`;
+              setMessages(prev => {
+                const filtered = prev.filter(m => m.id !== streamId);
+                const errorMsg: ChatMessage = {
+                  id: String(Date.now()),
+                  role: 'assistant',
+                  agent_name: data.agent || 'Workforce',
+                  content: '',
+                  created_at: new Date().toISOString(),
+                  metadata: {
+                    is_error: true,
+                    error: { message: errMsg, code: 'TASK_FAILED', retryable: true }
+                  }
+                };
+                return [...filtered, errorMsg];
+              });
             }
           }
         } catch (err) {
@@ -405,14 +458,50 @@ export function Chat({
         socketRef.current.close(1000);
       }
     };
-  }, [conversationId]);
+  }, []);
 
   // Scroll to bottom on new messages
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
   }, [messages, activities, loading]);
 
-  const handleSend = () => {
+  const handleSwitchTeam = async (newTeam: string) => {
+    fetch(apiUrl(`/api/teams/${encodeURIComponent(newTeam)}`))
+      .then(res => (res.ok ? res.json() : null))
+      .then(tData => {
+        if (tData) {
+          setTeamInfo(prev => ({
+            ...prev,
+            name: tData.name || newTeam,
+            agents: tData.agents || []
+          }));
+        } else {
+          setTeamInfo(prev => ({ ...prev, name: newTeam }));
+        }
+      })
+      .catch(console.error);
+
+    if (conversationId) {
+      try {
+        const res = await fetch(apiUrl(`/api/conversations/${conversationId}`), {
+          method: 'PATCH',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ team_name: newTeam })
+        });
+        if (!res.ok) {
+          const err = await res.json().catch(() => ({}));
+          showToast?.(err.detail || 'Failed to switch team', 'error');
+          return;
+        }
+        onConversationUpdated();
+        showToast?.(`Switched workforce to ${newTeam}`, 'success');
+      } catch (err: any) {
+        showToast?.(err.message || 'Error updating team', 'error');
+      }
+    }
+  };
+
+  const handleSend = async () => {
     if (!hasWorkspace) {
       if (onOpenWorkspaceModal) onOpenWorkspaceModal();
       return;
@@ -424,6 +513,8 @@ export function Chat({
 
     // Generate atomic session ID if in draft mode
     const activeId = conversationId || ('conv_' + Date.now().toString(36) + '_' + Math.random().toString(36).substring(2, 8));
+    activeSessionIdRef.current = activeId;
+    conversationIdRef.current = activeId;
 
     const cleanLine = userPrompt.split('\n')[0].trim().replace(/^[#*\-–—\d.\s]+/, '');
     const tempTitle = cleanLine.length > 45 ? cleanLine.slice(0, 42) + '...' : (cleanLine || 'New Task');
@@ -443,11 +534,29 @@ export function Chat({
       onSelectConversation(activeId, tempTitle);
     }
 
+    // Pre-persist user message immediately via HTTP to guarantee persistence in SQLite
+    // even if WebSocket disconnects or process is force-quit/restarted.
+    let userPrePersisted = false;
+    try {
+      const res = await fetch(apiUrl(`/api/conversations/${activeId}/messages`), {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ role: 'user', content: userPrompt })
+      });
+      if (res.ok) {
+        userPrePersisted = true;
+      }
+    } catch (e) {
+      console.warn('HTTP pre-persistence of user message failed, relying on WebSocket:', e);
+    }
+
     if (socketRef.current && socketRef.current.readyState === WebSocket.OPEN) {
       socketRef.current.send(JSON.stringify({
         type: 'run_task',
         content: userPrompt,
-        session_id: activeId
+        session_id: activeId,
+        team_name: teamInfo.name,
+        skip_save_user: userPrePersisted
       }));
     } else {
       setLoading(false);
@@ -469,9 +578,27 @@ export function Chat({
   };
 
   const handleStopTask = () => {
+    const targetConvId = activeSessionIdRef.current || conversationId || undefined;
+
+    // Dual-channel stop: send via WebSocket
     if (socketRef.current && socketRef.current.readyState === WebSocket.OPEN) {
-      socketRef.current.send(JSON.stringify({ type: 'stop', session_id: conversationId || undefined }));
+      socketRef.current.send(JSON.stringify({ type: 'stop', session_id: targetConvId }));
     }
+
+    // Dual-channel stop: also invoke HTTP POST /api/conversations/:id/stop
+    if (targetConvId) {
+      fetch(apiUrl(`/api/conversations/${targetConvId}/stop`), { method: 'POST' }).catch(err => {
+        console.warn('HTTP stop request failed:', err);
+      });
+    }
+
+    // Immediately reset UI state optimistically so user is never left stuck on "Working..."
+    setLoading(false);
+    setTaskStatus('interrupted');
+    setActiveAgents([]);
+    setWaitingAgent(null);
+    setAgentStatus(null);
+    showToast('Task execution stopped by user.', 'info');
   };
 
   const handleInterruptResponse = (response: string) => {
@@ -647,6 +774,8 @@ export function Chat({
         activeAgents={activeAgents}
         waitingAgent={waitingAgent}
         project={teamInfo.project}
+        availableTeams={availableTeams}
+        onSelectTeam={handleSwitchTeam}
       />
 
       {/* Reconnection Banner */}
