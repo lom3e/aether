@@ -406,6 +406,9 @@ def test_playwright_replay_and_workforce_health(tmp_path, monkeypatch):
             context = browser.new_context(viewport={"width": 1440, "height": 900}, locale="en-US")
             page = context.new_page()
             page.add_init_script("localStorage.setItem('aether_language', 'en');")
+            console_errors = []
+            page.on("pageerror", lambda err: console_errors.append(f"PAGEERROR: {err}"))
+            page.on("console", lambda msg: console_errors.append(f"CONSOLE: {msg.text}") if msg.type == "error" else None)
 
             # 1. Open UI
             page.goto("http://localhost:8995")
@@ -540,6 +543,10 @@ def test_playwright_replay_and_workforce_health(tmp_path, monkeypatch):
             # Screenshot 5: Per-Agent Health & Diagnostic Insights
             screenshot_agent = screenshots_dir / "slice9_per_agent_health.png"
             page.screenshot(path=str(screenshot_agent))
+
+            # Verify no runtime errors in browser console
+            severe_errors = [e for e in console_errors if "favicon" not in e.lower() and "status of 404" not in e.lower()]
+            assert len(severe_errors) == 0, f"Detected console/runtime errors: {severe_errors}"
 
             browser.close()
     finally:
