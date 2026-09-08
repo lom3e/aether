@@ -486,6 +486,27 @@ Before a mission transitions from `RUNNING` to `COMPLETED`:
    * **Rule 3: Structural Integrity:** Is the artifact valid (valid JSON, clean Markdown, non-empty)?
 3. If assertions fail, the Reviewer emits a `review_failed` event containing specific redlines. The task is reassigned to the producing agent for rework (maximum 2 automated reworks before halting for human intervention).
 
+### 3. Slice 5 Implementation Details (Completed)
+* **Reviewer Contract & Tool Restrictions (`src/aether/missions/reviewer.py`):**
+  - Read-only tools authorized: `["list_directory", "read_file", "search_knowledge"]`.
+  - Mutation tools strictly prohibited: `["write_file", "patch_file", "delete_file"]`.
+  - Reviewer agent identity dynamically resolved from team specs or defaulted to `"QualityGate Reviewer"`.
+* **Assertion Verification Engine (`QualityGateEvaluator`):**
+  - Rule 1: Requirement coverage verified against user objective constraints.
+  - Rule 2: Citation grounding and unhandled exception/traceback crash dump detection.
+  - Rule 3: Deterministic disk file existence, size verification (`> 0 bytes`), JSON syntax validation (`json.loads`), Python AST validation (`ast.parse`), and readable UTF-8 checks, augmented with provider LLM evaluation when configured.
+* **Automated Rework Loop (`src/aether/missions/runtime.py`):**
+  - Mission enters `ExecutionStatus.VERIFYING` after stage completion.
+  - Automatic rework dispatches to workforce team with reviewer redlines (capped at 2 attempts).
+  - Exceeding rework cap transitions to `ExecutionStatus.AWAITING_APPROVAL` with `pending_approval.type = "quality_gate_override"`.
+  - Manual override in `approve_gate` validates and completes deliverables as human-verified.
+* **Cockpit UI & Dossier (`ui/src/Missions.tsx`, `ui/src/i18n.tsx`):**
+  - Operational pulse and badges for `verifying` status.
+  - Quality Gate override card with reviewer name, quality score, and redline checklist.
+  - Deliverable verification pills (`verified`, `needs_revision`, `draft`).
+* **Test Verification (`tests/test_mission_quality_gate.py`):**
+  - Full suite covering persona contract, 3 assertion rules, pass flow, rework limit, override signoff, and rejection.
+
 ---
 
 ## J. Workforce Health Design

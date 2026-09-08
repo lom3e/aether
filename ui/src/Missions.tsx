@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useContext, useCallback, useMemo, useRef } from 'react';
 import {
   Target, Plus, CheckCircle, Circle, Play, AlertCircle, Trash2,
-  Users, Layers, Sparkles, X, RefreshCw, Pause,
+  Users, Layers, X, RefreshCw, Pause,
   Square, RotateCcw, FileText, MessageSquare, Check, ArrowLeft,
   Clock, ShieldAlert, ChevronRight, FileCode, Table, FolderArchive,
   Copy, Activity, Terminal, Workflow, User, ExternalLink, Download, FolderOpen,
@@ -48,7 +48,7 @@ interface Deliverable {
   type: 'document' | 'code' | 'data' | 'archive';
   size_bytes: number;
   sha256?: string | null;
-  status: 'verified' | 'draft' | 'final';
+  status: 'verified' | 'draft' | 'final' | 'needs_revision';
   metadata: Record<string, any>;
   created_at: string;
   updated_at?: string;
@@ -76,9 +76,15 @@ interface MissionExecution {
   recovery_state: string;
   pending_approval?: {
     id: string;
-    milestone_id: string;
-    milestone_title: string;
+    type?: string;
+    milestone_id?: string;
+    milestone_title?: string;
     prompt: string;
+    score?: number;
+    reviewer_agent?: string;
+    redlines?: string[];
+    feedback?: string;
+    rules?: Record<string, any>;
     requested_at: string;
   } | null;
   approval_history: any[];
@@ -670,8 +676,9 @@ export function Missions({ navigate, initialMissionId }: MissionsProps) {
         );
       case 'verifying':
         return (
-          <span className="badge badge-amber" style={{ display: 'inline-flex', alignItems: 'center', gap: '5px', fontWeight: 600 }}>
-            <Sparkles size={12} /> Verifying
+          <span className="badge badge-indigo" style={{ display: 'inline-flex', alignItems: 'center', gap: '5px', fontWeight: 600 }}>
+            <span style={{ width: '6px', height: '6px', borderRadius: '50%', backgroundColor: '#6366f1', display: 'inline-block' }} className="animate-pulse" />
+            {t('statusVerifying')}
           </span>
         );
       case 'awaiting_approval':
@@ -1147,6 +1154,25 @@ export function Missions({ navigate, initialMissionId }: MissionsProps) {
                     </>
                   )}
 
+                  {/* VERIFYING STATE */}
+                  {selectedMission.status === 'verifying' && (
+                    <div style={{
+                      display: 'flex',
+                      alignItems: 'center',
+                      gap: '6px',
+                      padding: '6px 14px',
+                      borderRadius: '8px',
+                      backgroundColor: 'rgba(99, 102, 241, 0.12)',
+                      border: '1px solid rgba(99, 102, 241, 0.3)',
+                      color: '#6366f1',
+                      fontSize: '13px',
+                      fontWeight: 600
+                    }}>
+                      <RefreshCw size={13} className="animate-spin" />
+                      <span>{t('statusVerifying')}...</span>
+                    </div>
+                  )}
+
                   {/* INTERRUPTED / PAUSED STATE */}
                   {selectedMission.status === 'interrupted' && (
                     <>
@@ -1278,6 +1304,8 @@ export function Missions({ navigate, initialMissionId }: MissionsProps) {
                 borderRadius: '10px',
                 border: selectedMission.status === 'running'
                   ? '1px solid hsl(var(--primary) / 0.4)'
+                  : selectedMission.status === 'verifying'
+                  ? '1px solid rgba(99, 102, 241, 0.4)'
                   : selectedMission.status === 'awaiting_approval'
                   ? '1px solid #f59e0b'
                   : selectedMission.status === 'completed'
@@ -1285,6 +1313,8 @@ export function Missions({ navigate, initialMissionId }: MissionsProps) {
                   : '1px solid hsl(var(--border))',
                 backgroundColor: selectedMission.status === 'running'
                   ? 'hsl(var(--primary) / 0.08)'
+                  : selectedMission.status === 'verifying'
+                  ? 'rgba(99, 102, 241, 0.08)'
                   : selectedMission.status === 'awaiting_approval'
                   ? 'rgba(245, 158, 11, 0.08)'
                   : selectedMission.status === 'completed'
@@ -1302,6 +1332,8 @@ export function Missions({ navigate, initialMissionId }: MissionsProps) {
                     borderRadius: '50%',
                     backgroundColor: selectedMission.status === 'running'
                       ? 'hsl(var(--primary))'
+                      : selectedMission.status === 'verifying'
+                      ? '#6366f1'
                       : selectedMission.status === 'awaiting_approval'
                       ? '#f59e0b'
                       : selectedMission.status === 'completed'
@@ -1310,6 +1342,7 @@ export function Missions({ navigate, initialMissionId }: MissionsProps) {
                   }} />
                   <div style={{ fontSize: '13px', fontWeight: 600, color: 'hsl(var(--fg))' }}>
                     {selectedMission.status === 'running' && t('operationalPulseRunning')}
+                    {selectedMission.status === 'verifying' && t('operationalPulseVerifying')}
                     {selectedMission.status === 'draft' && t('operationalPulseIdle')}
                     {selectedMission.status === 'interrupted' && t('operationalPulsePaused')}
                     {selectedMission.status === 'awaiting_approval' && t('operationalPulseApproval')}
@@ -1333,49 +1366,95 @@ export function Missions({ navigate, initialMissionId }: MissionsProps) {
               </div>
 
               {/* APPROVAL GATE BANNER (When Awaiting Signoff) */}
-              {selectedMission.status === 'awaiting_approval' && (
-                <div style={{
-                  padding: '16px 20px',
-                  borderRadius: '12px',
-                  border: '1px solid #f59e0b',
-                  backgroundColor: 'rgba(245, 158, 11, 0.08)',
-                  display: 'flex',
-                  flexDirection: 'column',
-                  gap: '12px'
-                }}>
-                  <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: '10px' }}>
-                    <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-                      <ShieldAlert size={18} className="text-amber-500" />
-                      <span style={{ fontSize: '13px', fontWeight: 700, color: '#f59e0b', textTransform: 'uppercase', letterSpacing: '0.05em' }}>
-                        {t('gateApprovalRequired')}
-                      </span>
+              {selectedMission.status === 'awaiting_approval' && (() => {
+                const activeExec = executions.find(e => e.id === selectedExecutionId);
+                const pending = activeExec?.pending_approval;
+                const isQualityGateOverride = pending?.type === 'quality_gate_override';
+                const redlines = (pending?.redlines as string[]) || [];
+
+                return (
+                  <div style={{
+                    padding: '16px 20px',
+                    borderRadius: '12px',
+                    border: '1px solid #f59e0b',
+                    backgroundColor: 'rgba(245, 158, 11, 0.08)',
+                    display: 'flex',
+                    flexDirection: 'column',
+                    gap: '12px'
+                  }}>
+                    <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: '10px' }}>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap' }}>
+                        <ShieldAlert size={18} className="text-amber-500" />
+                        <span style={{ fontSize: '13px', fontWeight: 700, color: '#f59e0b', textTransform: 'uppercase', letterSpacing: '0.05em' }}>
+                          {isQualityGateOverride ? t('qualityGateApprovalTitle') : t('gateApprovalRequired')}
+                        </span>
+                        {isQualityGateOverride && pending?.score !== undefined && (
+                          <span style={{
+                            fontSize: '11px',
+                            padding: '2px 8px',
+                            borderRadius: '6px',
+                            backgroundColor: 'rgba(245, 158, 11, 0.2)',
+                            color: '#b45309',
+                            fontWeight: 600
+                          }}>
+                            {t('qualityGateScore')}: {pending.score}/100
+                          </span>
+                        )}
+                        {isQualityGateOverride && pending?.reviewer_agent && (
+                          <span style={{ fontSize: '12px', color: 'hsl(var(--muted-fg))' }}>
+                            · {t('qualityGateReviewer')}: <strong>{pending.reviewer_agent}</strong>
+                          </span>
+                        )}
+                      </div>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                        <button
+                          onClick={() => handleMissionAction(t('approveMission'), 'approve')}
+                          disabled={actionLoading === 'approve'}
+                          className="btn btn-sm btn-primary"
+                          style={{ display: 'flex', alignItems: 'center', gap: '5px', backgroundColor: '#10b981', borderColor: '#10b981' }}
+                        >
+                          <Check size={14} />
+                          <span>{actionLoading === 'approve' ? 'Approving...' : (isQualityGateOverride ? t('acceptDeliverables') : t('approveAndProceed'))}</span>
+                        </button>
+                        <button
+                          onClick={() => handleMissionAction(t('rejectMission'), 'reject')}
+                          disabled={actionLoading === 'reject'}
+                          className="btn btn-sm btn-ghost text-rose-500 hover:bg-rose-500/10"
+                          style={{ display: 'flex', alignItems: 'center', gap: '5px' }}
+                        >
+                          <X size={14} />
+                          <span>{actionLoading === 'reject' ? 'Rejecting...' : t('rejectChanges')}</span>
+                        </button>
+                      </div>
                     </div>
-                    <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-                      <button
-                        onClick={() => handleMissionAction(t('approveMission'), 'approve')}
-                        disabled={actionLoading === 'approve'}
-                        className="btn btn-sm btn-primary"
-                        style={{ display: 'flex', alignItems: 'center', gap: '5px', backgroundColor: '#10b981', borderColor: '#10b981' }}
-                      >
-                        <Check size={14} />
-                        <span>{actionLoading === 'approve' ? 'Approving...' : t('approveAndProceed')}</span>
-                      </button>
-                      <button
-                        onClick={() => handleMissionAction(t('rejectMission'), 'reject')}
-                        disabled={actionLoading === 'reject'}
-                        className="btn btn-sm btn-ghost text-rose-500 hover:bg-rose-500/10"
-                        style={{ display: 'flex', alignItems: 'center', gap: '5px' }}
-                      >
-                        <X size={14} />
-                        <span>{actionLoading === 'reject' ? 'Rejecting...' : t('rejectChanges')}</span>
-                      </button>
-                    </div>
+
+                    <p style={{ margin: 0, fontSize: '13px', color: 'hsl(var(--fg))', lineHeight: 1.5 }}>
+                      {pending?.prompt || t('operationalPulseApproval')}
+                    </p>
+
+                    {isQualityGateOverride && redlines.length > 0 && (
+                      <div style={{
+                        padding: '10px 14px',
+                        borderRadius: '8px',
+                        backgroundColor: 'hsl(var(--card))',
+                        border: '1px solid rgba(245, 158, 11, 0.3)',
+                        display: 'flex',
+                        flexDirection: 'column',
+                        gap: '6px'
+                      }}>
+                        <div style={{ fontSize: '12px', fontWeight: 600, color: 'hsl(var(--fg))' }}>
+                          {t('qualityGateRedlines')}:
+                        </div>
+                        <ul style={{ margin: 0, paddingLeft: '18px', fontSize: '12px', color: 'hsl(var(--muted-fg))' }}>
+                          {redlines.map((r, idx) => (
+                            <li key={idx} style={{ marginBottom: '3px' }}>{r}</li>
+                          ))}
+                        </ul>
+                      </div>
+                    )}
                   </div>
-                  <p style={{ margin: 0, fontSize: '13px', color: 'hsl(var(--fg))', lineHeight: 1.5 }}>
-                    {executions.find(e => e.id === selectedExecutionId)?.pending_approval?.prompt || t('operationalPulseApproval')}
-                  </p>
-                </div>
-              )}
+                );
+              })()}
 
               {/* 2. OBIETTIVO (Objective) */}
               <div style={{
@@ -1957,16 +2036,48 @@ export function Missions({ navigate, initialMissionId }: MissionsProps) {
                                   {del.name}
                                 </span>
                                 {del.status === 'verified' && (
+                                  <span
+                                    title={del.metadata?.reviewer_agent ? `${t('qualityGateReviewer')}: ${del.metadata.reviewer_agent}${del.metadata?.quality_score ? ` (${del.metadata.quality_score}/100)` : ''}` : t('deliverableStatusVerified')}
+                                    style={{
+                                      fontSize: '10px',
+                                      padding: '1px 6px',
+                                      borderRadius: '4px',
+                                      backgroundColor: 'rgba(16, 185, 129, 0.15)',
+                                      color: '#10b981',
+                                      fontWeight: 600,
+                                      textTransform: 'uppercase'
+                                    }}
+                                  >
+                                    {t('deliverableStatusVerified')}
+                                  </span>
+                                )}
+                                {del.status === 'needs_revision' && (
+                                  <span
+                                    title={del.metadata?.redlines?.length ? (del.metadata.redlines as string[]).join('; ') : t('deliverableStatusNeedsRevision')}
+                                    style={{
+                                      fontSize: '10px',
+                                      padding: '1px 6px',
+                                      borderRadius: '4px',
+                                      backgroundColor: 'rgba(239, 68, 68, 0.15)',
+                                      color: '#ef4444',
+                                      fontWeight: 600,
+                                      textTransform: 'uppercase'
+                                    }}
+                                  >
+                                    {t('deliverableStatusNeedsRevision')}
+                                  </span>
+                                )}
+                                {(del.status === 'draft' || !del.status) && (
                                   <span style={{
                                     fontSize: '10px',
                                     padding: '1px 6px',
                                     borderRadius: '4px',
-                                    backgroundColor: 'rgba(16, 185, 129, 0.15)',
-                                    color: '#10b981',
+                                    backgroundColor: 'hsl(var(--muted))',
+                                    color: 'hsl(var(--muted-fg))',
                                     fontWeight: 600,
                                     textTransform: 'uppercase'
                                   }}>
-                                    {del.status}
+                                    {t('deliverableStatusDraft')}
                                   </span>
                                 )}
                               </div>

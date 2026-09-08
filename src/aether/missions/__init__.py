@@ -16,6 +16,7 @@ from aether.missions.models import (
     MissionGraph,
     MissionStatus,
 )
+from aether.missions.reviewer import QualityGateEvaluation, QualityGateEvaluator, QualityGateRuleResult
 from aether.missions.runtime import ConflictError, MissionRuntime, NotFoundError
 from aether.missions.store import MissionStore
 
@@ -36,4 +37,7 @@ __all__ = [
     "MissionRuntime",
     "ConflictError",
     "NotFoundError",
+    "QualityGateEvaluation",
+    "QualityGateEvaluator",
+    "QualityGateRuleResult",
 ]

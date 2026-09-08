@@ -1383,6 +1383,26 @@ class MissionStore:
                 updated_at=r["updated_at"],
             )
 
+    def update_deliverable_status(
+        self,
+        deliverable_id: str,
+        status: str,
+        metadata_update: dict[str, Any] | None = None,
+    ) -> Deliverable | None:
+        """
+        Updates the verification status and metadata of an existing deliverable.
+        """
+        deliv = self.get_deliverable(deliverable_id)
+        if not deliv:
+            return None
+        deliv.status = status
+        if metadata_update:
+            deliv.metadata = dict(deliv.metadata or {})
+            deliv.metadata.update(metadata_update)
+        deliv.updated_at = datetime.now(timezone.utc).isoformat()
+        self.add_deliverable(deliv.mission_id, deliv)
+        return deliv
+
     # ---------------------------------------------------------------------------
     # Execution Lifecycle & Lease Management
     # ---------------------------------------------------------------------------

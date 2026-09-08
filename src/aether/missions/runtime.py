@@ -30,6 +30,7 @@ from aether.missions.models import (
     MissionExecution,
     MissionStatus,
 )
+from aether.missions.reviewer import QualityGateEvaluation, QualityGateEvaluator
 from aether.missions.store import MissionStore
 from aether.workspace.workspace import Workspace
 
@@ -67,16 +68,19 @@ class MissionRuntime:
       - Boundary-safe pause and cancellation via cooperative tokens.
       - Automatic file deliverable harvesting with SHA-256 and lineage.
       - Truthful state: execution only reported running when worker lease is active.
+      - Reviewer contract and automated Quality Gate verification loop.
     """
 
     def __init__(
         self,
         workspace: Workspace,
         broadcaster: Callable[[dict[str, Any]], None] | None = None,
+        evaluator: QualityGateEvaluator | None = None,
     ) -> None:
         self.workspace = workspace
         self.store: MissionStore = workspace.missions
         self.broadcaster = broadcaster
+        self.evaluator = evaluator or QualityGateEvaluator()
         self._active_executions: dict[str, MissionExecutionHandle] = {}
         self._lock = asyncio.Lock()
         self._instance_id = f"{socket.gethostname()}:{os.getpid()}:{uuid.uuid4().hex[:8]}"
@@ -343,6 +347,53 @@ class MissionRuntime:
                 "notes": notes,
                 "responded_at": now,
             })
+
+            if pending.get("type") == "quality_gate_override":
+                deliverables = self.store.list_deliverables(mission_id)
+                for d in deliverables:
+                    if d.execution_id == active.id or not d.execution_id:
+                        d.status = "verified"
+                        d.metadata = dict(d.metadata or {})
+                        d.metadata["human_override"] = True
+                        d.metadata["approved_by"] = "User"
+                        if notes:
+                            d.metadata["approval_notes"] = notes
+                        self.store.add_deliverable(mission_id, d)
+
+                terminal_states = [em.to_dict() for em in self.store.get_execution_milestones(active.id)]
+                try:
+                    start_ts = datetime.fromisoformat(active.started_at).timestamp() if active.started_at else time.time()
+                except Exception:
+                    start_ts = time.time()
+                total_duration = max(0.0, time.time() - start_ts)
+
+                updated = self.store.update_execution(
+                    active.id,
+                    status=ExecutionStatus.COMPLETED,
+                    completed_at=now,
+                    duration_seconds=total_duration,
+                    current_milestone_id=None,
+                    pending_approval=None,
+                    approval_history=history,
+                    milestone_states=terminal_states,
+                )
+                self.store.update_mission(mission_id, status=MissionStatus.COMPLETED)
+                self.store.release_execution_lease(active.id)
+
+                self._log_activity(
+                    mission_id=mission_id,
+                    agent="User",
+                    activity_type="mission_completed",
+                    message=f"Quality Gate manual override approved by user. Mission completed.{' Notes: ' + notes if notes else ''}",
+                    metadata={"execution_id": active.id, "approval_id": target_id, "notes": notes},
+                )
+                self._broadcast({
+                    "type": "mission_completed",
+                    "mission_id": mission_id,
+                    "execution_id": active.id,
+                    "duration_seconds": total_duration,
+                })
+                return updated or active
 
             self.store.update_execution(
                 active.id,
@@ -738,6 +789,219 @@ class MissionRuntime:
                     })
                     return
 
+            # Transition to Quality Gate Verification
+            self.store.update_execution(exec_id, status=ExecutionStatus.VERIFYING)
+            self.store.update_mission(mid, status=MissionStatus.VERIFYING)
+            self._log_activity(
+                mission_id=mid,
+                agent="QualityGate Reviewer",
+                activity_type="quality_gate_started",
+                message="Beginning Quality Gate verification across deliverables and outputs.",
+                metadata={"execution_id": exec_id},
+            )
+            self._broadcast({
+                "type": "quality_gate_started",
+                "mission_id": mid,
+                "execution_id": exec_id,
+            })
+
+            all_delivs = self.store.list_deliverables(mid)
+            exec_deliverables = [d for d in all_delivs if d.execution_id == exec_id] or all_delivs
+
+            curr_exec = self.store.get_execution(exec_id)
+            rework_attempts = int(((curr_exec.metadata if curr_exec else {}) or {}).get("rework_attempts", 0))
+            max_rework_attempts = 2
+
+            while True:
+                if handle.cancellation_token.is_set():
+                    self._handle_interrupted(exec_id, mid)
+                    return
+
+                eval_result: QualityGateEvaluation = await self.evaluator.evaluate(
+                    mission_title=mission.title,
+                    mission_objective=mission.objective,
+                    deliverables=exec_deliverables,
+                    completed_context=completed_context,
+                    team=team,
+                    workspace=self.workspace,
+                )
+
+                if eval_result.passed:
+                    now_verified = datetime.now(timezone.utc).isoformat()
+                    for d in exec_deliverables:
+                        d.status = "verified"
+                        d.metadata = dict(d.metadata or {})
+                        d.metadata.update({
+                            "quality_score": eval_result.score,
+                            "reviewer_agent": eval_result.reviewer_agent,
+                            "rules": {k: v.to_dict() for k, v in eval_result.rules.items()},
+                            "verified_at": now_verified,
+                        })
+                        self.store.add_deliverable(mid, d)
+
+                    self._log_activity(
+                        mission_id=mid,
+                        agent=eval_result.reviewer_agent,
+                        activity_type="quality_gate_passed",
+                        message=f"Quality Gate PASSED (Score: {eval_result.score}/100). {eval_result.feedback}",
+                        metadata={"execution_id": exec_id, "evaluation": eval_result.to_dict()},
+                    )
+                    self._broadcast({
+                        "type": "quality_gate_passed",
+                        "mission_id": mid,
+                        "execution_id": exec_id,
+                        "evaluation": eval_result.to_dict(),
+                    })
+                    break  # Success! Proceed to mission completion
+                else:
+                    # Quality gate rejected
+                    for d in exec_deliverables:
+                        d.status = "needs_revision"
+                        d.metadata = dict(d.metadata or {})
+                        d.metadata.update({
+                            "quality_score": eval_result.score,
+                            "reviewer_agent": eval_result.reviewer_agent,
+                            "redlines": eval_result.redlines,
+                            "rules": {k: v.to_dict() for k, v in eval_result.rules.items()},
+                        })
+                        self.store.add_deliverable(mid, d)
+
+                    self._log_activity(
+                        mission_id=mid,
+                        agent=eval_result.reviewer_agent,
+                        activity_type="quality_gate_rejected",
+                        message=f"Quality Gate REJECTED (Score: {eval_result.score}/100): {eval_result.feedback}",
+                        metadata={
+                            "execution_id": exec_id,
+                            "rework_attempt": rework_attempts,
+                            "evaluation": eval_result.to_dict(),
+                        },
+                    )
+                    self._broadcast({
+                        "type": "quality_gate_rejected",
+                        "mission_id": mid,
+                        "execution_id": exec_id,
+                        "evaluation": eval_result.to_dict(),
+                    })
+
+                    if rework_attempts < max_rework_attempts:
+                        rework_attempts += 1
+                        c_exec = self.store.get_execution(exec_id)
+                        meta = dict(c_exec.metadata or {}) if c_exec else {}
+                        meta["rework_attempts"] = rework_attempts
+                        meta["last_quality_gate"] = eval_result.to_dict()
+
+                        self.store.update_execution(exec_id, status=ExecutionStatus.RUNNING, metadata=meta)
+                        self.store.update_mission(mid, status=MissionStatus.RUNNING)
+
+                        redlines_summary = "\n".join(f"- {r}" for r in eval_result.redlines) or "Fix identified quality issues."
+                        rework_instruction = (
+                            f"MISSION REWORK REQUIRED (Cycle {rework_attempts}/{max_rework_attempts})\n"
+                            f"MISSION: {mission.title}\n"
+                            f"OBJECTIVE: {mission.objective}\n\n"
+                            f"REVIEWER: {eval_result.reviewer_agent}\n"
+                            f"VERIFICATION FEEDBACK: {eval_result.feedback}\n\n"
+                            f"REQUIRED REDLINES & CORRECTIONS:\n{redlines_summary}\n\n"
+                            f"Please correct the deliverables, address redlines, and generate valid verified output."
+                        )
+
+                        self._log_activity(
+                            mission_id=mid,
+                            agent="Workforce Lead",
+                            activity_type="rework_dispatched",
+                            message=f"Dispatching automated rework cycle ({rework_attempts}/{max_rework_attempts}).",
+                            metadata={
+                                "execution_id": exec_id,
+                                "rework_attempt": rework_attempts,
+                                "redlines": eval_result.redlines,
+                            },
+                        )
+                        self._broadcast({
+                            "type": "rework_dispatched",
+                            "mission_id": mid,
+                            "execution_id": exec_id,
+                            "rework_attempt": rework_attempts,
+                        })
+
+                        created_files.clear()
+                        def _run_rework():
+                            try:
+                                return team.run(
+                                    rework_instruction,
+                                    session_id=mid,
+                                    cancellation_token=handle.cancellation_token,
+                                )
+                            except TypeError:
+                                return team.run(rework_instruction, session_id=mid)
+
+                        rework_res = await asyncio.to_thread(_run_rework)
+                        if handle.cancellation_token.is_set() or (
+                            rework_res and getattr(rework_res, "status", None) and getattr(rework_res.status, "value", None) == "interrupted"
+                        ):
+                            self._handle_interrupted(exec_id, mid)
+                            return
+
+                        last_m_id = exec_milestones[-1].milestone_id if exec_milestones else "rework"
+                        self._harvest_deliverables(mid, exec_id, last_m_id, created_files)
+                        all_delivs = self.store.list_deliverables(mid)
+                        exec_deliverables = [d for d in all_delivs if d.execution_id == exec_id] or all_delivs
+                        if rework_res and rework_res.output:
+                            completed_context.append(f"Rework Cycle {rework_attempts}: {rework_res.output[:300]}")
+
+                        self.store.update_execution(exec_id, status=ExecutionStatus.VERIFYING)
+                        self.store.update_mission(mid, status=MissionStatus.VERIFYING)
+                        continue
+                    else:
+                        # Reached maximum automated rework cycles -> Request Human Override
+                        c_exec = self.store.get_execution(exec_id)
+                        meta = dict(c_exec.metadata or {}) if c_exec else {}
+                        meta["rework_attempts"] = rework_attempts
+                        meta["last_quality_gate"] = eval_result.to_dict()
+
+                        override_prompt = (
+                            f"Quality Gate failed after {rework_attempts} automated rework cycles (Score: {eval_result.score}/100). "
+                            f"Reviewer: {eval_result.reviewer_agent}. "
+                            f"Findings: {'; '.join(eval_result.redlines) if eval_result.redlines else eval_result.feedback}"
+                        )
+                        override_approval = {
+                            "id": f"appr_qg_{uuid.uuid4().hex[:8]}",
+                            "type": "quality_gate_override",
+                            "score": eval_result.score,
+                            "reviewer_agent": eval_result.reviewer_agent,
+                            "prompt": override_prompt,
+                            "redlines": eval_result.redlines,
+                            "feedback": eval_result.feedback,
+                            "rules": {k: v.to_dict() for k, v in eval_result.rules.items()},
+                            "requested_at": datetime.now(timezone.utc).isoformat(),
+                        }
+
+                        self.store.update_execution(
+                            exec_id,
+                            status=ExecutionStatus.AWAITING_APPROVAL,
+                            pending_approval=override_approval,
+                            metadata=meta,
+                        )
+                        self.store.update_mission(mid, status=MissionStatus.AWAITING_APPROVAL)
+
+                        self._log_activity(
+                            mission_id=mid,
+                            agent="System",
+                            activity_type="approval_requested",
+                            message=override_prompt,
+                            metadata={
+                                "execution_id": exec_id,
+                                "approval_id": override_approval["id"],
+                                "type": "quality_gate_override",
+                            },
+                        )
+                        self._broadcast({
+                            "type": "approval_requested",
+                            "mission_id": mid,
+                            "execution_id": exec_id,
+                            "approval": override_approval,
+                        })
+                        return
+
             now_finish = datetime.now(timezone.utc).isoformat()
             total_duration = time.time() - handle.started_at
 
@@ -867,7 +1131,7 @@ class MissionRuntime:
                     type=ftype,
                     size_bytes=size_bytes,
                     sha256=sha256_hash,
-                    status="verified",
+                    status="draft",
                     metadata={"harvested_from_action": fe.get("action", "created")},
                 )
                 self.store.add_deliverable(mission_id, deliv)
