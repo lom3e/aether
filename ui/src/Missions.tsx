@@ -1439,11 +1439,11 @@ export function Missions({ navigate, initialMissionId }: MissionsProps) {
                 </div>
 
                 {currentTeam ? (
-                  <div style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
                     {/* Responsabile (Lead) */}
                     {missionLead && (
                       <div style={{
-                        padding: '12px 14px',
+                        padding: '10px 14px',
                         borderRadius: '8px',
                         backgroundColor: 'hsl(var(--bg))',
                         border: '1px solid hsl(var(--border))',
@@ -1454,38 +1454,26 @@ export function Missions({ navigate, initialMissionId }: MissionsProps) {
                       }}>
                         <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
                           <div style={{
-                            width: '32px',
-                            height: '32px',
-                            borderRadius: '8px',
+                            width: '28px',
+                            height: '28px',
+                            borderRadius: '6px',
                             backgroundColor: 'hsl(var(--primary) / 0.15)',
                             color: 'hsl(var(--primary))',
                             display: 'flex',
                             alignItems: 'center',
                             justifyContent: 'center',
                             fontWeight: 700,
-                            fontSize: '13px'
+                            fontSize: '12px',
+                            flexShrink: 0
                           }}>
                             {missionLead.name.slice(0, 1).toUpperCase()}
                           </div>
                           <div>
-                            <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
-                              <span style={{ fontSize: '13px', fontWeight: 600, color: 'hsl(var(--fg))' }}>
-                                {missionLead.name}
-                              </span>
-                              <span style={{
-                                fontSize: '10px',
-                                textTransform: 'uppercase',
-                                fontWeight: 700,
-                                padding: '1px 6px',
-                                borderRadius: '4px',
-                                backgroundColor: 'hsl(var(--primary) / 0.2)',
-                                color: 'hsl(var(--primary))'
-                              }}>
-                                {t('workforceOwner')}
-                              </span>
+                            <div style={{ fontSize: '11px', textTransform: 'uppercase', fontWeight: 600, color: 'hsl(var(--muted-fg))', letterSpacing: '0.04em' }}>
+                              {t('workforceOwner')}
                             </div>
-                            <div style={{ fontSize: '12px', color: 'hsl(var(--muted-fg))', marginTop: '2px' }}>
-                              {missionLead.role}
+                            <div style={{ fontSize: '13px', fontWeight: 600, color: 'hsl(var(--fg))' }}>
+                              {missionLead.name}
                             </div>
                           </div>
                         </div>
@@ -1493,7 +1481,7 @@ export function Missions({ navigate, initialMissionId }: MissionsProps) {
                         <button
                           onClick={() => setSelectedSpecialistForPopover(missionLead)}
                           className="btn btn-ghost"
-                          style={{ fontSize: '12px', padding: '4px 10px' }}
+                          style={{ fontSize: '12px', padding: '3px 10px' }}
                         >
                           {t('viewDetails')}
                         </button>
@@ -1502,61 +1490,39 @@ export function Missions({ navigate, initialMissionId }: MissionsProps) {
 
                     {/* Specialisti (Specialists) */}
                     {assignedSpecialists.length > 0 && (
-                      <div>
-                        <div style={{ fontSize: '11px', fontWeight: 600, color: 'hsl(var(--muted-fg))', textTransform: 'uppercase', letterSpacing: '0.05em', marginBottom: '8px' }}>
-                          {t('workforceSpecialists')} ({assignedSpecialists.length})
-                        </div>
-                        <div style={{ display: 'flex', flexWrap: 'wrap', gap: '8px' }}>
-                          {assignedSpecialists.map((agent, idx) => (
-                            <div
-                              key={idx}
-                              style={{
-                                display: 'flex',
-                                alignItems: 'center',
-                                gap: '10px',
-                                padding: '8px 12px',
-                                borderRadius: '8px',
-                                backgroundColor: 'hsl(var(--bg))',
-                                border: '1px solid hsl(var(--border))',
-                                flex: '1 1 calc(50% - 8px)',
-                                minWidth: '220px',
-                                justifyContent: 'space-between'
-                              }}
-                            >
-                              <div style={{ display: 'flex', alignItems: 'center', gap: '8px', minWidth: 0 }}>
-                                <div style={{
-                                  width: '24px',
-                                  height: '24px',
-                                  borderRadius: '50%',
-                                  backgroundColor: 'hsl(var(--muted))',
-                                  display: 'flex',
-                                  alignItems: 'center',
-                                  justifyContent: 'center',
-                                  fontSize: '11px',
-                                  fontWeight: 600,
-                                  color: 'hsl(var(--fg))',
-                                  flexShrink: 0
-                                }}>
-                                  {agent.name.slice(0, 1).toUpperCase()}
-                                </div>
-                                <div style={{ minWidth: 0 }}>
-                                  <div style={{ fontSize: '12.5px', fontWeight: 600, color: 'hsl(var(--fg))', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                                    {agent.name}
-                                  </div>
-                                  <div style={{ fontSize: '11px', color: 'hsl(var(--muted-fg))', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                                    {agent.role}
-                                  </div>
-                                </div>
-                              </div>
-                              <button
-                                onClick={() => setSelectedSpecialistForPopover(agent)}
-                                className="btn btn-ghost"
-                                style={{ fontSize: '11px', padding: '2px 8px', flexShrink: 0 }}
-                              >
-                                {t('viewDetails')}
-                              </button>
-                            </div>
-                          ))}
+                      <div style={{
+                        padding: '10px 14px',
+                        borderRadius: '8px',
+                        backgroundColor: 'hsl(var(--bg))',
+                        border: '1px solid hsl(var(--border))',
+                        display: 'flex',
+                        alignItems: 'center',
+                        justifyContent: 'space-between',
+                        gap: '12px',
+                        flexWrap: 'wrap'
+                      }}>
+                        <div style={{ display: 'flex', flexDirection: 'column', gap: '4px' }}>
+                          <div style={{ fontSize: '11px', textTransform: 'uppercase', fontWeight: 600, color: 'hsl(var(--muted-fg))', letterSpacing: '0.04em' }}>
+                            {t('workforceSpecialists')}
+                          </div>
+                          <div style={{ display: 'flex', alignItems: 'center', flexWrap: 'wrap', gap: '6px' }}>
+                            {assignedSpecialists.map((agent, idx) => (
+                              <span key={agent.name} style={{ display: 'inline-flex', alignItems: 'center', gap: '4px' }}>
+                                {idx > 0 && <span style={{ color: 'hsl(var(--muted-fg))', margin: '0 2px' }}>·</span>}
+                                <span style={{ fontSize: '13px', fontWeight: 600, color: 'hsl(var(--fg))' }}>
+                                  {agent.name}
+                                </span>
+                                <button
+                                  onClick={() => setSelectedSpecialistForPopover(agent)}
+                                  className="btn btn-ghost"
+                                  style={{ fontSize: '11px', padding: '1px 6px', height: '20px', lineHeight: '1' }}
+                                  title={`${agent.name} - ${t('viewDetails')}`}
+                                >
+                                  {t('viewDetails')}
+                                </button>
+                              </span>
+                            ))}
+                          </div>
                         </div>
                       </div>
                     )}
@@ -1614,39 +1580,22 @@ export function Missions({ navigate, initialMissionId }: MissionsProps) {
                         {t('stagePipeline')}
                       </h3>
                     </div>
-                    <span style={{ fontSize: '12px', color: 'hsl(var(--muted-fg))', marginTop: '2px', display: 'block' }}>
-                      {pipelineStats.completed} {t('ofMilestones')} {selectedMission.milestones.length} {t('completedCount')}
+                    <span style={{ fontSize: '12px', color: 'hsl(var(--muted-fg))', marginTop: '2px', display: 'flex', alignItems: 'center', gap: '5px' }}>
+                      {pipelineStats.completed > 0 && <Check size={13} className="text-emerald-500" />}
+                      <span>
+                        {pipelineStats.completed} {t('ofMilestones')} {selectedMission.milestones.length} {pipelineStats.completed === 1 ? t('completedCountSingular') : t('completedCount')}
+                      </span>
                     </span>
                   </div>
 
-                  {/* Pipeline Overview Status Bar */}
-                  <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap' }}>
-                    <span style={{ fontSize: '11px', padding: '2px 8px', borderRadius: '12px', backgroundColor: 'rgba(16, 185, 129, 0.12)', color: '#10b981', fontWeight: 600 }}>
-                      {pipelineStats.completed} {t('pipelineCompleted')}
-                    </span>
-                    {pipelineStats.running > 0 && (
-                      <span style={{ fontSize: '11px', padding: '2px 8px', borderRadius: '12px', backgroundColor: 'hsl(var(--primary) / 0.15)', color: 'hsl(var(--primary))', fontWeight: 600 }}>
-                        {pipelineStats.running} {t('pipelineRunning')}
-                      </span>
-                    )}
-                    {pipelineStats.blocked > 0 && (
-                      <span style={{ fontSize: '11px', padding: '2px 8px', borderRadius: '12px', backgroundColor: 'rgba(239, 68, 68, 0.12)', color: '#ef4444', fontWeight: 600 }}>
-                        {pipelineStats.blocked} {t('pipelineBlocked')}
-                      </span>
-                    )}
-                    <span style={{ fontSize: '11px', padding: '2px 8px', borderRadius: '12px', backgroundColor: 'hsl(var(--muted))', color: 'hsl(var(--muted-fg))', fontWeight: 500 }}>
-                      {pipelineStats.pending} {t('pipelinePending')}
-                    </span>
-
-                    <button
-                      onClick={() => setIsAddingMilestone(!isAddingMilestone)}
-                      className="btn btn-ghost"
-                      style={{ fontSize: '12px', display: 'flex', alignItems: 'center', gap: '5px', padding: '4px 10px', marginLeft: '4px' }}
-                    >
-                      <Plus size={14} />
-                      <span>{t('addStep')}</span>
-                    </button>
-                  </div>
+                  <button
+                    onClick={() => setIsAddingMilestone(!isAddingMilestone)}
+                    className="btn btn-ghost"
+                    style={{ fontSize: '12px', display: 'flex', alignItems: 'center', gap: '5px', padding: '4px 10px' }}
+                  >
+                    <Plus size={14} />
+                    <span>{t('addStep')}</span>
+                  </button>
                 </div>
 
                 {/* Inline Milestone Creation Form */}

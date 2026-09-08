@@ -63,7 +63,9 @@ class MissionStore:
                     team_name TEXT DEFAULT NULL,
                     status TEXT NOT NULL DEFAULT 'active',
                     created_at TEXT NOT NULL,
-                    updated_at TEXT NOT NULL
+                    updated_at TEXT NOT NULL,
+                    last_message TEXT DEFAULT '',
+                    agents TEXT DEFAULT '[]'
                 )
                 """
             )

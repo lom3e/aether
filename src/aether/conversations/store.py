@@ -127,6 +127,14 @@ class ConversationStore:
 
             # Backward-compatibility schema migrations
             try:
+                conn.execute("ALTER TABLE conversations ADD COLUMN last_message TEXT DEFAULT ''")
+            except Exception:
+                pass
+            try:
+                conn.execute("ALTER TABLE conversations ADD COLUMN agents TEXT DEFAULT '[]'")
+            except Exception:
+                pass
+            try:
                 conn.execute("ALTER TABLE conversations ADD COLUMN unread INTEGER DEFAULT 0")
             except Exception:
                 pass
