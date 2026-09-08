@@ -1,3 +1,18 @@
+"""
+MemoryManager — Orchestrates Short-Term (Conversation), Semantic, and Workforce Intelligence (Phase B).
+
+Context Injection Policy (Phase B Slice 1, Optimized):
+  - Retrieval is RELEVANCE-GATED: memories below MIN_RELEVANCE_SCORE are silently discarded.
+  - Default TOP-K: at most CONTEXT_MAX_MEMORIES (3) memories per task.
+  - Character BUDGET: total injected block is capped at CONTEXT_CHAR_BUDGET (~1400 chars).
+  - Per-memory EXCERPT cap: MEMORY_EXCERPT_MAX_CHARS limits individual content excerpts.
+  - COMPACT FORMAT: only summary + short excerpt + minimal provenance — never full content.
+  - ZERO-INJECTION RULE: if no memory clears the threshold, nothing is added to context.
+  - VERIFIED-ONLY: only non-archived, non-deleted memories with verified provenance qualify.
+
+These parameters are module-level constants so they can be patched in tests or overridden
+via subclass without changing the public API.
+"""
 from __future__ import annotations
 
 from typing import Any, TYPE_CHECKING
@@ -11,6 +26,81 @@ if TYPE_CHECKING:
     from aether.memory.store import WorkforceMemoryStore
 
 
+# ---------------------------------------------------------------------------
+# Context injection policy constants
+# ---------------------------------------------------------------------------
+
+# Minimum relevance score (from search_memories) for a memory to be considered
+# for injection. Scores are in raw units (not normalized to 0-1):
+#   - A score of 0.5 typically corresponds to at least one token overlap in summary
+#     or two partial matches in content, confidence-boosted.
+#   - Memories with score < this threshold are silently ignored.
+MIN_RELEVANCE_SCORE: float = 0.5
+
+# Maximum number of memories to inject into a single agent context call.
+CONTEXT_MAX_MEMORIES: int = 3
+
+# Maximum total characters for the entire injected memory block (including
+# header, all summaries, excerpts, and provenance lines).
+# Rationale: ~1400 chars ≈ ~350 tokens at 4 chars/token (conservative).
+CONTEXT_CHAR_BUDGET: int = 1400
+
+# Maximum characters for each individual memory's content excerpt.
+# If content is longer it is truncated with an ellipsis marker.
+MEMORY_EXCERPT_MAX_CHARS: int = 200
+
+# Header sentinel — used as a prefix guard to filter out stale injections from
+# prior conversation turns (prevents double-injection on resumed tasks).
+_MEMORY_BLOCK_HEADER = "Verified Workforce Intelligence & Compounding Memory:"
+
+
+def _format_memory_compact(mem: "WorkforceMemory", excerpt_max: int = MEMORY_EXCERPT_MAX_CHARS) -> str:  # type: ignore[name-defined]
+    """
+    Render a single WorkforceMemory in compact, token-efficient format.
+
+    Format:
+        [CATEGORY] Summary text
+          Source: <entity> | Agent: <name> | Mission: <id>
+          <short excerpt if content adds new info beyond summary>
+
+    Rules:
+    - If content is nearly identical to summary (overlap > 80%), excerpt is omitted.
+    - Content is always truncated to excerpt_max characters.
+    - Only non-None provenance fields are included.
+    """
+    category_tag = f"[{mem.category.value.upper()}]"
+    lines = [f"{category_tag} {mem.summary.strip()}"]
+
+    # Compact provenance line — only non-empty fields
+    prov_parts: list[str] = []
+    if mem.provenance.source_entity:
+        prov_parts.append(f"Source: {mem.provenance.source_entity}")
+    if mem.provenance.author_agent:
+        prov_parts.append(f"Agent: {mem.provenance.author_agent}")
+    if mem.provenance.source_mission_id:
+        prov_parts.append(f"Mission: {mem.provenance.source_mission_id}")
+    if prov_parts:
+        lines.append("  " + " | ".join(prov_parts))
+
+    # Excerpt: include only if it adds information beyond the summary
+    content = (mem.content or "").strip()
+    summary_norm = mem.summary.lower().strip()
+    content_norm = content.lower()
+
+    # Simple overlap check: if summary words cover most of content, skip excerpt
+    summary_words = set(summary_norm.split())
+    content_words = set(content_norm.split())
+    if content and summary_words and len(content_words) > 0:
+        overlap_ratio = len(summary_words & content_words) / max(len(content_words), 1)
+        if overlap_ratio < 0.8 and content:
+            excerpt = content[:excerpt_max]
+            if len(content) > excerpt_max:
+                excerpt += "…"
+            lines.append(f"  {excerpt}")
+
+    return "\n".join(lines)
+
+
 class MemoryManager:
     """
     Orchestrates Short-Term (Conversation), Semantic, and Scoped Workforce Intelligence (Phase B).
@@ -20,10 +110,15 @@ class MemoryManager:
         self,
         conversation_memory: ConversationMemory | None = None,
         semantic_memory: SemanticMemory | None = None,
-        workforce_memory_store: WorkforceMemoryStore | None = None,
+        workforce_memory_store: "WorkforceMemoryStore | None" = None,
         workspace_id: str | None = None,
         agent_name: str | None = None,
         team_name: str | None = None,
+        # Policy overrides (optional — defaults are module-level constants)
+        min_relevance_score: float | None = None,
+        context_max_memories: int | None = None,
+        context_char_budget: int | None = None,
+        memory_excerpt_max_chars: int | None = None,
     ) -> None:
         self.conversation_memory = conversation_memory or ConversationMemory()
         self.semantic_memory = semantic_memory or SemanticMemory()
@@ -32,9 +127,23 @@ class MemoryManager:
         self.agent_name = agent_name
         self.team_name = team_name
 
+        # Effective policy values (allow per-instance overrides for tests / special use-cases)
+        self.min_relevance_score = min_relevance_score if min_relevance_score is not None else MIN_RELEVANCE_SCORE
+        self.context_max_memories = context_max_memories if context_max_memories is not None else CONTEXT_MAX_MEMORIES
+        self.context_char_budget = context_char_budget if context_char_budget is not None else CONTEXT_CHAR_BUDGET
+        self.memory_excerpt_max_chars = memory_excerpt_max_chars if memory_excerpt_max_chars is not None else MEMORY_EXCERPT_MAX_CHARS
+
     def load_context(self, context: AgentContext) -> None:
         """
-        Load historical messages and inject relevant workforce and semantic memories into the AgentContext.
+        Load historical messages and inject relevant verified workforce memories into the AgentContext.
+
+        Injection policy:
+          1. Retrieve scored candidates via retrieve_for_context().
+          2. Discard any with score < min_relevance_score.
+          3. Keep at most context_max_memories (default 3).
+          4. Render each in compact format and accumulate until context_char_budget is exhausted.
+          5. Inject as a single system message only if at least one memory qualifies.
+          6. If nothing qualifies, add nothing — zero-injection rule applies.
         """
         system_msg = next((m for m in context.messages if m.role == "system"), None)
         incoming_non_system = [m for m in context.messages if m.role != "system"]
@@ -45,12 +154,12 @@ class MemoryManager:
             if not system_msg:
                 system_msg = next((m for m in history if m.role == "system"), None)
 
-            # Prior dialogue turns, filtering out prior injected memory facts
+            # Prior dialogue turns, filtering out prior injected memory blocks
             past_messages = [
                 m for m in history
                 if not (m.role == "system" and (
                     m.content.startswith("Informazioni di contesto recuperate dalla memoria:") or
-                    m.content.startswith("Verified Workforce Intelligence & Compounding Memory:")
+                    m.content.startswith(_MEMORY_BLOCK_HEADER)
                 ))
                 and m.role != "system"
             ]
@@ -74,39 +183,12 @@ class MemoryManager:
             combined_messages.extend(incoming_non_system)
             context.messages = combined_messages
 
-        # 2. Search and inject relevant workforce memories (Phase B)
+        # 2. Relevance-gated, budget-aware workforce memory injection (Phase B)
         injected = False
         if self.workforce_memory_store is not None and self.workspace_id:
-            wf_memories = self.workforce_memory_store.retrieve_for_task(
-                workspace_id=self.workspace_id,
-                task_instruction=context.task.instruction,
-                agent_name=self.agent_name,
-                team_name=self.team_name,
-                limit=4,
-            )
-            if wf_memories:
-                lines = []
-                for m in wf_memories:
-                    prov_parts = [f"Source: {m.provenance.source_entity}"]
-                    if m.provenance.author_agent:
-                        prov_parts.append(f"Author: {m.provenance.author_agent}")
-                    if m.provenance.source_mission_id:
-                        prov_parts.append(f"Mission: {m.provenance.source_mission_id}")
-                    prov_str = ", ".join(prov_parts)
-                    lines.append(f"- [{m.category.value.upper()}] {m.summary}: {m.content} ({prov_str})")
+            injected = self._inject_workforce_memory(context)
 
-                mem_text = "\n".join(lines)
-                wf_msg = Message(
-                    role="system",
-                    content=f"Verified Workforce Intelligence & Compounding Memory:\n{mem_text}",
-                )
-                if context.messages and context.messages[0].role == "system":
-                    context.messages.insert(1, wf_msg)
-                else:
-                    context.messages.insert(0, wf_msg)
-                injected = True
-
-        # Fallback to legacy semantic memory if workforce memory not injected
+        # 3. Fallback to legacy semantic memory ONLY when workforce memory not injected
         if not injected and self.semantic_memory:
             facts = self.semantic_memory.search(context.task.instruction, limit=3)
             if facts:
@@ -119,6 +201,65 @@ class MemoryManager:
                     context.messages.insert(1, fact_msg)
                 else:
                     context.messages.insert(0, fact_msg)
+
+    def _inject_workforce_memory(self, context: AgentContext) -> bool:
+        """
+        Core injection logic. Returns True if at least one memory was injected.
+
+        Algorithm:
+          1. Retrieve up to (context_max_memories * 3) scored candidates — over-fetch
+             to have margin for threshold and budget filtering.
+          2. Discard below threshold.
+          3. Take top-k by score (deterministic).
+          4. Render compact blocks, accumulate until char budget exhausted.
+          5. Inject as single system message prepended after any existing system prompt.
+          6. Return True only if block is non-empty.
+        """
+        assert self.workforce_memory_store is not None  # guarded by caller
+
+        # Over-fetch to allow for threshold filtering
+        fetch_limit = self.context_max_memories * 3
+        scored = self.workforce_memory_store.retrieve_for_context(
+            workspace_id=self.workspace_id,
+            task_instruction=context.task.instruction,
+            agent_name=self.agent_name,
+            team_name=self.team_name,
+            limit=fetch_limit,
+        )
+
+        # Apply relevance threshold gate
+        qualified = [(mem, score) for mem, score in scored if score >= self.min_relevance_score]
+        if not qualified:
+            return False  # Zero-injection rule: nothing relevant
+
+        # Apply top-k cap
+        qualified = qualified[: self.context_max_memories]
+
+        # Build compact block within char budget
+        memory_blocks: list[str] = []
+        remaining_budget = self.context_char_budget
+
+        for mem, _score in qualified:
+            block = _format_memory_compact(mem, excerpt_max=self.memory_excerpt_max_chars)
+            block_len = len(block) + 1  # +1 for the separator newline
+            if remaining_budget - block_len < 0:
+                break  # Budget exhausted — stop adding even if more memories qualify
+            memory_blocks.append(block)
+            remaining_budget -= block_len
+
+        if not memory_blocks:
+            return False  # Budget was zero or all blocks were oversized
+
+        mem_text = "\n".join(memory_blocks)
+        wf_msg = Message(
+            role="system",
+            content=f"{_MEMORY_BLOCK_HEADER}\n{mem_text}",
+        )
+        if context.messages and context.messages[0].role == "system":
+            context.messages.insert(1, wf_msg)
+        else:
+            context.messages.insert(0, wf_msg)
+        return True
 
     def persist_context(self, context: AgentContext) -> None:
         """

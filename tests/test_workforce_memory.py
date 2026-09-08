@@ -456,7 +456,7 @@ def test_agent_context_workforce_memory_injection(tmp_path):
     assert "[DECISION]" in content
     assert "Bearer token validation" in content
     assert "Source: quality_gate" in content
-    assert "Author: SecurityReviewer" in content
+    assert "Author: SecurityReviewer" in content or "Agent: SecurityReviewer" in content
 
 
 # ----------------------------------------------------------------------

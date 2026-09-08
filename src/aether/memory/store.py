@@ -418,6 +418,8 @@ class WorkforceMemoryStore:
     ) -> list[WorkforceMemory]:
         """
         Convenience method to retrieve the top ranked memories for a task instruction.
+        Returns plain WorkforceMemory list (no scores). Use retrieve_for_context() when
+        scores are needed for threshold gating.
         """
         results = self.search_memories(
             workspace_id=workspace_id,
@@ -428,6 +430,33 @@ class WorkforceMemoryStore:
             limit=limit,
         )
         return [mem for mem, _ in results]
+
+    def retrieve_for_context(
+        self,
+        workspace_id: str,
+        task_instruction: str,
+        agent_name: str | None = None,
+        team_name: str | None = None,
+        mission_id: str | None = None,
+        limit: int = 10,
+    ) -> list[tuple[WorkforceMemory, float]]:
+        """
+        Retrieve scored (memory, relevance_score) pairs for context injection.
+        Unlike retrieve_for_task(), this preserves the relevance score so callers can
+        apply threshold gating and budget-aware selection.
+
+        Only non-archived, non-deleted, verified memories are candidates.
+        Scoring is purely deterministic (term-overlap × recency × confidence).
+        Same input always produces same output order.
+        """
+        return self.search_memories(
+            workspace_id=workspace_id,
+            query=task_instruction,
+            team_name=team_name,
+            agent_name=agent_name,
+            mission_id=mission_id,
+            limit=limit,
+        )
 
     # ------------------------------------------------------------------
     # Internal Helpers
