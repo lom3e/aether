@@ -375,6 +375,7 @@ class MissionRuntime:
                                     mission_id=mission_id,
                                     execution_id=active.id,
                                     deliverable=d,
+                                    knowledge_graph_store=getattr(self.workspace, "knowledge_graph", None),
                                 )
                             except Exception as exc:
                                 logger.warning("Failed to ingest overridden deliverable to memory: %s", exc)
@@ -394,6 +395,7 @@ class MissionRuntime:
                                 "notes": notes,
                                 "responded_at": now,
                             },
+                            knowledge_graph_store=getattr(self.workspace, "knowledge_graph", None),
                         )
                     except Exception as exc:
                         logger.warning("Failed to ingest approved decision into memory: %s", exc)
@@ -448,6 +450,7 @@ class MissionRuntime:
                             "notes": notes,
                             "responded_at": now,
                         },
+                        knowledge_graph_store=getattr(self.workspace, "knowledge_graph", None),
                     )
                 except Exception as exc:
                     logger.warning("Failed to ingest approved decision into memory: %s", exc)
@@ -926,6 +929,7 @@ class MissionRuntime:
                                     execution_id=exec_id,
                                     deliverable=d,
                                     eval_result=eval_result,
+                                    knowledge_graph_store=getattr(self.workspace, "knowledge_graph", None),
                                 )
                             if rework_attempts > 0 or eval_result.feedback:
                                 MemoryIngestionService.ingest_quality_gate_lesson(
@@ -935,6 +939,7 @@ class MissionRuntime:
                                     execution_id=exec_id,
                                     eval_result=eval_result,
                                     rework_count=rework_attempts,
+                                    knowledge_graph_store=getattr(self.workspace, "knowledge_graph", None),
                                 )
                         except Exception as exc:
                             logger.warning("Failed to ingest quality gate memory: %s", exc)

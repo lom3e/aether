@@ -1,10 +1,11 @@
 import { useState, useEffect, useContext, useRef } from 'react';
-import { Database, FileText, Upload, Trash2, ShieldCheck, Lock, FolderGit2, CheckCircle2, AlertCircle, FileUp } from 'lucide-react';
+import { Database, FileText, Upload, Trash2, ShieldCheck, Lock, FolderGit2, CheckCircle2, AlertCircle, FileUp, Network } from 'lucide-react';
 import { ToastContext } from './toast';
 import { apiError, apiUrl } from './api';
 import { TopHeader } from './TopHeader';
 import { useTranslation } from './i18n';
 import { Tooltip } from './Tooltip';
+import { KnowledgeGraph } from './KnowledgeGraph';
 
 interface IngestionProgress {
   active: boolean;
@@ -16,6 +17,7 @@ interface IngestionProgress {
 
 export function Knowledge() {
   const { t } = useTranslation();
+  const [viewMode, setViewMode] = useState<'documents' | 'graph'>('documents');
   const [documents, setDocuments] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
   const [activeTab, setActiveTab] = useState<'all' | 'workspace' | 'project' | 'system'>('all');
@@ -331,8 +333,32 @@ export function Knowledge() {
       />
 
       <div style={{ padding: '32px', maxWidth: '1200px', margin: '0 auto' }}>
-        {/* Real-time Ingestion Progress Card */}
-        {progress.active && (
+        {/* Main Knowledge View Mode Switcher */}
+        <div style={{ display: 'flex', gap: '8px', marginBottom: '24px', background: 'hsl(var(--card))', padding: '4px', borderRadius: '10px', width: 'fit-content', border: '1px solid hsl(var(--border))' }}>
+          <button
+            data-testid="knowledge-documents-tab"
+            className={`btn btn-sm ${viewMode === 'documents' ? 'btn-primary' : 'btn-ghost'}`}
+            style={{ borderRadius: '8px', fontSize: '13px' }}
+            onClick={() => setViewMode('documents')}
+          >
+            <FileText size={15} /> {t('knowledgeDocumentsTab')}
+          </button>
+          <button
+            data-testid="knowledge-graph-tab"
+            className={`btn btn-sm ${viewMode === 'graph' ? 'btn-primary' : 'btn-ghost'}`}
+            style={{ borderRadius: '8px', fontSize: '13px' }}
+            onClick={() => setViewMode('graph')}
+          >
+            <Network size={15} /> {t('knowledgeGraphTab')}
+          </button>
+        </div>
+
+        {viewMode === 'graph' ? (
+          <KnowledgeGraph />
+        ) : (
+          <>
+            {/* Real-time Ingestion Progress Card */}
+            {progress.active && (
           <div
             className="card fade-in"
             style={{
@@ -540,6 +566,8 @@ export function Knowledge() {
               </span>
             </div>
           </div>
+        )}
+          </>
         )}
       </div>
     </div>

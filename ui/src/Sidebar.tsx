@@ -1141,6 +1141,7 @@ export function Sidebar({
 
               <Tooltip content={t('navKnowledge')} position={collapsed ? 'right' : 'top'} disabled={!collapsed}>
                 <button
+                  data-testid="nav-knowledge"
                   className={`btn btn-ghost ${currentView === 'knowledge' ? 'active' : ''}`}
                   style={{ width: '100%', justifyContent: collapsed ? 'center' : 'flex-start', padding: '7px 8px', fontSize: '13px' }}
                   onClick={() => onNavigate('knowledge')}

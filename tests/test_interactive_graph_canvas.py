@@ -251,6 +251,8 @@ def test_playwright_interactive_execution_graph_canvas(tmp_path: Path, monkeypat
             page.wait_for_selector("text=Run #1", timeout=5000)
 
             # Verify Canvas elements
+            page.wait_for_selector(".execution-graph-canvas-container svg", timeout=5000)
+            page.wait_for_selector(".edges-layer", timeout=5000)
             assert page.is_visible(".execution-graph-canvas-container svg")
             assert page.is_visible(".edges-layer")
             assert page.is_visible(".nodes-layer")

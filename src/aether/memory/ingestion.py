@@ -40,6 +40,7 @@ class MemoryIngestionService:
         deliverable_size_bytes: int = 0,
         quality_score: float | None = None,
         reviewer_agent: str | None = None,
+        knowledge_graph_store: Any = None,
     ) -> WorkforceMemory:
         """
         Ingests a verified deliverable as an OUTCOME memory.
@@ -119,7 +120,14 @@ class MemoryIngestionService:
             confidence=(eff_quality_score / 100.0) if (eff_quality_score is not None and eff_quality_score > 0) else 1.0,
             tags=[eff_type, "deliverable", "verified"],
         )
-        return effective_store.create_memory(mem)
+        saved = effective_store.create_memory(mem)
+        if knowledge_graph_store is not None:
+            try:
+                from aether.knowledge.graph.builder import KnowledgeGraphBuilder
+                KnowledgeGraphBuilder.compile_memory(saved, knowledge_graph_store)
+            except Exception:
+                pass
+        return saved
 
     @staticmethod
     def ingest_approved_decision(
@@ -136,6 +144,7 @@ class MemoryIngestionService:
         milestone_title: str = "",
         decision_note: str | None = None,
         operator_name: str | None = None,
+        knowledge_graph_store: Any = None,
     ) -> WorkforceMemory:
         """
         Ingests an approved human checkpoint as a DECISION memory.
@@ -184,7 +193,14 @@ class MemoryIngestionService:
             confidence=1.0,
             tags=["approval", "decision", "milestone"],
         )
-        return effective_store.create_memory(mem)
+        saved = effective_store.create_memory(mem)
+        if knowledge_graph_store is not None:
+            try:
+                from aether.knowledge.graph.builder import KnowledgeGraphBuilder
+                KnowledgeGraphBuilder.compile_memory(saved, knowledge_graph_store)
+            except Exception:
+                pass
+        return saved
 
     @staticmethod
     def ingest_quality_gate_lesson(
@@ -201,6 +217,7 @@ class MemoryIngestionService:
         mission_title: str = "",
         lesson_text: str = "",
         reviewer_agent: str | None = None,
+        knowledge_graph_store: Any = None,
     ) -> WorkforceMemory:
         """
         Ingests a lesson learned during Quality Gate evaluations.
@@ -250,4 +267,11 @@ class MemoryIngestionService:
             confidence=0.95,
             tags=["quality_gate", "lesson", "correction"],
         )
-        return effective_store.create_memory(mem)
+        saved = effective_store.create_memory(mem)
+        if knowledge_graph_store is not None:
+            try:
+                from aether.knowledge.graph.builder import KnowledgeGraphBuilder
+                KnowledgeGraphBuilder.compile_memory(saved, knowledge_graph_store)
+            except Exception:
+                pass
+        return saved

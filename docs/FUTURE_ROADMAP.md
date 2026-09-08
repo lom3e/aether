@@ -627,7 +627,7 @@ CarShine (Company)
  └── Document ───────► Pricing_Matrix_2026.pdf
 ```
 
-* **Classification:** `Differentiator` | **Depends on:** Memory system, Artifact Engine.
+* **Classification:** `Differentiator` | **Status:** `Phase B Slice 2 Foundation Implemented` (Persistent SQLite Property Graph, Canonical Deduplication, Bounded Traversal, REST & UI). | **Depends on:** Workforce Memory.
 
 ### 5.3 Workforce Learning & Correction Ingestion
 * **Functional Description:** User edits or post-mission feedback trigger automated rule extraction:

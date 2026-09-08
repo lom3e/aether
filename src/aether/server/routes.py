@@ -3759,6 +3759,12 @@ async def create_memory_route(request: Request, payload: MemoryCreatePayload):
         tags=payload.tags,
     )
     saved = ws.memory.create_memory(mem)
+    if hasattr(ws, "knowledge_graph") and ws.knowledge_graph:
+        try:
+            from aether.knowledge.graph.builder import KnowledgeGraphBuilder
+            KnowledgeGraphBuilder.compile_memory(saved, ws.knowledge_graph)
+        except Exception:
+            pass
     return saved.to_dict()
 
 
@@ -3828,4 +3834,205 @@ async def retrieve_memories_route(request: Request, payload: MemoryRetrievePaylo
         }
         for m, score in scored_results
     ]
+
+
+# ---------------------------------------------------------------------------
+# Knowledge Graph REST APIs (Phase B Slice 2)
+# ---------------------------------------------------------------------------
+
+class KnowledgeSearchPayload(BaseModel):
+    query: str
+    node_types: list[str] | None = None
+    limit: int = 10
+
+
+class KnowledgeSubgraphPayload(BaseModel):
+    seed_node_ids: list[str]
+    max_depth: int = 2
+    max_nodes: int = 50
+    relation_types: list[str] | None = None
+
+
+@router.get("/knowledge/nodes")
+async def list_knowledge_nodes_route(
+    request: Request,
+    node_type: str | None = None,
+    types: str | None = None,
+    q: str | None = None,
+    search: str | None = None,
+    include_archived: bool = False,
+    limit: int = 100,
+    offset: int = 0,
+):
+    ws = getattr(request.app.state, "workspace", None)
+    if not ws:
+        raise HTTPException(status_code=503, detail="Workspace not initialized.")
+
+    type_list = [t.strip() for t in types.split(",") if t.strip()] if types else None
+    query_str = (search or q or "").strip() or None
+
+    nodes = ws.knowledge_graph.list_nodes(
+        workspace_id=ws.name,
+        node_type=node_type,
+        node_types=type_list,
+        query=query_str,
+        include_archived=include_archived,
+        limit=limit,
+        offset=offset,
+    )
+    if not nodes and hasattr(ws, "memory") and ws.memory:
+        try:
+            existing_mems = ws.memory.list_memories(ws.name, limit=100)
+            if existing_mems:
+                from aether.knowledge.graph.builder import KnowledgeGraphBuilder
+                KnowledgeGraphBuilder.compile_all_memories(existing_mems, ws.knowledge_graph)
+                nodes = ws.knowledge_graph.list_nodes(
+                    workspace_id=ws.name,
+                    node_type=node_type,
+                    node_types=type_list,
+                    query=query_str,
+                    include_archived=include_archived,
+                    limit=limit,
+                    offset=offset,
+                )
+        except Exception:
+            pass
+    return [n.to_dict() for n in nodes]
+
+
+@router.get("/knowledge/nodes/{node_id}")
+async def get_knowledge_node_route(request: Request, node_id: str):
+    ws = getattr(request.app.state, "workspace", None)
+    if not ws:
+        raise HTTPException(status_code=503, detail="Workspace not initialized.")
+
+    node = ws.knowledge_graph.get_node(node_id, workspace_id=ws.name)
+    if not node:
+        raise HTTPException(status_code=404, detail="Knowledge node not found.")
+    return node.to_dict()
+
+
+@router.get("/knowledge/nodes/{node_id}/neighbors")
+async def get_knowledge_node_neighbors_route(
+    request: Request,
+    node_id: str,
+    direction: str = "both",
+    relations: str | None = None,
+    limit: int = 50,
+):
+    ws = getattr(request.app.state, "workspace", None)
+    if not ws:
+        raise HTTPException(status_code=503, detail="Workspace not initialized.")
+
+    node = ws.knowledge_graph.get_node(node_id, workspace_id=ws.name)
+    if not node:
+        raise HTTPException(status_code=404, detail="Knowledge node not found.")
+
+    rel_list = [r.strip() for r in relations.split(",") if r.strip()] if relations else None
+    neighbors = ws.knowledge_graph.get_neighbors(
+        node_id=node_id,
+        workspace_id=ws.name,
+        direction=direction,
+        relation_types=rel_list,
+        limit=limit,
+    )
+    return [
+        {
+            "node": neighbor_node.to_dict(),
+            "edge": edge.to_dict(),
+        }
+        for neighbor_node, edge in neighbors
+    ]
+
+
+@router.get("/knowledge/nodes/{node_id}/subgraph")
+async def get_knowledge_node_subgraph_route(
+    request: Request,
+    node_id: str,
+    max_depth: int = 2,
+    max_nodes: int = 50,
+    relations: str | None = None,
+):
+    ws = getattr(request.app.state, "workspace", None)
+    if not ws:
+        raise HTTPException(status_code=503, detail="Workspace not initialized.")
+
+    node = ws.knowledge_graph.get_node(node_id, workspace_id=ws.name)
+    if not node:
+        raise HTTPException(status_code=404, detail="Knowledge node not found.")
+
+    rel_list = [r.strip() for r in relations.split(",") if r.strip()] if relations else None
+    subgraph = ws.knowledge_graph.get_subgraph(
+        seed_node_ids=node_id,
+        workspace_id=ws.name,
+        max_depth=max_depth,
+        max_nodes=max_nodes,
+        relation_types=rel_list,
+    )
+    return subgraph.to_dict()
+
+
+@router.get("/knowledge/edges")
+async def list_knowledge_edges_route(
+    request: Request,
+    source_node_id: str | None = None,
+    target_node_id: str | None = None,
+    relation_type: str | None = None,
+    relations: str | None = None,
+    limit: int = 200,
+    offset: int = 0,
+):
+    ws = getattr(request.app.state, "workspace", None)
+    if not ws:
+        raise HTTPException(status_code=503, detail="Workspace not initialized.")
+
+    rel_list = [r.strip() for r in relations.split(",") if r.strip()] if relations else None
+    edges = ws.knowledge_graph.list_edges(
+        workspace_id=ws.name,
+        source_node_id=source_node_id,
+        target_node_id=target_node_id,
+        relation_type=relation_type,
+        relation_types=rel_list,
+        limit=limit,
+        offset=offset,
+    )
+    return [e.to_dict() for e in edges]
+
+
+@router.post("/knowledge/search")
+async def search_knowledge_nodes_route(request: Request, payload: KnowledgeSearchPayload):
+    ws = getattr(request.app.state, "workspace", None)
+    if not ws:
+        raise HTTPException(status_code=503, detail="Workspace not initialized.")
+
+    scored = ws.knowledge_graph.search_nodes(
+        workspace_id=ws.name,
+        query=payload.query,
+        node_types=payload.node_types,
+        limit=payload.limit,
+    )
+    return [
+        {
+            "node": n.to_dict(),
+            "score": score,
+        }
+        for n, score in scored
+    ]
+
+
+@router.post("/knowledge/subgraph")
+async def get_multi_seed_subgraph_route(request: Request, payload: KnowledgeSubgraphPayload):
+    ws = getattr(request.app.state, "workspace", None)
+    if not ws:
+        raise HTTPException(status_code=503, detail="Workspace not initialized.")
+
+    subgraph = ws.knowledge_graph.get_subgraph(
+        seed_node_ids=payload.seed_node_ids,
+        workspace_id=ws.name,
+        max_depth=payload.max_depth,
+        max_nodes=payload.max_nodes,
+        relation_types=payload.relation_types,
+    )
+    return subgraph.to_dict()
+
 
