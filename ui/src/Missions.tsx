@@ -4,7 +4,7 @@ import {
   Users, Layers, Sparkles, X, RefreshCw, Pause,
   Square, RotateCcw, FileText, MessageSquare, Check, ArrowLeft,
   Clock, ShieldAlert, ChevronRight, FileCode, Table, FolderArchive,
-  Copy, Activity, Terminal, Workflow, User
+  Copy, Activity, Terminal, Workflow, User, ExternalLink, Download, FolderOpen
 } from 'lucide-react';
 import { apiUrl } from './api';
 import { useTranslation } from './i18n';
@@ -456,7 +456,10 @@ export function Missions({ navigate, initialMissionId }: MissionsProps) {
       setSelectedMission(created);
       await fetchMissions();
     } catch (err: any) {
-      showToast?.(err.message || 'Failed to create mission', 'error');
+      const msg = err?.message === 'Load failed'
+        ? 'Unable to connect to local Aether backend. Please verify that the runtime is running.'
+        : (err?.message || 'Failed to create mission');
+      showToast?.(msg, 'error');
     } finally {
       setCreating(false);
     }
@@ -488,6 +491,47 @@ export function Missions({ navigate, initialMissionId }: MissionsProps) {
     setTimeout(() => {
       setCopiedPath(null);
     }, 2000);
+  };
+
+  const handleOpenDeliverable = async (deliverableId: string, reveal: boolean = false) => {
+    if (!selectedMission) return;
+    try {
+      const res = await fetch(
+        apiUrl(`/api/missions/${selectedMission.id}/deliverables/${deliverableId}/open?reveal=${reveal}`),
+        { method: 'POST' }
+      );
+      if (!res.ok) {
+        const data = await res.json().catch(() => ({}));
+        throw new Error(data.detail || t('deliverableOpenFailed'));
+      }
+      showToast?.(reveal ? t('deliverableRevealedSuccess') : t('deliverableOpenedSuccess'), 'success');
+    } catch (err: any) {
+      showToast?.(err.message || t('deliverableOpenFailed'), 'error');
+    }
+  };
+
+  const handleDownloadDeliverable = async (deliverableId: string, filename: string) => {
+    if (!selectedMission) return;
+    try {
+      const res = await fetch(
+        apiUrl(`/api/missions/${selectedMission.id}/deliverables/${deliverableId}/download`)
+      );
+      if (!res.ok) {
+        const data = await res.json().catch(() => ({}));
+        throw new Error(data.detail || t('deliverableDownloadFailed'));
+      }
+      const blob = await res.blob();
+      const url = window.URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = filename || 'download';
+      document.body.appendChild(a);
+      a.click();
+      window.URL.revokeObjectURL(url);
+      document.body.removeChild(a);
+    } catch (err: any) {
+      showToast?.(err.message || t('deliverableDownloadFailed'), 'error');
+    }
   };
 
   const formatBytes = (bytes: number) => {
@@ -1904,7 +1948,20 @@ export function Missions({ navigate, initialMissionId }: MissionsProps) {
                             </div>
                             <div style={{ minWidth: 0, flex: 1 }}>
                               <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-                                <span style={{ fontSize: '13px', fontWeight: 600, color: 'hsl(var(--fg))', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                                <span
+                                  onClick={() => handleOpenDeliverable(del.id, false)}
+                                  style={{
+                                    fontSize: '13px',
+                                    fontWeight: 600,
+                                    color: 'hsl(var(--fg))',
+                                    overflow: 'hidden',
+                                    textOverflow: 'ellipsis',
+                                    whiteSpace: 'nowrap',
+                                    cursor: 'pointer'
+                                  }}
+                                  className="hover:underline"
+                                  title={t('deliverableActionOpenTooltip')}
+                                >
                                   {del.name}
                                 </span>
                                 <span style={{
@@ -1925,7 +1982,41 @@ export function Missions({ navigate, initialMissionId }: MissionsProps) {
                             </div>
                           </div>
 
-                          <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+                          <div style={{ display: 'flex', alignItems: 'center', gap: '6px', flexWrap: 'wrap' }}>
+                            {/* Open */}
+                            <button
+                              onClick={() => handleOpenDeliverable(del.id, false)}
+                              className="btn btn-ghost"
+                              style={{ display: 'flex', alignItems: 'center', gap: '4px', fontSize: '11px', padding: '4px 8px' }}
+                              title={t('deliverableActionOpenTooltip')}
+                            >
+                              <ExternalLink size={13} className="text-primary" />
+                              <span>{t('deliverableActionOpen')}</span>
+                            </button>
+
+                            {/* Reveal in Finder / File Explorer */}
+                            <button
+                              onClick={() => handleOpenDeliverable(del.id, true)}
+                              className="btn btn-ghost"
+                              style={{ display: 'flex', alignItems: 'center', gap: '4px', fontSize: '11px', padding: '4px 8px' }}
+                              title={t('deliverableActionRevealTooltip')}
+                            >
+                              <FolderOpen size={13} />
+                              <span className="hidden sm:inline">{t('deliverableActionReveal')}</span>
+                            </button>
+
+                            {/* Download */}
+                            <button
+                              onClick={() => handleDownloadDeliverable(del.id, del.name)}
+                              className="btn btn-ghost"
+                              style={{ display: 'flex', alignItems: 'center', gap: '4px', fontSize: '11px', padding: '4px 8px' }}
+                              title={t('deliverableActionDownloadTooltip')}
+                            >
+                              <Download size={13} />
+                              <span>{t('deliverableActionDownload')}</span>
+                            </button>
+
+                            {/* Copy Path */}
                             <button
                               onClick={() => handleCopyPath(del.id, del.path)}
                               className="btn btn-ghost"

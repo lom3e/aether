@@ -8,6 +8,10 @@ import time
 import uuid
 from dataclasses import dataclass
 from pathlib import Path
+from contextlib import contextmanager
+from typing import Generator
+
+from aether.core.sqlite import get_sqlite_connection, sqlite_connection
 
 
 @dataclass
@@ -23,20 +27,13 @@ class AgentIdentity:
     def create(cls, name: str, role: str) -> "AgentIdentity":
         """Generate a new AgentIdentity with a fresh ID and current timestamps."""
         safe_name = "".join(c if c.isalnum() else "_" for c in name).lower()
-        suffix = uuid.uuid4().hex[:8]
-        agent_id = f"agent_{safe_name}_{suffix}"
-
-        now = time.time()
         return cls(
-            id=agent_id,
+            id=f"agent_{safe_name}_{uuid.uuid4().hex[:8]}",
             name=name,
             role=role,
-            created_at=now,
-            last_active=now,
+            created_at=time.time(),
+            last_active=time.time(),
         )
-
-
-from aether.core.sqlite import get_sqlite_connection
 
 
 class AgentStore:
@@ -44,13 +41,18 @@ class AgentStore:
 
     def __init__(self, db_path: str | Path = ":memory:") -> None:
         self.db_path = str(db_path)
+        self._is_memory = self.db_path == ":memory:" or "mode=memory" in self.db_path
         if self.db_path == ":memory:":
-            import uuid
             self.db_path = f"file:memdb_{uuid.uuid4().hex}?mode=memory&cache=shared"
+        self._keepalive_conn: sqlite3.Connection | None = (
+            get_sqlite_connection(self.db_path) if self._is_memory else None
+        )
         self._init_db()
 
-    def _get_connection(self) -> sqlite3.Connection:
-        return get_sqlite_connection(self.db_path)
+    @contextmanager
+    def _get_connection(self) -> Generator[sqlite3.Connection, None, None]:
+        with sqlite_connection(self.db_path) as conn:
+            yield conn
 
     def _init_db(self) -> None:
         with self._get_connection() as conn:

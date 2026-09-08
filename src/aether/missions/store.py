@@ -5,14 +5,15 @@ and read-only DAG graph synthesis.
 """
 from __future__ import annotations
 
+from contextlib import contextmanager
 from datetime import datetime, timezone, timedelta
 import json
 from pathlib import Path
 import sqlite3
-from typing import Any
+from typing import Any, Generator
 import uuid
 
-from aether.core.sqlite import get_sqlite_connection
+from aether.core.sqlite import get_sqlite_connection, sqlite_connection
 from aether.missions.models import (
     Deliverable,
     ExecutionMilestone,
@@ -37,12 +38,19 @@ class MissionStore:
 
     def __init__(self, db_path: str | Path) -> None:
         self.db_path = str(db_path)
+        self._is_memory = self.db_path == ":memory:" or "mode=memory" in self.db_path
         if self.db_path == ":memory:":
             self.db_path = f"file:memdb_missions_{uuid.uuid4().hex}?mode=memory&cache=shared"
+        # For in-memory databases, retain a keepalive connection so the shared memory database is preserved
+        self._keepalive_conn: sqlite3.Connection | None = (
+            get_sqlite_connection(self.db_path) if self._is_memory else None
+        )
         self._init_db()
 
-    def _get_connection(self) -> sqlite3.Connection:
-        return get_sqlite_connection(self.db_path)
+    @contextmanager
+    def _get_connection(self) -> Generator[sqlite3.Connection, None, None]:
+        with sqlite_connection(self.db_path) as conn:
+            yield conn
 
     def _init_db(self) -> None:
         with self._get_connection() as conn:
@@ -1161,6 +1169,19 @@ class MissionStore:
                             meta = json.loads(r["metadata"])
                         except Exception:
                             pass
+                    sb = int(r["size_bytes"] or 0)
+                    p_str = r["path"]
+                    if sb <= 0 and p_str and not self._is_memory:
+                        try:
+                            fp = Path(p_str)
+                            ws_root = Path(self.db_path).parent.parent
+                            for candidate in [ws_root / "files" / fp, ws_root / fp, fp]:
+                                if candidate.exists() and candidate.is_file():
+                                    sb = candidate.stat().st_size
+                                    break
+                        except Exception:
+                            pass
+
                     deliverables.append(
                         Deliverable(
                             id=r["id"],
@@ -1170,7 +1191,7 @@ class MissionStore:
                             name=r["name"],
                             path=r["path"],
                             type=r["type"],
-                            size_bytes=int(r["size_bytes"] or 0),
+                            size_bytes=sb,
                             sha256=r["sha256"],
                             status=r["status"],
                             metadata=meta,
@@ -1196,6 +1217,16 @@ class MissionStore:
             for item in raw_delivs:
                 if isinstance(item, dict):
                     d = Deliverable.from_dict({**item, "mission_id": mission_id})
+                    if d.size_bytes <= 0 and d.path and not self._is_memory:
+                        try:
+                            fp = Path(d.path)
+                            ws_root = Path(self.db_path).parent.parent
+                            for candidate in [ws_root / "files" / fp, ws_root / fp, fp]:
+                                if candidate.exists() and candidate.is_file():
+                                    d.size_bytes = candidate.stat().st_size
+                                    break
+                        except Exception:
+                            pass
                     deliverables.append(d)
                     if d.path:
                         seen_paths.add(d.path)
@@ -1216,13 +1247,23 @@ class MissionStore:
                 for row in rows:
                     meta_raw = row["metadata"]
                     meta = json.loads(meta_raw) if isinstance(meta_raw, str) and meta_raw else {}
-                    file_path = meta.get("path")
+                    file_path = meta.get("path") or (meta.get("arguments") or {}).get("path")
                     if file_path and file_path not in seen_paths:
                         seen_paths.add(file_path)
                         filename = Path(file_path).name
                         ext = Path(file_path).suffix.lower()
                         ftype = "document" if ext in (".md", ".txt", ".pdf", ".docx") else ("data" if ext in (".json", ".csv", ".tsv", ".yaml", ".yml", ".parquet") else ("code" if ext in (".py", ".ts", ".tsx", ".js", ".sh", ".rs", ".go") else "archive"))
                         size_bytes = int(meta.get("size_bytes", 0))
+                        if size_bytes <= 0 and file_path and not self._is_memory:
+                            try:
+                                fp = Path(file_path)
+                                ws_root = Path(self.db_path).parent.parent
+                                for candidate in [ws_root / "files" / fp, ws_root / fp, fp]:
+                                    if candidate.exists() and candidate.is_file():
+                                        size_bytes = candidate.stat().st_size
+                                        break
+                            except Exception:
+                                pass
                         deliverables.append(
                             Deliverable(
                                 id=f"del_{row['id']}",

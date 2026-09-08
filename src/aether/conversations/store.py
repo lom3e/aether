@@ -8,10 +8,14 @@ from __future__ import annotations
 import json
 import re
 import sqlite3
-import uuid
+from contextlib import contextmanager
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any
+from typing import Any, Generator
+
+from aether.core.sqlite import get_sqlite_connection, sqlite_connection
+import uuid
+
 
 
 def generate_smart_title(content: str) -> str:
@@ -75,12 +79,18 @@ class ConversationStore:
 
     def __init__(self, db_path: str | Path) -> None:
         self.db_path = str(db_path)
+        self._is_memory = self.db_path == ":memory:" or "mode=memory" in self.db_path
         if self.db_path == ":memory:":
             self.db_path = f"file:memdb_convs_{uuid.uuid4().hex}?mode=memory&cache=shared"
+        self._keepalive_conn: sqlite3.Connection | None = (
+            get_sqlite_connection(self.db_path) if self._is_memory else None
+        )
         self._init_db()
 
-    def _get_connection(self) -> sqlite3.Connection:
-        return get_sqlite_connection(self.db_path)
+    @contextmanager
+    def _get_connection(self) -> Generator[sqlite3.Connection, None, None]:
+        with sqlite_connection(self.db_path) as conn:
+            yield conn
 
     def _init_db(self) -> None:
         with self._get_connection() as conn:

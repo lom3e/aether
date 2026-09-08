@@ -545,6 +545,13 @@ class MissionRuntime:
                         message=f"Executed {t_name}",
                         metadata={"tool_name": t_name, "arguments": args, "execution_id": exec_id},
                     )
+                    # Robust harvesting fallback: record file paths directly from file tools
+                    if t_name in ("write_file", "patch_file") and isinstance(args, dict) and args.get("path"):
+                        created_files.append({
+                            "path": args.get("path"),
+                            "action": "created" if t_name == "write_file" else "updated",
+                            "size_bytes": 0,
+                        })
                 except Exception:
                     pass
 
@@ -552,6 +559,7 @@ class MissionRuntime:
                 team.emitter.on(EventType.FILE_CREATED, _on_file_event)
                 team.emitter.on(EventType.FILE_MODIFIED, _on_file_event)
                 team.emitter.on(EventType.TOOL_CALLED, _on_tool_event)
+
 
             completed_context: list[str] = []
 
@@ -768,6 +776,13 @@ class MissionRuntime:
             )
             self.store.update_mission(mid, status=MissionStatus.FAILED)
         finally:
+            if hasattr(team, "emitter") and team.emitter:
+                try:
+                    team.emitter.off(EventType.FILE_CREATED, _on_file_event)
+                    team.emitter.off(EventType.FILE_MODIFIED, _on_file_event)
+                    team.emitter.off(EventType.TOOL_CALLED, _on_tool_event)
+                except Exception:
+                    pass
             if handle.heartbeat_task and not handle.heartbeat_task.done():
                 handle.heartbeat_task.cancel()
             self.store.release_execution_lease(exec_id, handle.owner_token)
@@ -817,8 +832,18 @@ class MissionRuntime:
             seen_paths.add(path_str)
 
             p = Path(path_str)
+            if not p.is_absolute():
+                sandbox_root = getattr(getattr(self.workspace, "sandbox", None), "root", None)
+                if sandbox_root:
+                    p = (Path(sandbox_root) / p).resolve()
+                elif hasattr(self.workspace, "files_dir"):
+                    p = (Path(self.workspace.files_dir) / p).resolve()
+                else:
+                    p = (Path(self.workspace.root) / p).resolve()
+
             if not p.exists() or not p.is_file():
                 continue
+
 
             try:
                 content = p.read_bytes()

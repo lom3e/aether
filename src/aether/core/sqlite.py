@@ -8,6 +8,10 @@ import sqlite3
 from pathlib import Path
 
 
+from contextlib import contextmanager
+from typing import Generator
+
+
 def configure_sqlite_connection(conn: sqlite3.Connection) -> sqlite3.Connection:
     """Configure standard pragmas on an active SQLite connection.
 
@@ -47,3 +51,29 @@ def get_sqlite_connection(
         conn.row_factory = row_factory
     configure_sqlite_connection(conn)
     return conn
+
+
+@contextmanager
+def sqlite_connection(
+    db_path: str | Path,
+    *,
+    timeout: float = 10.0,
+    row_factory: type | None = sqlite3.Row,
+    check_same_thread: bool = True,
+) -> Generator[sqlite3.Connection, None, None]:
+    """
+    Context manager yielding a SQLite connection within an auto-committing/rolling-back transaction,
+    guaranteeing that the underlying connection is closed when exiting the context block.
+    """
+    conn = get_sqlite_connection(
+        db_path,
+        timeout=timeout,
+        row_factory=row_factory,
+        check_same_thread=check_same_thread,
+    )
+    try:
+        with conn:
+            yield conn
+    finally:
+        conn.close()
+

@@ -76,6 +76,15 @@ HIDDEN_IMPORTS = [
     "aether.knowledge",
     "aether.memory",
     "aether.skills",
+    "aether.missions",
+    "aether.missions.models",
+    "aether.missions.store",
+    "aether.missions.runtime",
+    "aether.automation",
+    "aether.automation.models",
+    "aether.automation.store",
+    "aether.automation.scheduler",
+    "aether.automation.engine",
 ]
 
 

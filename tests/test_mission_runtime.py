@@ -290,3 +290,57 @@ async def test_deliverable_harvesting_during_run(workspace_with_runtime, tmp_pat
     assert d.execution_id == exec_run.id
     assert d.sha256 is not None
     assert d.size_bytes > 0
+
+
+@pytest.mark.asyncio
+async def test_deliverable_harvesting_relative_path(workspace_with_runtime, tmp_path):
+    ws, store, runtime, events = workspace_with_runtime
+
+    files_dir = tmp_path / "files"
+    files_dir.mkdir(parents=True, exist_ok=True)
+    ws.files_dir = files_dir
+    ws.sandbox = MagicMock()
+    ws.sandbox.root = files_dir
+
+    runtime_file = files_dir / "runtime_test.txt"
+    runtime_file.write_text("Aether Runtime OK")
+
+    fake_emitter = EventEmitter()
+
+    class RelativeHarvestingTeam(FakeTeam):
+        def run(self, task_instruction, **kwargs):
+            # Emit tool_called with relative path argument as write_file does
+            self.emitter.emit(
+                AgentEvent(
+                    event_type=EventType.TOOL_CALLED,
+                    agent_name="Intelligence Lead",
+                    task_id="step-1",
+                    metadata={
+                        "tool_name": "write_file",
+                        "arguments": {"path": "runtime_test.txt", "content": "Aether Runtime OK"},
+                    },
+                )
+            )
+            return ExecutionResult(success=True, output="Created runtime_test.txt")
+
+    ws.load_team.return_value = RelativeHarvestingTeam(emitter=fake_emitter)
+
+    mission = store.create_mission(
+        title="Smoke Test",
+        objective="Create small text file",
+        milestones=[{"title": "Create test file"}],
+    )
+
+    exec_run = await runtime.start_mission(mission.id)
+    handle = runtime._active_executions.get(exec_run.id)
+    if handle and handle.task:
+        await handle.task
+
+    delivs = store.list_deliverables(mission.id)
+    assert len(delivs) == 1
+    d = delivs[0]
+    assert d.name == "runtime_test.txt"
+    assert d.execution_id == exec_run.id
+    assert d.size_bytes == len("Aether Runtime OK".encode())
+    assert d.sha256 is not None
+

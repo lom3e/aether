@@ -1,6 +1,7 @@
 import asyncio
 import json
 from fastapi import APIRouter, Request, HTTPException, UploadFile, File, Form, status, Query
+from fastapi.responses import FileResponse
 from pydantic import BaseModel, Field
 from typing import Any
 import hashlib
@@ -2912,6 +2913,156 @@ async def create_mission_deliverable(request: Request, mission_id: str, payload:
     if not success:
         raise HTTPException(status_code=500, detail="Failed to register deliverable.")
     return deliverable.to_dict()
+
+
+def _resolve_and_validate_deliverable_file(ws, path_str: str) -> Path:
+    """
+    Securely resolves a deliverable path strictly within the authorized workspace boundaries.
+    Prevents path traversal, rejects null bytes, and blocks access to files outside workspace.
+    """
+    if not path_str or not isinstance(path_str, str):
+        raise HTTPException(status_code=400, detail="Invalid deliverable path.")
+
+    if "\0" in path_str:
+        raise HTTPException(status_code=400, detail="Null byte in deliverable path.")
+
+    allowed_roots: list[Path] = []
+    sandbox_root = getattr(getattr(ws, "sandbox", None), "root", None)
+    if sandbox_root:
+        allowed_roots.append(Path(sandbox_root).resolve())
+    if hasattr(ws, "files_dir") and ws.files_dir:
+        allowed_roots.append(Path(ws.files_dir).resolve())
+    if hasattr(ws, "root") and ws.root:
+        allowed_roots.append(Path(ws.root).resolve())
+
+    if not allowed_roots:
+        raise HTTPException(status_code=500, detail="Workspace filesystem boundaries not configured.")
+
+    raw_path = Path(path_str).expanduser()
+    resolved_candidate: Path | None = None
+
+    if raw_path.is_absolute():
+        resolved = raw_path.resolve()
+        is_safe = any(resolved == root or root in resolved.parents for root in allowed_roots)
+        if not is_safe:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="Security boundary violation: deliverable file is outside authorized workspace boundaries.",
+            )
+        resolved_candidate = resolved
+    else:
+        for root in allowed_roots:
+            try:
+                candidate = (root / raw_path).resolve()
+                if candidate == root or root in candidate.parents:
+                    if candidate.exists():
+                        resolved_candidate = candidate
+                        break
+                    elif resolved_candidate is None:
+                        resolved_candidate = candidate
+            except Exception:
+                pass
+
+    if resolved_candidate is None or not any(resolved_candidate == root or root in resolved_candidate.parents for root in allowed_roots):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Security boundary violation: deliverable target escapes authorized workspace boundaries.",
+        )
+
+    if not resolved_candidate.exists() or not resolved_candidate.is_file():
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Deliverable file '{path_str}' does not exist on disk.",
+        )
+
+    return resolved_candidate
+
+
+@router.get("/missions/{mission_id}/deliverables/{deliverable_id}/download")
+async def download_mission_deliverable(
+    request: Request,
+    mission_id: str,
+    deliverable_id: str,
+):
+    """
+    Streams the physical deliverable file as an attachment.
+    Ensures path validation within workspace sandbox boundaries.
+    """
+    ws = getattr(request.app.state, "workspace", None)
+    if not ws:
+        raise HTTPException(status_code=503, detail="Workspace not initialized.")
+    mission = ws.missions.get_mission(mission_id, include_milestones=False)
+    if not mission:
+        raise HTTPException(status_code=404, detail="Mission not found.")
+
+    deliverables = ws.missions.list_deliverables(mission_id)
+    target = next((d for d in deliverables if d.id == deliverable_id), None)
+    if not target:
+        raise HTTPException(status_code=404, detail=f"Deliverable '{deliverable_id}' not found for mission '{mission_id}'.")
+
+    file_path = _resolve_and_validate_deliverable_file(ws, target.path)
+    download_filename = target.name or file_path.name
+
+    return FileResponse(
+        path=str(file_path),
+        filename=download_filename,
+        media_type="application/octet-stream",
+    )
+
+
+@router.post("/missions/{mission_id}/deliverables/{deliverable_id}/open")
+async def open_mission_deliverable(
+    request: Request,
+    mission_id: str,
+    deliverable_id: str,
+    reveal: bool = Query(default=False, description="Reveal in Finder / File Explorer rather than opening directly"),
+):
+    """
+    Opens the deliverable file using the native OS integration (or reveals it in Finder / File Explorer).
+    Validates deliverable path against workspace boundaries.
+    """
+    ws = getattr(request.app.state, "workspace", None)
+    if not ws:
+        raise HTTPException(status_code=503, detail="Workspace not initialized.")
+    mission = ws.missions.get_mission(mission_id, include_milestones=False)
+    if not mission:
+        raise HTTPException(status_code=404, detail="Mission not found.")
+
+    deliverables = ws.missions.list_deliverables(mission_id)
+    target = next((d for d in deliverables if d.id == deliverable_id), None)
+    if not target:
+        raise HTTPException(status_code=404, detail=f"Deliverable '{deliverable_id}' not found for mission '{mission_id}'.")
+
+    file_path = _resolve_and_validate_deliverable_file(ws, target.path)
+
+    import platform
+    import subprocess
+
+    sys_name = platform.system()
+    try:
+        if reveal:
+            if sys_name == "Darwin":
+                subprocess.Popen(["open", "-R", str(file_path)])
+            elif sys_name == "Windows":
+                subprocess.Popen(["explorer", f"/select,{file_path}"])
+            else:
+                subprocess.Popen(["xdg-open", str(file_path.parent)])
+        else:
+            if sys_name == "Darwin":
+                subprocess.Popen(["open", str(file_path)])
+            elif sys_name == "Windows":
+                os.startfile(str(file_path))
+            else:
+                subprocess.Popen(["xdg-open", str(file_path)])
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=f"Native OS action failed: {exc}")
+
+    return {
+        "status": "ok",
+        "action": "reveal" if reveal else "open",
+        "deliverable_id": target.id,
+        "path": str(file_path),
+    }
 
 
 @router.get("/missions/{mission_id}/activities")

@@ -28,6 +28,8 @@ from aether.server.routes import (
     list_mission_executions,
     get_mission_execution,
     list_mission_deliverables,
+    download_mission_deliverable,
+    open_mission_deliverable,
     MissionActionStartPayload,
     MissionActionPausePayload,
     MissionActionCancelPayload,
@@ -230,3 +232,143 @@ async def test_error_handling_not_found(test_workspace):
     with pytest.raises(HTTPException) as exc:
         await start_mission_route(req, "non-existent-id")
     assert exc.value.status_code == 404
+
+
+@pytest.mark.asyncio
+async def test_deliverable_download_and_size_resolution(test_workspace):
+    ws, runtime, mock_team = test_workspace
+    req = make_request()
+
+    mission = ws.missions.create_mission(
+        title="Deliverable Test",
+        objective="Verify deliverable download and real size",
+    )
+    mid = mission.id
+
+    # Create a real file in the workspace files directory
+    ws.files_dir.mkdir(parents=True, exist_ok=True)
+    report_file = ws.files_dir / "summary_report.md"
+    content = b"# Aether Executive Summary\nAll objectives achieved with high precision."
+    report_file.write_bytes(content)
+
+    # Register deliverable with relative path and initial size 0
+    from aether.missions.models import Deliverable
+    d = Deliverable(
+        id="del_report_01",
+        mission_id=mid,
+        name="summary_report.md",
+        path="summary_report.md",
+        type="document",
+        size_bytes=0,
+        status="verified",
+    )
+    ws.missions.add_deliverable(mid, d)
+
+    # 1. Size resolution test: list_deliverables must resolve real size from disk
+    delivs = ws.missions.list_deliverables(mid)
+    assert len(delivs) == 1
+    assert delivs[0].size_bytes == len(content)
+    assert delivs[0].size_bytes > 0
+
+    # 2. Download endpoint test
+    resp = await download_mission_deliverable(req, mid, "del_report_01")
+    assert resp.path == str(report_file.resolve())
+    assert resp.filename == "summary_report.md"
+
+    # 3. Missing deliverable ID
+    with pytest.raises(HTTPException) as exc:
+        await download_mission_deliverable(req, mid, "non_existent_del")
+    assert exc.value.status_code == 404
+
+
+@pytest.mark.asyncio
+async def test_deliverable_open_and_reveal(test_workspace, monkeypatch):
+    ws, runtime, mock_team = test_workspace
+    req = make_request()
+
+    mission = ws.missions.create_mission(
+        title="Deliverable Open Test",
+        objective="Verify deliverable open and reveal",
+    )
+    mid = mission.id
+
+    ws.files_dir.mkdir(parents=True, exist_ok=True)
+    report_file = ws.files_dir / "output.txt"
+    report_file.write_text("Test deliverable output")
+
+    from aether.missions.models import Deliverable
+    d = Deliverable(
+        id="del_output_01",
+        mission_id=mid,
+        name="output.txt",
+        path="output.txt",
+        type="document",
+        size_bytes=0,
+        status="verified",
+    )
+    ws.missions.add_deliverable(mid, d)
+
+    popen_calls = []
+
+    def mock_popen(cmd, *args, **kwargs):
+        popen_calls.append(cmd)
+        mock_proc = MagicMock()
+        return mock_proc
+
+    import subprocess
+    monkeypatch.setattr(subprocess, "Popen", mock_popen)
+
+    # 1. Open action (reveal=False)
+    res_open = await open_mission_deliverable(req, mid, "del_output_01", reveal=False)
+    assert res_open["status"] == "ok"
+    assert res_open["action"] == "open"
+    assert len(popen_calls) == 1
+    assert str(report_file.resolve()) in popen_calls[0]
+
+    # 2. Reveal action (reveal=True)
+    res_reveal = await open_mission_deliverable(req, mid, "del_output_01", reveal=True)
+    assert res_reveal["status"] == "ok"
+    assert res_reveal["action"] == "reveal"
+    assert len(popen_calls) == 2
+
+
+@pytest.mark.asyncio
+async def test_deliverable_security_boundary_enforcement(test_workspace, tmp_path):
+    ws, runtime, mock_team = test_workspace
+    req = make_request()
+
+    mission = ws.missions.create_mission(
+        title="Security Boundary Test",
+        objective="Test path traversal rejection",
+    )
+    mid = mission.id
+
+    # Create a secret file outside the workspace root
+    external_dir = tmp_path / "external_system"
+    external_dir.mkdir()
+    secret_file = external_dir / "secret.txt"
+    secret_file.write_text("super_secret_credentials")
+
+    from aether.missions.models import Deliverable
+
+    # Attempt path traversal deliverable
+    d_traversal = Deliverable(
+        id="del_malicious_01",
+        mission_id=mid,
+        name="secret.txt",
+        path="../../../external_system/secret.txt",
+        type="document",
+        size_bytes=10,
+        status="draft",
+    )
+    ws.missions.add_deliverable(mid, d_traversal)
+
+    # Must be blocked with 403 Forbidden
+    with pytest.raises(HTTPException) as exc_dl:
+        await download_mission_deliverable(req, mid, "del_malicious_01")
+    assert exc_dl.value.status_code == 403
+
+    with pytest.raises(HTTPException) as exc_open:
+        await open_mission_deliverable(req, mid, "del_malicious_01", reveal=False)
+    assert exc_open.value.status_code == 403
+
