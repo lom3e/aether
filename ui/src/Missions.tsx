@@ -272,6 +272,8 @@ export function Missions({ navigate, initialMissionId }: MissionsProps) {
   } | null>(null);
   const [loadingIntelligence, setLoadingIntelligence] = useState(false);
   const [copiedContext, setCopiedContext] = useState(false);
+  const [showTechnicalDetails, setShowTechnicalDetails] = useState(false);
+  const [selectedSourcePreview, setSelectedSourcePreview] = useState<any | null>(null);
 
   const selectedMissionRef = useRef<Mission | null>(selectedMission);
   selectedMissionRef.current = selectedMission;
@@ -2755,7 +2757,7 @@ export function Missions({ navigate, initialMissionId }: MissionsProps) {
 
               {/* Tab: Knowledge Used (Unified Intelligence) */}
               {activeInspectorTab === 'intelligence' && (
-                <div style={{ display: 'flex', flexDirection: 'column', gap: '16px' }} data-testid="intelligence-panel">
+                <div style={{ display: 'flex', flexDirection: 'column', gap: '14px' }} data-testid="intelligence-panel">
                   {loadingIntelligence ? (
                     <div style={{ padding: '32px', textAlign: 'center', color: 'hsl(var(--muted-fg))', fontSize: '13px' }}>
                       <RefreshCw size={20} className="animate-spin" style={{ margin: '0 auto 8px' }} />
@@ -2779,81 +2781,139 @@ export function Missions({ navigate, initialMissionId }: MissionsProps) {
                     </div>
                   ) : (
                     <>
-                      {/* Summary Metrics Banner */}
+                      {/* Primary Header: Summary & Discreet Budget */}
                       <div style={{
-                        display: 'grid',
-                        gridTemplateColumns: 'repeat(auto-fit, minmax(130px, 1fr))',
-                        gap: '12px',
-                        padding: '14px 16px',
-                        borderRadius: '8px',
-                        backgroundColor: 'hsl(var(--bg))',
-                        border: '1px solid hsl(var(--border))'
-                      }} data-testid="intelligence-metrics">
-                        <div>
-                          <div style={{ fontSize: '11px', color: 'hsl(var(--muted-fg))' }}>{t('intelligenceTotalFound')}</div>
-                          <div style={{ fontSize: '16px', fontWeight: 700, color: 'hsl(var(--fg))' }} data-testid="metric-total-found">
-                            {intelligenceData.total_memories_found + intelligenceData.total_nodes_found}
-                          </div>
-                          <div style={{ fontSize: '10px', color: 'hsl(var(--muted-fg))' }}>
-                            {intelligenceData.total_memories_found} mem / {intelligenceData.total_nodes_found} graph
-                          </div>
+                        display: 'flex',
+                        alignItems: 'center',
+                        justifyContent: 'space-between',
+                        flexWrap: 'wrap',
+                        gap: '8px',
+                        paddingBottom: '2px'
+                      }}>
+                        <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                          <h4 style={{ fontSize: '13px', fontWeight: 600, margin: 0, color: 'hsl(var(--fg))' }}>
+                            {t('intelligenceKnowledgeUsed')}
+                          </h4>
+                          <span style={{
+                            fontSize: '11px',
+                            fontWeight: 600,
+                            padding: '2px 8px',
+                            borderRadius: '12px',
+                            backgroundColor: 'hsl(var(--primary) / 0.12)',
+                            color: 'hsl(var(--primary))'
+                          }}>
+                            {intelligenceData.evidence.length}{' '}
+                            {intelligenceData.evidence.length === 1 ? t('intelligenceSourceApplied') : t('intelligenceSourcesApplied')}
+                          </span>
                         </div>
 
-                        <div>
-                          <div style={{ fontSize: '11px', color: 'hsl(var(--muted-fg))' }}>{t('intelligenceDeduplicated')}</div>
-                          <div style={{ fontSize: '16px', fontWeight: 700, color: 'hsl(var(--primary))' }} data-testid="metric-dedup-count">
-                            {intelligenceData.evidence.length}
-                          </div>
-                          <div style={{ fontSize: '10px', color: 'hsl(var(--muted-fg))' }}>
-                            {intelligenceData.deduplicated_count} cross-fused
-                          </div>
-                        </div>
-
-                        <div>
-                          <div style={{ fontSize: '11px', color: 'hsl(var(--muted-fg))' }}>{t('intelligenceInjectedChars')}</div>
-                          <div style={{ fontSize: '16px', fontWeight: 700, color: 'hsl(var(--fg))' }} data-testid="metric-injected-chars">
-                            {intelligenceData.injected_char_count} / 2200
-                          </div>
-                          {/* Mini progress bar */}
-                          <div style={{ width: '100%', height: '4px', backgroundColor: 'hsl(var(--muted))', borderRadius: '2px', marginTop: '4px', overflow: 'hidden' }}>
-                            <div style={{
-                              width: `${Math.min(100, (intelligenceData.injected_char_count / 2200) * 100)}%`,
-                              height: '100%',
-                              backgroundColor: 'hsl(var(--primary))'
-                            }} />
-                          </div>
+                        <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+                          <span
+                            style={{ fontSize: '11px', color: 'hsl(var(--muted-fg))' }}
+                            data-testid="metric-injected-chars"
+                          >
+                            {intelligenceData.injected_char_count} / 2200 {t('intelligenceCharsBudget')}
+                          </span>
+                          <button
+                            type="button"
+                            onClick={() => setShowTechnicalDetails(!showTechnicalDetails)}
+                            className="btn btn-ghost"
+                            style={{
+                              fontSize: '11px',
+                              padding: '2px 8px',
+                              height: '24px',
+                              display: 'inline-flex',
+                              alignItems: 'center',
+                              gap: '4px',
+                              color: 'hsl(var(--muted-fg))'
+                            }}
+                            data-testid="toggle-details-btn"
+                            title={t('intelligenceTechnicalDetails')}
+                          >
+                            <span>{t('intelligenceTechnicalDetails')}</span>
+                            {showTechnicalDetails ? <ChevronUp size={12} /> : <ChevronDown size={12} />}
+                          </button>
                         </div>
                       </div>
 
-                      {/* Evidence List */}
-                      <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }} data-testid="intelligence-evidence-list">
-                        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
-                          <span style={{ fontSize: '13px', fontWeight: 600, color: 'hsl(var(--fg))' }}>
-                            {t('intelligenceEvidenceDetails')} ({intelligenceData.evidence.length})
-                          </span>
+                      {/* Technical Details (Collapsible Debugger Metrics) */}
+                      {showTechnicalDetails && (
+                        <div style={{
+                          padding: '12px 14px',
+                          borderRadius: '8px',
+                          backgroundColor: 'hsl(var(--bg))',
+                          border: '1px solid hsl(var(--border))',
+                          display: 'flex',
+                          flexDirection: 'column',
+                          gap: '10px'
+                        }} data-testid="intelligence-metrics">
+                          <div style={{
+                            display: 'grid',
+                            gridTemplateColumns: 'repeat(auto-fit, minmax(120px, 1fr))',
+                            gap: '10px',
+                            fontSize: '11px'
+                          }}>
+                            <div>
+                              <div style={{ color: 'hsl(var(--muted-fg))' }}>{t('intelligenceTotalFound')}</div>
+                              <div style={{ fontSize: '14px', fontWeight: 700, color: 'hsl(var(--fg))' }} data-testid="metric-total-found">
+                                {intelligenceData.total_memories_found + intelligenceData.total_nodes_found}
+                              </div>
+                              <div style={{ fontSize: '10px', color: 'hsl(var(--muted-fg))' }}>
+                                {intelligenceData.total_memories_found} mem · {intelligenceData.total_nodes_found} graph
+                              </div>
+                            </div>
+
+                            <div>
+                              <div style={{ color: 'hsl(var(--muted-fg))' }}>{t('intelligenceDeduplicated')}</div>
+                              <div style={{ fontSize: '14px', fontWeight: 700, color: 'hsl(var(--primary))' }} data-testid="metric-dedup-count">
+                                {intelligenceData.evidence.length}
+                              </div>
+                              <div style={{ fontSize: '10px', color: 'hsl(var(--muted-fg))' }}>
+                                {intelligenceData.deduplicated_count} cross-fused
+                              </div>
+                            </div>
+
+                            <div>
+                              <div style={{ color: 'hsl(var(--muted-fg))' }}>{t('intelligenceContextBudget')}</div>
+                              <div style={{ fontSize: '14px', fontWeight: 700, color: 'hsl(var(--fg))' }}>
+                                {Math.round((intelligenceData.injected_char_count / 2200) * 100)}%
+                              </div>
+                              <div style={{ fontSize: '10px', color: 'hsl(var(--muted-fg))' }}>
+                                max 2200 chars
+                              </div>
+                            </div>
+                          </div>
+
+                          {/* Copy Injected Context Button */}
                           {intelligenceData.formatted_context && (
-                            <button
-                              onClick={() => {
-                                navigator.clipboard.writeText(intelligenceData.formatted_context || '');
-                                setCopiedContext(true);
-                                setTimeout(() => setCopiedContext(false), 2000);
-                              }}
-                              className="btn btn-secondary btn-sm"
-                              style={{ fontSize: '11px', display: 'flex', alignItems: 'center', gap: '4px', padding: '4px 8px' }}
-                              data-testid="copy-context-btn"
-                            >
-                              <Copy size={12} />
-                              <span>{copiedContext ? t('intelligenceCopied') : t('intelligenceCopyContext')}</span>
-                            </button>
+                            <div style={{ display: 'flex', justifyContent: 'flex-end', paddingTop: '4px', borderTop: '1px solid hsl(var(--border))' }}>
+                              <button
+                                type="button"
+                                onClick={() => {
+                                  navigator.clipboard.writeText(intelligenceData.formatted_context || '');
+                                  setCopiedContext(true);
+                                  setTimeout(() => setCopiedContext(false), 2000);
+                                }}
+                                className="btn btn-secondary btn-sm"
+                                style={{ fontSize: '11px', display: 'flex', alignItems: 'center', gap: '4px', padding: '3px 8px' }}
+                                data-testid="copy-context-btn"
+                              >
+                                <Copy size={11} />
+                                <span>{copiedContext ? t('intelligenceCopied') : t('intelligenceCopyContext')}</span>
+                              </button>
+                            </div>
                           )}
                         </div>
+                      )}
 
-                        {intelligenceData.evidence.map((item, idx) => (
+                      {/* Primary Evidence Cards List (Max 3 cards) */}
+                      <div style={{ display: 'flex', flexDirection: 'column', gap: '10px' }} data-testid="intelligence-evidence-list">
+                        {intelligenceData.evidence.slice(0, 3).map((item, idx) => (
                           <div
                             key={item.id || idx}
                             data-testid={`evidence-card-${idx}`}
                             style={{
-                              padding: '14px',
+                              padding: '12px 14px',
                               borderRadius: '8px',
                               backgroundColor: 'hsl(var(--bg))',
                               border: '1px solid hsl(var(--border))',
@@ -2862,19 +2922,34 @@ export function Missions({ navigate, initialMissionId }: MissionsProps) {
                               gap: '8px'
                             }}
                           >
-                            {/* Card Header: Type Badge, Category, Score */}
+                            {/* Card Header: Verified Badge, Source Type, Title */}
                             <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: '6px' }}>
-                              <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+                              <div style={{ display: 'flex', alignItems: 'center', flexWrap: 'wrap', gap: '6px' }}>
+                                <span style={{
+                                  fontSize: '10px',
+                                  fontWeight: 600,
+                                  padding: '2px 6px',
+                                  borderRadius: '4px',
+                                  backgroundColor: 'rgba(16, 185, 129, 0.12)',
+                                  color: 'rgb(16, 185, 129)',
+                                  display: 'inline-flex',
+                                  alignItems: 'center',
+                                  gap: '3px'
+                                }}>
+                                  <Check size={10} strokeWidth={2.5} />
+                                  {t('intelligenceVerified')}
+                                </span>
+
                                 <span style={{
                                   fontSize: '10px',
                                   fontWeight: 700,
                                   padding: '2px 6px',
                                   borderRadius: '4px',
                                   backgroundColor: item.source_type === 'hybrid'
-                                    ? 'rgba(147, 51, 234, 0.15)'
+                                    ? 'rgba(147, 51, 234, 0.12)'
                                     : item.source_type === 'memory'
-                                    ? 'rgba(59, 130, 246, 0.15)'
-                                    : 'rgba(16, 185, 129, 0.15)',
+                                    ? 'rgba(59, 130, 246, 0.12)'
+                                    : 'rgba(16, 185, 129, 0.12)',
                                   color: item.source_type === 'hybrid'
                                     ? 'rgb(168, 85, 247)'
                                     : item.source_type === 'memory'
@@ -2890,31 +2965,13 @@ export function Missions({ navigate, initialMissionId }: MissionsProps) {
                                     : t('intelligenceSourceGraph')}
                                 </span>
 
-                                {(item.category || item.node_type) && (
-                                  <span style={{
-                                    fontSize: '10px',
-                                    padding: '2px 6px',
-                                    borderRadius: '4px',
-                                    backgroundColor: 'hsl(var(--muted))',
-                                    color: 'hsl(var(--muted-fg))',
-                                    textTransform: 'uppercase'
-                                  }}>
-                                    {item.category || item.node_type}
-                                  </span>
-                                )}
-
                                 <span style={{ fontSize: '13px', fontWeight: 600, color: 'hsl(var(--fg))' }} data-testid={`evidence-title-${idx}`}>
                                   {item.title}
                                 </span>
                               </div>
-
-                              <div style={{ display: 'flex', alignItems: 'center', gap: '8px', fontSize: '11px', color: 'hsl(var(--muted-fg))' }}>
-                                <span>Score: <strong style={{ color: 'hsl(var(--fg))' }}>{item.score}</strong></span>
-                                <span>Conf: <strong style={{ color: 'hsl(var(--fg))' }}>{Math.round(item.confidence * 100)}%</strong></span>
-                              </div>
                             </div>
 
-                            {/* Summary / Excerpt text */}
+                            {/* Brief Summary */}
                             <div style={{
                               fontSize: '12px',
                               color: 'hsl(var(--fg))',
@@ -2927,49 +2984,73 @@ export function Missions({ navigate, initialMissionId }: MissionsProps) {
                               {item.summary}
                             </div>
 
-                            {/* Provenance & Graph Relations row */}
-                            <div style={{ display: 'flex', flexWrap: 'wrap', alignItems: 'center', gap: '8px', fontSize: '11px' }}>
-                              {/* Provenance pills */}
-                              <div style={{ display: 'flex', alignItems: 'center', gap: '4px', color: 'hsl(var(--muted-fg))' }} data-testid={`evidence-provenance-${idx}`}>
-                                <span>{t('intelligenceProvenance')}:</span>
-                                {item.provenance.source_entity && (
-                                  <span style={{ padding: '1px 5px', borderRadius: '4px', backgroundColor: 'hsl(var(--muted))' }}>
-                                    {item.provenance.source_entity}
-                                  </span>
-                                )}
+                            {/* Provenance, Max 1-2 Relations, and Actions */}
+                            <div style={{ display: 'flex', flexWrap: 'wrap', alignItems: 'center', justifyContent: 'space-between', gap: '8px', fontSize: '11px' }}>
+                              <div style={{ display: 'flex', flexWrap: 'wrap', alignItems: 'center', gap: '6px' }} data-testid={`evidence-provenance-${idx}`}>
                                 {item.provenance.author_agent && (
-                                  <span style={{ padding: '1px 5px', borderRadius: '4px', backgroundColor: 'hsl(var(--muted))', color: 'hsl(var(--primary))' }}>
+                                  <span style={{ color: 'hsl(var(--primary))', fontWeight: 500 }}>
                                     @{item.provenance.author_agent}
                                   </span>
                                 )}
                                 {item.provenance.source_mission_id && (
-                                  <span style={{ padding: '1px 5px', borderRadius: '4px', backgroundColor: 'hsl(var(--muted))' }}>
-                                    Mission {item.provenance.source_mission_id.slice(0, 8)}
+                                  <span style={{ color: 'hsl(var(--muted-fg))' }}>
+                                    · Mission {item.provenance.source_mission_id.slice(0, 8)}
                                   </span>
                                 )}
+                                {item.provenance.source_entity && (
+                                  <span style={{ color: 'hsl(var(--muted-fg))' }}>
+                                    · {item.provenance.source_entity}
+                                  </span>
+                                )}
+
+                                {/* Max 1-2 useful relations */}
+                                {item.relations_summary && item.relations_summary.slice(0, 2).map((rel, rIdx) => (
+                                  <span
+                                    key={rIdx}
+                                    style={{
+                                      padding: '1px 6px',
+                                      borderRadius: '4px',
+                                      backgroundColor: 'rgba(59, 130, 246, 0.1)',
+                                      color: 'rgb(59, 130, 246)',
+                                      fontFamily: 'monospace',
+                                      fontSize: '10px'
+                                    }}
+                                    data-testid={`evidence-relation-${idx}-${rIdx}`}
+                                  >
+                                    {rel}
+                                  </span>
+                                ))}
                               </div>
 
-                              {/* Relational Links */}
-                              {item.relations_summary && item.relations_summary.length > 0 && (
-                                <div style={{ display: 'flex', alignItems: 'center', gap: '4px', color: 'hsl(var(--muted-fg))' }} data-testid={`evidence-relations-${idx}`}>
-                                  <span>{t('intelligenceRelations')}:</span>
-                                  {item.relations_summary.map((rel, rIdx) => (
-                                    <span
-                                      key={rIdx}
-                                      style={{
-                                        padding: '1px 6px',
-                                        borderRadius: '4px',
-                                        backgroundColor: 'rgba(59, 130, 246, 0.1)',
-                                        color: 'rgb(59, 130, 246)',
-                                        fontFamily: 'monospace',
-                                        fontSize: '10px'
-                                      }}
-                                    >
-                                      {rel}
-                                    </span>
-                                  ))}
-                                </div>
-                              )}
+                              {/* Actions: View source & Open in Knowledge Graph */}
+                              <div style={{ display: 'flex', alignItems: 'center', gap: '4px' }}>
+                                <button
+                                  type="button"
+                                  onClick={() => setSelectedSourcePreview(item)}
+                                  className="btn btn-ghost"
+                                  style={{ fontSize: '11px', padding: '2px 8px', height: '22px', display: 'inline-flex', alignItems: 'center', gap: '4px' }}
+                                  data-testid={`view-source-btn-${idx}`}
+                                  title={t('intelligenceViewSource')}
+                                >
+                                  <Eye size={12} />
+                                  <span>{t('intelligenceViewSource')}</span>
+                                </button>
+
+                                <button
+                                  type="button"
+                                  onClick={() => {
+                                    setIsInspectorOpen(false);
+                                    navigate('knowledge');
+                                  }}
+                                  className="btn btn-ghost"
+                                  style={{ fontSize: '11px', padding: '2px 8px', height: '22px', display: 'inline-flex', alignItems: 'center', gap: '4px' }}
+                                  data-testid={`open-graph-btn-${idx}`}
+                                  title={t('intelligenceOpenInGraph')}
+                                >
+                                  <ExternalLink size={12} />
+                                  <span>{t('intelligenceOpenInGraph')}</span>
+                                </button>
+                              </div>
                             </div>
                           </div>
                         ))}
@@ -3445,6 +3526,94 @@ export function Missions({ navigate, initialMissionId }: MissionsProps) {
           apiUrl={apiUrl}
           onClose={() => setIsMissionExplainOpen(false)}
         />
+      )}
+
+      {/* Source Preview Modal (Unified Intelligence) */}
+      {selectedSourcePreview && (
+        <div
+          style={{
+            position: 'fixed',
+            inset: 0,
+            backgroundColor: 'rgba(0,0,0,0.5)',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            zIndex: 1000,
+            padding: '16px'
+          }}
+          onClick={() => setSelectedSourcePreview(null)}
+        >
+          <div
+            style={{
+              backgroundColor: 'hsl(var(--card))',
+              borderRadius: '12px',
+              border: '1px solid hsl(var(--border))',
+              padding: '20px',
+              maxWidth: '560px',
+              width: '100%',
+              display: 'flex',
+              flexDirection: 'column',
+              gap: '14px',
+              boxShadow: '0 8px 32px rgba(0,0,0,0.2)'
+            }}
+            onClick={e => e.stopPropagation()}
+            data-testid="source-preview-modal"
+          >
+            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                <span style={{ fontSize: '10px', fontWeight: 700, padding: '2px 6px', borderRadius: '4px', backgroundColor: 'hsl(var(--muted))', color: 'hsl(var(--fg))', textTransform: 'uppercase' }}>
+                  {selectedSourcePreview.source_type}
+                </span>
+                <h3 style={{ fontSize: '14px', fontWeight: 600, margin: 0, color: 'hsl(var(--fg))' }}>
+                  {selectedSourcePreview.title}
+                </h3>
+              </div>
+              <button
+                type="button"
+                onClick={() => setSelectedSourcePreview(null)}
+                className="btn btn-ghost"
+                style={{ padding: '4px' }}
+                data-testid="close-source-preview-btn"
+              >
+                <X size={16} />
+              </button>
+            </div>
+
+            <div style={{
+              fontSize: '13px',
+              lineHeight: 1.5,
+              color: 'hsl(var(--fg))',
+              backgroundColor: 'hsl(var(--bg))',
+              padding: '12px',
+              borderRadius: '8px',
+              border: '1px solid hsl(var(--border))',
+              whiteSpace: 'pre-wrap'
+            }}>
+              {selectedSourcePreview.content || selectedSourcePreview.summary}
+            </div>
+
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', fontSize: '11px', color: 'hsl(var(--muted-fg))' }}>
+              <div>
+                {selectedSourcePreview.provenance?.author_agent && `Author: @${selectedSourcePreview.provenance.author_agent}`}
+                {selectedSourcePreview.provenance?.source_mission_id && ` · Mission: ${selectedSourcePreview.provenance.source_mission_id.slice(0, 8)}`}
+              </div>
+              <button
+                type="button"
+                onClick={() => {
+                  setSelectedSourcePreview(null);
+                  setIsInspectorOpen(false);
+                  navigate('knowledge');
+                }}
+                className="btn btn-secondary btn-sm"
+                style={{ fontSize: '11px', display: 'inline-flex', alignItems: 'center', gap: '4px' }}
+                data-testid="modal-open-graph-btn"
+              >
+                <ExternalLink size={12} />
+                <span>{t('intelligenceOpenInGraph')}</span>
+              </button>
+            </div>
+          </div>
+        </div>
       )}
     </div>
   );

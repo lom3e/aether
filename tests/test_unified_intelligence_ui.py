@@ -177,20 +177,11 @@ def test_unified_intelligence_inspector_tab(browser_context):
     intel_panel = page.locator("[data-testid='intelligence-panel']")
     expect(intel_panel).to_be_visible()
 
-    # Verify Summary Metrics
-    metrics_banner = page.locator("[data-testid='intelligence-metrics']")
-    expect(metrics_banner).to_be_visible()
-
-    total_found = page.locator("[data-testid='metric-total-found']")
-    expect(total_found).to_be_visible()
-
-    dedup_count = page.locator("[data-testid='metric-dedup-count']")
-    expect(dedup_count).to_be_visible()
-
+    # Verify Discreet Character Budget
     injected_chars = page.locator("[data-testid='metric-injected-chars']")
     expect(injected_chars).to_be_visible()
 
-    # Verify Evidence Cards
+    # Verify Evidence Cards (Primary Simplified View)
     evidence_list = page.locator("[data-testid='intelligence-evidence-list']")
     expect(evidence_list).to_be_visible()
 
@@ -203,16 +194,52 @@ def test_unified_intelligence_inspector_tab(browser_context):
     first_title = page.locator("[data-testid='evidence-title-0']")
     expect(first_title).to_be_visible()
 
-    # Capture overview screenshot
+    first_summary = page.locator("[data-testid='evidence-summary-0']")
+    expect(first_summary).to_be_visible()
+
+    # Test "View source" action
+    view_source_btn = page.locator("[data-testid='view-source-btn-0']")
+    expect(view_source_btn).to_be_visible()
+    view_source_btn.click()
+    page.wait_for_timeout(300)
+
+    # Verify Source Preview Modal
+    preview_modal = page.locator("[data-testid='source-preview-modal']")
+    expect(preview_modal).to_be_visible()
+    close_preview_btn = page.locator("[data-testid='close-source-preview-btn']")
+    close_preview_btn.click()
+    page.wait_for_timeout(300)
+
+    # Verify Open in Graph Action exists
+    open_graph_btn = page.locator("[data-testid='open-graph-btn-0']")
+    expect(open_graph_btn).to_be_visible()
+
+    # Capture overview screenshot (Primary Simplified UX)
     page.screenshot(path=str(SCREENSHOTS_DIR / "phase_b_unified_intelligence.png"))
 
-    # Verify Provenance and Copy Context Button
+    # Test Technical Details Toggle
+    toggle_details_btn = page.locator("[data-testid='toggle-details-btn']")
+    expect(toggle_details_btn).to_be_visible()
+    toggle_details_btn.click()
+    page.wait_for_timeout(300)
+
+    # Verify Summary Metrics Banner inside Technical Details
+    metrics_banner = page.locator("[data-testid='intelligence-metrics']")
+    expect(metrics_banner).to_be_visible()
+
+    total_found = page.locator("[data-testid='metric-total-found']")
+    expect(total_found).to_be_visible()
+
+    dedup_count = page.locator("[data-testid='metric-dedup-count']")
+    expect(dedup_count).to_be_visible()
+
+    # Verify Copy Injected Context Button
     copy_btn = page.locator("[data-testid='copy-context-btn']")
     if copy_btn.is_visible():
         copy_btn.click()
         page.wait_for_timeout(300)
 
-    # Capture detail screenshot
+    # Capture detail screenshot (With Technical Details Open)
     page.screenshot(path=str(SCREENSHOTS_DIR / "phase_b_unified_intelligence_detail.png"))
 
     # Assert zero console errors
