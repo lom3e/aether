@@ -111,7 +111,24 @@ Aether is engineered to progress naturally from **Answering** to **Doing**, and 
 
 ---
 
-## 1.4 The Core Design Triad: Workforce vs. Mission vs. Aether
+## 1.4 Permanent UX Principle: Simple by Default
+
+> **"Complexity is capability, not interface."**  
+> Aether may possess an arbitrarily sophisticated internal architecture, but that complexity must never be perceived by the user as interface complexity.
+
+Aether must be a commercial product usable by normal people, not just developers, engineers, or AI specialists.
+
+### Mandatory UX Directives (MUST):
+- **Primary UI:** Simple, intuitive, readable, hierarchical, action-oriented, and outcome-first. A user must never need to understand internal concepts (`Team`, `AgentStore`, `SQLite`, `ToolRegistry`, `provider`, `execution graph`, `retrieval`, `provenance`, `Quality Gate`, `orchestration`, `runtime`, `Knowledge Graph`).
+- **Primary UX Contract:** Every screen must instantly answer: (1) *Where am I?*, (2) *What is happening?*, and (3) *What can I do right now?*.
+- **Details on Demand:** Telemetry, provenance, scoring, debug, graph relations, and diagnostics belong in on-demand secondary views/modals.
+- **Commercial Product Test:** *"Would a normal person, who does not know Aether and is not a technical specialist, understand what to do without being trained on the product’s architecture?"* If no, simplify the UX.
+
+$$\mathbf{\text{“Powerful enough for experts, simple enough for everyone.”}}$$
+
+---
+
+## 1.5 The Core Design Triad: Workforce vs. Mission vs. Aether
 
 To maintain architectural clarity throughout the platform, three core concepts are strictly separated:
 

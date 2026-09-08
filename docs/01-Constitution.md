@@ -107,6 +107,19 @@ Agents should communicate through abstraction layers rather than directly depend
 
 ---
 
+## 3.5 Simple by Default (Complexity is Capability, Not Interface)
+
+Aether can have an arbitrary level of internal architectural complexity, but the user must never experience that complexity in the interface.
+
+Aether must be a commercial product usable by normal people, not just developers, engineers, or AI specialists.
+
+* **Primary UI:** Simple, intuitive, readable, hierarchical, action-oriented, outcome-first. Usable without knowing internal concepts (Team, AgentStore, SQLite, ToolRegistry, provider, DAG, retrieval, provenance, Quality Gate, Knowledge Graph).
+* **Details on Demand:** Telemetry, provenance, scoring, debug, and graph relationships belong in secondary, on-demand views.
+* **Commercial Product Test:** Every feature must be understandable by a non-technical person without product architecture training.
+* **Motto:** *Powerful enough for experts, simple enough for everyone.*
+
+---
+
 # 4. Agent Philosophy
 
 Agents are not simple processes.
