@@ -56,6 +56,7 @@ interface ExecutionGraphCanvasProps {
   className?: string;
   height?: number | string;
   onNodeClick?: (node: GraphNode | null) => void;
+  highlightedNodeId?: string | null;
 }
 
 const NODE_WIDTH = 210;
@@ -73,6 +74,7 @@ export function ExecutionGraphCanvas({
   className = '',
   height = '100%',
   onNodeClick,
+  highlightedNodeId = null,
 }: ExecutionGraphCanvasProps) {
   const containerRef = useRef<HTMLDivElement>(null);
 
@@ -89,6 +91,13 @@ export function ExecutionGraphCanvas({
   const [hoveredEdgeId, setHoveredEdgeId] = useState<string | null>(null);
   const [copiedId, setCopiedId] = useState<boolean>(false);
   const [showLegend, setShowLegend] = useState<boolean>(true);
+
+  // Sync external highlighted node from Replay
+  useEffect(() => {
+    if (highlightedNodeId) {
+      setSelectedNodeId(highlightedNodeId);
+    }
+  }, [highlightedNodeId]);
 
   // Preserve selection if graph updates and node still exists
   useEffect(() => {

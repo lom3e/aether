@@ -5,7 +5,7 @@ import {
   Square, RotateCcw, FileText, MessageSquare, Check, ArrowLeft,
   Clock, ShieldAlert, ChevronRight, FileCode, Table, FolderArchive,
   Copy, Activity, Terminal, Workflow, User, ExternalLink, Download, FolderOpen,
-  ChevronDown, ChevronUp, Eye, Sparkles
+  ChevronDown, ChevronUp, Eye, Sparkles, HeartPulse, History
 } from 'lucide-react';
 import { apiUrl, getSessionToken } from './api';
 import { useTranslation } from './i18n';
@@ -14,6 +14,8 @@ import { Tooltip } from './Tooltip';
 import { MarkdownRenderer } from './MarkdownRenderer';
 import { ExecutionGraphCanvas } from './ExecutionGraphCanvas';
 import { DeliverableDossierViewerModal, MissionExplainModal } from './DeliverablesViewer';
+import { FlightRecorderReplay } from './FlightRecorderReplay';
+import { WorkforceHealthView } from './WorkforceHealthView';
 
 interface AgentInfo {
   name: string;
@@ -229,8 +231,9 @@ export function Missions({ navigate, initialMissionId }: MissionsProps) {
   const [selectedExecutionId, setSelectedExecutionId] = useState<string | null>(null);
   const [actionLoading, setActionLoading] = useState<string | null>(null);
 
-  // Inspector & Activities (Slice 2E)
-  const [activeInspectorTab, setActiveInspectorTab] = useState<'graph' | 'trace' | 'telemetry'>('graph');
+  // Inspector & Activities (Slice 2E, 7, 9)
+  const [activeInspectorTab, setActiveInspectorTab] = useState<'graph' | 'replay' | 'health' | 'trace' | 'telemetry'>('graph');
+  const [replayHighlightedNodeId, setReplayHighlightedNodeId] = useState<string | null>(null);
   const [activities, setActivities] = useState<ActivityItem[]>([]);
   const [loadingActivities, setLoadingActivities] = useState(false);
 
@@ -1590,18 +1593,46 @@ export function Missions({ navigate, initialMissionId }: MissionsProps) {
                     )}
                   </div>
 
-                  {currentTeam && (
-                    <span style={{
-                      fontSize: '11px',
-                      padding: '3px 10px',
-                      borderRadius: '12px',
-                      backgroundColor: workforceStatus.bg,
-                      color: workforceStatus.color,
-                      fontWeight: 600
-                    }}>
-                      {workforceStatus.label}
-                    </span>
-                  )}
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                    <button
+                      type="button"
+                      data-testid="workforce-health-trigger"
+                      onClick={() => {
+                        setActiveInspectorTab('health');
+                        setIsInspectorOpen(true);
+                      }}
+                      className="btn btn-ghost"
+                      style={{
+                        padding: '4px 10px',
+                        fontSize: '11px',
+                        fontWeight: 600,
+                        borderRadius: '8px',
+                        border: '1px solid hsl(var(--border))',
+                        backgroundColor: 'hsl(var(--bg))',
+                        color: 'hsl(var(--fg))',
+                        display: 'inline-flex',
+                        alignItems: 'center',
+                        gap: '6px',
+                        cursor: 'pointer'
+                      }}
+                      title="Inspect Workforce Health metrics and diagnostics"
+                    >
+                      <HeartPulse size={13} className="text-primary" />
+                      <span>{t('workforceHealthBtn')}</span>
+                    </button>
+                    {currentTeam && (
+                      <span style={{
+                        fontSize: '11px',
+                        padding: '3px 10px',
+                        borderRadius: '12px',
+                        backgroundColor: workforceStatus.bg,
+                        color: workforceStatus.color,
+                        fontWeight: 600
+                      }}>
+                        {workforceStatus.label}
+                      </span>
+                    )}
+                  </div>
                 </div>
 
                 {currentTeam ? (
@@ -2330,7 +2361,7 @@ export function Missions({ navigate, initialMissionId }: MissionsProps) {
         }}>
           <div style={{
             width: '100%',
-            maxWidth: activeInspectorTab === 'graph' ? 'min(1080px, 92vw)' : '640px',
+            maxWidth: (activeInspectorTab === 'graph' || activeInspectorTab === 'replay' || activeInspectorTab === 'health') ? 'min(1080px, 92vw)' : '640px',
             transition: 'max-width 0.25s cubic-bezier(0.16, 1, 0.3, 1)',
             height: '100%',
             backgroundColor: 'hsl(var(--card))',
@@ -2363,16 +2394,18 @@ export function Missions({ navigate, initialMissionId }: MissionsProps) {
               display: 'flex',
               borderBottom: '1px solid hsl(var(--border))',
               backgroundColor: 'hsl(var(--bg))',
-              padding: '0 16px'
+              padding: '0 16px',
+              overflowX: 'auto'
             }}>
+              {/* Tab 1: Graph */}
               <button
                 onClick={() => setActiveInspectorTab('graph')}
+                data-testid="tab-graph"
                 style={{
                   padding: '10px 14px',
                   fontSize: '12px',
                   fontWeight: 600,
                   color: activeInspectorTab === 'graph' ? 'hsl(var(--primary))' : 'hsl(var(--muted-fg))',
-                  borderBottom: activeInspectorTab === 'graph' ? '2px solid hsl(var(--primary))' : '2px solid transparent',
                   background: 'none',
                   border: 'none',
                   borderBottomWidth: '2px',
@@ -2381,7 +2414,8 @@ export function Missions({ navigate, initialMissionId }: MissionsProps) {
                   cursor: 'pointer',
                   display: 'flex',
                   alignItems: 'center',
-                  gap: '6px'
+                  gap: '6px',
+                  whiteSpace: 'nowrap'
                 }}
               >
                 <Workflow size={14} />
@@ -2393,11 +2427,38 @@ export function Missions({ navigate, initialMissionId }: MissionsProps) {
                 )}
               </button>
 
+              {/* Tab 2: Replay (Flight Recorder) */}
+              <button
+                onClick={() => setActiveInspectorTab('replay')}
+                data-testid="tab-replay"
+                style={{
+                  padding: '10px 14px',
+                  fontSize: '12px',
+                  fontWeight: 600,
+                  color: activeInspectorTab === 'replay' ? 'hsl(var(--primary))' : 'hsl(var(--muted-fg))',
+                  background: 'none',
+                  border: 'none',
+                  borderBottomWidth: '2px',
+                  borderBottomStyle: 'solid',
+                  borderBottomColor: activeInspectorTab === 'replay' ? 'hsl(var(--primary))' : 'transparent',
+                  cursor: 'pointer',
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: '6px',
+                  whiteSpace: 'nowrap'
+                }}
+              >
+                <History size={14} />
+                <span>{t('tabReplay')}</span>
+              </button>
+
+              {/* Tab 3: Trace */}
               <button
                 onClick={() => {
                   setActiveInspectorTab('trace');
                   if (selectedMission) fetchActivities(selectedMission.id);
                 }}
+                data-testid="tab-trace"
                 style={{
                   padding: '10px 14px',
                   fontSize: '12px',
@@ -2411,7 +2472,8 @@ export function Missions({ navigate, initialMissionId }: MissionsProps) {
                   cursor: 'pointer',
                   display: 'flex',
                   alignItems: 'center',
-                  gap: '6px'
+                  gap: '6px',
+                  whiteSpace: 'nowrap'
                 }}
               >
                 <Activity size={14} />
@@ -2423,8 +2485,35 @@ export function Missions({ navigate, initialMissionId }: MissionsProps) {
                 )}
               </button>
 
+              {/* Tab 4: Workforce Health */}
+              <button
+                onClick={() => setActiveInspectorTab('health')}
+                data-testid="tab-health"
+                style={{
+                  padding: '10px 14px',
+                  fontSize: '12px',
+                  fontWeight: 600,
+                  color: activeInspectorTab === 'health' ? 'hsl(var(--primary))' : 'hsl(var(--muted-fg))',
+                  background: 'none',
+                  border: 'none',
+                  borderBottomWidth: '2px',
+                  borderBottomStyle: 'solid',
+                  borderBottomColor: activeInspectorTab === 'health' ? 'hsl(var(--primary))' : 'transparent',
+                  cursor: 'pointer',
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: '6px',
+                  whiteSpace: 'nowrap'
+                }}
+              >
+                <HeartPulse size={14} />
+                <span>{t('tabHealth')}</span>
+              </button>
+
+              {/* Tab 5: Telemetry */}
               <button
                 onClick={() => setActiveInspectorTab('telemetry')}
+                data-testid="tab-telemetry"
                 style={{
                   padding: '10px 14px',
                   fontSize: '12px',
@@ -2438,7 +2527,8 @@ export function Missions({ navigate, initialMissionId }: MissionsProps) {
                   cursor: 'pointer',
                   display: 'flex',
                   alignItems: 'center',
-                  gap: '6px'
+                  gap: '6px',
+                  whiteSpace: 'nowrap'
                 }}
               >
                 <Terminal size={14} />
@@ -2448,8 +2538,8 @@ export function Missions({ navigate, initialMissionId }: MissionsProps) {
 
             {/* Tab Body */}
             <div style={{
-              padding: activeInspectorTab === 'graph' ? '12px' : '20px',
-              overflowY: activeInspectorTab === 'graph' ? 'hidden' : 'auto',
+              padding: (activeInspectorTab === 'graph' || activeInspectorTab === 'replay') ? '12px' : '20px',
+              overflowY: (activeInspectorTab === 'graph' || activeInspectorTab === 'replay') ? 'hidden' : 'auto',
               flex: 1,
               display: 'flex',
               flexDirection: 'column',
@@ -2464,12 +2554,28 @@ export function Missions({ navigate, initialMissionId }: MissionsProps) {
                     selectedExecutionId={selectedExecutionId}
                     runNumber={executions.find(e => e.id === selectedExecutionId)?.run_number}
                     runStatus={executions.find(e => e.id === selectedExecutionId)?.status}
+                    highlightedNodeId={replayHighlightedNodeId}
                     height="100%"
                   />
                 </div>
               )}
 
-              {/* Tab 2: Activity Trace */}
+              {/* Tab 2: Flight Recorder Timeline Replay */}
+              {activeInspectorTab === 'replay' && selectedMission && (
+                <div style={{ flex: 1, minHeight: '520px', height: '100%', display: 'flex', flexDirection: 'column' }}>
+                  <FlightRecorderReplay
+                    missionId={selectedMission.id}
+                    executionId={selectedExecutionId}
+                    runNumber={executions.find(e => e.id === selectedExecutionId)?.run_number}
+                    onFocusCanvasNode={(nodeId) => {
+                      setReplayHighlightedNodeId(nodeId);
+                      setActiveInspectorTab('graph');
+                    }}
+                  />
+                </div>
+              )}
+
+              {/* Tab 3: Activity Trace */}
               {activeInspectorTab === 'trace' && (
                 <>
                   {loadingActivities ? (
@@ -2535,7 +2641,17 @@ export function Missions({ navigate, initialMissionId }: MissionsProps) {
                 </>
               )}
 
-              {/* Tab 3: Telemetry & Specs */}
+              {/* Tab 4: Workforce Health */}
+              {activeInspectorTab === 'health' && selectedMission && (
+                <WorkforceHealthView
+                  missionId={selectedMission.id}
+                  executionId={selectedExecutionId}
+                  teamName={selectedMission.team_name}
+                  runNumber={executions.find(e => e.id === selectedExecutionId)?.run_number}
+                />
+              )}
+
+              {/* Tab 5: Telemetry & Specs */}
               {activeInspectorTab === 'telemetry' && (
                 <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
                   <div style={{

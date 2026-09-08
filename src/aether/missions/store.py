@@ -331,7 +331,8 @@ class MissionStore:
 
             # Insert initial milestones if provided
             if milestones:
-                for idx, m_data in enumerate(milestones):
+                for idx, m_entry in enumerate(milestones):
+                    m_data = m_entry.to_dict() if hasattr(m_entry, "to_dict") else m_entry
                     m_id = m_data.get("id") or uuid.uuid4().hex
                     m_title = str(m_data.get("title", f"Milestone {idx + 1}")).strip()
                     m_desc = str(m_data.get("description", "")).strip()
@@ -1004,6 +1005,24 @@ class MissionStore:
         builder = ExplainBuilder(self)
         return builder.build_mission_explain(mission_id, execution_id=execution_id)
 
+    def get_mission_replay(self, mission_id: str, execution_id: str | None = None):
+        """Compiles a chronological ReplayTimeline for the mission and target execution."""
+        from aether.missions.replay import ReplayCompiler
+        compiler = ReplayCompiler(self)
+        return compiler.compile(mission_id=mission_id, execution_id=execution_id)
+
+    def get_workforce_health(
+        self,
+        mission_id: str | None = None,
+        execution_id: str | None = None,
+        team_name: str | None = None,
+        team_resolver: Any = None,
+    ):
+        """Calculates WorkforceHealthSummary for the target execution, mission, or workforce."""
+        from aether.missions.health import WorkforceHealthAnalyzer
+        analyzer = WorkforceHealthAnalyzer(self, team_resolver=team_resolver)
+        return analyzer.analyze(mission_id=mission_id, execution_id=execution_id, team_name=team_name)
+
 
     # ---------------------------------------------------------------------------
     # Deliverables Management & Lineage
@@ -1564,6 +1583,7 @@ class MissionStore:
         status: ExecutionStatus | str | None = None,
         current_milestone_id: str | None = None,
         team_name: str | None = None,
+        started_at: str | None = None,
         completed_at: str | None = None,
         interrupted_at: str | None = None,
         duration_seconds: float | None = None,
@@ -1589,6 +1609,9 @@ class MissionStore:
         if team_name is not None:
             updates.append("team_name = ?")
             params.append(team_name or None)
+        if started_at is not None:
+            updates.append("started_at = ?")
+            params.append(started_at or None)
         if completed_at is not None:
             updates.append("completed_at = ?")
             params.append(completed_at or None)
@@ -1915,3 +1938,44 @@ class MissionStore:
                 recovered_ids.append(exec_id)
 
         return recovered_ids
+
+    def log_conversation_activity(
+        self,
+        mission_id: str,
+        agent: str,
+        message: str,
+        activity_type: str = "tool_execution",
+        details: dict[str, Any] | None = None,
+        execution_id: str | None = None,
+        task_id: str | None = None,
+        activity_id: str | None = None,
+        created_at: str | None = None,
+    ) -> str:
+        """Logs an activity into conversation_activities table associated with a mission and execution."""
+        act_id = activity_id or f"act_{uuid.uuid4().hex[:10]}"
+        conv_id = f"conv_{mission_id}"
+        meta = dict(details or {})
+        if execution_id:
+            meta["execution_id"] = execution_id
+        if task_id:
+            meta["milestone_id"] = task_id
+            meta["task_id"] = task_id
+        ts = created_at or datetime.now(timezone.utc).isoformat()
+
+        with self._get_connection() as conn:
+            conn.execute(
+                """
+                INSERT OR IGNORE INTO conversations (id, title, team_name, status, created_at, updated_at)
+                VALUES (?, 'Mission Conversation', 'Default', 'active', ?, ?)
+                """,
+                (conv_id, ts, ts),
+            )
+            conn.execute(
+                """
+                INSERT INTO conversation_activities (
+                    id, conversation_id, agent, activity_type, message, metadata, created_at
+                ) VALUES (?, ?, ?, ?, ?, ?, ?)
+                """,
+                (act_id, conv_id, agent, activity_type, message, json.dumps(meta), ts),
+            )
+        return act_id

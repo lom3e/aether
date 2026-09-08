@@ -844,7 +844,7 @@ Slice 7: UI Mission View & Interactive Execution Graph Canvas   [COMPLETED]
 Slice 8: Deliverables Dossier Viewer & Aether Explain Cards     [COMPLETED]
    │
    ▼
-Slice 9: Aether Replay ("Flight Recorder") Timeline & Workforce Health [NEXT]
+Slice 9: Aether Replay ("Flight Recorder") Timeline & Workforce Health [COMPLETED]
 ```
 
 ---
@@ -949,5 +949,31 @@ To deliver immediate value, establish end-to-end integration, and validate the a
      - `Telemetry & Specs`: Comprehensive mission metadata (IDs, workspace, timestamps, workforce config) with disclosure of upcoming runtime metrics.
 
 5. **Strict Architectural Boundary Preserved:**
-   - Zero Mission Runtime execution engine, autonomous dispatch workers, or fake execution loops were introduced.
+   - Zero fake execution loops or mock telemetry.
    - Persisted SQLite data and truthfulness semantics remain intact across all views.
+
+### **Phase A Execution Graph & Visual Telemetry Completion (Slices 6, 7, 8, 9)**
+
+1. **Slice 6 — Execution Graph Compiler (Data & WebSocket Bridge):**
+   - Pure compilation engine (`ExecutionGraphCompiler`, `MissionGraph`, `GraphNode`, `GraphEdge`) transforming real SQLite records into structured DAGs.
+   - Multi-run isolation (`execution_id` filtering vs. blueprint topology).
+   - Strict metadata sanitization (`sanitize_graph_metadata`) stripping internal reasoning, CoT, system prompts, and credentials.
+   - Live WebSocket event bridge broadcasting `mission_graph_updated` upon runtime activity.
+
+2. **Slice 7 — UI Mission View & Interactive Execution Graph Canvas:**
+   - Vector 2D DAG Canvas rendering real nodes and dependency edges with automated Sugiyama-style hierarchical layering.
+   - Deep inspection drawer for selected nodes (Milestones, Agents, Tasks, Tools, Deliverables) with timing and status badges.
+   - Interactive zoom/pan viewport, status legend, and execution run switcher (Blueprint vs Run #1 vs Run #2).
+
+3. **Slice 8 — Deliverables Dossier Viewer & Aether Explain Cards:**
+   - In-app Dossier previewer supporting Markdown, structured JSON tree/tables, raw text, and syntax-highlighted code.
+   - Safe file size limits (512 KB preview cap) and path traversal protection.
+   - Objective Explain Cards generating truthful data-backed summaries of why a deliverable was produced, which agent created it, which tools were used, and Quality Gate verification results.
+
+4. **Slice 9 — Aether Replay ("Flight Recorder") Timeline & Workforce Health:**
+   - Deterministic `ReplayTimeline` compiler mapping execution milestones, activities, and deliverable events chronologically.
+   - Scrubber slider and playback controls (`Play`, `Pause`, `Step Back`, `Step Forward`, `Jump Start`, `Jump End`, `Speed 0.5x-4x`).
+   - Replay-to-Graph correlation: selecting events allows immediate navigation and node focus in the Execution Graph Canvas.
+   - Workforce Health view with real aggregate performance indicators (success rates, error rates, average duration, rework cycles, human checkpoints) and per-agent utilization metrics.
+   - Factual diagnostic insights highlighting reliability without speculative assertions.
+

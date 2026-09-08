@@ -25,6 +25,17 @@ from aether.missions.explain import (
     VerificationCheck,
     VerificationSummary,
 )
+from aether.missions.replay import (
+    ReplayCompiler,
+    ReplayEvent,
+    ReplayTimeline,
+)
+from aether.missions.health import (
+    AgentHealthMetric,
+    HealthInsight,
+    WorkforceHealthAnalyzer,
+    WorkforceHealthSummary,
+)
 from aether.missions.graph_compiler import ExecutionGraphCompiler
 from aether.missions.reviewer import QualityGateEvaluation, QualityGateEvaluator, QualityGateRuleResult
 from aether.missions.runtime import ConflictError, MissionRuntime, NotFoundError
@@ -58,4 +69,11 @@ __all__ = [
     "VerificationSummary",
     "Contributor",
     "EvidenceItem",
+    "ReplayEvent",
+    "ReplayTimeline",
+    "ReplayCompiler",
+    "AgentHealthMetric",
+    "HealthInsight",
+    "WorkforceHealthSummary",
+    "WorkforceHealthAnalyzer",
 ]

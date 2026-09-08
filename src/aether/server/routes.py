@@ -3252,6 +3252,83 @@ async def get_mission_explain(
     return summary.to_dict()
 
 
+@router.get("/missions/{mission_id}/replay")
+async def get_mission_replay(
+    request: Request,
+    mission_id: str,
+    execution_id: str | None = None,
+):
+    """
+    Returns the flight recorder chronological timeline of events for the specified mission
+    and execution run. All events are sanitized and ordered.
+    """
+    ws = getattr(request.app.state, "workspace", None)
+    if not ws:
+        raise HTTPException(status_code=503, detail="Workspace not initialized.")
+    mission = ws.missions.get_mission(mission_id, include_milestones=False)
+    if not mission:
+        raise HTTPException(status_code=404, detail="Mission not found.")
+
+    timeline = ws.missions.get_mission_replay(mission_id, execution_id=execution_id)
+    return timeline.to_dict()
+
+
+@router.get("/missions/{mission_id}/health")
+async def get_mission_workforce_health(
+    request: Request,
+    mission_id: str,
+    execution_id: str | None = None,
+):
+    """
+    Calculates and returns deterministic workforce health metrics, per-agent statistics,
+    and factual diagnostic insights for the given mission and optional execution run.
+    """
+    ws = getattr(request.app.state, "workspace", None)
+    if not ws:
+        raise HTTPException(status_code=503, detail="Workspace not initialized.")
+    mission = ws.missions.get_mission(mission_id, include_milestones=False)
+    if not mission:
+        raise HTTPException(status_code=404, detail="Mission not found.")
+
+    def team_resolver(tname: str):
+        try:
+            return ws.load_team(tname)
+        except Exception:
+            return None
+
+    health = ws.missions.get_workforce_health(
+        mission_id=mission_id,
+        execution_id=execution_id,
+        team_resolver=team_resolver,
+    )
+    return health.to_dict()
+
+
+@router.get("/workforce/health")
+async def get_global_workforce_health(
+    request: Request,
+    team_name: str | None = None,
+):
+    """
+    Returns workspace-level workforce reliability metrics and per-agent operational telemetry.
+    """
+    ws = getattr(request.app.state, "workspace", None)
+    if not ws:
+        raise HTTPException(status_code=503, detail="Workspace not initialized.")
+
+    def team_resolver(tname: str):
+        try:
+            return ws.load_team(tname)
+        except Exception:
+            return None
+
+    health = ws.missions.get_workforce_health(
+        team_name=team_name,
+        team_resolver=team_resolver,
+    )
+    return health.to_dict()
+
+
 @router.get("/missions/{mission_id}/activities")
 async def list_mission_activities(request: Request, mission_id: str):
     ws = getattr(request.app.state, "workspace", None)
