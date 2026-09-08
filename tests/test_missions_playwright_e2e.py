@@ -85,18 +85,16 @@ def test_playwright_missions_e2e_flow(tmp_path, monkeypatch):
             page.wait_for_selector("text=Design Distributed Vector Index", timeout=5000)
 
             # 6. Verify Executive Single-Pane Cockpit Elements
-            page.wait_for_selector("text=Outcome Charter", timeout=5000)
-            page.wait_for_selector("text=What are we trying to accomplish?", timeout=5000)
+            page.wait_for_selector("text=Objective", timeout=5000)
             assert page.is_visible("text=Design Distributed Vector Index")
-            assert page.is_visible("text=Outcome Charter")
-            assert page.is_visible("text=What are we trying to accomplish?")
-            assert page.is_visible("text=Assigned Workforce")
-            assert page.is_visible("text=Outcome Stage Pipeline")
-            assert page.is_visible("text=Deliverables Dossier")
+            assert page.is_visible("text=Objective")
+            assert page.is_visible("text=Workforce")
+            assert page.is_visible("text=Stages")
+            assert page.is_visible("text=Results")
 
             # Verify Slice 2B: Human-Centered Workforce & Role Presence
-            if page.is_visible("button:has-text('Role Specs')"):
-                page.click("button:has-text('Role Specs')")
+            if page.is_visible("button:has-text('Details')"):
+                page.click("button:has-text('Details')")
                 page.wait_for_selector("text=Underlying Model", timeout=5000)
                 assert page.is_visible("text=Underlying Model")
                 page.click("button:has-text('Close')")
@@ -112,6 +110,15 @@ def test_playwright_missions_e2e_flow(tmp_path, monkeypatch):
             # Wait for execution run to complete and show Re-run action
             page.wait_for_selector("button:has-text('Re-run Mission')", timeout=10000)
             assert page.is_visible("button:has-text('Re-run Mission')")
+
+            # Verify truthful workforce state (Completed, not Standby)
+            assert page.is_visible("span:has-text('Completed')")
+
+            # Verify progressive disclosure: Show details / Hide details if output exists
+            if page.is_visible("button:has-text('Show details')"):
+                page.click("button:has-text('Show details')")
+                assert page.is_visible("button:has-text('Hide details')")
+                page.click("button:has-text('Hide details')")
 
             # 8. Test Re-run -> Dispatches Execution Run #2
             page.click("button:has-text('Re-run Mission')")
@@ -130,8 +137,8 @@ def test_playwright_missions_e2e_flow(tmp_path, monkeypatch):
             assert page.is_visible("text=Stage 1")
             assert page.is_visible("text=Stage 2")
 
-            # Verify Slice 2D: Deliverables Dossier
-            assert page.is_visible("text=Deliverables Dossier")
+            # Verify Slice 2D: Deliverables / Results
+            assert page.is_visible("text=Results")
 
             # 10. Test Progressive Disclosure Slide-Over Inspector (Slice 2E)
             page.click("button:has-text('Inspect')")

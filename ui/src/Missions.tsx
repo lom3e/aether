@@ -4,12 +4,14 @@ import {
   Users, Layers, Sparkles, X, RefreshCw, Pause,
   Square, RotateCcw, FileText, MessageSquare, Check, ArrowLeft,
   Clock, ShieldAlert, ChevronRight, FileCode, Table, FolderArchive,
-  Copy, Activity, Terminal, Workflow, User, ExternalLink, Download, FolderOpen
+  Copy, Activity, Terminal, Workflow, User, ExternalLink, Download, FolderOpen,
+  ChevronDown, ChevronUp
 } from 'lucide-react';
 import { apiUrl } from './api';
 import { useTranslation } from './i18n';
 import { ToastContext } from './toast';
 import { Tooltip } from './Tooltip';
+import { MarkdownRenderer } from './MarkdownRenderer';
 
 interface AgentInfo {
   name: string;
@@ -185,6 +187,18 @@ export function Missions({ navigate, initialMissionId }: MissionsProps) {
   const [isAddingMilestone, setIsAddingMilestone] = useState(false);
   const [newMTitle, setNewMTitle] = useState('');
   const [newMDesc, setNewMDesc] = useState('');
+
+  // Stage details expansion state
+  const [expandedStageIds, setExpandedStageIds] = useState<Set<string>>(new Set());
+
+  const toggleStageExpanded = (id: string) => {
+    setExpandedStageIds(prev => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  };
 
   // Teams list for selector
   const [availableTeams, setAvailableTeams] = useState<string[]>([]);
@@ -719,13 +733,47 @@ export function Missions({ navigate, initialMissionId }: MissionsProps) {
 
   const pipelineStats = useMemo(() => {
     if (!selectedMission || !selectedMission.milestones) return { completed: 0, running: 0, pending: 0, blocked: 0 };
-    return {
-      completed: selectedMission.milestones.filter(m => m.status === 'completed').length,
-      running: selectedMission.milestones.filter(m => m.status === 'running').length,
-      pending: selectedMission.milestones.filter(m => m.status === 'pending').length,
-      blocked: selectedMission.milestones.filter(m => m.status === 'failed').length,
-    };
-  }, [selectedMission]);
+    const activeExec = executions.find(e => e.id === selectedExecutionId) || (executions.length > 0 ? executions[executions.length - 1] : null);
+    const execMilestoneMap = new Map((activeExec?.milestone_states || []).map(s => [s.milestone_id, s]));
+
+    let completed = 0;
+    let running = 0;
+    let blocked = 0;
+    let pending = 0;
+
+    for (const m of selectedMission.milestones) {
+      const execState = execMilestoneMap.get(m.id);
+      const st = execState ? execState.status : m.status;
+      if (st === 'completed') completed++;
+      else if (st === 'running') running++;
+      else if (st === 'failed') blocked++;
+      else pending++;
+    }
+
+    return { completed, running, pending, blocked };
+  }, [selectedMission, executions, selectedExecutionId]);
+
+  const workforceStatus = useMemo(() => {
+    if (!selectedMission) return { key: 'assigned', label: t('statusAssigned'), color: 'hsl(var(--muted-fg))', bg: 'hsl(var(--muted))' };
+    const activeExec = executions.find(e => e.id === selectedExecutionId) || (executions.length > 0 ? executions[executions.length - 1] : null);
+    if (!activeExec || selectedMission.status === 'draft') {
+      return { key: 'assigned', label: t('statusAssigned'), color: 'hsl(var(--muted-fg))', bg: 'hsl(var(--muted))' };
+    }
+    if (selectedMission.status === 'completed' || activeExec.status === 'completed') {
+      return { key: 'completed', label: t('statusCompleted'), color: '#10b981', bg: 'rgba(16, 185, 129, 0.12)' };
+    }
+    if (selectedMission.status === 'running' || activeExec.status === 'running') {
+      return { key: 'running', label: t('statusExecuting'), color: 'hsl(var(--primary))', bg: 'hsl(var(--primary) / 0.15)' };
+    }
+    if (selectedMission.status === 'interrupted' || activeExec.status === 'interrupted') {
+      return { key: 'paused', label: t('statusPaused'), color: '#f59e0b', bg: 'rgba(245, 158, 11, 0.12)' };
+    }
+    if (selectedMission.status === 'failed' || activeExec.status === 'failed' || selectedMission.status === 'cancelled' || activeExec.status === 'cancelled') {
+      return { key: 'failed', label: t('statusFailed'), color: '#ef4444', bg: 'rgba(239, 68, 68, 0.12)' };
+    }
+    return { key: 'assigned', label: t('statusAssigned'), color: 'hsl(var(--muted-fg))', bg: 'hsl(var(--muted))' };
+  }, [selectedMission, executions, selectedExecutionId, t]);
+
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', height: '100%', overflow: 'hidden', backgroundColor: 'hsl(var(--bg))' }}>
@@ -1224,9 +1272,9 @@ export function Missions({ navigate, initialMissionId }: MissionsProps) {
               flexDirection: 'column',
               gap: '20px'
             }}>
-              {/* 1. OPERATIONAL PULSE BANNER */}
+              {/* 1. SIMPLE STATUS BANNER */}
               <div style={{
-                padding: '14px 18px',
+                padding: '12px 18px',
                 borderRadius: '10px',
                 border: selectedMission.status === 'running'
                   ? '1px solid hsl(var(--primary) / 0.4)'
@@ -1247,10 +1295,10 @@ export function Missions({ navigate, initialMissionId }: MissionsProps) {
                 justifyContent: 'space-between',
                 gap: '12px'
               }}>
-                <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
                   <div style={{
-                    width: '10px',
-                    height: '10px',
+                    width: '9px',
+                    height: '9px',
                     borderRadius: '50%',
                     backgroundColor: selectedMission.status === 'running'
                       ? 'hsl(var(--primary))'
@@ -1260,21 +1308,14 @@ export function Missions({ navigate, initialMissionId }: MissionsProps) {
                       ? '#10b981'
                       : 'hsl(var(--muted-fg))'
                   }} />
-                  <div>
-                    <div style={{ fontSize: '13px', fontWeight: 600, color: 'hsl(var(--fg))' }}>
-                      {selectedMission.status === 'running' && t('operationalPulseRunning')}
-                      {selectedMission.status === 'draft' && t('operationalPulseIdle')}
-                      {selectedMission.status === 'interrupted' && t('operationalPulsePaused')}
-                      {selectedMission.status === 'awaiting_approval' && t('operationalPulseApproval')}
-                      {selectedMission.status === 'completed' && t('operationalPulseCompleted')}
-                      {selectedMission.status === 'failed' && t('operationalPulseFailed')}
-                      {selectedMission.status === 'cancelled' && t('operationalPulseCancelled')}
-                    </div>
-                    <div style={{ fontSize: '12px', color: 'hsl(var(--muted-fg))', marginTop: '3px', display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap' }}>
-                      <span>{t('assignedWorkforceLabel')}: {selectedMission.team_name || t('defaultWorkforce')}</span>
-                      <span style={{ opacity: 0.4 }}>•</span>
-                      <span style={{ fontStyle: 'italic', opacity: 0.85 }}>{t('runtimeExecutionNotice')}</span>
-                    </div>
+                  <div style={{ fontSize: '13px', fontWeight: 600, color: 'hsl(var(--fg))' }}>
+                    {selectedMission.status === 'running' && t('operationalPulseRunning')}
+                    {selectedMission.status === 'draft' && t('operationalPulseIdle')}
+                    {selectedMission.status === 'interrupted' && t('operationalPulsePaused')}
+                    {selectedMission.status === 'awaiting_approval' && t('operationalPulseApproval')}
+                    {selectedMission.status === 'completed' && t('operationalPulseCompleted')}
+                    {selectedMission.status === 'failed' && t('operationalPulseFailed')}
+                    {selectedMission.status === 'cancelled' && t('operationalPulseCancelled')}
                   </div>
                 </div>
 
@@ -1336,7 +1377,31 @@ export function Missions({ navigate, initialMissionId }: MissionsProps) {
                 </div>
               )}
 
-              {/* 2. OUTCOME CHARTER & WORKFORCE ROSTER (Slice 2B) */}
+              {/* 2. OBIETTIVO (Objective) */}
+              <div style={{
+                padding: '20px',
+                borderRadius: '12px',
+                border: '1px solid hsl(var(--border))',
+                backgroundColor: 'hsl(var(--card))'
+              }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '10px' }}>
+                  <Target size={16} className="text-primary" />
+                  <h3 style={{ fontSize: '14px', fontWeight: 600, margin: 0, color: 'hsl(var(--fg))' }}>
+                    {t('outcomeCharter')}
+                  </h3>
+                </div>
+                <p style={{
+                  fontSize: '14px',
+                  color: 'hsl(var(--fg))',
+                  lineHeight: 1.6,
+                  margin: 0,
+                  whiteSpace: 'pre-wrap'
+                }}>
+                  {selectedMission.objective}
+                </p>
+              </div>
+
+              {/* 3. WORKFORCE */}
               <div style={{
                 padding: '20px',
                 borderRadius: '12px',
@@ -1344,226 +1409,194 @@ export function Missions({ navigate, initialMissionId }: MissionsProps) {
                 backgroundColor: 'hsl(var(--card))',
                 display: 'flex',
                 flexDirection: 'column',
-                gap: '16px'
+                gap: '14px'
               }}>
-                <div>
-                  <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '8px' }}>
-                    <Target size={16} className="text-primary" />
-                    <span style={{ fontSize: '12px', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.05em', color: 'hsl(var(--primary))' }}>
-                      {t('outcomeCharter')}
-                    </span>
-                  </div>
-
-                  <h3 style={{ fontSize: '16px', fontWeight: 600, margin: '0 0 10px', color: 'hsl(var(--fg))' }}>
-                    {t('whatAreWeAchieving')}
-                  </h3>
-
-                  <p style={{
-                    fontSize: '14px',
-                    color: 'hsl(var(--fg))',
-                    lineHeight: 1.6,
-                    margin: 0,
-                    whiteSpace: 'pre-wrap'
-                  }}>
-                    {selectedMission.objective}
-                  </p>
-                </div>
-
-                {/* Workforce & Specialists Roster */}
-                <div style={{
-                  borderTop: '1px solid hsl(var(--border))',
-                  paddingTop: '14px',
-                  display: 'flex',
-                  flexDirection: 'column',
-                  gap: '12px'
-                }}>
-                  <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: '8px' }}>
-                    <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-                      <Users size={16} className="text-primary" />
-                      <span style={{ fontSize: '13px', fontWeight: 600, color: 'hsl(var(--fg))' }}>
-                        {t('assignedWorkforceLabel')}: {selectedMission.team_name || t('noWorkforceAssigned')}
-                      </span>
-                    </div>
-
-                    {currentTeam && (
-                      <span style={{
-                        fontSize: '11px',
-                        padding: '2px 8px',
-                        borderRadius: '12px',
-                        backgroundColor: 'hsl(var(--muted))',
-                        color: 'hsl(var(--muted-fg))',
-                        fontWeight: 500
-                      }}>
-                        {t('statusAssigned')} ({t('statusStandby')})
+                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: '8px' }}>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                    <Users size={16} className="text-primary" />
+                    <h3 style={{ fontSize: '14px', fontWeight: 600, margin: 0, color: 'hsl(var(--fg))' }}>
+                      {t('assignedWorkforceLabel')}
+                    </h3>
+                    {selectedMission.team_name && (
+                      <span style={{ fontSize: '13px', color: 'hsl(var(--muted-fg))' }}>
+                        ({selectedMission.team_name})
                       </span>
                     )}
                   </div>
 
-                  {currentTeam ? (
-                    <div style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
-                      {/* Mission Lead Card */}
-                      {missionLead && (
-                        <div style={{
-                          padding: '12px 14px',
-                          borderRadius: '8px',
-                          backgroundColor: 'hsl(var(--bg))',
-                          border: '1px solid hsl(var(--border))',
-                          display: 'flex',
-                          alignItems: 'center',
-                          justifyContent: 'space-between',
-                          flexWrap: 'wrap',
-                          gap: '10px'
-                        }}>
-                          <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
-                            <div style={{
-                              width: '32px',
-                              height: '32px',
-                              borderRadius: '8px',
-                              backgroundColor: 'hsl(var(--primary) / 0.15)',
-                              color: 'hsl(var(--primary))',
-                              display: 'flex',
-                              alignItems: 'center',
-                              justifyContent: 'center',
-                              fontWeight: 700,
-                              fontSize: '13px'
-                            }}>
-                              {missionLead.name.slice(0, 1).toUpperCase()}
-                            </div>
-                            <div>
-                              <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
-                                <span style={{ fontSize: '13px', fontWeight: 600, color: 'hsl(var(--fg))' }}>
-                                  {missionLead.name}
-                                </span>
-                                <span style={{
-                                  fontSize: '10px',
-                                  textTransform: 'uppercase',
-                                  fontWeight: 700,
-                                  padding: '1px 6px',
-                                  borderRadius: '4px',
-                                  backgroundColor: 'hsl(var(--primary) / 0.2)',
-                                  color: 'hsl(var(--primary))'
-                                }}>
-                                  {t('missionLead')}
-                                </span>
-                              </div>
-                              <div style={{ fontSize: '11px', color: 'hsl(var(--muted-fg))', marginTop: '2px' }}>
-                                {missionLead.role} • {missionLead.provider || currentTeam.default_provider || 'OpenAI'} ({missionLead.model || currentTeam.default_model || 'gpt-4o'})
-                              </div>
-                            </div>
-                          </div>
+                  {currentTeam && (
+                    <span style={{
+                      fontSize: '11px',
+                      padding: '3px 10px',
+                      borderRadius: '12px',
+                      backgroundColor: workforceStatus.bg,
+                      color: workforceStatus.color,
+                      fontWeight: 600
+                    }}>
+                      {workforceStatus.label}
+                    </span>
+                  )}
+                </div>
 
-                          <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
-                            <span style={{
-                              fontSize: '11px',
-                              padding: '2px 8px',
-                              borderRadius: '6px',
-                              backgroundColor: 'hsl(var(--muted))',
-                              color: 'hsl(var(--muted-fg))',
-                              fontWeight: 500
-                            }}>
-                              {t('statusStandby')}
-                            </span>
-                            <button
-                              onClick={() => setSelectedSpecialistForPopover(missionLead)}
-                              className="btn btn-ghost"
-                              style={{ fontSize: '11px', padding: '3px 8px' }}
-                            >
-                              Role Specs
-                            </button>
+                {currentTeam ? (
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
+                    {/* Responsabile (Lead) */}
+                    {missionLead && (
+                      <div style={{
+                        padding: '12px 14px',
+                        borderRadius: '8px',
+                        backgroundColor: 'hsl(var(--bg))',
+                        border: '1px solid hsl(var(--border))',
+                        display: 'flex',
+                        alignItems: 'center',
+                        justifyContent: 'space-between',
+                        gap: '12px'
+                      }}>
+                        <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+                          <div style={{
+                            width: '32px',
+                            height: '32px',
+                            borderRadius: '8px',
+                            backgroundColor: 'hsl(var(--primary) / 0.15)',
+                            color: 'hsl(var(--primary))',
+                            display: 'flex',
+                            alignItems: 'center',
+                            justifyContent: 'center',
+                            fontWeight: 700,
+                            fontSize: '13px'
+                          }}>
+                            {missionLead.name.slice(0, 1).toUpperCase()}
+                          </div>
+                          <div>
+                            <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+                              <span style={{ fontSize: '13px', fontWeight: 600, color: 'hsl(var(--fg))' }}>
+                                {missionLead.name}
+                              </span>
+                              <span style={{
+                                fontSize: '10px',
+                                textTransform: 'uppercase',
+                                fontWeight: 700,
+                                padding: '1px 6px',
+                                borderRadius: '4px',
+                                backgroundColor: 'hsl(var(--primary) / 0.2)',
+                                color: 'hsl(var(--primary))'
+                              }}>
+                                {t('workforceOwner')}
+                              </span>
+                            </div>
+                            <div style={{ fontSize: '12px', color: 'hsl(var(--muted-fg))', marginTop: '2px' }}>
+                              {missionLead.role}
+                            </div>
                           </div>
                         </div>
-                      )}
 
-                      {/* Assigned Specialists Grid */}
-                      {assignedSpecialists.length > 0 && (
-                        <div>
-                          <div style={{ fontSize: '11px', fontWeight: 600, color: 'hsl(var(--muted-fg))', textTransform: 'uppercase', letterSpacing: '0.05em', marginBottom: '8px' }}>
-                            {t('assignedSpecialists')} ({assignedSpecialists.length})
-                          </div>
-                          <div style={{ display: 'flex', flexWrap: 'wrap', gap: '8px' }}>
-                            {assignedSpecialists.map((agent, idx) => (
-                              <button
-                                key={idx}
-                                onClick={() => setSelectedSpecialistForPopover(agent)}
-                                style={{
-                                  display: 'flex',
-                                  alignItems: 'center',
-                                  gap: '8px',
-                                  padding: '6px 12px',
-                                  borderRadius: '8px',
-                                  backgroundColor: 'hsl(var(--bg))',
-                                  border: '1px solid hsl(var(--border))',
-                                  cursor: 'pointer',
-                                  textAlign: 'left',
-                                  transition: 'border-color 0.15s ease'
-                                }}
-                                className="hover:border-primary"
-                              >
+                        <button
+                          onClick={() => setSelectedSpecialistForPopover(missionLead)}
+                          className="btn btn-ghost"
+                          style={{ fontSize: '12px', padding: '4px 10px' }}
+                        >
+                          {t('viewDetails')}
+                        </button>
+                      </div>
+                    )}
+
+                    {/* Specialisti (Specialists) */}
+                    {assignedSpecialists.length > 0 && (
+                      <div>
+                        <div style={{ fontSize: '11px', fontWeight: 600, color: 'hsl(var(--muted-fg))', textTransform: 'uppercase', letterSpacing: '0.05em', marginBottom: '8px' }}>
+                          {t('workforceSpecialists')} ({assignedSpecialists.length})
+                        </div>
+                        <div style={{ display: 'flex', flexWrap: 'wrap', gap: '8px' }}>
+                          {assignedSpecialists.map((agent, idx) => (
+                            <div
+                              key={idx}
+                              style={{
+                                display: 'flex',
+                                alignItems: 'center',
+                                gap: '10px',
+                                padding: '8px 12px',
+                                borderRadius: '8px',
+                                backgroundColor: 'hsl(var(--bg))',
+                                border: '1px solid hsl(var(--border))',
+                                flex: '1 1 calc(50% - 8px)',
+                                minWidth: '220px',
+                                justifyContent: 'space-between'
+                              }}
+                            >
+                              <div style={{ display: 'flex', alignItems: 'center', gap: '8px', minWidth: 0 }}>
                                 <div style={{
-                                  width: '20px',
-                                  height: '20px',
+                                  width: '24px',
+                                  height: '24px',
                                   borderRadius: '50%',
                                   backgroundColor: 'hsl(var(--muted))',
                                   display: 'flex',
                                   alignItems: 'center',
                                   justifyContent: 'center',
-                                  fontSize: '10px',
+                                  fontSize: '11px',
                                   fontWeight: 600,
-                                  color: 'hsl(var(--fg))'
+                                  color: 'hsl(var(--fg))',
+                                  flexShrink: 0
                                 }}>
                                   {agent.name.slice(0, 1).toUpperCase()}
                                 </div>
-                                <div>
-                                  <div style={{ fontSize: '12px', fontWeight: 600, color: 'hsl(var(--fg))' }}>
+                                <div style={{ minWidth: 0 }}>
+                                  <div style={{ fontSize: '12.5px', fontWeight: 600, color: 'hsl(var(--fg))', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
                                     {agent.name}
                                   </div>
-                                  <div style={{ fontSize: '10px', color: 'hsl(var(--muted-fg))' }}>
+                                  <div style={{ fontSize: '11px', color: 'hsl(var(--muted-fg))', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
                                     {agent.role}
                                   </div>
                                 </div>
+                              </div>
+                              <button
+                                onClick={() => setSelectedSpecialistForPopover(agent)}
+                                className="btn btn-ghost"
+                                style={{ fontSize: '11px', padding: '2px 8px', flexShrink: 0 }}
+                              >
+                                {t('viewDetails')}
                               </button>
-                            ))}
-                          </div>
-                        </div>
-                      )}
-                    </div>
-                  ) : (
-                    <div style={{
-                      padding: '16px',
-                      borderRadius: '8px',
-                      backgroundColor: 'hsl(var(--bg))',
-                      border: '1px dashed hsl(var(--border))',
-                      display: 'flex',
-                      alignItems: 'center',
-                      justifyContent: 'space-between',
-                      flexWrap: 'wrap',
-                      gap: '12px'
-                    }}>
-                      <div>
-                        <div style={{ fontSize: '13px', fontWeight: 500, color: 'hsl(var(--fg))' }}>
-                          {t('noWorkforceAssigned')}
-                        </div>
-                        <div style={{ fontSize: '11px', color: 'hsl(var(--muted-fg))', marginTop: '2px' }}>
-                          {t('noWorkforceDesc')}
+                            </div>
+                          ))}
                         </div>
                       </div>
-
-                      {availableTeams.length > 0 && (
-                        <select
-                          value=""
-                          onChange={(e) => { if (e.target.value) handleUpdateTeam(e.target.value); }}
-                          className="form-input"
-                          style={{ fontSize: '12px', padding: '4px 8px', maxWidth: '220px' }}
-                        >
-                          <option value="" disabled>Assign workforce team...</option>
-                          {availableTeams.map(tm => (
-                            <option key={tm} value={tm}>{tm}</option>
-                          ))}
-                        </select>
-                      )}
+                    )}
+                  </div>
+                ) : (
+                  <div style={{
+                    padding: '16px',
+                    borderRadius: '8px',
+                    backgroundColor: 'hsl(var(--bg))',
+                    border: '1px dashed hsl(var(--border))',
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'space-between',
+                    flexWrap: 'wrap',
+                    gap: '12px'
+                  }}>
+                    <div>
+                      <div style={{ fontSize: '13px', fontWeight: 500, color: 'hsl(var(--fg))' }}>
+                        {t('noWorkforceAssigned')}
+                      </div>
+                      <div style={{ fontSize: '11px', color: 'hsl(var(--muted-fg))', marginTop: '2px' }}>
+                        {t('noWorkforceDesc')}
+                      </div>
                     </div>
-                  )}
-                </div>
+
+                    {availableTeams.length > 0 && (
+                      <select
+                        value=""
+                        onChange={(e) => { if (e.target.value) handleUpdateTeam(e.target.value); }}
+                        className="form-input"
+                        style={{ fontSize: '12px', padding: '4px 8px', maxWidth: '220px' }}
+                      >
+                        <option value="" disabled>Assign workforce team...</option>
+                        {availableTeams.map(tm => (
+                          <option key={tm} value={tm}>{tm}</option>
+                        ))}
+                      </select>
+                    )}
+                  </div>
+                )}
               </div>
 
               {/* 3. OUTCOME STAGE PIPELINE (Slice 2C) */}
@@ -1684,7 +1717,7 @@ export function Missions({ navigate, initialMissionId }: MissionsProps) {
                     </div>
                   ) : (
                     (() => {
-                      const activeExec = executions.find(e => e.id === selectedExecutionId) || executions[executions.length - 1];
+                      const activeExec = executions.find(e => e.id === selectedExecutionId) || (executions.length > 0 ? executions[executions.length - 1] : null);
                       const execMilestoneMap = new Map((activeExec?.milestone_states || []).map(s => [s.milestone_id, s]));
 
                       return selectedMission.milestones.map((m, idx) => {
@@ -1693,6 +1726,8 @@ export function Missions({ navigate, initialMissionId }: MissionsProps) {
                         const isDone = effectiveStatus === 'completed';
                         const isRunning = effectiveStatus === 'running';
                         const isFailed = effectiveStatus === 'failed';
+                        const isExpanded = expandedStageIds.has(m.id);
+                        const hasDetails = Boolean(execState?.output || execState?.error_message);
 
                         return (
                           <div
@@ -1702,8 +1737,7 @@ export function Missions({ navigate, initialMissionId }: MissionsProps) {
                             onMouseLeave={() => setHoveredMilestoneId(null)}
                             style={{
                               display: 'flex',
-                              alignItems: 'flex-start',
-                              gap: '12px',
+                              flexDirection: 'column',
                               padding: '12px 14px',
                               borderRadius: '8px',
                               backgroundColor: isDone
@@ -1721,133 +1755,145 @@ export function Missions({ navigate, initialMissionId }: MissionsProps) {
                               transition: 'all 0.15s ease'
                             }}
                           >
-                            {/* Status Clickable Checkbox/Action */}
-                            <button
-                              onClick={() => handleToggleMilestone(m)}
-                              title="Toggle stage state"
-                              style={{
-                                background: 'none',
-                                border: 'none',
-                                padding: 0,
-                                cursor: 'pointer',
-                                color: isDone ? '#10b981' : isRunning ? 'hsl(var(--primary))' : isFailed ? '#ef4444' : 'hsl(var(--muted-fg))',
-                                marginTop: '2px'
-                              }}
-                            >
-                              {isDone ? (
-                                <CheckCircle size={18} />
-                              ) : isRunning ? (
-                                <Play size={16} fill="currentColor" />
-                              ) : isFailed ? (
-                                <AlertCircle size={18} />
-                              ) : (
-                                <Circle size={18} />
-                              )}
-                            </button>
+                            <div style={{ display: 'flex', alignItems: 'flex-start', gap: '12px' }}>
+                              {/* Status Clickable Checkbox/Action */}
+                              <button
+                                onClick={() => handleToggleMilestone(m)}
+                                title="Toggle stage state"
+                                style={{
+                                  background: 'none',
+                                  border: 'none',
+                                  padding: 0,
+                                  cursor: 'pointer',
+                                  color: isDone ? '#10b981' : isRunning ? 'hsl(var(--primary))' : isFailed ? '#ef4444' : 'hsl(var(--muted-fg))',
+                                  marginTop: '2px'
+                                }}
+                              >
+                                {isDone ? (
+                                  <CheckCircle size={18} />
+                                ) : isRunning ? (
+                                  <Play size={16} fill="currentColor" />
+                                ) : isFailed ? (
+                                  <AlertCircle size={18} />
+                                ) : (
+                                  <Circle size={18} />
+                                )}
+                              </button>
 
-                            <div style={{ flex: 1 }}>
-                              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '8px' }}>
-                                <div style={{
-                                  fontSize: '13.5px',
-                                  fontWeight: isRunning ? 600 : 500,
-                                  color: isDone ? 'hsl(var(--muted-fg))' : 'hsl(var(--fg))',
-                                  textDecoration: isDone ? 'line-through' : 'none'
-                                }}>
-                                  <span style={{
-                                    fontSize: '10px',
-                                    textTransform: 'uppercase',
-                                    fontWeight: 700,
-                                    padding: '1px 5px',
-                                    borderRadius: '4px',
-                                    backgroundColor: 'hsl(var(--muted))',
-                                    color: 'hsl(var(--muted-fg))',
-                                    marginRight: '8px'
+                              <div style={{ flex: 1, minWidth: 0 }}>
+                                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '8px', flexWrap: 'wrap' }}>
+                                  <div style={{
+                                    fontSize: '13.5px',
+                                    fontWeight: isRunning ? 600 : 500,
+                                    color: isDone ? 'hsl(var(--muted-fg))' : 'hsl(var(--fg))',
+                                    textDecoration: isDone ? 'line-through' : 'none'
                                   }}>
-                                    {t('stage')} {idx + 1}
-                                  </span>
-                                  {m.title}
+                                    <span style={{
+                                      fontSize: '10px',
+                                      textTransform: 'uppercase',
+                                      fontWeight: 700,
+                                      padding: '1px 5px',
+                                      borderRadius: '4px',
+                                      backgroundColor: 'hsl(var(--muted))',
+                                      color: 'hsl(var(--muted-fg))',
+                                      marginRight: '8px'
+                                    }}>
+                                      {t('stage')} {idx + 1}
+                                    </span>
+                                    {m.title}
+                                  </div>
+
+                                  <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                                    {isDone && (
+                                      <span style={{ fontSize: '11px', color: '#10b981', fontWeight: 500 }}>
+                                        {t('completedAt')} {execState?.completed_at ? new Date(execState.completed_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : (m.completed_at ? new Date(m.completed_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : '')}
+                                      </span>
+                                    )}
+                                    {isRunning && (
+                                      <span style={{ fontSize: '11px', color: 'hsl(var(--primary))', fontWeight: 600 }}>
+                                        {t('statusExecuting')}
+                                      </span>
+                                    )}
+                                    {isFailed && (
+                                      <span style={{ fontSize: '11px', color: '#ef4444', fontWeight: 600 }}>
+                                        {t('pipelineBlocked')}
+                                      </span>
+                                    )}
+
+                                    {/* Show/Hide Details Toggle */}
+                                    {hasDetails && (
+                                      <button
+                                        type="button"
+                                        onClick={() => toggleStageExpanded(m.id)}
+                                        className="btn btn-ghost"
+                                        style={{
+                                          fontSize: '11px',
+                                          display: 'flex',
+                                          alignItems: 'center',
+                                          gap: '4px',
+                                          padding: '2px 6px',
+                                          color: 'hsl(var(--muted-fg))'
+                                        }}
+                                      >
+                                        {isExpanded ? <ChevronUp size={12} /> : <ChevronDown size={12} />}
+                                        <span>{isExpanded ? t('hideDetails') : t('showDetails')}</span>
+                                      </button>
+                                    )}
+
+                                    {/* Hover-activated deletion */}
+                                    {hoveredMilestoneId === m.id && (
+                                      <button
+                                        onClick={() => setMilestoneToDelete(m.id)}
+                                        className="btn btn-ghost text-muted-fg hover:text-rose-500"
+                                        style={{ padding: '2px 4px', borderRadius: '4px' }}
+                                        title="Delete milestone"
+                                      >
+                                        <Trash2 size={13} />
+                                      </button>
+                                    )}
+                                  </div>
                                 </div>
 
-                                <div style={{ display: 'flex', alignItems: 'center', gap: '6px', minHeight: '24px' }}>
-                                  {isDone && (
-                                    <span style={{ fontSize: '11px', color: '#10b981', fontWeight: 500 }}>
-                                      {t('completedAt')}
-                                    </span>
-                                  )}
-                                  {isRunning && (
-                                    <span style={{ fontSize: '11px', color: 'hsl(var(--primary))', fontWeight: 600 }}>
-                                      {t('statusRunning')}
-                                    </span>
-                                  )}
-                                  {isFailed && (
-                                    <span style={{ fontSize: '11px', color: '#ef4444', fontWeight: 600 }}>
-                                      Failed
-                                    </span>
-                                  )}
-
-                                  {/* Hover-activated deletion */}
-                                  {hoveredMilestoneId === m.id && (
-                                    <button
-                                      onClick={() => setMilestoneToDelete(m.id)}
-                                      className="btn btn-ghost text-muted-fg hover:text-rose-500"
-                                      style={{ padding: '2px 4px', borderRadius: '4px' }}
-                                      title="Delete milestone"
-                                    >
-                                      <Trash2 size={13} />
-                                    </button>
-                                  )}
-                                </div>
+                                {m.description && (
+                                  <div style={{ fontSize: '12px', color: 'hsl(var(--muted-fg))', marginTop: '4px', lineHeight: 1.4 }}>
+                                    {m.description}
+                                  </div>
+                                )}
                               </div>
-
-                              {m.description && (
-                                <div style={{ fontSize: '12px', color: 'hsl(var(--muted-fg))', marginTop: '4px', lineHeight: 1.4 }}>
-                                  {m.description}
-                                </div>
-                              )}
-
-                              {execState?.output && (
-                                <div style={{
-                                  fontSize: '11.5px',
-                                  color: 'hsl(var(--fg))',
-                                  marginTop: '6px',
-                                  padding: '6px 8px',
-                                  borderRadius: '6px',
-                                  backgroundColor: 'hsl(var(--muted) / 0.5)',
-                                  border: '1px solid hsl(var(--border))',
-                                  fontFamily: 'monospace',
-                                  whiteSpace: 'pre-wrap',
-                                  maxHeight: '120px',
-                                  overflowY: 'auto'
-                                }}>
-                                  {execState.output}
-                                </div>
-                              )}
-
-                              {execState?.error_message && (
-                                <div style={{
-                                  fontSize: '11.5px',
-                                  color: '#ef4444',
-                                  marginTop: '6px',
-                                  padding: '6px 8px',
-                                  borderRadius: '6px',
-                                  backgroundColor: 'rgba(239, 68, 68, 0.08)',
-                                  border: '1px solid rgba(239, 68, 68, 0.2)'
-                                }}>
-                                  {execState.error_message}
-                                </div>
-                              )}
-
-                              {m.completed_at && !execState?.completed_at && (
-                                <div style={{ fontSize: '11px', color: 'hsl(var(--muted-fg))', marginTop: '4px' }}>
-                                  {t('completedAt')} {new Date(m.completed_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
-                                </div>
-                              )}
-                              {execState?.completed_at && (
-                                <div style={{ fontSize: '11px', color: '#10b981', marginTop: '4px' }}>
-                                  {t('completedAt')} {new Date(execState.completed_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
-                                </div>
-                              )}
                             </div>
+
+                            {/* Progressive Disclosure: Formatted Output When Expanded */}
+                            {isExpanded && (
+                              <div style={{ marginTop: '10px', paddingTop: '10px', borderTop: '1px solid hsl(var(--border))' }}>
+                                {execState?.output && (
+                                  <div style={{
+                                    fontSize: '12.5px',
+                                    color: 'hsl(var(--fg))',
+                                    lineHeight: 1.6,
+                                    padding: '12px 14px',
+                                    borderRadius: '6px',
+                                    backgroundColor: 'hsl(var(--bg))',
+                                    border: '1px solid hsl(var(--border))'
+                                  }}>
+                                    <MarkdownRenderer content={execState.output} />
+                                  </div>
+                                )}
+
+                                {execState?.error_message && (
+                                  <div style={{
+                                    fontSize: '12px',
+                                    color: '#ef4444',
+                                    marginTop: execState?.output ? '8px' : '0',
+                                    padding: '8px 12px',
+                                    borderRadius: '6px',
+                                    backgroundColor: 'rgba(239, 68, 68, 0.08)',
+                                    border: '1px solid rgba(239, 68, 68, 0.2)'
+                                  }}>
+                                    {execState.error_message}
+                                  </div>
+                                )}
+                              </div>
+                            )}
                           </div>
                         );
                       });
@@ -1856,7 +1902,7 @@ export function Missions({ navigate, initialMissionId }: MissionsProps) {
                 </div>
               </div>
 
-              {/* 4. DELIVERABLES DOSSIER (Slice 2D) */}
+              {/* 5. RISULTATI (Results) */}
               <div style={{
                 padding: '20px',
                 borderRadius: '12px',
@@ -1866,7 +1912,7 @@ export function Missions({ navigate, initialMissionId }: MissionsProps) {
                 <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '14px' }}>
                   <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
                     <FileText size={16} className="text-primary" />
-                    <h3 style={{ fontSize: '15px', fontWeight: 600, margin: 0, color: 'hsl(var(--fg))' }}>
+                    <h3 style={{ fontSize: '14px', fontWeight: 600, margin: 0, color: 'hsl(var(--fg))' }}>
                       {t('deliverablesDossier')}
                     </h3>
                     <span style={{
@@ -1885,7 +1931,7 @@ export function Missions({ navigate, initialMissionId }: MissionsProps) {
                 {loadingDeliverables ? (
                   <div style={{ padding: '24px', textAlign: 'center', color: 'hsl(var(--muted-fg))', fontSize: '12px' }}>
                     <RefreshCw size={16} className="animate-spin" style={{ margin: '0 auto 8px' }} />
-                    Loading deliverables...
+                    Loading...
                   </div>
                 ) : deliverables.length === 0 ? (
                   <div style={{
@@ -1895,19 +1941,16 @@ export function Missions({ navigate, initialMissionId }: MissionsProps) {
                     textAlign: 'center',
                     color: 'hsl(var(--muted-fg))'
                   }}>
-                    <FileText size={28} style={{ margin: '0 auto 10px', opacity: 0.3 }} />
+                    <FileText size={26} style={{ margin: '0 auto 10px', opacity: 0.3 }} />
                     <div style={{ fontSize: '13px', fontWeight: 500, color: 'hsl(var(--fg))' }}>
                       {t('deliverablesEmptyTitle')}
                     </div>
                     <div style={{ fontSize: '12px', marginTop: '4px', maxWidth: '440px', marginInline: 'auto' }}>
                       {t('deliverablesEmptyDesc')}
                     </div>
-                    <div style={{ fontSize: '11px', marginTop: '8px', color: 'hsl(var(--muted-fg))', opacity: 0.8 }}>
-                      {t('deliverablesRuntimeNotice')}
-                    </div>
                   </div>
                 ) : (
-                  <div style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
                     {deliverables.map((del) => {
                       const renderTypeIcon = () => {
                         switch (del.type) {
@@ -1922,7 +1965,7 @@ export function Missions({ navigate, initialMissionId }: MissionsProps) {
                         <div
                           key={del.id}
                           style={{
-                            padding: '12px 14px',
+                            padding: '10px 14px',
                             borderRadius: '8px',
                             backgroundColor: 'hsl(var(--bg))',
                             border: '1px solid hsl(var(--border))',
@@ -1932,7 +1975,7 @@ export function Missions({ navigate, initialMissionId }: MissionsProps) {
                             gap: '12px'
                           }}
                         >
-                          <div style={{ display: 'flex', alignItems: 'center', gap: '12px', minWidth: 0, flex: 1 }}>
+                          <div style={{ display: 'flex', alignItems: 'center', gap: '10px', minWidth: 0, flex: 1 }}>
                             <div style={{
                               width: '32px',
                               height: '32px',
@@ -1964,25 +2007,27 @@ export function Missions({ navigate, initialMissionId }: MissionsProps) {
                                 >
                                   {del.name}
                                 </span>
-                                <span style={{
-                                  fontSize: '10px',
-                                  padding: '1px 6px',
-                                  borderRadius: '4px',
-                                  backgroundColor: del.status === 'verified' ? 'rgba(16, 185, 129, 0.15)' : 'hsl(var(--muted))',
-                                  color: del.status === 'verified' ? '#10b981' : 'hsl(var(--muted-fg))',
-                                  fontWeight: 600,
-                                  textTransform: 'uppercase'
-                                }}>
-                                  {del.status}
-                                </span>
+                                {del.status === 'verified' && (
+                                  <span style={{
+                                    fontSize: '10px',
+                                    padding: '1px 6px',
+                                    borderRadius: '4px',
+                                    backgroundColor: 'rgba(16, 185, 129, 0.15)',
+                                    color: '#10b981',
+                                    fontWeight: 600,
+                                    textTransform: 'uppercase'
+                                  }}>
+                                    {del.status}
+                                  </span>
+                                )}
                               </div>
-                              <div style={{ fontSize: '11px', color: 'hsl(var(--muted-fg))', marginTop: '2px', fontFamily: 'monospace', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                                {del.path} • {formatBytes(del.size_bytes)}
+                              <div style={{ fontSize: '11px', color: 'hsl(var(--muted-fg))', marginTop: '2px' }}>
+                                {formatBytes(del.size_bytes)}
                               </div>
                             </div>
                           </div>
 
-                          <div style={{ display: 'flex', alignItems: 'center', gap: '6px', flexWrap: 'wrap' }}>
+                          <div style={{ display: 'flex', alignItems: 'center', gap: '4px', flexWrap: 'wrap' }}>
                             {/* Open */}
                             <button
                               onClick={() => handleOpenDeliverable(del.id, false)}
@@ -2034,9 +2079,9 @@ export function Missions({ navigate, initialMissionId }: MissionsProps) {
                 )}
               </div>
 
-              {/* 5. PROGRESSIVE DISCLOSURE INSPECTOR GATEWAY */}
+              {/* 6. PROGRESSIVE DISCLOSURE INSPECTOR GATEWAY */}
               <div style={{
-                padding: '16px 20px',
+                padding: '14px 18px',
                 borderRadius: '10px',
                 border: '1px solid hsl(var(--border))',
                 backgroundColor: 'hsl(var(--card))',
@@ -2046,7 +2091,7 @@ export function Missions({ navigate, initialMissionId }: MissionsProps) {
                 gap: '16px'
               }}>
                 <div>
-                  <div style={{ fontSize: '13.5px', fontWeight: 600, color: 'hsl(var(--fg))' }}>
+                  <div style={{ fontSize: '13px', fontWeight: 600, color: 'hsl(var(--fg))' }}>
                     {t('inspectExecution')}
                   </div>
                   <div style={{ fontSize: '12px', color: 'hsl(var(--muted-fg))', marginTop: '2px' }}>
@@ -2060,10 +2105,10 @@ export function Missions({ navigate, initialMissionId }: MissionsProps) {
                     if (selectedMission) fetchActivities(selectedMission.id);
                   }}
                   className="btn btn-secondary"
-                  style={{ display: 'flex', alignItems: 'center', gap: '6px', fontSize: '13px' }}
+                  style={{ display: 'flex', alignItems: 'center', gap: '6px', fontSize: '12.5px', padding: '6px 12px' }}
                 >
                   <Layers size={14} />
-                  <span>Inspect</span>
+                  <span>{t('inspectExecution')}</span>
                   <ChevronRight size={14} />
                 </button>
               </div>
@@ -2465,6 +2510,16 @@ export function Missions({ navigate, initialMissionId }: MissionsProps) {
                 <h3 style={{ fontSize: '15px', fontWeight: 600, margin: 0, color: 'hsl(var(--fg))' }}>
                   {selectedSpecialistForPopover.name}
                 </h3>
+                <span style={{
+                  fontSize: '11px',
+                  padding: '2px 8px',
+                  borderRadius: '12px',
+                  backgroundColor: workforceStatus.bg,
+                  color: workforceStatus.color,
+                  fontWeight: 600
+                }}>
+                  {workforceStatus.label}
+                </span>
               </div>
               <button onClick={() => setSelectedSpecialistForPopover(null)} className="btn btn-ghost" style={{ padding: '4px' }}>
                 <X size={16} />
@@ -2543,7 +2598,11 @@ export function Missions({ navigate, initialMissionId }: MissionsProps) {
                 fontSize: '11px',
                 color: 'hsl(var(--muted-fg))'
               }}>
-                ℹ️ {t('specialistStandbyNote')}
+                ℹ️ {workforceStatus.key === 'completed' ? t('workforceStatusCompletedNote') :
+                    workforceStatus.key === 'running' ? t('workforceStatusRunningNote') :
+                    workforceStatus.key === 'paused' ? t('workforceStatusPausedNote') :
+                    workforceStatus.key === 'failed' ? t('workforceStatusFailedNote') :
+                    t('workforceStatusReadyNote')}
               </div>
             </div>
 
