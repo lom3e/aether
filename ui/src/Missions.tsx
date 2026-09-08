@@ -12,6 +12,7 @@ import { useTranslation } from './i18n';
 import { ToastContext } from './toast';
 import { Tooltip } from './Tooltip';
 import { MarkdownRenderer } from './MarkdownRenderer';
+import { ExecutionGraphCanvas } from './ExecutionGraphCanvas';
 
 interface AgentInfo {
   name: string;
@@ -138,7 +139,7 @@ interface GraphNode {
   type: string;
   label: string;
   status: string;
-  metadata: Record<string, any>;
+  metadata?: Record<string, any>;
 }
 
 interface GraphEdge {
@@ -228,7 +229,6 @@ export function Missions({ navigate, initialMissionId }: MissionsProps) {
   const [activeInspectorTab, setActiveInspectorTab] = useState<'graph' | 'trace' | 'telemetry'>('graph');
   const [activities, setActivities] = useState<ActivityItem[]>([]);
   const [loadingActivities, setLoadingActivities] = useState(false);
-  const [selectedGraphNode, setSelectedGraphNode] = useState<GraphNode | null>(null);
 
   const selectedMissionRef = useRef<Mission | null>(selectedMission);
   selectedMissionRef.current = selectedMission;
@@ -364,7 +364,6 @@ export function Missions({ navigate, initialMissionId }: MissionsProps) {
       setExecutions([]);
       setSelectedExecutionId(null);
       setSelectedSpecialistForPopover(null);
-      setSelectedGraphNode(null);
     }
   }, [selectedMission?.id, loadGraph, fetchExecutions, fetchDeliverables, fetchActivities]);
 
@@ -2273,7 +2272,8 @@ export function Missions({ navigate, initialMissionId }: MissionsProps) {
         }}>
           <div style={{
             width: '100%',
-            maxWidth: '640px',
+            maxWidth: activeInspectorTab === 'graph' ? 'min(1080px, 92vw)' : '640px',
+            transition: 'max-width 0.25s cubic-bezier(0.16, 1, 0.3, 1)',
             height: '100%',
             backgroundColor: 'hsl(var(--card))',
             borderLeft: '1px solid hsl(var(--border))',
@@ -2295,7 +2295,7 @@ export function Missions({ navigate, initialMissionId }: MissionsProps) {
                   </p>
                 </div>
               </div>
-              <button onClick={() => setIsInspectorOpen(false)} className="btn btn-ghost" style={{ padding: '4px' }}>
+              <button onClick={() => setIsInspectorOpen(false)} className="btn btn-ghost" aria-label="Close Inspector" data-testid="close-inspector-btn" style={{ padding: '4px' }}>
                 <X size={18} />
               </button>
             </div>
@@ -2389,186 +2389,26 @@ export function Missions({ navigate, initialMissionId }: MissionsProps) {
             </div>
 
             {/* Tab Body */}
-            <div style={{ padding: '20px', overflowY: 'auto', flex: 1, display: 'flex', flexDirection: 'column', gap: '16px' }}>
-              {/* Tab 1: Execution Graph */}
+            <div style={{
+              padding: activeInspectorTab === 'graph' ? '12px' : '20px',
+              overflowY: activeInspectorTab === 'graph' ? 'hidden' : 'auto',
+              flex: 1,
+              display: 'flex',
+              flexDirection: 'column',
+              gap: '16px'
+            }}>
+              {/* Tab 1: Interactive Execution Graph Canvas */}
               {activeInspectorTab === 'graph' && (
-                <>
-                  <div style={{
-                    padding: '10px 14px',
-                    borderRadius: '6px',
-                    backgroundColor: 'hsl(var(--muted))',
-                    fontSize: '12px',
-                    color: 'hsl(var(--muted-fg))',
-                    display: 'flex',
-                    alignItems: 'center',
-                    justifyContent: 'space-between',
-                    gap: '12px'
-                  }}>
-                    <div>
-                      {selectedExecutionId ? (
-                        <span>
-                          Viewing <strong>Run #{executions.find(e => e.id === selectedExecutionId)?.run_number || selectedExecutionId.slice(0, 8)}</strong> DAG
-                          {executions.find(e => e.id === selectedExecutionId)?.status && (
-                            <span style={{ marginLeft: '6px', opacity: 0.8 }}>
-                              ({executions.find(e => e.id === selectedExecutionId)?.status})
-                            </span>
-                          )}
-                        </span>
-                      ) : (
-                        <span>Viewing <strong>Blueprint DAG</strong> (Design Specification)</span>
-                      )}
-                    </div>
-                    {graphData?.execution_id && (
-                      <span style={{
-                        fontSize: '10px',
-                        fontFamily: 'monospace',
-                        padding: '2px 6px',
-                        borderRadius: '4px',
-                        backgroundColor: 'hsl(var(--card))',
-                        border: '1px solid hsl(var(--border))'
-                      }}>
-                        {graphData.execution_id.slice(0, 12)}
-                      </span>
-                    )}
-                  </div>
-
-                  {loadingGraph ? (
-                    <div style={{ padding: '32px', textAlign: 'center', color: 'hsl(var(--muted-fg))', fontSize: '13px' }}>
-                      <RefreshCw size={20} className="animate-spin" style={{ margin: '0 auto 8px' }} />
-                      Compiling node graph...
-                    </div>
-                  ) : !graphData || graphData.nodes.length === 0 ? (
-                    <div style={{ padding: '32px', textAlign: 'center', color: 'hsl(var(--muted-fg))', fontSize: '12px' }}>
-                      No execution nodes registered yet.
-                    </div>
-                  ) : (
-                    <div style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
-                      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', fontSize: '11px', color: 'hsl(var(--muted-fg))', padding: '0 4px' }}>
-                        <span>Topology: <strong>{graphData.nodes.length}</strong> {t('graphNodesCount')} · <strong>{graphData.edges.length}</strong> {t('graphEdgesCount')}</span>
-                        {selectedGraphNode && (
-                          <button onClick={() => setSelectedGraphNode(null)} className="btn btn-ghost" style={{ padding: '1px 6px', fontSize: '10px' }}>
-                            Clear selection
-                          </button>
-                        )}
-                      </div>
-
-                      {graphData.nodes.map(node => {
-                        const isSelected = selectedGraphNode?.id === node.id;
-                        const inboundEdges = isSelected && graphData ? graphData.edges.filter(e => e.target === node.id) : [];
-                        const outboundEdges = isSelected && graphData ? graphData.edges.filter(e => e.source === node.id) : [];
-
-                        const getTypeColor = (type: string) => {
-                          switch (type) {
-                            case 'mission': return { bg: 'hsl(var(--primary) / 0.15)', color: 'hsl(var(--primary))' };
-                            case 'execution': return { bg: 'rgba(168, 85, 247, 0.15)', color: '#c084fc' };
-                            case 'milestone': return { bg: 'rgba(59, 130, 246, 0.15)', color: '#60a5fa' };
-                            case 'agent': return { bg: 'rgba(6, 182, 212, 0.15)', color: '#22d3ee' };
-                            case 'task': return { bg: 'rgba(245, 158, 11, 0.15)', color: '#fbbf24' };
-                            case 'tool': return { bg: 'rgba(100, 116, 139, 0.15)', color: '#94a3b8' };
-                            case 'deliverable': return { bg: 'rgba(16, 185, 129, 0.15)', color: '#34d399' };
-                            default: return { bg: 'hsl(var(--muted))', color: 'hsl(var(--fg))' };
-                          }
-                        };
-                        const typeStyle = getTypeColor(node.type);
-
-                        return (
-                          <div
-                            key={node.id}
-                            onClick={() => setSelectedGraphNode(isSelected ? null : node)}
-                            style={{
-                              padding: '12px 14px',
-                              borderRadius: '8px',
-                              backgroundColor: isSelected
-                                ? 'hsl(var(--primary) / 0.08)'
-                                : node.type === 'mission'
-                                ? 'hsl(var(--primary) / 0.03)'
-                                : 'hsl(var(--bg))',
-                              border: isSelected
-                                ? '1px solid hsl(var(--primary))'
-                                : '1px solid hsl(var(--border))',
-                              cursor: 'pointer',
-                              transition: 'all 0.15s ease'
-                            }}
-                          >
-                            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
-                              <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
-                                <span style={{
-                                  fontSize: '10px',
-                                  textTransform: 'uppercase',
-                                  fontWeight: 700,
-                                  padding: '2px 6px',
-                                  borderRadius: '4px',
-                                  backgroundColor: typeStyle.bg,
-                                  color: typeStyle.color
-                                }}>
-                                  {node.type}
-                                </span>
-                                <span style={{ fontSize: '13px', fontWeight: 600, color: 'hsl(var(--fg))' }}>
-                                  {node.label}
-                                </span>
-                              </div>
-                              {getStatusBadge(node.status)}
-                            </div>
-
-                            {isSelected && (
-                              <div style={{
-                                marginTop: '10px',
-                                paddingTop: '10px',
-                                borderTop: '1px solid hsl(var(--border))',
-                                fontSize: '11px',
-                                color: 'hsl(var(--muted-fg))',
-                                display: 'flex',
-                                flexDirection: 'column',
-                                gap: '8px'
-                              }}>
-                                <div style={{ fontFamily: 'monospace' }}>
-                                  ID: <span style={{ color: 'hsl(var(--fg))' }}>{node.id}</span>
-                                </div>
-
-                                {/* Relationships */}
-                                {(inboundEdges.length > 0 || outboundEdges.length > 0) && (
-                                  <div style={{ display: 'flex', flexDirection: 'column', gap: '4px', padding: '6px 8px', borderRadius: '4px', backgroundColor: 'hsl(var(--card))' }}>
-                                    {inboundEdges.map(edge => {
-                                      const src = graphData.nodes.find(n => n.id === edge.source);
-                                      return (
-                                        <div key={edge.id} style={{ display: 'flex', alignItems: 'center', gap: '6px', fontSize: '11px' }}>
-                                          <span style={{ color: 'hsl(var(--primary))', fontWeight: 600 }}>← {edge.type}</span>
-                                          <span style={{ color: 'hsl(var(--fg))' }}>{src ? src.label : edge.source}</span>
-                                        </div>
-                                      );
-                                    })}
-                                    {outboundEdges.map(edge => {
-                                      const tgt = graphData.nodes.find(n => n.id === edge.target);
-                                      return (
-                                        <div key={edge.id} style={{ display: 'flex', alignItems: 'center', gap: '6px', fontSize: '11px' }}>
-                                          <span style={{ color: '#22d3ee', fontWeight: 600 }}>→ {edge.type}</span>
-                                          <span style={{ color: 'hsl(var(--fg))' }}>{tgt ? tgt.label : edge.target}</span>
-                                        </div>
-                                      );
-                                    })}
-                                  </div>
-                                )}
-
-                                {node.metadata && Object.keys(node.metadata).length > 0 && (
-                                  <pre style={{
-                                    backgroundColor: 'hsl(var(--card))',
-                                    padding: '8px',
-                                    borderRadius: '4px',
-                                    fontSize: '10px',
-                                    overflowX: 'auto',
-                                    margin: 0
-                                  }}>
-                                    {JSON.stringify(node.metadata, null, 2)}
-                                  </pre>
-                                )}
-                              </div>
-                            )}
-                          </div>
-                        );
-                      })}
-                    </div>
-                  )}
-                </>
+                <div style={{ flex: 1, minHeight: '520px', height: '100%', display: 'flex', flexDirection: 'column' }}>
+                  <ExecutionGraphCanvas
+                    graph={graphData}
+                    loading={loadingGraph}
+                    selectedExecutionId={selectedExecutionId}
+                    runNumber={executions.find(e => e.id === selectedExecutionId)?.run_number}
+                    runStatus={executions.find(e => e.id === selectedExecutionId)?.status}
+                    height="100%"
+                  />
+                </div>
               )}
 
               {/* Tab 2: Activity Trace */}

@@ -1,8 +1,8 @@
-# Aether Execution Graph Compiler Architecture
+# Aether Execution Graph Compiler & Interactive Canvas Architecture
 
 **Document Status:** Production Architectural Specification  
-**Component:** `src/aether/missions/graph_compiler.py`  
-**Slice:** Phase A — Slice 6 (Completed)  
+**Components:** `src/aether/missions/graph_compiler.py` & `ui/src/ExecutionGraphCanvas.tsx`  
+**Slice:** Phase A — Slice 6 & Slice 7 (Completed)  
 **Security & Privacy:** Strictly Zero Chain-of-Thought / Secret Leakage  
 
 ---
@@ -186,22 +186,90 @@ Triggers hooked in runtime:
 
 ---
 
-## 9. Inspector UI Integration
+## 9. UI Interactive Execution Graph Canvas (`ExecutionGraphCanvas.tsx`)
 
-In `ui/src/Missions.tsx`, the Execution Graph Inspector provides progressive disclosure for advanced inspection:
+In `ui/src/ExecutionGraphCanvas.tsx` and `ui/src/Missions.tsx`, the Execution Graph Inspector provides a high-performance, dependency-free interactive SVG canvas for progressive disclosure:
 
-1. **Scope Indicator:** Distinguishes between `Run #1 (completed)` vs `Blueprint Specification`.
-2. **Type Categorization:** Color-coded badges for nodes (`mission`, `execution`, `milestone`, `agent`, `task`, `tool`, `deliverable`).
-3. **Relationship Explorer:** Selecting any node displays its exact inbound (`← depends_on`, `← delegated_to`, `← executes`) and outbound (`→ produced`, `→ verifies`, `→ invokes`) relationships.
-4. **Dual-Channel Synchronization:** Uses real-time WebSocket listening on `/ws/chat` for immediate 0ms updates, backed by resilient fallback polling.
+```text
+┌─────────────────────────────────────────────────────────────────────────────┐
+│  Toolbar: [ + ] [ - ] [ 100% ] [ Fit to View ] [ Reset (1:1) ] [ ? Legend ] │
+├─────────────────────────────────────────────────────────────────────────────┤
+│  SVG Canvas (Pan & Zoom Viewport)                                           │
+│                                                                             │
+│   [Mission Root] ──(contains)──▶ [Milestone 1] ──▶ [Agent Lead]             │
+│                                        │                   │                │
+│                                   (depends_on)          (executes)          │
+│                                        ▼                   ▼                │
+│                                  [Milestone 2] ◀──── [Task Step]            │
+│                                        │                   │                │
+│                                   (produced)           (invoked)            │
+│                                        ▼                   ▼                │
+│                                 [Deliverable]        [Tool: bash]           │
+│                                        ▲                                    │
+│                                    (verifies)                               │
+│                                        │                                    │
+│                                [Reviewer Agent]                             │
+│                                                                             │
+│   ┌──────────────────────────────────────────────────────────────┐          │
+│   │ Node Inspector Drawer (Slide-over on selection)              │          │
+│   │ • Type & Status Badges                                       │          │
+│   │ • ID (one-click copy)                                        │          │
+│   │ • Lineage / Execution Run                                    │          │
+│   │ • Relationship Explorer (Inbound / Outbound with Jump links) │          │
+│   │ • Sanitized Operational Metadata                             │          │
+│   └──────────────────────────────────────────────────────────────┘          │
+└─────────────────────────────────────────────────────────────────────────────┘
+```
+
+### 9.1 Deterministic Layered DAG Layout
+To eliminate heavyweight third-party graph library dependencies while maintaining high performance and clean geometry, `ExecutionGraphCanvas.tsx` implements a self-contained layered DAG layout algorithm:
+1. **Topological Layering:** Identifies root nodes (nodes without incoming non-loop edges) and iteratively assigns rank/layer depths based on `contains`, `depends_on`, `delegated_to`, `executes`, `invoked`, and `produced` edges.
+2. **In-Layer Ordering:** Reorders nodes within layers based on parent barycenter coordinates to minimize edge crossings.
+3. **Discrete Coordinate Mapping:** Distributes layers along the X-axis (with horizontal spacing $X_{spacing} = 260\text{px}$) and nodes along the Y-axis (with vertical spacing $Y_{spacing} = 100\text{px}$, node width $180\text{px}$, node height $56\text{px}$).
+4. **Auto Fit-to-View:** Calculates the exact bounding box of all mapped node coordinates and computes optimal scale factor (clamped between $0.25\times$ and $2.5\times$) and translation offset to fit the canvas viewport seamlessly upon loading.
+
+### 9.2 Canvas Navigation & Interaction
+* **Pan:** Click-and-drag across the SVG canvas background. Cursor toggles dynamically between `grab` and `grabbing`.
+* **Zoom:**
+  - Mouse wheel zoom centered on cursor, smoothly clamped between $0.25\times$ ($25\%$) and $2.5\times$ ($250\%$).
+  - Toolbar controls: Zoom In (`+`), Zoom Out (`-`), direct zoom percentage indicator.
+  - One-click **Fit-to-View** and **Reset View** ($100\%$ scale at origin).
+* **Node Selection & Context Dimming:**
+  - Clicking any node selects it with a glowing halo ring (`rgba(99, 102, 241, 0.45)`).
+  - All unrelated nodes and edges are smoothly dimmed to $20\%$ opacity (`opacity: 0.2`), elevating the active dependency lineage.
+  - Clicking empty canvas space or the close button clears selection and restores full opacity.
+* **Cubic Bezier Edges & Custom Directional Markers:**
+  - Directional curves: Forward edges render smooth horizontal cubic Bezier curves (`C (x1+dx) y1, (x2-dx) y2, x2 y2`).
+  - Rework / Loop edges: Reverse Quality Gate edges loop gracefully underneath connected nodes (`C (x1+40) (y1+80), (x2-40) (y2+80), x2 y2`) with amber dashed styling.
+  - SVG Arrow Markers: `#arrow-default`, `#arrow-inbound`, `#arrow-outbound`, and `#arrow-rework`.
+
+### 9.3 Contextual Node Inspector Drawer
+When a node is selected, an embedded slide-over drawer opens seamlessly on the right side of the canvas:
+* **Node Metadata:** Type badge, status badge, copyable Node ID (`navigator.clipboard.writeText`), and label.
+* **Lineage:** Displays parent milestone, mission, or execution context.
+* **Relationship Explorer:** Dedicated sections for **Inbound** and **Outbound** edges, with relationship type badges (`depends_on`, `delegated_to`, `executes`, `invoked`, `produced`, `verifies`, `rework`) and clickable target buttons that trigger smooth camera focus to the target node.
+* **Sanitized Operational Details:** Safe operational parameters (e.g. execution duration, deliverable path, exit codes) rendered cleanly with strict zero-leakage enforcement.
+
+### 9.4 Multi-Run & Live WebSocket Synchronization
+* **Run Selector Sync:** When switching between `Run #1`, `Run #2`, or `Blueprint Specification`, the canvas fetches and transitions to the selected run's isolated DAG.
+* **Live WebSocket Integration:** Subscribed to `mission_graph_updated` on `/ws/chat`. Incoming updates refresh node statuses and inject newly spawned tasks/tools in-place without resetting user pan or zoom offsets.
 
 ---
 
 ## 10. Automated Verification Suite
 
-Verified by automated tests in `tests/test_execution_graph_compiler.py`:
-- `test_sanitize_graph_metadata_strips_sensitive_keys`: Verifies zero CoT, thought, prompt, and secret leaks.
-- `test_compile_blueprint_graph_deterministic`: Verifies deterministic blueprint compilation, contains/depends_on edges, and mathematical orphan prevention.
-- `test_compile_multi_run_isolation`: Verifies strict isolation between Run #1 and Run #2 nodes, deliverables, and activities.
-- `test_runtime_execution_compiles_graph_and_broadcasts`: Verifies real runtime execution emits `mission_graph_updated` with correct DAG payload.
-- `test_get_mission_graph_route`: Verifies REST API behavior with and without `execution_id`, and 404 handling.
+Verified by automated tests across backend compilers, models, REST routes, and Playwright browser E2E:
+1. `tests/test_execution_graph_compiler.py`:
+   - `test_sanitize_graph_metadata_strips_sensitive_keys`: Verifies zero CoT, thought, prompt, and secret leaks.
+   - `test_compile_blueprint_graph_deterministic`: Verifies deterministic blueprint compilation, contains/depends_on edges, and mathematical orphan prevention.
+   - `test_compile_multi_run_isolation`: Verifies strict isolation between Run #1 and Run #2 nodes, deliverables, and activities.
+   - `test_runtime_execution_compiles_graph_and_broadcasts`: Verifies real runtime execution emits `mission_graph_updated` with correct DAG payload.
+   - `test_get_mission_graph_route`: Verifies REST API behavior with and without `execution_id`, and 404 handling.
+2. `tests/test_interactive_graph_canvas.py`:
+   - `test_canvas_dag_layering_and_orphan_edge_invariants`: Verifies DAG layering algorithms, topological sorting invariants, and absence of dangling edge references.
+   - `test_canvas_privacy_guarantees`: Verifies that compiled graph node and edge attributes inspected by the canvas are sanitized and free of confidential agent thoughts or secrets.
+   - `test_playwright_interactive_execution_graph_canvas`: End-to-end browser test verifying Blueprint graph rendering, real execution triggering, canvas zoom/fit/reset controls, node selection, contextual drawer opening, relationship jump navigation, and multi-run scope switching. Captured visual screenshots:
+     - `slice7_blueprint_graph.png`: Blueprint specification graph before execution.
+     - `slice7_multinode_canvas.png`: Full multi-node execution DAG with tasks, agents, tools, and deliverables.
+     - `slice7_selected_node_inspector.png`: Focused node selection with dimming and open relationship explorer drawer.
+     - `slice7_run2_switched_canvas.png`: Switched canvas viewport rendering isolated Run #2 execution state.

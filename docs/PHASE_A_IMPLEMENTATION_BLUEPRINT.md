@@ -838,10 +838,10 @@ Slice 5: Reviewer Agent Contract & Quality Gate Rework Loop     [COMPLETED]
 Slice 6: Execution Graph Compiler (Data & WebSocket Bridge)     [COMPLETED]
    │
    ▼
-Slice 7: UI Mission View & Interactive Execution Graph Canvas   [NEXT]
+Slice 7: UI Mission View & Interactive Execution Graph Canvas   [COMPLETED]
    │
    ▼
-Slice 8: Deliverables Dossier Viewer & Aether Explain Cards
+Slice 8: Deliverables Dossier Viewer & Aether Explain Cards     [NEXT]
    │
    ▼
 Slice 9: Aether Replay ("Flight Recorder") Timeline & Workforce Health
