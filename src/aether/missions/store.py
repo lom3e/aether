@@ -973,171 +973,23 @@ class MissionStore:
     # Read-Only Execution Graph Generation
     # ---------------------------------------------------------------------------
 
-    def get_mission_graph(self, mission_id: str) -> MissionGraph | None:
+    def get_mission_graph(
+        self,
+        mission_id: str,
+        execution_id: str | None = None,
+    ) -> MissionGraph | None:
         """
-        Synthesizes a read-only DAG graph representing the mission, its milestones,
-        and linked conversation activities / executions.
+        Synthesizes an execution-aware DAG graph representing the mission,
+        its milestones, executions, agents, tasks, tools, and deliverables.
+        Delegates to ExecutionGraphCompiler for deterministic multi-run compilation.
         """
-        mission = self.get_mission(mission_id, include_milestones=True)
-        if not mission:
-            return None
+        from aether.missions.graph_compiler import ExecutionGraphCompiler
+        compiler = getattr(self, "_graph_compiler", None)
+        if compiler is None:
+            compiler = ExecutionGraphCompiler(self)
+            self._graph_compiler = compiler
+        return compiler.compile(mission_id=mission_id, execution_id=execution_id)
 
-        nodes: list[GraphNode] = []
-        edges: list[GraphEdge] = []
-
-        # 1. Root Mission Node
-        root_node_id = f"mission_{mission.id}"
-        nodes.append(
-            GraphNode(
-                id=root_node_id,
-                type="mission",
-                label=mission.title,
-                status=mission.status.value if isinstance(mission.status, MissionStatus) else str(mission.status),
-                metadata={
-                    "objective": mission.objective,
-                    "team_name": mission.team_name,
-                    "created_at": mission.created_at,
-                    "updated_at": mission.updated_at,
-                },
-            )
-        )
-
-        # 2. Milestone Nodes & Structural Edges
-        for idx, m in enumerate(mission.milestones):
-            m_node_id = f"milestone_{m.id}"
-            m_status_val = m.status.value if isinstance(m.status, MilestoneStatus) else str(m.status)
-            m_node = GraphNode(
-                id=m_node_id,
-                type="milestone",
-                label=m.title,
-                status=m_status_val,
-                metadata={
-                    "description": m.description,
-                    "order_idx": m.order_idx,
-                    "dependencies": m.dependencies,
-                    "completed_at": m.completed_at,
-                },
-            )
-            nodes.append(m_node)
-
-            # Containment edge from Root Mission to Milestone
-            edges.append(
-                GraphEdge(
-                    id=f"edge_contain_{mission.id}_{m.id}",
-                    source=root_node_id,
-                    target=m_node_id,
-                    type="contains",
-                    label="contains",
-                )
-            )
-
-            # Dependencies / Sequential Edges
-            if m.dependencies:
-                for dep_id in m.dependencies:
-                    edges.append(
-                        GraphEdge(
-                            id=f"edge_dep_{dep_id}_{m.id}",
-                            source=f"milestone_{dep_id}",
-                            target=m_node_id,
-                            type="depends_on",
-                            label="depends_on",
-                        )
-                    )
-            elif idx > 0:
-                prev_m = mission.milestones[idx - 1]
-                edges.append(
-                    GraphEdge(
-                        id=f"edge_seq_{prev_m.id}_{m.id}",
-                        source=f"milestone_{prev_m.id}",
-                        target=m_node_id,
-                        type="depends_on",
-                        label="next",
-                    )
-                )
-
-        # 3. If conversation_id is linked, fetch recent execution activities and map them
-        if mission.conversation_id:
-            try:
-                with self._get_connection() as conn:
-                    act_rows = conn.execute(
-                        """
-                        SELECT id, conversation_id, agent, activity_type, message, metadata, created_at
-                        FROM conversation_activities
-                        WHERE conversation_id = ?
-                        ORDER BY created_at ASC
-                        LIMIT 30
-                        """,
-                        (mission.conversation_id,),
-                    ).fetchall()
-
-                # Attach activities to the current running milestone or root
-                active_target = None
-                for m in mission.milestones:
-                    if m.status in (MilestoneStatus.RUNNING, MilestoneStatus.PENDING):
-                        active_target = f"milestone_{m.id}"
-                        break
-                if not active_target and mission.milestones:
-                    active_target = f"milestone_{mission.milestones[-1].id}"
-                if not active_target:
-                    active_target = root_node_id
-
-                for act in act_rows:
-                    act_id = act["id"]
-                    agent_name = act["agent"]
-                    act_type = act["activity_type"]
-                    msg = act["message"] or act_type
-                    label = f"{agent_name}: {msg[:30]}..." if len(msg) > 30 else f"{agent_name}: {msg}"
-
-                    act_node_id = f"activity_{act_id}"
-                    nodes.append(
-                        GraphNode(
-                            id=act_node_id,
-                            type="task" if "task" in act_type else "agent",
-                            label=label,
-                            status="completed" if "completed" in act_type else ("running" if "started" in act_type else "info"),
-                            metadata={
-                                "agent": agent_name,
-                                "activity_type": act_type,
-                                "created_at": act["created_at"],
-                            },
-                        )
-                    )
-                    edges.append(
-                        GraphEdge(
-                            id=f"edge_act_{act_id}",
-                            source=active_target,
-                            target=act_node_id,
-                            type="delegated_to",
-                            label=act_type,
-                        )
-                    )
-            except Exception:
-                pass
-
-        # 4. Deliverable Nodes & Production Edges
-        deliverables = self.list_deliverables(mission.id)
-        for d in deliverables:
-            d_node_id = f"deliverable_{d.id}"
-            nodes.append(
-                GraphNode(
-                    id=d_node_id,
-                    type="deliverable",
-                    label=d.name,
-                    status=d.status,
-                    metadata=d.to_dict(),
-                )
-            )
-            edges.append(
-                GraphEdge(
-                    id=f"edge_del_{d.id}",
-                    source=root_node_id,
-                    target=d_node_id,
-                    type="produced",
-                    label="produced",
-                )
-            )
-
-        return MissionGraph(mission_id=mission.id, nodes=nodes, edges=edges)
 
     # ---------------------------------------------------------------------------
     # Deliverables Management & Lineage

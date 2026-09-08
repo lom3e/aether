@@ -7,7 +7,7 @@ import {
   Copy, Activity, Terminal, Workflow, User, ExternalLink, Download, FolderOpen,
   ChevronDown, ChevronUp
 } from 'lucide-react';
-import { apiUrl } from './api';
+import { apiUrl, getSessionToken } from './api';
 import { useTranslation } from './i18n';
 import { ToastContext } from './toast';
 import { Tooltip } from './Tooltip';
@@ -147,12 +147,15 @@ interface GraphEdge {
   target: string;
   type: string;
   label?: string;
+  metadata?: Record<string, any>;
 }
 
 interface MissionGraph {
   mission_id: string;
+  execution_id?: string | null;
   nodes: GraphNode[];
   edges: GraphEdge[];
+  metadata?: Record<string, any>;
 }
 
 interface MissionsProps {
@@ -276,11 +279,12 @@ export function Missions({ navigate, initialMissionId }: MissionsProps) {
     fetchTeams();
   }, [fetchMissions, fetchTeams]);
 
-  // Load Graph for Selected Mission
-  const loadGraph = useCallback(async (missionId: string) => {
+  // Load Graph for Selected Mission (Execution-Aware)
+  const loadGraph = useCallback(async (missionId: string, executionId?: string | null) => {
     try {
       setLoadingGraph(true);
-      const res = await fetch(apiUrl(`/api/missions/${missionId}/graph`));
+      const q = executionId ? `?execution_id=${encodeURIComponent(executionId)}` : '';
+      const res = await fetch(apiUrl(`/api/missions/${missionId}/graph${q}`));
       if (!res.ok) throw new Error('Failed to load graph');
       const data = await res.json();
       setGraphData(data);
@@ -349,7 +353,7 @@ export function Missions({ navigate, initialMissionId }: MissionsProps) {
 
   useEffect(() => {
     if (selectedMission) {
-      loadGraph(selectedMission.id);
+      loadGraph(selectedMission.id, selectedExecutionId);
       fetchExecutions(selectedMission.id);
       fetchDeliverables(selectedMission.id, selectedExecutionId);
       fetchActivities(selectedMission.id);
@@ -365,12 +369,90 @@ export function Missions({ navigate, initialMissionId }: MissionsProps) {
   }, [selectedMission?.id, loadGraph, fetchExecutions, fetchDeliverables, fetchActivities]);
 
   useEffect(() => {
-    if (selectedMission?.id && selectedExecutionId) {
+    if (selectedMission?.id) {
       fetchDeliverables(selectedMission.id, selectedExecutionId);
+      loadGraph(selectedMission.id, selectedExecutionId);
     }
-  }, [selectedMission?.id, selectedExecutionId, fetchDeliverables]);
+  }, [selectedMission?.id, selectedExecutionId, fetchDeliverables, loadGraph]);
 
-  // Real-time polling when mission execution is active
+  // Real-time WebSocket bridge for mission events and graph compilation
+  useEffect(() => {
+    if (!selectedMission?.id) return;
+
+    let isMounted = true;
+    let ws: WebSocket | null = null;
+    let reconnectTimeout: any = null;
+
+    const connect = () => {
+      if (!isMounted) return;
+      try {
+        const token = getSessionToken();
+        const baseWs = apiUrl('/ws/chat').replace(/^http/, 'ws');
+        const wsUrl = token ? `${baseWs}?token=${encodeURIComponent(token)}` : baseWs;
+        ws = new WebSocket(wsUrl);
+
+        ws.onmessage = (event) => {
+          if (!isMounted) return;
+          try {
+            const data = JSON.parse(event.data);
+            if (!data || !data.type) return;
+
+            // Handle graph updates
+            if (data.type === 'mission_graph_updated' && data.mission_id === selectedMission.id) {
+              if (!selectedExecutionId || !data.execution_id || data.execution_id === selectedExecutionId) {
+                if (data.graph) {
+                  setGraphData(data.graph);
+                }
+              }
+            }
+
+            // Handle general mission state events
+            if (data.mission_id === selectedMission.id) {
+              if (['mission_started', 'mission_completed', 'mission_failed', 'mission_paused', 'mission_cancelled'].includes(data.type)) {
+                fetchExecutions(selectedMission.id);
+                fetchActivities(selectedMission.id);
+              }
+              if (data.type === 'deliverable_added') {
+                fetchDeliverables(selectedMission.id, selectedExecutionId);
+              }
+            }
+          } catch (e) {
+            // ignore non-json messages
+          }
+        };
+
+        ws.onclose = () => {
+          if (isMounted) {
+            reconnectTimeout = setTimeout(connect, 3000);
+          }
+        };
+
+        ws.onerror = () => {
+          try {
+            ws?.close();
+          } catch (e) {}
+        };
+      } catch (err) {
+        if (isMounted) {
+          reconnectTimeout = setTimeout(connect, 5000);
+        }
+      }
+    };
+
+    connect();
+
+    return () => {
+      isMounted = false;
+      if (reconnectTimeout) clearTimeout(reconnectTimeout);
+      if (ws) {
+        try {
+          ws.close();
+        } catch (e) {}
+      }
+    };
+  }, [selectedMission?.id, selectedExecutionId, fetchExecutions, fetchActivities, fetchDeliverables]);
+
+  // Real-time polling when mission execution is active (resilient fallback)
   useEffect(() => {
     if (!selectedMission) return;
     const isLive = selectedMission.status === 'running' || selectedMission.status === 'verifying';
@@ -385,7 +467,7 @@ export function Missions({ navigate, initialMissionId }: MissionsProps) {
           setMissions(prev => prev.map(m => m.id === fresh.id ? fresh : m));
           fetchExecutions(fresh.id);
           fetchActivities(fresh.id);
-          loadGraph(fresh.id);
+          loadGraph(fresh.id, selectedExecutionId);
         }
       } catch (err) {
         // ignore polling failures
@@ -393,7 +475,7 @@ export function Missions({ navigate, initialMissionId }: MissionsProps) {
     }, 2500);
 
     return () => clearInterval(interval);
-  }, [selectedMission?.id, selectedMission?.status, fetchExecutions, fetchActivities, loadGraph]);
+  }, [selectedMission?.id, selectedMission?.status, selectedExecutionId, fetchExecutions, fetchActivities, loadGraph]);
 
   const handleMissionAction = async (actionName: string, endpoint: string, body?: any) => {
     if (!selectedMission) return;
@@ -418,11 +500,12 @@ export function Missions({ navigate, initialMissionId }: MissionsProps) {
       setMissions(prev => prev.map(m => m.id === updatedMission.id ? updatedMission : m));
       showToast?.(`${actionName} triggered`, 'success');
       await fetchExecutions(updatedMission.id);
+      const targetExecId = data.execution?.id || selectedExecutionId;
       if (data.execution?.id) {
         setSelectedExecutionId(data.execution.id);
       }
-      loadGraph(updatedMission.id);
-      fetchDeliverables(updatedMission.id, data.execution?.id);
+      loadGraph(updatedMission.id, targetExecId);
+      fetchDeliverables(updatedMission.id, targetExecId);
       fetchActivities(updatedMission.id);
     } catch (err: any) {
       showToast?.(err.message, 'error');
@@ -598,7 +681,7 @@ export function Missions({ navigate, initialMissionId }: MissionsProps) {
       const updatedMission = { ...selectedMission, milestones: updatedMilestones };
       setSelectedMission(updatedMission);
       setMissions(prev => prev.map(mis => mis.id === updatedMission.id ? updatedMission : mis));
-      loadGraph(selectedMission.id);
+      loadGraph(selectedMission.id, selectedExecutionId);
     } catch (err: any) {
       showToast?.(err.message, 'error');
     }
@@ -627,7 +710,7 @@ export function Missions({ navigate, initialMissionId }: MissionsProps) {
       setNewMTitle('');
       setNewMDesc('');
       setIsAddingMilestone(false);
-      loadGraph(selectedMission.id);
+      loadGraph(selectedMission.id, selectedExecutionId);
       showToast?.('Milestone added', 'success');
     } catch (err: any) {
       showToast?.(err.message, 'error');
@@ -646,7 +729,7 @@ export function Missions({ navigate, initialMissionId }: MissionsProps) {
       setSelectedMission(updatedMission);
       setMissions(prev => prev.map(mis => mis.id === updatedMission.id ? updatedMission : mis));
       setMilestoneToDelete(null);
-      loadGraph(selectedMission.id);
+      loadGraph(selectedMission.id, selectedExecutionId);
       showToast?.('Milestone removed', 'success');
     } catch (err: any) {
       showToast?.(err.message, 'error');
@@ -2315,9 +2398,38 @@ export function Missions({ navigate, initialMissionId }: MissionsProps) {
                     borderRadius: '6px',
                     backgroundColor: 'hsl(var(--muted))',
                     fontSize: '12px',
-                    color: 'hsl(var(--muted-fg))'
+                    color: 'hsl(var(--muted-fg))',
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'space-between',
+                    gap: '12px'
                   }}>
-                    {t('inspectPlaceholderNotice')}
+                    <div>
+                      {selectedExecutionId ? (
+                        <span>
+                          Viewing <strong>Run #{executions.find(e => e.id === selectedExecutionId)?.run_number || selectedExecutionId.slice(0, 8)}</strong> DAG
+                          {executions.find(e => e.id === selectedExecutionId)?.status && (
+                            <span style={{ marginLeft: '6px', opacity: 0.8 }}>
+                              ({executions.find(e => e.id === selectedExecutionId)?.status})
+                            </span>
+                          )}
+                        </span>
+                      ) : (
+                        <span>Viewing <strong>Blueprint DAG</strong> (Design Specification)</span>
+                      )}
+                    </div>
+                    {graphData?.execution_id && (
+                      <span style={{
+                        fontSize: '10px',
+                        fontFamily: 'monospace',
+                        padding: '2px 6px',
+                        borderRadius: '4px',
+                        backgroundColor: 'hsl(var(--card))',
+                        border: '1px solid hsl(var(--border))'
+                      }}>
+                        {graphData.execution_id.slice(0, 12)}
+                      </span>
+                    )}
                   </div>
 
                   {loadingGraph ? (
@@ -2332,7 +2444,7 @@ export function Missions({ navigate, initialMissionId }: MissionsProps) {
                   ) : (
                     <div style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
                       <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', fontSize: '11px', color: 'hsl(var(--muted-fg))', padding: '0 4px' }}>
-                        <span>Topology: {graphData.nodes.length} {t('graphNodesCount')} · {graphData.edges.length} {t('graphEdgesCount')}</span>
+                        <span>Topology: <strong>{graphData.nodes.length}</strong> {t('graphNodesCount')} · <strong>{graphData.edges.length}</strong> {t('graphEdgesCount')}</span>
                         {selectedGraphNode && (
                           <button onClick={() => setSelectedGraphNode(null)} className="btn btn-ghost" style={{ padding: '1px 6px', fontSize: '10px' }}>
                             Clear selection
@@ -2342,6 +2454,23 @@ export function Missions({ navigate, initialMissionId }: MissionsProps) {
 
                       {graphData.nodes.map(node => {
                         const isSelected = selectedGraphNode?.id === node.id;
+                        const inboundEdges = isSelected && graphData ? graphData.edges.filter(e => e.target === node.id) : [];
+                        const outboundEdges = isSelected && graphData ? graphData.edges.filter(e => e.source === node.id) : [];
+
+                        const getTypeColor = (type: string) => {
+                          switch (type) {
+                            case 'mission': return { bg: 'hsl(var(--primary) / 0.15)', color: 'hsl(var(--primary))' };
+                            case 'execution': return { bg: 'rgba(168, 85, 247, 0.15)', color: '#c084fc' };
+                            case 'milestone': return { bg: 'rgba(59, 130, 246, 0.15)', color: '#60a5fa' };
+                            case 'agent': return { bg: 'rgba(6, 182, 212, 0.15)', color: '#22d3ee' };
+                            case 'task': return { bg: 'rgba(245, 158, 11, 0.15)', color: '#fbbf24' };
+                            case 'tool': return { bg: 'rgba(100, 116, 139, 0.15)', color: '#94a3b8' };
+                            case 'deliverable': return { bg: 'rgba(16, 185, 129, 0.15)', color: '#34d399' };
+                            default: return { bg: 'hsl(var(--muted))', color: 'hsl(var(--fg))' };
+                          }
+                        };
+                        const typeStyle = getTypeColor(node.type);
+
                         return (
                           <div
                             key={node.id}
@@ -2350,9 +2479,9 @@ export function Missions({ navigate, initialMissionId }: MissionsProps) {
                               padding: '12px 14px',
                               borderRadius: '8px',
                               backgroundColor: isSelected
-                                ? 'hsl(var(--primary) / 0.1)'
+                                ? 'hsl(var(--primary) / 0.08)'
                                 : node.type === 'mission'
-                                ? 'hsl(var(--primary) / 0.05)'
+                                ? 'hsl(var(--primary) / 0.03)'
                                 : 'hsl(var(--bg))',
                               border: isSelected
                                 ? '1px solid hsl(var(--primary))'
@@ -2369,8 +2498,8 @@ export function Missions({ navigate, initialMissionId }: MissionsProps) {
                                   fontWeight: 700,
                                   padding: '2px 6px',
                                   borderRadius: '4px',
-                                  backgroundColor: 'hsl(var(--muted))',
-                                  color: 'hsl(var(--fg))'
+                                  backgroundColor: typeStyle.bg,
+                                  color: typeStyle.color
                                 }}>
                                   {node.type}
                                 </span>
@@ -2387,11 +2516,39 @@ export function Missions({ navigate, initialMissionId }: MissionsProps) {
                                 paddingTop: '10px',
                                 borderTop: '1px solid hsl(var(--border))',
                                 fontSize: '11px',
-                                color: 'hsl(var(--muted-fg))'
+                                color: 'hsl(var(--muted-fg))',
+                                display: 'flex',
+                                flexDirection: 'column',
+                                gap: '8px'
                               }}>
-                                <div style={{ fontFamily: 'monospace', marginBottom: '4px' }}>
-                                  ID: {node.id}
+                                <div style={{ fontFamily: 'monospace' }}>
+                                  ID: <span style={{ color: 'hsl(var(--fg))' }}>{node.id}</span>
                                 </div>
+
+                                {/* Relationships */}
+                                {(inboundEdges.length > 0 || outboundEdges.length > 0) && (
+                                  <div style={{ display: 'flex', flexDirection: 'column', gap: '4px', padding: '6px 8px', borderRadius: '4px', backgroundColor: 'hsl(var(--card))' }}>
+                                    {inboundEdges.map(edge => {
+                                      const src = graphData.nodes.find(n => n.id === edge.source);
+                                      return (
+                                        <div key={edge.id} style={{ display: 'flex', alignItems: 'center', gap: '6px', fontSize: '11px' }}>
+                                          <span style={{ color: 'hsl(var(--primary))', fontWeight: 600 }}>← {edge.type}</span>
+                                          <span style={{ color: 'hsl(var(--fg))' }}>{src ? src.label : edge.source}</span>
+                                        </div>
+                                      );
+                                    })}
+                                    {outboundEdges.map(edge => {
+                                      const tgt = graphData.nodes.find(n => n.id === edge.target);
+                                      return (
+                                        <div key={edge.id} style={{ display: 'flex', alignItems: 'center', gap: '6px', fontSize: '11px' }}>
+                                          <span style={{ color: '#22d3ee', fontWeight: 600 }}>→ {edge.type}</span>
+                                          <span style={{ color: 'hsl(var(--fg))' }}>{tgt ? tgt.label : edge.target}</span>
+                                        </div>
+                                      );
+                                    })}
+                                  </div>
+                                )}
+
                                 {node.metadata && Object.keys(node.metadata).length > 0 && (
                                   <pre style={{
                                     backgroundColor: 'hsl(var(--card))',

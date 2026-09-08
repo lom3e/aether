@@ -507,6 +507,27 @@ Before a mission transitions from `RUNNING` to `COMPLETED`:
 * **Test Verification (`tests/test_mission_quality_gate.py`):**
   - Full suite covering persona contract, 3 assertion rules, pass flow, rework limit, override signoff, and rejection.
 
+### 4. Slice 6 Implementation Details (Completed)
+* **Execution Graph Compiler (`src/aether/missions/graph_compiler.py`):**
+  - Deterministic transformation of runtime execution states, milestone execution records, conversation activities, and deliverables into `MissionGraph` DAG models.
+  - Node types: `mission`, `execution`, `milestone`, `agent`, `task`, `tool`, `deliverable`.
+  - Edge types: `has_execution`, `contains`, `depends_on`, `delegated_to`, `executes`, `invoked`, `produced`, `verifies`, `rework`.
+  - Multi-run isolation: filters activities, deliverables, and milestone states strictly by `execution_id`.
+  - In-memory cache for terminal executions (`COMPLETED`, `FAILED`, `CANCELLED`) with automatic cache invalidation during state transitions.
+  - Mathematical orphan edge prevention (`_add_edge` strictly validates `source in node_ids and target in node_ids`) and node deduplication (`_add_node`).
+* **Zero Chain-of-Thought Privacy Engine (`sanitize_graph_metadata`):**
+  - Recursive metadata sanitization stripping prompts (`prompt`, `system_prompt`), thoughts (`thought`, `thinking`, `chain_of_thought`, `reasoning`, `private_reasoning`), and credentials (`secret`, `token`, `api_key`, `password`).
+  - Preserves observable operational metrics (durations, tool arguments, file hashes, review scores).
+* **Real-time WebSocket Event Bridge (`src/aether/missions/runtime.py`):**
+  - Emits `mission_graph_updated` events over `/ws/chat` on mission started, paused, cancelled, milestone started/completed, tool called, quality gate passed/rejected, rework dispatched, deliverable harvested, and terminal states.
+* **REST API Endpoint (`src/aether/server/routes.py`):**
+  - `GET /api/missions/{id}/graph?execution_id=...`: accepts optional `execution_id` query parameter for multi-run inspection.
+* **Inspector UI Integration (`ui/src/Missions.tsx`):**
+  - Graph Inspector tab with run context badge (`Run #...` or `Blueprint`), color-coded type tags, interactive node selection, and incoming/outgoing relationship explorer.
+  - WebSocket event listener on `/ws/chat` for immediate real-time graph updates.
+* **Test Verification (`tests/test_execution_graph_compiler.py`):**
+  - Unit and integration tests for compiler determinism, multi-run isolation, runtime event broadcasting, REST route, and chain-of-thought sanitization.
+
 ---
 
 ## J. Workforce Health Design
@@ -799,25 +820,25 @@ Phase A introduces a multi-tier test suite verifying every component from unit s
 To prevent speculative abstractions and broken dependencies, Phase A must be built in **Nine Discrete Slices**:
 
 ```text
-Slice 1: Core Event Extensions & Metadata Enrichment
+Slice 1: Core Event Extensions & Metadata Enrichment             [COMPLETED]
    │
    ▼
-Slice 2: Mission Domain Models & SQLite Persistence Store
+Slice 2: Mission Domain Models & SQLite Persistence Store       [COMPLETED]
    │
    ▼
-Slice 3: Mission REST API Endpoints & State Machine Service
+Slice 3: Mission REST API Endpoints & State Machine Service     [COMPLETED]
    │
    ▼
-Slice 4: Deliverables Engine & Provenance Lineage Store
+Slice 4: Deliverables Engine & Provenance Lineage Store         [COMPLETED]
    │
    ▼
-Slice 5: Reviewer Agent Contract & Quality Gate Rework Loop
+Slice 5: Reviewer Agent Contract & Quality Gate Rework Loop     [COMPLETED]
    │
    ▼
-Slice 6: Execution Graph Compiler (Data & WebSocket Bridge)
+Slice 6: Execution Graph Compiler (Data & WebSocket Bridge)     [COMPLETED]
    │
    ▼
-Slice 7: UI Mission View & Interactive Execution Graph Canvas
+Slice 7: UI Mission View & Interactive Execution Graph Canvas   [NEXT]
    │
    ▼
 Slice 8: Deliverables Dossier Viewer & Aether Explain Cards

@@ -370,7 +370,7 @@ class Deliverable:
 @dataclass(slots=True)
 class GraphNode:
     id: str
-    type: str  # "mission", "milestone", "task", "agent", "tool", "deliverable"
+    type: str  # "mission", "execution", "milestone", "task", "agent", "tool", "deliverable"
     label: str
     status: str
     metadata: dict[str, Any] = field(default_factory=dict)
@@ -384,13 +384,23 @@ class GraphNode:
             "metadata": self.metadata,
         }
 
+    @classmethod
+    def from_dict(cls, data: dict[str, Any]) -> GraphNode:
+        return cls(
+            id=data.get("id", ""),
+            type=data.get("type", "task"),
+            label=data.get("label", ""),
+            status=data.get("status", "pending"),
+            metadata=data.get("metadata") or {},
+        )
+
 
 @dataclass(slots=True)
 class GraphEdge:
     id: str
     source: str
     target: str
-    type: str  # "contains", "depends_on", "produced", "delegated_to"
+    type: str  # "has_execution", "contains", "depends_on", "produced", "delegated_to", "executes", "invoked", "verifies", "rework"
     label: str = ""
 
     def to_dict(self) -> dict[str, Any]:
@@ -402,16 +412,48 @@ class GraphEdge:
             "label": self.label,
         }
 
+    @classmethod
+    def from_dict(cls, data: dict[str, Any]) -> GraphEdge:
+        return cls(
+            id=data.get("id", ""),
+            source=data.get("source", ""),
+            target=data.get("target", ""),
+            type=data.get("type", "contains"),
+            label=data.get("label", ""),
+        )
+
 
 @dataclass(slots=True)
 class MissionGraph:
     mission_id: str
     nodes: list[GraphNode] = field(default_factory=list)
     edges: list[GraphEdge] = field(default_factory=list)
+    execution_id: str | None = None
+    metadata: dict[str, Any] = field(default_factory=dict)
 
     def to_dict(self) -> dict[str, Any]:
-        return {
+        res: dict[str, Any] = {
             "mission_id": self.mission_id,
             "nodes": [n.to_dict() for n in self.nodes],
             "edges": [e.to_dict() for e in self.edges],
         }
+        if self.execution_id is not None:
+            res["execution_id"] = self.execution_id
+        if self.metadata:
+            res["metadata"] = self.metadata
+        return res
+
+    @classmethod
+    def from_dict(cls, data: dict[str, Any]) -> MissionGraph:
+        raw_nodes = data.get("nodes") or []
+        nodes = [GraphNode.from_dict(n) if isinstance(n, dict) else n for n in raw_nodes]
+        raw_edges = data.get("edges") or []
+        edges = [GraphEdge.from_dict(e) if isinstance(e, dict) else e for e in raw_edges]
+        return cls(
+            mission_id=data.get("mission_id", ""),
+            nodes=nodes,
+            edges=edges,
+            execution_id=data.get("execution_id"),
+            metadata=data.get("metadata") or {},
+        )
+

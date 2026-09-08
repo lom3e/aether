@@ -2852,14 +2852,19 @@ async def delete_mission_milestone(request: Request, mission_id: str, milestone_
 
 
 @router.get("/missions/{mission_id}/graph")
-async def get_mission_graph(request: Request, mission_id: str):
+async def get_mission_graph(
+    request: Request,
+    mission_id: str,
+    execution_id: str | None = None,
+):
     ws = getattr(request.app.state, "workspace", None)
     if not ws:
         raise HTTPException(status_code=503, detail="Workspace not initialized.")
-    graph = ws.missions.get_mission_graph(mission_id)
+    graph = ws.missions.get_mission_graph(mission_id, execution_id=execution_id)
     if not graph:
         raise HTTPException(status_code=404, detail="Mission not found.")
     return graph.to_dict()
+
 
 
 class CreateDeliverablePayload(BaseModel):

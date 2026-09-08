@@ -30,6 +30,7 @@ from aether.missions.models import (
     MissionExecution,
     MissionStatus,
 )
+from aether.missions.graph_compiler import ExecutionGraphCompiler
 from aether.missions.reviewer import QualityGateEvaluation, QualityGateEvaluator
 from aether.missions.store import MissionStore
 from aether.workspace.workspace import Workspace
@@ -85,6 +86,8 @@ class MissionRuntime:
         self._lock = asyncio.Lock()
         self._instance_id = f"{socket.gethostname()}:{os.getpid()}:{uuid.uuid4().hex[:8]}"
         self._is_shutting_down = False
+        self.graph_compiler = ExecutionGraphCompiler(self.store)
+
 
     @property
     def instance_id(self) -> str:
@@ -221,7 +224,9 @@ class MissionRuntime:
                 "mission_id": mission_id,
                 "execution_id": active.id,
             })
+            self._broadcast_graph_update(mission_id, active.id, "mission_paused")
             return updated or active
+
 
     async def resume_mission(self, mission_id: str) -> MissionExecution:
         """
@@ -282,7 +287,9 @@ class MissionRuntime:
                 "mission_id": mission_id,
                 "execution_id": active.id,
             })
+            self._broadcast_graph_update(mission_id, active.id, "mission_cancelled")
             return updated or active
+
 
     async def retry_mission(self, mission_id: str, milestone_id: str | None = None) -> MissionExecution:
         """
@@ -518,6 +525,8 @@ class MissionRuntime:
             "execution_id": execution.id,
             "run_number": execution.run_number,
         })
+        self._broadcast_graph_update(mission.id, execution.id, "mission_started")
+
         self._log_activity(
             mission_id=mission.id,
             agent="System",
@@ -547,6 +556,7 @@ class MissionRuntime:
         """
         exec_id = handle.execution_id
         mid = handle.mission_id
+        team = None
         try:
             mission = self.store.get_mission(mid)
             if not mission:
@@ -583,6 +593,8 @@ class MissionRuntime:
                 except Exception:
                     pass
 
+            current_milestone_id: str | None = None
+
             def _on_tool_event(event: Any) -> None:
                 try:
                     data = getattr(event, "metadata", None) or getattr(event, "data", {}) or {}
@@ -594,8 +606,14 @@ class MissionRuntime:
                         agent=agent,
                         activity_type="tool_called",
                         message=f"Executed {t_name}",
-                        metadata={"tool_name": t_name, "arguments": args, "execution_id": exec_id},
+                        metadata={
+                            "tool_name": t_name,
+                            "arguments": args,
+                            "execution_id": exec_id,
+                            "milestone_id": current_milestone_id,
+                        },
                     )
+                    self._broadcast_graph_update(mid, exec_id, "tool_called")
                     # Robust harvesting fallback: record file paths directly from file tools
                     if t_name in ("write_file", "patch_file") and isinstance(args, dict) and args.get("path"):
                         created_files.append({
@@ -605,6 +623,7 @@ class MissionRuntime:
                         })
                 except Exception:
                     pass
+
 
             if hasattr(team, "emitter") and team.emitter:
                 team.emitter.on(EventType.FILE_CREATED, _on_file_event)
@@ -665,6 +684,7 @@ class MissionRuntime:
 
                 now_start = datetime.now(timezone.utc).isoformat()
                 t0 = time.time()
+                current_milestone_id = tmpl_m.id
                 self.store.update_execution(exec_id, current_milestone_id=tmpl_m.id)
                 self.store.update_execution_milestone(
                     exec_id,
@@ -686,6 +706,8 @@ class MissionRuntime:
                     "execution_id": exec_id,
                     "milestone_id": tmpl_m.id,
                 })
+                self._broadcast_graph_update(mid, exec_id, "milestone_started")
+
 
                 prior_summary = "\n".join(completed_context[-3:]) if completed_context else "None"
                 task_instruction = (
@@ -759,6 +781,7 @@ class MissionRuntime:
                         "execution_id": exec_id,
                         "milestone_id": tmpl_m.id,
                     })
+                    self._broadcast_graph_update(mid, exec_id, "milestone_completed")
                 else:
                     err_msg = (result.error if result else None) or "Stage execution failed."
                     self.store.update_execution_milestone(
@@ -787,7 +810,9 @@ class MissionRuntime:
                         "execution_id": exec_id,
                         "error": err_msg,
                     })
+                    self._broadcast_graph_update(mid, exec_id, "execution_failed")
                     return
+
 
             # Transition to Quality Gate Verification
             self.store.update_execution(exec_id, status=ExecutionStatus.VERIFYING)
@@ -852,6 +877,7 @@ class MissionRuntime:
                         "execution_id": exec_id,
                         "evaluation": eval_result.to_dict(),
                     })
+                    self._broadcast_graph_update(mid, exec_id, "quality_gate_passed")
                     break  # Success! Proceed to mission completion
                 else:
                     # Quality gate rejected
@@ -883,6 +909,7 @@ class MissionRuntime:
                         "execution_id": exec_id,
                         "evaluation": eval_result.to_dict(),
                     })
+                    self._broadcast_graph_update(mid, exec_id, "quality_gate_rejected")
 
                     if rework_attempts < max_rework_attempts:
                         rework_attempts += 1
@@ -922,6 +949,8 @@ class MissionRuntime:
                             "execution_id": exec_id,
                             "rework_attempt": rework_attempts,
                         })
+                        self._broadcast_graph_update(mid, exec_id, "rework_dispatched")
+
 
                         created_files.clear()
                         def _run_rework():
@@ -1030,6 +1059,7 @@ class MissionRuntime:
                 "execution_id": exec_id,
                 "duration_seconds": total_duration,
             })
+            self._broadcast_graph_update(mid, exec_id, "mission_completed")
 
         except Exception as exc:
             logger.exception("Unexpected error in mission execution loop: %s", exc)
@@ -1039,8 +1069,9 @@ class MissionRuntime:
                 error_message=str(exc),
             )
             self.store.update_mission(mid, status=MissionStatus.FAILED)
+            self._broadcast_graph_update(mid, exec_id, "mission_failed")
         finally:
-            if hasattr(team, "emitter") and team.emitter:
+            if team is not None and hasattr(team, "emitter") and team.emitter:
                 try:
                     team.emitter.off(EventType.FILE_CREATED, _on_file_event)
                     team.emitter.off(EventType.FILE_MODIFIED, _on_file_event)
@@ -1068,6 +1099,7 @@ class MissionRuntime:
             "mission_id": mid,
             "execution_id": exec_id,
         })
+        self._broadcast_graph_update(mid, exec_id, "mission_paused")
 
     def _is_approved(self, execution_id: str, milestone_id: str) -> bool:
         exec_obj = self.store.get_execution(execution_id)
@@ -1147,6 +1179,7 @@ class MissionRuntime:
                     "mission_id": mission_id,
                     "deliverable": deliv.to_dict(),
                 })
+                self._broadcast_graph_update(mission_id, execution_id, "deliverable_added")
             except Exception as exc:
                 logger.warning("Could not harvest deliverable %s: %s", path_str, exc)
 
@@ -1202,3 +1235,26 @@ class MissionRuntime:
                         pass
             except Exception as exc:
                 logger.debug("Failed to broadcast mission event: %s", exc)
+
+    def _broadcast_graph_update(
+        self,
+        mission_id: str,
+        execution_id: str | None = None,
+        event_type: str = "",
+    ) -> None:
+        if not self.broadcaster:
+            return
+        try:
+            self.graph_compiler.invalidate_cache(mission_id, execution_id)
+            graph = self.graph_compiler.compile(mission_id=mission_id, execution_id=execution_id, force_refresh=True)
+            if graph:
+                self._broadcast({
+                    "type": "mission_graph_updated",
+                    "mission_id": mission_id,
+                    "execution_id": execution_id or graph.execution_id,
+                    "event": event_type,
+                    "graph": graph.to_dict(),
+                })
+        except Exception as exc:
+            logger.debug("Failed to broadcast graph update: %s", exc)
+
