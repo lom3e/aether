@@ -24,30 +24,26 @@ from aether.memory.semantic import SemanticMemory
 
 if TYPE_CHECKING:
     from aether.memory.store import WorkforceMemoryStore
+    from aether.knowledge.graph.store import KnowledgeGraphStore
+    from aether.intelligence.service import UnifiedIntelligenceService
 
 
 # ---------------------------------------------------------------------------
 # Context injection policy constants
 # ---------------------------------------------------------------------------
 
-# Minimum relevance score (from search_memories) for a memory to be considered
-# for injection. Scores are in raw units (not normalized to 0-1):
-#   - A score of 0.5 typically corresponds to at least one token overlap in summary
-#     or two partial matches in content, confidence-boosted.
-#   - Memories with score < this threshold are silently ignored.
+# Minimum relevance score for evidence to be considered for injection.
 MIN_RELEVANCE_SCORE: float = 0.5
 
-# Maximum number of memories to inject into a single agent context call.
-CONTEXT_MAX_MEMORIES: int = 3
+# Maximum number of evidence items to inject into a single agent context call.
+CONTEXT_MAX_MEMORIES: int = 4
 
-# Maximum total characters for the entire injected memory block (including
-# header, all summaries, excerpts, and provenance lines).
-# Rationale: ~1400 chars ≈ ~350 tokens at 4 chars/token (conservative).
-CONTEXT_CHAR_BUDGET: int = 1400
+# Maximum total characters for the entire injected intelligence block.
+# Rationale: ~2200 chars ≈ ~550 tokens at 4 chars/token.
+CONTEXT_CHAR_BUDGET: int = 2200
 
-# Maximum characters for each individual memory's content excerpt.
-# If content is longer it is truncated with an ellipsis marker.
-MEMORY_EXCERPT_MAX_CHARS: int = 200
+# Maximum characters for each individual evidence item content excerpt.
+MEMORY_EXCERPT_MAX_CHARS: int = 240
 
 # Header sentinel — used as a prefix guard to filter out stale injections from
 # prior conversation turns (prevents double-injection on resumed tasks).
@@ -111,6 +107,8 @@ class MemoryManager:
         conversation_memory: ConversationMemory | None = None,
         semantic_memory: SemanticMemory | None = None,
         workforce_memory_store: "WorkforceMemoryStore | None" = None,
+        knowledge_graph_store: "KnowledgeGraphStore | None" = None,
+        intelligence_service: "UnifiedIntelligenceService | None" = None,
         workspace_id: str | None = None,
         agent_name: str | None = None,
         team_name: str | None = None,
@@ -123,6 +121,8 @@ class MemoryManager:
         self.conversation_memory = conversation_memory or ConversationMemory()
         self.semantic_memory = semantic_memory or SemanticMemory()
         self.workforce_memory_store = workforce_memory_store
+        self.knowledge_graph_store = knowledge_graph_store
+        self.intelligence_service = intelligence_service
         self.workspace_id = workspace_id or "default"
         self.agent_name = agent_name
         self.team_name = team_name
@@ -135,14 +135,14 @@ class MemoryManager:
 
     def load_context(self, context: AgentContext) -> None:
         """
-        Load historical messages and inject relevant verified workforce memories into the AgentContext.
+        Load historical messages and inject relevant verified workforce memories & knowledge graph into the AgentContext.
 
         Injection policy:
-          1. Retrieve scored candidates via retrieve_for_context().
+          1. Retrieve scored candidates via UnifiedIntelligenceService.
           2. Discard any with score < min_relevance_score.
-          3. Keep at most context_max_memories (default 3).
+          3. Keep at most context_max_memories (default 4).
           4. Render each in compact format and accumulate until context_char_budget is exhausted.
-          5. Inject as a single system message only if at least one memory qualifies.
+          5. Inject as a single system message only if at least one evidence item qualifies.
           6. If nothing qualifies, add nothing — zero-injection rule applies.
         """
         system_msg = next((m for m in context.messages if m.role == "system"), None)
@@ -183,9 +183,9 @@ class MemoryManager:
             combined_messages.extend(incoming_non_system)
             context.messages = combined_messages
 
-        # 2. Relevance-gated, budget-aware workforce memory injection (Phase B)
+        # 2. Relevance-gated, budget-aware workforce intelligence injection (Phase B Macro Slice 3)
         injected = False
-        if self.workforce_memory_store is not None and self.workspace_id:
+        if (self.workforce_memory_store is not None or self.knowledge_graph_store is not None or self.intelligence_service is not None) and self.workspace_id:
             injected = self._inject_workforce_memory(context)
 
         # 3. Fallback to legacy semantic memory ONLY when workforce memory not injected
@@ -204,61 +204,46 @@ class MemoryManager:
 
     def _inject_workforce_memory(self, context: AgentContext) -> bool:
         """
-        Core injection logic. Returns True if at least one memory was injected.
-
-        Algorithm:
-          1. Retrieve up to (context_max_memories * 3) scored candidates — over-fetch
-             to have margin for threshold and budget filtering.
-          2. Discard below threshold.
-          3. Take top-k by score (deterministic).
-          4. Render compact blocks, accumulate until char budget exhausted.
-          5. Inject as single system message prepended after any existing system prompt.
-          6. Return True only if block is non-empty.
+        Core injection logic using UnifiedIntelligenceService. Returns True if context was injected.
         """
-        assert self.workforce_memory_store is not None  # guarded by caller
+        from aether.intelligence.service import UnifiedIntelligenceService
 
-        # Over-fetch to allow for threshold filtering
-        fetch_limit = self.context_max_memories * 3
-        scored = self.workforce_memory_store.retrieve_for_context(
+        service = self.intelligence_service or UnifiedIntelligenceService(
+            workforce_memory_store=self.workforce_memory_store,
+            knowledge_graph_store=self.knowledge_graph_store,
+            default_workspace_id=self.workspace_id,
+            min_relevance_score=self.min_relevance_score,
+            context_max_items=self.context_max_memories,
+            total_char_budget=self.context_char_budget,
+            item_excerpt_max_chars=self.memory_excerpt_max_chars,
+        )
+
+        result = service.retrieve_unified_context(
             workspace_id=self.workspace_id,
             task_instruction=context.task.instruction,
             agent_name=self.agent_name,
             team_name=self.team_name,
-            limit=fetch_limit,
+            min_relevance_score=self.min_relevance_score,
+            max_items=self.context_max_memories,
+            char_budget=self.context_char_budget,
+            excerpt_max_chars=self.memory_excerpt_max_chars,
         )
 
-        # Apply relevance threshold gate
-        qualified = [(mem, score) for mem, score in scored if score >= self.min_relevance_score]
-        if not qualified:
-            return False  # Zero-injection rule: nothing relevant
+        if not result.formatted_context:
+            return False
 
-        # Apply top-k cap
-        qualified = qualified[: self.context_max_memories]
-
-        # Build compact block within char budget
-        memory_blocks: list[str] = []
-        remaining_budget = self.context_char_budget
-
-        for mem, _score in qualified:
-            block = _format_memory_compact(mem, excerpt_max=self.memory_excerpt_max_chars)
-            block_len = len(block) + 1  # +1 for the separator newline
-            if remaining_budget - block_len < 0:
-                break  # Budget exhausted — stop adding even if more memories qualify
-            memory_blocks.append(block)
-            remaining_budget -= block_len
-
-        if not memory_blocks:
-            return False  # Budget was zero or all blocks were oversized
-
-        mem_text = "\n".join(memory_blocks)
         wf_msg = Message(
             role="system",
-            content=f"{_MEMORY_BLOCK_HEADER}\n{mem_text}",
+            content=result.formatted_context,
         )
         if context.messages and context.messages[0].role == "system":
             context.messages.insert(1, wf_msg)
         else:
             context.messages.insert(0, wf_msg)
+
+        if getattr(context.task, "metadata", None) is not None and isinstance(context.task.metadata, dict):
+            context.task.metadata["intelligence_result"] = result.to_dict()
+
         return True
 
     def persist_context(self, context: AgentContext) -> None:

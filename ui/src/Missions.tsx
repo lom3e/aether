@@ -231,11 +231,47 @@ export function Missions({ navigate, initialMissionId }: MissionsProps) {
   const [selectedExecutionId, setSelectedExecutionId] = useState<string | null>(null);
   const [actionLoading, setActionLoading] = useState<string | null>(null);
 
-  // Inspector & Activities (Slice 2E, 7, 9)
-  const [activeInspectorTab, setActiveInspectorTab] = useState<'graph' | 'replay' | 'health' | 'trace' | 'telemetry'>('graph');
+  // Inspector & Activities (Slice 2E, 7, 9, Phase B Slice 3)
+  const [activeInspectorTab, setActiveInspectorTab] = useState<'graph' | 'replay' | 'health' | 'intelligence' | 'trace' | 'telemetry'>('graph');
   const [replayHighlightedNodeId, setReplayHighlightedNodeId] = useState<string | null>(null);
   const [activities, setActivities] = useState<ActivityItem[]>([]);
   const [loadingActivities, setLoadingActivities] = useState(false);
+
+  // Unified Workforce Intelligence State (Phase B Macro Slice 3)
+  const [intelligenceData, setIntelligenceData] = useState<{
+    workspace_id: string;
+    task_instruction: string;
+    evidence: Array<{
+      id: string;
+      source_type: 'memory' | 'graph_node' | 'graph_edge' | 'hybrid';
+      title: string;
+      summary: string;
+      score: number;
+      confidence: number;
+      category?: string;
+      node_type?: string;
+      provenance: {
+        source_entity?: string;
+        author_agent?: string;
+        source_mission_id?: string;
+        source_execution_id?: string;
+        verification_status?: string;
+        evidence?: Record<string, any>;
+      };
+      source_memory_ids?: string[];
+      source_node_ids?: string[];
+      relations_summary?: string[];
+      properties?: Record<string, any>;
+      created_at: string;
+    }>;
+    total_memories_found: number;
+    total_nodes_found: number;
+    deduplicated_count: number;
+    injected_char_count: number;
+    formatted_context?: string | null;
+  } | null>(null);
+  const [loadingIntelligence, setLoadingIntelligence] = useState(false);
+  const [copiedContext, setCopiedContext] = useState(false);
 
   const selectedMissionRef = useRef<Mission | null>(selectedMission);
   selectedMissionRef.current = selectedMission;
@@ -358,21 +394,54 @@ export function Missions({ navigate, initialMissionId }: MissionsProps) {
     }
   }, []);
 
+  const fetchIntelligence = useCallback(async (mission: Mission, executionId?: string | null) => {
+    try {
+      setLoadingIntelligence(true);
+      const query = mission.objective || mission.title;
+      const res = await fetch(apiUrl('/api/intelligence/retrieve'), {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'X-Aether-Session-Token': getSessionToken() || '',
+        },
+        body: JSON.stringify({
+          query: query,
+          workspace_id: mission.workspace_id,
+          team_name: mission.team_name,
+          mission_id: mission.id,
+          execution_id: executionId || undefined,
+          max_items: 5,
+          char_budget: 2200,
+        }),
+      });
+      if (res.ok) {
+        const data = await res.json();
+        setIntelligenceData(data);
+      }
+    } catch (err) {
+      console.error(err);
+    } finally {
+      setLoadingIntelligence(false);
+    }
+  }, []);
+
   useEffect(() => {
     if (selectedMission) {
       loadGraph(selectedMission.id, selectedExecutionId);
       fetchExecutions(selectedMission.id);
       fetchDeliverables(selectedMission.id, selectedExecutionId);
       fetchActivities(selectedMission.id);
+      fetchIntelligence(selectedMission, selectedExecutionId);
     } else {
       setGraphData(null);
       setDeliverables([]);
       setActivities([]);
       setExecutions([]);
+      setIntelligenceData(null);
       setSelectedExecutionId(null);
       setSelectedSpecialistForPopover(null);
     }
-  }, [selectedMission?.id, loadGraph, fetchExecutions, fetchDeliverables, fetchActivities]);
+  }, [selectedMission, selectedExecutionId, loadGraph, fetchExecutions, fetchDeliverables, fetchActivities, fetchIntelligence]);
 
   useEffect(() => {
     if (selectedMission?.id) {
@@ -2361,7 +2430,7 @@ export function Missions({ navigate, initialMissionId }: MissionsProps) {
         }}>
           <div style={{
             width: '100%',
-            maxWidth: (activeInspectorTab === 'graph' || activeInspectorTab === 'replay' || activeInspectorTab === 'health') ? 'min(1080px, 92vw)' : '640px',
+            maxWidth: (activeInspectorTab === 'graph' || activeInspectorTab === 'replay' || activeInspectorTab === 'health' || activeInspectorTab === 'intelligence') ? 'min(1080px, 92vw)' : '640px',
             transition: 'max-width 0.25s cubic-bezier(0.16, 1, 0.3, 1)',
             height: '100%',
             backgroundColor: 'hsl(var(--card))',
@@ -2452,7 +2521,65 @@ export function Missions({ navigate, initialMissionId }: MissionsProps) {
                 <span>{t('tabReplay')}</span>
               </button>
 
-              {/* Tab 3: Trace */}
+              {/* Tab 3: Workforce Health */}
+              <button
+                onClick={() => setActiveInspectorTab('health')}
+                data-testid="tab-health"
+                style={{
+                  padding: '10px 14px',
+                  fontSize: '12px',
+                  fontWeight: 600,
+                  color: activeInspectorTab === 'health' ? 'hsl(var(--primary))' : 'hsl(var(--muted-fg))',
+                  background: 'none',
+                  border: 'none',
+                  borderBottomWidth: '2px',
+                  borderBottomStyle: 'solid',
+                  borderBottomColor: activeInspectorTab === 'health' ? 'hsl(var(--primary))' : 'transparent',
+                  cursor: 'pointer',
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: '6px',
+                  whiteSpace: 'nowrap'
+                }}
+              >
+                <HeartPulse size={14} />
+                <span>{t('tabHealth')}</span>
+              </button>
+
+              {/* Tab 4: Knowledge Used (Unified Intelligence) */}
+              <button
+                onClick={() => {
+                  setActiveInspectorTab('intelligence');
+                  if (selectedMission) fetchIntelligence(selectedMission, selectedExecutionId);
+                }}
+                data-testid="tab-intelligence"
+                style={{
+                  padding: '10px 14px',
+                  fontSize: '12px',
+                  fontWeight: 600,
+                  color: activeInspectorTab === 'intelligence' ? 'hsl(var(--primary))' : 'hsl(var(--muted-fg))',
+                  background: 'none',
+                  border: 'none',
+                  borderBottomWidth: '2px',
+                  borderBottomStyle: 'solid',
+                  borderBottomColor: activeInspectorTab === 'intelligence' ? 'hsl(var(--primary))' : 'transparent',
+                  cursor: 'pointer',
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: '6px',
+                  whiteSpace: 'nowrap'
+                }}
+              >
+                <Sparkles size={14} />
+                <span>{t('tabIntelligence')}</span>
+                {intelligenceData?.evidence && intelligenceData.evidence.length > 0 && (
+                  <span style={{ fontSize: '10px', padding: '1px 5px', borderRadius: '10px', backgroundColor: 'hsl(var(--muted))' }}>
+                    {intelligenceData.evidence.length}
+                  </span>
+                )}
+              </button>
+
+              {/* Tab 5: Trace */}
               <button
                 onClick={() => {
                   setActiveInspectorTab('trace');
@@ -2485,32 +2612,7 @@ export function Missions({ navigate, initialMissionId }: MissionsProps) {
                 )}
               </button>
 
-              {/* Tab 4: Workforce Health */}
-              <button
-                onClick={() => setActiveInspectorTab('health')}
-                data-testid="tab-health"
-                style={{
-                  padding: '10px 14px',
-                  fontSize: '12px',
-                  fontWeight: 600,
-                  color: activeInspectorTab === 'health' ? 'hsl(var(--primary))' : 'hsl(var(--muted-fg))',
-                  background: 'none',
-                  border: 'none',
-                  borderBottomWidth: '2px',
-                  borderBottomStyle: 'solid',
-                  borderBottomColor: activeInspectorTab === 'health' ? 'hsl(var(--primary))' : 'transparent',
-                  cursor: 'pointer',
-                  display: 'flex',
-                  alignItems: 'center',
-                  gap: '6px',
-                  whiteSpace: 'nowrap'
-                }}
-              >
-                <HeartPulse size={14} />
-                <span>{t('tabHealth')}</span>
-              </button>
-
-              {/* Tab 5: Telemetry */}
+              {/* Tab 6: Telemetry */}
               <button
                 onClick={() => setActiveInspectorTab('telemetry')}
                 data-testid="tab-telemetry"
@@ -2649,6 +2751,232 @@ export function Missions({ navigate, initialMissionId }: MissionsProps) {
                   teamName={selectedMission.team_name}
                   runNumber={executions.find(e => e.id === selectedExecutionId)?.run_number}
                 />
+              )}
+
+              {/* Tab: Knowledge Used (Unified Intelligence) */}
+              {activeInspectorTab === 'intelligence' && (
+                <div style={{ display: 'flex', flexDirection: 'column', gap: '16px' }} data-testid="intelligence-panel">
+                  {loadingIntelligence ? (
+                    <div style={{ padding: '32px', textAlign: 'center', color: 'hsl(var(--muted-fg))', fontSize: '13px' }}>
+                      <RefreshCw size={20} className="animate-spin" style={{ margin: '0 auto 8px' }} />
+                      Loading unified intelligence context...
+                    </div>
+                  ) : !intelligenceData || intelligenceData.evidence.length === 0 ? (
+                    <div style={{
+                      padding: '32px 16px',
+                      borderRadius: '8px',
+                      border: '1px dashed hsl(var(--border))',
+                      textAlign: 'center',
+                      color: 'hsl(var(--muted-fg))'
+                    }} data-testid="intelligence-empty-state">
+                      <Sparkles size={28} style={{ margin: '0 auto 10px', opacity: 0.3 }} />
+                      <div style={{ fontSize: '13px', fontWeight: 500, color: 'hsl(var(--fg))' }}>
+                        {t('intelligenceNoEvidence')}
+                      </div>
+                      <div style={{ fontSize: '12px', marginTop: '4px', maxWidth: '440px', marginInline: 'auto', lineHeight: 1.4 }}>
+                        {t('intelligenceNoEvidenceDesc')}
+                      </div>
+                    </div>
+                  ) : (
+                    <>
+                      {/* Summary Metrics Banner */}
+                      <div style={{
+                        display: 'grid',
+                        gridTemplateColumns: 'repeat(auto-fit, minmax(130px, 1fr))',
+                        gap: '12px',
+                        padding: '14px 16px',
+                        borderRadius: '8px',
+                        backgroundColor: 'hsl(var(--bg))',
+                        border: '1px solid hsl(var(--border))'
+                      }} data-testid="intelligence-metrics">
+                        <div>
+                          <div style={{ fontSize: '11px', color: 'hsl(var(--muted-fg))' }}>{t('intelligenceTotalFound')}</div>
+                          <div style={{ fontSize: '16px', fontWeight: 700, color: 'hsl(var(--fg))' }} data-testid="metric-total-found">
+                            {intelligenceData.total_memories_found + intelligenceData.total_nodes_found}
+                          </div>
+                          <div style={{ fontSize: '10px', color: 'hsl(var(--muted-fg))' }}>
+                            {intelligenceData.total_memories_found} mem / {intelligenceData.total_nodes_found} graph
+                          </div>
+                        </div>
+
+                        <div>
+                          <div style={{ fontSize: '11px', color: 'hsl(var(--muted-fg))' }}>{t('intelligenceDeduplicated')}</div>
+                          <div style={{ fontSize: '16px', fontWeight: 700, color: 'hsl(var(--primary))' }} data-testid="metric-dedup-count">
+                            {intelligenceData.evidence.length}
+                          </div>
+                          <div style={{ fontSize: '10px', color: 'hsl(var(--muted-fg))' }}>
+                            {intelligenceData.deduplicated_count} cross-fused
+                          </div>
+                        </div>
+
+                        <div>
+                          <div style={{ fontSize: '11px', color: 'hsl(var(--muted-fg))' }}>{t('intelligenceInjectedChars')}</div>
+                          <div style={{ fontSize: '16px', fontWeight: 700, color: 'hsl(var(--fg))' }} data-testid="metric-injected-chars">
+                            {intelligenceData.injected_char_count} / 2200
+                          </div>
+                          {/* Mini progress bar */}
+                          <div style={{ width: '100%', height: '4px', backgroundColor: 'hsl(var(--muted))', borderRadius: '2px', marginTop: '4px', overflow: 'hidden' }}>
+                            <div style={{
+                              width: `${Math.min(100, (intelligenceData.injected_char_count / 2200) * 100)}%`,
+                              height: '100%',
+                              backgroundColor: 'hsl(var(--primary))'
+                            }} />
+                          </div>
+                        </div>
+                      </div>
+
+                      {/* Evidence List */}
+                      <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }} data-testid="intelligence-evidence-list">
+                        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+                          <span style={{ fontSize: '13px', fontWeight: 600, color: 'hsl(var(--fg))' }}>
+                            {t('intelligenceEvidenceDetails')} ({intelligenceData.evidence.length})
+                          </span>
+                          {intelligenceData.formatted_context && (
+                            <button
+                              onClick={() => {
+                                navigator.clipboard.writeText(intelligenceData.formatted_context || '');
+                                setCopiedContext(true);
+                                setTimeout(() => setCopiedContext(false), 2000);
+                              }}
+                              className="btn btn-secondary btn-sm"
+                              style={{ fontSize: '11px', display: 'flex', alignItems: 'center', gap: '4px', padding: '4px 8px' }}
+                              data-testid="copy-context-btn"
+                            >
+                              <Copy size={12} />
+                              <span>{copiedContext ? t('intelligenceCopied') : t('intelligenceCopyContext')}</span>
+                            </button>
+                          )}
+                        </div>
+
+                        {intelligenceData.evidence.map((item, idx) => (
+                          <div
+                            key={item.id || idx}
+                            data-testid={`evidence-card-${idx}`}
+                            style={{
+                              padding: '14px',
+                              borderRadius: '8px',
+                              backgroundColor: 'hsl(var(--bg))',
+                              border: '1px solid hsl(var(--border))',
+                              display: 'flex',
+                              flexDirection: 'column',
+                              gap: '8px'
+                            }}
+                          >
+                            {/* Card Header: Type Badge, Category, Score */}
+                            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: '6px' }}>
+                              <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+                                <span style={{
+                                  fontSize: '10px',
+                                  fontWeight: 700,
+                                  padding: '2px 6px',
+                                  borderRadius: '4px',
+                                  backgroundColor: item.source_type === 'hybrid'
+                                    ? 'rgba(147, 51, 234, 0.15)'
+                                    : item.source_type === 'memory'
+                                    ? 'rgba(59, 130, 246, 0.15)'
+                                    : 'rgba(16, 185, 129, 0.15)',
+                                  color: item.source_type === 'hybrid'
+                                    ? 'rgb(168, 85, 247)'
+                                    : item.source_type === 'memory'
+                                    ? 'rgb(59, 130, 246)'
+                                    : 'rgb(16, 185, 129)',
+                                  textTransform: 'uppercase',
+                                  letterSpacing: '0.04em'
+                                }} data-testid={`source-type-badge-${idx}`}>
+                                  {item.source_type === 'hybrid'
+                                    ? t('intelligenceSourceHybrid')
+                                    : item.source_type === 'memory'
+                                    ? t('intelligenceSourceMemory')
+                                    : t('intelligenceSourceGraph')}
+                                </span>
+
+                                {(item.category || item.node_type) && (
+                                  <span style={{
+                                    fontSize: '10px',
+                                    padding: '2px 6px',
+                                    borderRadius: '4px',
+                                    backgroundColor: 'hsl(var(--muted))',
+                                    color: 'hsl(var(--muted-fg))',
+                                    textTransform: 'uppercase'
+                                  }}>
+                                    {item.category || item.node_type}
+                                  </span>
+                                )}
+
+                                <span style={{ fontSize: '13px', fontWeight: 600, color: 'hsl(var(--fg))' }} data-testid={`evidence-title-${idx}`}>
+                                  {item.title}
+                                </span>
+                              </div>
+
+                              <div style={{ display: 'flex', alignItems: 'center', gap: '8px', fontSize: '11px', color: 'hsl(var(--muted-fg))' }}>
+                                <span>Score: <strong style={{ color: 'hsl(var(--fg))' }}>{item.score}</strong></span>
+                                <span>Conf: <strong style={{ color: 'hsl(var(--fg))' }}>{Math.round(item.confidence * 100)}%</strong></span>
+                              </div>
+                            </div>
+
+                            {/* Summary / Excerpt text */}
+                            <div style={{
+                              fontSize: '12px',
+                              color: 'hsl(var(--fg))',
+                              lineHeight: 1.45,
+                              backgroundColor: 'hsl(var(--card))',
+                              padding: '8px 10px',
+                              borderRadius: '6px',
+                              border: '1px solid hsl(var(--border))'
+                            }} data-testid={`evidence-summary-${idx}`}>
+                              {item.summary}
+                            </div>
+
+                            {/* Provenance & Graph Relations row */}
+                            <div style={{ display: 'flex', flexWrap: 'wrap', alignItems: 'center', gap: '8px', fontSize: '11px' }}>
+                              {/* Provenance pills */}
+                              <div style={{ display: 'flex', alignItems: 'center', gap: '4px', color: 'hsl(var(--muted-fg))' }} data-testid={`evidence-provenance-${idx}`}>
+                                <span>{t('intelligenceProvenance')}:</span>
+                                {item.provenance.source_entity && (
+                                  <span style={{ padding: '1px 5px', borderRadius: '4px', backgroundColor: 'hsl(var(--muted))' }}>
+                                    {item.provenance.source_entity}
+                                  </span>
+                                )}
+                                {item.provenance.author_agent && (
+                                  <span style={{ padding: '1px 5px', borderRadius: '4px', backgroundColor: 'hsl(var(--muted))', color: 'hsl(var(--primary))' }}>
+                                    @{item.provenance.author_agent}
+                                  </span>
+                                )}
+                                {item.provenance.source_mission_id && (
+                                  <span style={{ padding: '1px 5px', borderRadius: '4px', backgroundColor: 'hsl(var(--muted))' }}>
+                                    Mission {item.provenance.source_mission_id.slice(0, 8)}
+                                  </span>
+                                )}
+                              </div>
+
+                              {/* Relational Links */}
+                              {item.relations_summary && item.relations_summary.length > 0 && (
+                                <div style={{ display: 'flex', alignItems: 'center', gap: '4px', color: 'hsl(var(--muted-fg))' }} data-testid={`evidence-relations-${idx}`}>
+                                  <span>{t('intelligenceRelations')}:</span>
+                                  {item.relations_summary.map((rel, rIdx) => (
+                                    <span
+                                      key={rIdx}
+                                      style={{
+                                        padding: '1px 6px',
+                                        borderRadius: '4px',
+                                        backgroundColor: 'rgba(59, 130, 246, 0.1)',
+                                        color: 'rgb(59, 130, 246)',
+                                        fontFamily: 'monospace',
+                                        fontSize: '10px'
+                                      }}
+                                    >
+                                      {rel}
+                                    </span>
+                                  ))}
+                                </div>
+                              )}
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                    </>
+                  )}
+                </div>
               )}
 
               {/* Tab 5: Telemetry & Specs */}

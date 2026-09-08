@@ -102,6 +102,8 @@ class Team:
         workspace_name: str | None = None,
         workforce_memory: Any | None = None,
         workforce_memory_store: Any | None = None,
+        knowledge_graph: Any | None = None,
+        knowledge_graph_store: Any | None = None,
         verbose: bool = False,
     ) -> None:
         self.config = config
@@ -112,6 +114,7 @@ class Team:
         self.project_id = str(project_id).strip() if project_id and str(project_id).strip() else None
         self.workspace_name = str(workspace_name).strip() if workspace_name and str(workspace_name).strip() else None
         self.workforce_memory = workforce_memory_store or workforce_memory
+        self.knowledge_graph = knowledge_graph_store or knowledge_graph
 
         # ---- Skills Registry ----
         from aether.skills.builtin import get_default_skill_registry
@@ -433,11 +436,12 @@ class Team:
                 from aether.memory.persistent_conversation import PersistentConversationMemory
                 conv_mem = PersistentConversationMemory(db_path=self.conversation_db_path, agent_id=agent_id)
 
-            if conv_mem is not None or self.workforce_memory is not None:
+            if conv_mem is not None or self.workforce_memory is not None or self.knowledge_graph is not None:
                 from aether.memory.manager import MemoryManager
                 memory_manager = MemoryManager(
                     conversation_memory=conv_mem,
                     workforce_memory_store=self.workforce_memory,
+                    knowledge_graph_store=self.knowledge_graph,
                     workspace_id=self.workspace_name,
                     agent_name=agent_config.name,
                     team_name=self.config.name,

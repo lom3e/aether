@@ -2606,6 +2606,7 @@ async def apply_architect_workforce(request: Request, data: ApplyArchitectWorkfo
 class CreateMissionPayload(BaseModel):
     title: str = Field(min_length=1, max_length=255)
     objective: str = Field(min_length=1)
+    workspace_id: str | None = None
     team_name: str | None = None
     project_id: str | None = None
     conversation_id: str | None = None
@@ -2673,6 +2674,7 @@ async def create_mission(request: Request, data: CreateMissionPayload):
         mission = ws.missions.create_mission(
             title=data.title,
             objective=data.objective,
+            workspace_id=data.workspace_id or ws.name,
             team_name=team_name,
             project_id=data.project_id,
             conversation_id=data.conversation_id,
@@ -3645,6 +3647,7 @@ class MemoryCreatePayload(BaseModel):
     source_entity: str = "manual"
     source_id: str | None = None
     author_agent: str | None = None
+    provenance: dict[str, Any] | None = None
 
 
 class MemoryUpdatePayload(BaseModel):
@@ -3659,8 +3662,8 @@ class MemoryRetrievePayload(BaseModel):
     query: str
     category: str | None = None
     categories: list[str] | None = None
-    agent_name: str | None = None
     team_name: str | None = None
+    agent_name: str | None = None
     mission_id: str | None = None
     execution_id: str | None = None
     limit: int = 5
@@ -3669,13 +3672,12 @@ class MemoryRetrievePayload(BaseModel):
 @router.get("/memories")
 async def list_memories_route(
     request: Request,
-    category: str | None = None,
-    scope: str | None = None,
-    agent: str | None = None,
     team: str | None = None,
+    agent: str | None = None,
     mission: str | None = None,
     execution: str | None = None,
-    status: str | None = "active",
+    category: str | None = None,
+    status: str = "all",
     search: str | None = None,
     q: str | None = None,
     limit: int = 50,
@@ -3736,13 +3738,15 @@ async def create_memory_route(request: Request, payload: MemoryCreatePayload):
     except Exception:
         cat = MemoryCategory.FACT
 
+    prov_dict = payload.provenance or {}
     provenance = MemoryProvenance(
-        source_entity=payload.source_entity,
-        source_id=payload.source_id,
-        source_mission_id=payload.mission_id,
-        source_execution_id=payload.execution_id,
-        author_agent=payload.author_agent,
-        verification_status="verified",
+        source_entity=prov_dict.get("source_entity") or payload.source_entity,
+        source_id=prov_dict.get("source_id") or payload.source_id,
+        source_mission_id=prov_dict.get("source_mission_id") or payload.mission_id,
+        source_execution_id=prov_dict.get("source_execution_id") or payload.execution_id,
+        author_agent=prov_dict.get("author_agent") or payload.author_agent,
+        verification_status=prov_dict.get("verification_status") or "verified",
+        evidence=prov_dict.get("evidence") or {},
     )
 
     mem = WorkforceMemory.create(
@@ -3753,18 +3757,21 @@ async def create_memory_route(request: Request, payload: MemoryCreatePayload):
         provenance=provenance,
         team_name=payload.team_name,
         agent_name=payload.agent_name,
-        mission_id=payload.mission_id,
-        execution_id=payload.execution_id,
+        mission_id=prov_dict.get("source_mission_id") or payload.mission_id,
+        execution_id=prov_dict.get("source_execution_id") or payload.execution_id,
         confidence=payload.confidence,
         tags=payload.tags,
     )
     saved = ws.memory.create_memory(mem)
+
+    # Auto-compile into Knowledge Graph
     if hasattr(ws, "knowledge_graph") and ws.knowledge_graph:
         try:
             from aether.knowledge.graph.builder import KnowledgeGraphBuilder
             KnowledgeGraphBuilder.compile_memory(saved, ws.knowledge_graph)
         except Exception:
             pass
+
     return saved.to_dict()
 
 
@@ -4034,5 +4041,70 @@ async def get_multi_seed_subgraph_route(request: Request, payload: KnowledgeSubg
         relation_types=payload.relation_types,
     )
     return subgraph.to_dict()
+
+
+# ---------------------------------------------------------------------------
+# Unified Workforce Intelligence REST API (Phase B Macro Slice 3)
+# ---------------------------------------------------------------------------
+
+class IntelligenceRetrievePayload(BaseModel):
+    query: str
+    workspace_id: str | None = None
+    agent_name: str | None = None
+    team_name: str | None = None
+    mission_id: str | None = None
+    execution_id: str | None = None
+    min_relevance_score: float | None = None
+    max_items: int | None = None
+    char_budget: int | None = None
+    max_graph_hops: int | None = None
+
+
+@router.post("/intelligence/retrieve")
+async def retrieve_unified_intelligence_route(
+    request: Request,
+    payload: IntelligenceRetrievePayload,
+):
+    ws = getattr(request.app.state, "workspace", None)
+    if not ws:
+        raise HTTPException(status_code=503, detail="Workspace not initialized.")
+
+    ws_id = (payload.workspace_id or ws.name).strip()
+    if ws_id == "default" and ws.name != "default":
+        ws_id = ws.name
+    from aether.intelligence.service import UnifiedIntelligenceService
+
+    # Auto-compile existing memories into graph if graph is currently empty
+    if hasattr(ws, "memory") and ws.memory and hasattr(ws, "knowledge_graph") and ws.knowledge_graph:
+        try:
+            existing_nodes = ws.knowledge_graph.list_nodes(workspace_id=ws_id, limit=1)
+            if not existing_nodes:
+                mems = ws.memory.list_memories(ws_id, limit=100)
+                if mems:
+                    from aether.knowledge.graph.builder import KnowledgeGraphBuilder
+                    KnowledgeGraphBuilder.compile_all_memories(mems, ws.knowledge_graph)
+        except Exception:
+            pass
+
+    service = UnifiedIntelligenceService(
+        workforce_memory_store=getattr(ws, "memory", None),
+        knowledge_graph_store=getattr(ws, "knowledge_graph", None),
+        default_workspace_id=ws_id,
+    )
+
+    result = service.retrieve_unified_context(
+        workspace_id=ws_id,
+        task_instruction=payload.query,
+        agent_name=payload.agent_name,
+        team_name=payload.team_name,
+        mission_id=payload.mission_id,
+        execution_id=payload.execution_id,
+        min_relevance_score=payload.min_relevance_score,
+        max_items=payload.max_items,
+        char_budget=payload.char_budget,
+        max_graph_hops=payload.max_graph_hops,
+    )
+    return result.to_dict()
+
 
 

@@ -372,6 +372,7 @@ class Workspace:
             project_id=project_id,
             workspace_name=self.name,
             workforce_memory_store=self.memory,
+            knowledge_graph_store=self.knowledge_graph,
         )
 
     def set_default_team(self, team_name: str) -> None:
