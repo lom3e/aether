@@ -4107,4 +4107,222 @@ async def retrieve_unified_intelligence_route(
     return result.to_dict()
 
 
+# ---------------------------------------------------------------------------
+# Phase B Macro Slice 4: Learning & Correction Loop REST APIs
+# ---------------------------------------------------------------------------
+
+class CreateCorrectionPayload(BaseModel):
+    problem: str = Field(min_length=1)
+    correction: str = Field(min_length=1)
+    rationale: str = ""
+    target_scope: str = "workspace"
+    target_identifier: str = "workspace"
+    evidence: dict[str, Any] = Field(default_factory=dict)
+    source_mission_id: str | None = None
+    source_execution_id: str | None = None
+    workspace_id: str | None = None
+
+
+class DistillLessonPayload(BaseModel):
+    correction_id: str = Field(min_length=1)
+    workspace_id: str | None = None
+
+
+@router.get("/learning/events")
+async def list_learning_events_route(
+    request: Request,
+    event_type: str | None = None,
+    mission_id: str | None = None,
+    execution_id: str | None = None,
+    verification_status: str | None = None,
+    limit: int = 100,
+    offset: int = 0,
+    workspace_id: str | None = None,
+):
+    ws = getattr(request.app.state, "workspace", None)
+    if not ws:
+        return []
+    ws_id = (workspace_id or ws.name).strip()
+    events = ws.learning_store.list_events(
+        workspace_id=ws_id,
+        event_type=event_type,
+        mission_id=mission_id,
+        execution_id=execution_id,
+        verification_status=verification_status,
+        limit=limit,
+        offset=offset,
+    )
+    return [e.to_dict() for e in events]
+
+
+@router.get("/learning/events/{event_id}")
+async def get_learning_event_route(
+    request: Request,
+    event_id: str,
+    workspace_id: str | None = None,
+):
+    ws = getattr(request.app.state, "workspace", None)
+    if not ws:
+        raise HTTPException(status_code=503, detail="Workspace not initialized.")
+    ws_id = (workspace_id or ws.name).strip()
+    event = ws.learning_store.get_event(event_id, workspace_id=ws_id)
+    if not event:
+        raise HTTPException(status_code=404, detail=f"LearningEvent '{event_id}' not found.")
+    return event.to_dict()
+
+
+@router.get("/learning/corrections")
+async def list_corrections_route(
+    request: Request,
+    status: str | None = None,
+    scope: str | None = None,
+    target_identifier: str | None = None,
+    source_mission_id: str | None = None,
+    limit: int = 100,
+    offset: int = 0,
+    workspace_id: str | None = None,
+):
+    ws = getattr(request.app.state, "workspace", None)
+    if not ws:
+        return []
+    ws_id = (workspace_id or ws.name).strip()
+    corrs = ws.learning_store.list_corrections(
+        workspace_id=ws_id,
+        status=status,
+        scope=scope,
+        target_identifier=target_identifier,
+        source_mission_id=source_mission_id,
+        limit=limit,
+        offset=offset,
+    )
+    return [c.to_dict() for c in corrs]
+
+
+@router.post("/learning/corrections", status_code=status.HTTP_201_CREATED)
+async def create_correction_route(
+    request: Request,
+    payload: CreateCorrectionPayload,
+):
+    ws = getattr(request.app.state, "workspace", None)
+    if not ws:
+        raise HTTPException(status_code=503, detail="Workspace not initialized.")
+    ws_id = (payload.workspace_id or ws.name).strip()
+
+    from aether.learning.models import Correction, LearningScope, LearningVerificationStatus
+    import uuid
+
+    corr = Correction(
+        id=f"corr-{uuid.uuid4().hex[:12]}",
+        workspace_id=ws_id,
+        target_scope=LearningScope.from_str(payload.target_scope),
+        target_identifier=payload.target_identifier,
+        problem=payload.problem,
+        correction=payload.correction,
+        rationale=payload.rationale,
+        evidence=payload.evidence,
+        source_mission_id=payload.source_mission_id,
+        source_execution_id=payload.source_execution_id,
+        verification_status=LearningVerificationStatus.PROPOSED,
+    )
+    saved, _ = ws.learning_store.create_or_get_correction(corr)
+    return saved.to_dict()
+
+
+@router.post("/learning/corrections/{correction_id}/verify")
+async def verify_correction_route(
+    request: Request,
+    correction_id: str,
+    workspace_id: str | None = None,
+):
+    ws = getattr(request.app.state, "workspace", None)
+    if not ws:
+        raise HTTPException(status_code=503, detail="Workspace not initialized.")
+    ws_id = (workspace_id or ws.name).strip()
+
+    try:
+        lesson = ws.learning.verify_correction(correction_id, workspace_id=ws_id)
+        return lesson.to_dict()
+    except ValueError as exc:
+        raise HTTPException(status_code=404, detail=str(exc))
+
+
+@router.post("/learning/corrections/{correction_id}/reject")
+async def reject_correction_route(
+    request: Request,
+    correction_id: str,
+    workspace_id: str | None = None,
+):
+    ws = getattr(request.app.state, "workspace", None)
+    if not ws:
+        raise HTTPException(status_code=503, detail="Workspace not initialized.")
+    ws_id = (workspace_id or ws.name).strip()
+
+    try:
+        corr = ws.learning.reject_correction(correction_id, workspace_id=ws_id)
+        return corr.to_dict()
+    except ValueError as exc:
+        raise HTTPException(status_code=404, detail=str(exc))
+
+
+@router.get("/learning/lessons")
+async def list_lessons_route(
+    request: Request,
+    scope: str | None = None,
+    target_identifier: str | None = None,
+    is_regression: bool | None = None,
+    verification_status: str | None = None,
+    limit: int = 100,
+    offset: int = 0,
+    workspace_id: str | None = None,
+):
+    ws = getattr(request.app.state, "workspace", None)
+    if not ws:
+        return []
+    ws_id = (workspace_id or ws.name).strip()
+    lessons = ws.learning_store.list_lessons(
+        workspace_id=ws_id,
+        scope=scope,
+        target_identifier=target_identifier,
+        is_regression=is_regression,
+        verification_status=verification_status,
+        limit=limit,
+        offset=offset,
+    )
+    return [l.to_dict() for l in lessons]
+
+
+@router.get("/learning/lessons/{lesson_id}")
+async def get_lesson_route(
+    request: Request,
+    lesson_id: str,
+    workspace_id: str | None = None,
+):
+    ws = getattr(request.app.state, "workspace", None)
+    if not ws:
+        raise HTTPException(status_code=503, detail="Workspace not initialized.")
+    ws_id = (workspace_id or ws.name).strip()
+    lesson = ws.learning_store.get_lesson(lesson_id, workspace_id=ws_id)
+    if not lesson:
+        raise HTTPException(status_code=404, detail=f"DistilledLesson '{lesson_id}' not found.")
+    return lesson.to_dict()
+
+
+@router.post("/learning/distill")
+async def distill_lesson_route(
+    request: Request,
+    payload: DistillLessonPayload,
+):
+    ws = getattr(request.app.state, "workspace", None)
+    if not ws:
+        raise HTTPException(status_code=503, detail="Workspace not initialized.")
+    ws_id = (payload.workspace_id or ws.name).strip()
+
+    try:
+        lesson = ws.learning.verify_correction(payload.correction_id, workspace_id=ws_id)
+        return lesson.to_dict()
+    except ValueError as exc:
+        raise HTTPException(status_code=404, detail=str(exc))
+
+
+
 

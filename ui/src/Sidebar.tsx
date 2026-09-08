@@ -3,7 +3,7 @@ import {
   Sparkles, MessageSquare, Bot, Users, Database, Settings, ShoppingBag,
   Plus, ChevronLeft, Moon, Sun, Globe, Trash2, Search,
   ChevronDown, MoreVertical, Archive, Copy, Edit2, Check,
-  Pin, Folder, GitBranch, ExternalLink, RefreshCw, X, Zap, Puzzle, Target, Brain
+  Pin, Folder, GitBranch, ExternalLink, RefreshCw, X, Zap, Puzzle, Target, Brain, GraduationCap
 } from 'lucide-react';
 import { useTranslation } from './i18n';
 import { useTheme } from './theme';
@@ -1160,6 +1160,18 @@ export function Sidebar({
                 >
                   <Brain size={15} />
                   {!collapsed && <span>{t('navMemory')}</span>}
+                </button>
+              </Tooltip>
+
+              <Tooltip content={t('navLearning')} position={collapsed ? 'right' : 'top'} disabled={!collapsed}>
+                <button
+                  data-testid="nav-learning"
+                  className={`btn btn-ghost ${currentView === 'learning' ? 'active' : ''}`}
+                  style={{ width: '100%', justifyContent: collapsed ? 'center' : 'flex-start', padding: '7px 8px', fontSize: '13px' }}
+                  onClick={() => onNavigate('learning')}
+                >
+                  <GraduationCap size={15} />
+                  {!collapsed && <span>{t('navLearning')}</span>}
                 </button>
               </Tooltip>
 

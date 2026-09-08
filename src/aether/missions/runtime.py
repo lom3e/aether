@@ -944,6 +944,20 @@ class MissionRuntime:
                         except Exception as exc:
                             logger.warning("Failed to ingest quality gate memory: %s", exc)
 
+                    # Ingest verified learning & distillation in LearningService
+                    if hasattr(self.workspace, "learning") and self.workspace.learning:
+                        try:
+                            self.workspace.learning.record_quality_gate_pass(
+                                workspace_id=self.workspace.name,
+                                mission_id=mid,
+                                execution_id=exec_id,
+                                eval_result=eval_result,
+                                team_name=mission.team_name,
+                                rework_count=rework_attempts,
+                            )
+                        except Exception as exc:
+                            logger.warning("Failed to record quality gate pass in LearningService: %s", exc)
+
                     self._log_activity(
                         mission_id=mid,
                         agent=eval_result.reviewer_agent,
@@ -971,6 +985,20 @@ class MissionRuntime:
                             "rules": {k: v.to_dict() for k, v in eval_result.rules.items()},
                         })
                         self.store.add_deliverable(mid, d)
+
+                    # Record failure & proposed corrections in LearningService
+                    if hasattr(self.workspace, "learning") and self.workspace.learning:
+                        try:
+                            self.workspace.learning.record_quality_gate_failure(
+                                workspace_id=self.workspace.name,
+                                mission_id=mid,
+                                execution_id=exec_id,
+                                eval_result=eval_result,
+                                team_name=mission.team_name,
+                                rework_attempt=rework_attempts + 1,
+                            )
+                        except Exception as exc:
+                            logger.warning("Failed to record quality gate failure in LearningService: %s", exc)
 
                     self._log_activity(
                         mission_id=mid,

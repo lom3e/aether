@@ -10,6 +10,7 @@ import { Skills } from './Skills';
 import { Home } from './Home';
 import { Missions } from './Missions';
 import { Memory } from './Memory';
+import { Learning } from './Learning';
 import { Marketplace } from './Marketplace';
 import { AgentProfile } from './AgentProfile';
 import { CommandPalette } from './CommandPalette';
@@ -297,6 +298,7 @@ function MainApp() {
         {currentView === 'teams' && <Teams />}
         {currentView === 'knowledge' && <Knowledge />}
         {currentView === 'memory' && <Memory />}
+        {currentView === 'learning' && <Learning />}
         {currentView === 'automations' && <Automations />}
         {currentView === 'skills' && <Skills navigate={navigate} />}
         {currentView === 'settings' && <Settings onWorkspaceSwitched={handleWorkspaceSwitched} />}

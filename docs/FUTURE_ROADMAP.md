@@ -630,9 +630,9 @@ CarShine (Company)
 * **Classification:** `Differentiator` | **Status:** `Phase B Slice 2 & Slice 3 Implemented & Unified` (Persistent SQLite Property Graph, Canonical Deduplication, Bounded Traversal, Unified Intelligence Context Retrieval, REST & UI). | **Depends on:** Workforce Memory.
 
 ### 5.3 Workforce Learning & Correction Ingestion
-* **Functional Description:** User edits or post-mission feedback trigger automated rule extraction:
-  $$\text{Task} \longrightarrow \text{Result} \longrightarrow \text{User Feedback} \longrightarrow \text{Extracted Lesson} \longrightarrow \text{Memory Ingestion}$$
-* **Classification:** `Differentiator` | **Depends on:** Workforce Memory.
+* **Functional Description:** User edits, Quality Gate outcomes, or post-mission feedback trigger automated, evidence-first rule extraction:
+  $$\text{Task} \longrightarrow \text{Quality Gate / Feedback} \longrightarrow \text{Proposed Correction} \longrightarrow \text{Rework / Verification} \longrightarrow \text{Distilled Lesson} \longrightarrow \text{Memory + KG Ingestion}$$
+* **Classification:** `Differentiator` | **Status:** `Phase B Slice 4 Implemented & Verified` (Evidence-First Closed Loop, Observed → Proposed → Verified Corrections, Distilled Lessons, Multi-Store Compilation into Workforce Memory & Knowledge Graph, Deterministic Regression Detection, REST & UI). | **Depends on:** Workforce Memory, Knowledge Graph, Unified Intelligence.
 
 ---
 
@@ -1112,7 +1112,7 @@ Development follows **Four Sequential Strategic Phases**:
 | Workforce Memory (8 Categories) | Intelligence | `Differentiator` | Phase B ✅ |
 | Enterprise Knowledge Graph | Intelligence | `Differentiator` | Phase B ✅ |
 | Unified Intelligence Context Retrieval | Intelligence | `Differentiator` | Phase B ✅ |
-| Workforce Learning & Correction Loop | Intelligence | `Differentiator` | Phase B |
+| Workforce Learning & Correction Loop | Intelligence | `Differentiator` | Phase B ✅ |
 | Verified Execution & Quality Gates | Verification | `Core` | Phase B |
 | Conflict Resolution Pipeline | Verification | `Differentiator` | Phase B |
 | Human Checkpoints & Safety Gates | Human Control | `Foundation` | Phase B |

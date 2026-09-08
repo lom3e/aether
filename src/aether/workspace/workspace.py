@@ -195,6 +195,30 @@ class Workspace:
         return KnowledgeGraphStore(self.knowledge_graph_db_path, default_workspace_id=self.name)
 
     @property
+    def learning_db_path(self) -> str:
+        """Path to the persistent learning & correction database."""
+        if self.data_dir.exists() or self.config_path.exists():
+            return str(self.data_dir / "learning.db")
+        return str(self.legacy_aether_dir / "learning.db")
+
+    @property
+    def learning_store(self):
+        """Return the LearningStore for this workspace."""
+        from aether.learning.store import LearningStore
+        Path(self.learning_db_path).parent.mkdir(parents=True, exist_ok=True)
+        return LearningStore(self.learning_db_path)
+
+    @property
+    def learning(self):
+        """Return the LearningService for this workspace."""
+        from aether.learning.service import LearningService
+        return LearningService(
+            learning_store=self.learning_store,
+            memory_store=self.memory,
+            knowledge_graph_store=self.knowledge_graph,
+        )
+
+    @property
     def project_path(self) -> Path | None:
         """Return the resolved Path of the connected project root if configured and existing."""
         raw_path = self.config.get("workspace", {}).get("project", {}).get("path")
