@@ -100,6 +100,8 @@ class Team:
         emitter: EventEmitter | None = None,
         project_id: str | None = None,
         workspace_name: str | None = None,
+        workforce_memory: Any | None = None,
+        workforce_memory_store: Any | None = None,
         verbose: bool = False,
     ) -> None:
         self.config = config
@@ -109,6 +111,7 @@ class Team:
         self.sandbox = sandbox
         self.project_id = str(project_id).strip() if project_id and str(project_id).strip() else None
         self.workspace_name = str(workspace_name).strip() if workspace_name and str(workspace_name).strip() else None
+        self.workforce_memory = workforce_memory_store or workforce_memory
 
         # ---- Skills Registry ----
         from aether.skills.builtin import get_default_skill_registry
@@ -425,11 +428,20 @@ class Team:
                 agent_id = identity.id
 
             memory_manager = None
+            conv_mem = None
             if agent_id and self.conversation_db_path:
                 from aether.memory.persistent_conversation import PersistentConversationMemory
-                from aether.memory.manager import MemoryManager
                 conv_mem = PersistentConversationMemory(db_path=self.conversation_db_path, agent_id=agent_id)
-                memory_manager = MemoryManager(conversation_memory=conv_mem)
+
+            if conv_mem is not None or self.workforce_memory is not None:
+                from aether.memory.manager import MemoryManager
+                memory_manager = MemoryManager(
+                    conversation_memory=conv_mem,
+                    workforce_memory_store=self.workforce_memory,
+                    workspace_id=self.workspace_name,
+                    agent_name=agent_config.name,
+                    team_name=self.config.name,
+                )
 
             agent = Agent(
                 agent_id=agent_id,

@@ -467,7 +467,7 @@ class Agent:
                 )
 
             # Truncation before the generate call if memory_manager is configured
-            if self.memory_manager is not None:
+            if self.memory_manager is not None and getattr(self.memory_manager, "conversation_memory", None) is not None:
                 limit = self.max_total_tokens if self.max_total_tokens is not None else 8192
                 agent_context.messages = self.memory_manager.conversation_memory.truncate_context(
                     agent_context.messages, limit

@@ -167,6 +167,20 @@ class Workspace:
         return AutomationStore(self.automations_db_path)
 
     @property
+    def memory_db_path(self) -> str:
+        """Path to the persistent workforce memory database."""
+        if self.data_dir.exists() or self.config_path.exists():
+            return str(self.data_dir / "memory.db")
+        return str(self.legacy_aether_dir / "memory.db")
+
+    @property
+    def memory(self):
+        """Return the WorkforceMemoryStore for this workspace."""
+        from aether.memory.store import WorkforceMemoryStore
+        Path(self.memory_db_path).parent.mkdir(parents=True, exist_ok=True)
+        return WorkforceMemoryStore(self.memory_db_path, default_workspace_id=self.name)
+
+    @property
     def project_path(self) -> Path | None:
         """Return the resolved Path of the connected project root if configured and existing."""
         raw_path = self.config.get("workspace", {}).get("project", {}).get("path")
@@ -334,7 +348,7 @@ class Workspace:
         if self.project_info and self.project_info.get("exists"):
             project_id = self.project_info.get("id") or self.project_info.get("name")
 
-        # Instantiate Team (this will internally wire PersistentConversationMemory using conversation_db_path)
+        # Instantiate Team (this will internally wire PersistentConversationMemory using conversation_db_path and workforce memory)
         return Team(
             config=team_config,
             knowledge_store=knowledge_store,
@@ -343,6 +357,7 @@ class Workspace:
             conversation_db_path=self.conversations_db_path,
             project_id=project_id,
             workspace_name=self.name,
+            workforce_memory_store=self.memory,
         )
 
     def set_default_team(self, team_name: str) -> None:

@@ -3626,3 +3626,206 @@ async def get_mission_execution(request: Request, mission_id: str, execution_id:
     if not execution or execution.mission_id != mission_id:
         raise HTTPException(status_code=404, detail="Execution not found.")
     return execution.to_dict()
+
+
+# ----------------------------------------------------------------------
+# Workforce Memory Endpoints (Phase B Layer 5.1 & 5.3)
+# ----------------------------------------------------------------------
+
+class MemoryCreatePayload(BaseModel):
+    category: str
+    summary: str
+    content: str
+    tags: list[str] = Field(default_factory=list)
+    confidence: float = 0.9
+    team_name: str | None = None
+    agent_name: str | None = None
+    mission_id: str | None = None
+    execution_id: str | None = None
+    source_entity: str = "manual"
+    source_id: str | None = None
+    author_agent: str | None = None
+
+
+class MemoryUpdatePayload(BaseModel):
+    summary: str | None = None
+    content: str | None = None
+    category: str | None = None
+    tags: list[str] | None = None
+    confidence: float | None = None
+
+
+class MemoryRetrievePayload(BaseModel):
+    query: str
+    category: str | None = None
+    categories: list[str] | None = None
+    agent_name: str | None = None
+    team_name: str | None = None
+    mission_id: str | None = None
+    execution_id: str | None = None
+    limit: int = 5
+
+
+@router.get("/memories")
+async def list_memories_route(
+    request: Request,
+    category: str | None = None,
+    scope: str | None = None,
+    agent: str | None = None,
+    team: str | None = None,
+    mission: str | None = None,
+    execution: str | None = None,
+    status: str | None = "active",
+    search: str | None = None,
+    q: str | None = None,
+    limit: int = 50,
+    offset: int = 0,
+):
+    ws = getattr(request.app.state, "workspace", None)
+    if not ws:
+        raise HTTPException(status_code=503, detail="Workspace not initialized.")
+    store = ws.memory
+    query_str = (search or q or "").strip() or None
+    include_archived = (status == "archived" or status == "all")
+
+    memories = store.list_memories(
+        workspace_id=ws.name,
+        team_name=team,
+        agent_name=agent,
+        mission_id=mission,
+        execution_id=execution,
+        category=category,
+        query=query_str,
+        include_archived=include_archived,
+        limit=limit,
+        offset=offset,
+    )
+    if status == "archived":
+        memories = [m for m in memories if m.is_archived]
+    elif status == "active":
+        memories = [m for m in memories if not m.is_archived]
+    return [m.to_dict() for m in memories]
+
+
+@router.get("/memories/{memory_id}")
+async def get_memory_route(request: Request, memory_id: str):
+    ws = getattr(request.app.state, "workspace", None)
+    if not ws:
+        raise HTTPException(status_code=503, detail="Workspace not initialized.")
+    mem = ws.memory.get_memory(memory_id, workspace_id=ws.name)
+    if not mem:
+        raise HTTPException(status_code=404, detail="Memory record not found.")
+    return mem.to_dict()
+
+
+@router.post("/memories", status_code=status.HTTP_201_CREATED)
+async def create_memory_route(request: Request, payload: MemoryCreatePayload):
+    ws = getattr(request.app.state, "workspace", None)
+    if not ws:
+        raise HTTPException(status_code=503, detail="Workspace not initialized.")
+    from aether.memory.models import WorkforceMemory, MemoryCategory, MemoryProvenance
+    from aether.memory.sanitization import sanitize_memory_text
+
+    clean_summary = sanitize_memory_text(payload.summary)
+    clean_content = sanitize_memory_text(payload.content)
+    if not clean_summary or not clean_content:
+        raise HTTPException(status_code=422, detail="Memory summary and content cannot be empty.")
+
+    try:
+        cat = MemoryCategory.from_str(payload.category)
+    except Exception:
+        cat = MemoryCategory.FACT
+
+    provenance = MemoryProvenance(
+        source_entity=payload.source_entity,
+        source_id=payload.source_id,
+        source_mission_id=payload.mission_id,
+        source_execution_id=payload.execution_id,
+        author_agent=payload.author_agent,
+        verification_status="verified",
+    )
+
+    mem = WorkforceMemory.create(
+        workspace_id=ws.name,
+        category=cat,
+        summary=clean_summary,
+        content=clean_content,
+        provenance=provenance,
+        team_name=payload.team_name,
+        agent_name=payload.agent_name,
+        mission_id=payload.mission_id,
+        execution_id=payload.execution_id,
+        confidence=payload.confidence,
+        tags=payload.tags,
+    )
+    saved = ws.memory.create_memory(mem)
+    return saved.to_dict()
+
+
+@router.patch("/memories/{memory_id}")
+async def update_memory_route(request: Request, memory_id: str, payload: MemoryUpdatePayload):
+    ws = getattr(request.app.state, "workspace", None)
+    if not ws:
+        raise HTTPException(status_code=503, detail="Workspace not initialized.")
+    try:
+        updated = ws.memory.update_memory(
+            memory_id=memory_id,
+            summary=payload.summary,
+            content=payload.content,
+            category=payload.category,
+            tags=payload.tags,
+            confidence=payload.confidence,
+            workspace_id=ws.name,
+        )
+        return updated.to_dict()
+    except KeyError:
+        raise HTTPException(status_code=404, detail="Memory record not found.")
+
+
+@router.post("/memories/{memory_id}/archive")
+async def archive_memory_route(request: Request, memory_id: str, archived: bool = True):
+    ws = getattr(request.app.state, "workspace", None)
+    if not ws:
+        raise HTTPException(status_code=503, detail="Workspace not initialized.")
+    try:
+        updated = ws.memory.archive_memory(memory_id, archived=archived, workspace_id=ws.name)
+        return updated.to_dict()
+    except KeyError:
+        raise HTTPException(status_code=404, detail="Memory record not found.")
+
+
+@router.delete("/memories/{memory_id}")
+async def delete_memory_route(request: Request, memory_id: str, hard: bool = False):
+    ws = getattr(request.app.state, "workspace", None)
+    if not ws:
+        raise HTTPException(status_code=503, detail="Workspace not initialized.")
+    deleted = ws.memory.delete_memory(memory_id, hard=hard, workspace_id=ws.name)
+    if not deleted:
+        raise HTTPException(status_code=404, detail="Memory record not found.")
+    return {"deleted": True, "id": memory_id}
+
+
+@router.post("/memories/retrieve")
+async def retrieve_memories_route(request: Request, payload: MemoryRetrievePayload):
+    ws = getattr(request.app.state, "workspace", None)
+    if not ws:
+        raise HTTPException(status_code=503, detail="Workspace not initialized.")
+    categories = payload.categories or ([payload.category] if payload.category else None)
+    scored_results = ws.memory.search_memories(
+        workspace_id=ws.name,
+        query=payload.query,
+        team_name=payload.team_name,
+        agent_name=payload.agent_name,
+        mission_id=payload.mission_id,
+        execution_id=payload.execution_id,
+        categories=categories,
+        limit=payload.limit,
+    )
+    return [
+        {
+            "memory": m.to_dict(),
+            "score": round(score, 3),
+        }
+        for m, score in scored_results
+    ]
+

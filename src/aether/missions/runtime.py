@@ -366,6 +366,37 @@ class MissionRuntime:
                         if notes:
                             d.metadata["approval_notes"] = notes
                         self.store.add_deliverable(mission_id, d)
+                        if hasattr(self.workspace, "memory") and self.workspace.memory:
+                            try:
+                                from aether.memory.ingestion import MemoryIngestionService
+                                MemoryIngestionService.ingest_verified_deliverable(
+                                    memory_store=self.workspace.memory,
+                                    workspace_id=self.workspace.name,
+                                    mission_id=mission_id,
+                                    execution_id=active.id,
+                                    deliverable=d,
+                                )
+                            except Exception as exc:
+                                logger.warning("Failed to ingest overridden deliverable to memory: %s", exc)
+
+                # Ingest override decision and complete mission
+                if hasattr(self.workspace, "memory") and self.workspace.memory:
+                    try:
+                        from aether.memory.ingestion import MemoryIngestionService
+                        MemoryIngestionService.ingest_approved_decision(
+                            memory_store=self.workspace.memory,
+                            workspace_id=self.workspace.name,
+                            mission_id=mission_id,
+                            execution_id=active.id,
+                            approval_record={
+                                **pending,
+                                "decision": "approved",
+                                "notes": notes,
+                                "responded_at": now,
+                            },
+                        )
+                    except Exception as exc:
+                        logger.warning("Failed to ingest approved decision into memory: %s", exc)
 
                 terminal_states = [em.to_dict() for em in self.store.get_execution_milestones(active.id)]
                 try:
@@ -401,6 +432,25 @@ class MissionRuntime:
                     "duration_seconds": total_duration,
                 })
                 return updated or active
+
+            # Normal stage gate approval — ingest decision and resume execution
+            if hasattr(self.workspace, "memory") and self.workspace.memory:
+                try:
+                    from aether.memory.ingestion import MemoryIngestionService
+                    MemoryIngestionService.ingest_approved_decision(
+                        memory_store=self.workspace.memory,
+                        workspace_id=self.workspace.name,
+                        mission_id=mission_id,
+                        execution_id=active.id,
+                        approval_record={
+                            **pending,
+                            "decision": "approved",
+                            "notes": notes,
+                            "responded_at": now,
+                        },
+                    )
+                except Exception as exc:
+                    logger.warning("Failed to ingest approved decision into memory: %s", exc)
 
             self.store.update_execution(
                 active.id,
@@ -863,6 +913,31 @@ class MissionRuntime:
                             "verified_at": now_verified,
                         })
                         self.store.add_deliverable(mid, d)
+
+                    # Ingest verified deliverables and quality gate learnings into workforce memory
+                    if hasattr(self.workspace, "memory") and self.workspace.memory:
+                        try:
+                            from aether.memory.ingestion import MemoryIngestionService
+                            for d in exec_deliverables:
+                                MemoryIngestionService.ingest_verified_deliverable(
+                                    memory_store=self.workspace.memory,
+                                    workspace_id=self.workspace.name,
+                                    mission_id=mid,
+                                    execution_id=exec_id,
+                                    deliverable=d,
+                                    eval_result=eval_result,
+                                )
+                            if rework_attempts > 0 or eval_result.feedback:
+                                MemoryIngestionService.ingest_quality_gate_lesson(
+                                    memory_store=self.workspace.memory,
+                                    workspace_id=self.workspace.name,
+                                    mission_id=mid,
+                                    execution_id=exec_id,
+                                    eval_result=eval_result,
+                                    rework_count=rework_attempts,
+                                )
+                        except Exception as exc:
+                            logger.warning("Failed to ingest quality gate memory: %s", exc)
 
                     self._log_activity(
                         mission_id=mid,
