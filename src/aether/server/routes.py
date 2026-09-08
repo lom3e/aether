@@ -3070,6 +3070,188 @@ async def open_mission_deliverable(
     }
 
 
+MAX_PREVIEW_SIZE_BYTES = 512 * 1024  # 512 KB
+
+
+def _detect_deliverable_format(file_path: Path, stated_type: str = "") -> str:
+    ext = file_path.suffix.lower()
+    if ext in (".md", ".markdown", ".mdown"):
+        return "markdown"
+    if ext in (".json", ".jsonl"):
+        return "json"
+    if ext in (".csv", ".tsv"):
+        return "csv"
+    if ext in (
+        ".py", ".ts", ".tsx", ".js", ".jsx", ".sh", ".bash", ".zsh",
+        ".rs", ".go", ".html", ".css", ".sql", ".c", ".cpp", ".h",
+        ".java", ".yaml", ".yml", ".toml",
+    ):
+        return "code"
+    if ext in (".txt", ".log", ".ini", ".cfg", ".env", ".diff", ".patch"):
+        return "text"
+    if ext in (
+        ".png", ".jpg", ".jpeg", ".gif", ".webp", ".svg", ".pdf",
+        ".zip", ".tar", ".gz", ".7z", ".parquet", ".bin", ".exe", ".dylib", ".so",
+    ):
+        return "binary"
+    if stated_type == "code":
+        return "code"
+    if stated_type == "data":
+        return "text"
+    return "text"
+
+
+@router.get("/missions/{mission_id}/deliverables/{deliverable_id}/preview")
+async def get_deliverable_preview(
+    request: Request,
+    mission_id: str,
+    deliverable_id: str,
+):
+    """
+    Securely reads real deliverable file content within authorized workspace boundaries.
+    Applies format detection (markdown, json, csv, code, text, binary) and protects against giant files.
+    """
+    ws = getattr(request.app.state, "workspace", None)
+    if not ws:
+        raise HTTPException(status_code=503, detail="Workspace not initialized.")
+    mission = ws.missions.get_mission(mission_id, include_milestones=False)
+    if not mission:
+        raise HTTPException(status_code=404, detail="Mission not found.")
+
+    target = ws.missions.get_deliverable(mission_id, deliverable_id)
+    if not target:
+        raise HTTPException(
+            status_code=404,
+            detail=f"Deliverable '{deliverable_id}' not found for mission '{mission_id}'.",
+        )
+
+    file_path = _resolve_and_validate_deliverable_file(ws, target.path)
+    file_stat = file_path.stat()
+    actual_size = file_stat.st_size
+
+    fmt = _detect_deliverable_format(file_path, target.type)
+    if fmt == "binary":
+        return {
+            "deliverable_id": target.id,
+            "mission_id": mission_id,
+            "execution_id": target.execution_id,
+            "name": target.name,
+            "path": target.path,
+            "type": target.type,
+            "format": "binary",
+            "size_bytes": actual_size,
+            "content": None,
+            "preview_available": False,
+            "truncated": False,
+            "message": "Binary preview not supported in browser. Use Open or Download to inspect.",
+        }
+
+    if actual_size > MAX_PREVIEW_SIZE_BYTES:
+        return {
+            "deliverable_id": target.id,
+            "mission_id": mission_id,
+            "execution_id": target.execution_id,
+            "name": target.name,
+            "path": target.path,
+            "type": target.type,
+            "format": fmt,
+            "size_bytes": actual_size,
+            "content": None,
+            "preview_available": False,
+            "truncated": True,
+            "message": f"File size ({actual_size} bytes) exceeds preview limit (512 KB). Use Open or Download to inspect.",
+        }
+
+    try:
+        content = file_path.read_text(encoding="utf-8", errors="replace")
+    except Exception as exc:
+        return {
+            "deliverable_id": target.id,
+            "mission_id": mission_id,
+            "execution_id": target.execution_id,
+            "name": target.name,
+            "path": target.path,
+            "type": target.type,
+            "format": fmt,
+            "size_bytes": actual_size,
+            "content": None,
+            "preview_available": False,
+            "truncated": False,
+            "message": f"Failed to read file: {exc}",
+        }
+
+    return {
+        "deliverable_id": target.id,
+        "mission_id": mission_id,
+        "execution_id": target.execution_id,
+        "name": target.name,
+        "path": target.path,
+        "type": target.type,
+        "format": fmt,
+        "size_bytes": actual_size,
+        "content": content,
+        "preview_available": True,
+        "truncated": False,
+        "message": None,
+    }
+
+
+@router.get("/missions/{mission_id}/deliverables/{deliverable_id}/explain")
+async def get_deliverable_explain(
+    request: Request,
+    mission_id: str,
+    deliverable_id: str,
+):
+    """
+    Generates an observable Aether Explain Card for a specific deliverable.
+    Answers: What was produced? What evidence supports it? Who contributed? What was verified? What is the decision?
+    Strictly zero Chain-of-Thought or prompt leakage.
+    """
+    ws = getattr(request.app.state, "workspace", None)
+    if not ws:
+        raise HTTPException(status_code=503, detail="Workspace not initialized.")
+    mission = ws.missions.get_mission(mission_id, include_milestones=False)
+    if not mission:
+        raise HTTPException(status_code=404, detail="Mission not found.")
+
+    card = ws.missions.explain_deliverable(mission_id, deliverable_id)
+    if not card:
+        raise HTTPException(
+            status_code=404,
+            detail=f"Deliverable '{deliverable_id}' not found for mission '{mission_id}'.",
+        )
+
+    return card.to_dict()
+
+
+@router.get("/missions/{mission_id}/explain")
+async def get_mission_explain(
+    request: Request,
+    mission_id: str,
+    execution_id: str | None = Query(default=None, description="Filter explain summary to a specific execution run"),
+):
+    """
+    Generates a Mission-level Aether Explain Summary.
+    Explains why this mission is completed / in progress / awaiting review based on verified milestones and deliverables.
+    Strictly zero Chain-of-Thought or prompt leakage.
+    """
+    ws = getattr(request.app.state, "workspace", None)
+    if not ws:
+        raise HTTPException(status_code=503, detail="Workspace not initialized.")
+    mission = ws.missions.get_mission(mission_id, include_milestones=False)
+    if not mission:
+        raise HTTPException(status_code=404, detail="Mission not found.")
+
+    summary = ws.missions.explain_mission(mission_id, execution_id=execution_id)
+    if not summary:
+        raise HTTPException(
+            status_code=404,
+            detail=f"Mission '{mission_id}' could not be explained.",
+        )
+
+    return summary.to_dict()
+
+
 @router.get("/missions/{mission_id}/activities")
 async def list_mission_activities(request: Request, mission_id: str):
     ws = getattr(request.app.state, "workspace", None)

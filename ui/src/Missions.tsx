@@ -5,7 +5,7 @@ import {
   Square, RotateCcw, FileText, MessageSquare, Check, ArrowLeft,
   Clock, ShieldAlert, ChevronRight, FileCode, Table, FolderArchive,
   Copy, Activity, Terminal, Workflow, User, ExternalLink, Download, FolderOpen,
-  ChevronDown, ChevronUp
+  ChevronDown, ChevronUp, Eye, Sparkles
 } from 'lucide-react';
 import { apiUrl, getSessionToken } from './api';
 import { useTranslation } from './i18n';
@@ -13,6 +13,7 @@ import { ToastContext } from './toast';
 import { Tooltip } from './Tooltip';
 import { MarkdownRenderer } from './MarkdownRenderer';
 import { ExecutionGraphCanvas } from './ExecutionGraphCanvas';
+import { DeliverableDossierViewerModal, MissionExplainModal } from './DeliverablesViewer';
 
 interface AgentInfo {
   name: string;
@@ -215,10 +216,13 @@ export function Missions({ navigate, initialMissionId }: MissionsProps) {
   const [teams, setTeams] = useState<TeamInfo[]>([]);
   const [selectedSpecialistForPopover, setSelectedSpecialistForPopover] = useState<AgentInfo | null>(null);
 
-  // Deliverables (Slice 2D)
+  // Deliverables (Slice 2D & Slice 8)
   const [deliverables, setDeliverables] = useState<Deliverable[]>([]);
   const [loadingDeliverables, setLoadingDeliverables] = useState(false);
   const [copiedPath, setCopiedPath] = useState<string | null>(null);
+  const [selectedViewerDeliverable, setSelectedViewerDeliverable] = useState<Deliverable | null>(null);
+  const [viewerInitialTab, setViewerInitialTab] = useState<'preview' | 'explain'>('preview');
+  const [isMissionExplainOpen, setIsMissionExplainOpen] = useState(false);
 
   // Executions (Runs) State (Phase A - Mission Runtime)
   const [executions, setExecutions] = useState<MissionExecution[]>([]);
@@ -1018,6 +1022,7 @@ export function Missions({ navigate, initialMissionId }: MissionsProps) {
                   return (
                     <div
                       key={m.id}
+                      data-testid={`mission-card-${m.id}`}
                       onClick={() => setSelectedMission(m)}
                       style={{
                         padding: '14px 16px',
@@ -2019,7 +2024,7 @@ export function Missions({ navigate, initialMissionId }: MissionsProps) {
                 border: '1px solid hsl(var(--border))',
                 backgroundColor: 'hsl(var(--card))'
               }}>
-                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '14px' }}>
+                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '14px', flexWrap: 'wrap', gap: '8px' }}>
                   <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
                     <FileText size={16} className="text-primary" />
                     <h3 style={{ fontSize: '14px', fontWeight: 600, margin: 0, color: 'hsl(var(--fg))' }}>
@@ -2036,6 +2041,25 @@ export function Missions({ navigate, initialMissionId }: MissionsProps) {
                       {deliverables.length}
                     </span>
                   </div>
+
+                  {/* Mission Explain Button */}
+                  <button
+                    onClick={() => setIsMissionExplainOpen(true)}
+                    className="btn btn-ghost"
+                    style={{
+                      display: 'flex',
+                      alignItems: 'center',
+                      gap: '5px',
+                      fontSize: '11px',
+                      padding: '4px 8px',
+                      color: 'hsl(var(--primary))',
+                    }}
+                    title={t('explainMissionSubtitle')}
+                    data-testid="explain-mission-btn"
+                  >
+                    <Sparkles size={13} />
+                    <span>{t('explainMissionOutcome')}</span>
+                  </button>
                 </div>
 
                 {loadingDeliverables ? (
@@ -2102,7 +2126,10 @@ export function Missions({ navigate, initialMissionId }: MissionsProps) {
                             <div style={{ minWidth: 0, flex: 1 }}>
                               <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
                                 <span
-                                  onClick={() => handleOpenDeliverable(del.id, false)}
+                                  onClick={() => {
+                                    setSelectedViewerDeliverable(del);
+                                    setViewerInitialTab('preview');
+                                  }}
                                   style={{
                                     fontSize: '13px',
                                     fontWeight: 600,
@@ -2113,7 +2140,8 @@ export function Missions({ navigate, initialMissionId }: MissionsProps) {
                                     cursor: 'pointer'
                                   }}
                                   className="hover:underline"
-                                  title={t('deliverableActionOpenTooltip')}
+                                  title={t('deliverableActionPreview')}
+                                  data-testid={`deliverable-title-${del.id}`}
                                 >
                                   {del.name}
                                 </span>
@@ -2170,6 +2198,36 @@ export function Missions({ navigate, initialMissionId }: MissionsProps) {
                           </div>
 
                           <div style={{ display: 'flex', alignItems: 'center', gap: '4px', flexWrap: 'wrap' }}>
+                            {/* Preview */}
+                            <button
+                              onClick={() => {
+                                setSelectedViewerDeliverable(del);
+                                setViewerInitialTab('preview');
+                              }}
+                              className="btn btn-ghost"
+                              style={{ display: 'flex', alignItems: 'center', gap: '4px', fontSize: '11px', padding: '4px 8px' }}
+                              title={t('deliverableActionPreview')}
+                              data-testid={`preview-deliverable-${del.id}`}
+                            >
+                              <Eye size={13} className="text-primary" />
+                              <span>{t('deliverableActionPreview')}</span>
+                            </button>
+
+                            {/* Explain */}
+                            <button
+                              onClick={() => {
+                                setSelectedViewerDeliverable(del);
+                                setViewerInitialTab('explain');
+                              }}
+                              className="btn btn-ghost"
+                              style={{ display: 'flex', alignItems: 'center', gap: '4px', fontSize: '11px', padding: '4px 8px' }}
+                              title={t('tabExplain')}
+                              data-testid={`explain-deliverable-${del.id}`}
+                            >
+                              <Sparkles size={13} className="text-amber-500" />
+                              <span>{t('deliverableActionExplain')}</span>
+                            </button>
+
                             {/* Open */}
                             <button
                               onClick={() => handleOpenDeliverable(del.id, false)}
@@ -2177,8 +2235,8 @@ export function Missions({ navigate, initialMissionId }: MissionsProps) {
                               style={{ display: 'flex', alignItems: 'center', gap: '4px', fontSize: '11px', padding: '4px 8px' }}
                               title={t('deliverableActionOpenTooltip')}
                             >
-                              <ExternalLink size={13} className="text-primary" />
-                              <span>{t('deliverableActionOpen')}</span>
+                              <ExternalLink size={13} className="text-muted-fg" />
+                              <span className="hidden sm:inline">{t('deliverableActionOpen')}</span>
                             </button>
 
                             {/* Reveal in Finder / File Explorer */}
@@ -2918,6 +2976,31 @@ export function Missions({ navigate, initialMissionId }: MissionsProps) {
             </form>
           </div>
         </div>
+      )}
+
+      {/* Slice 8 Deliverable Dossier Viewer Modal */}
+      {selectedViewerDeliverable && selectedMission && (
+        <DeliverableDossierViewerModal
+          deliverable={selectedViewerDeliverable}
+          missionId={selectedMission.id}
+          apiUrl={apiUrl}
+          initialTab={viewerInitialTab}
+          onClose={() => setSelectedViewerDeliverable(null)}
+          onOpen={handleOpenDeliverable}
+          onDownload={handleDownloadDeliverable}
+          onCopyPath={handleCopyPath}
+          copiedPathId={copiedPath}
+        />
+      )}
+
+      {/* Slice 8 Mission-Level Explain Modal */}
+      {isMissionExplainOpen && selectedMission && (
+        <MissionExplainModal
+          missionId={selectedMission.id}
+          executionId={selectedExecutionId}
+          apiUrl={apiUrl}
+          onClose={() => setIsMissionExplainOpen(false)}
+        />
       )}
     </div>
   );

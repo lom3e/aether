@@ -841,10 +841,10 @@ Slice 6: Execution Graph Compiler (Data & WebSocket Bridge)     [COMPLETED]
 Slice 7: UI Mission View & Interactive Execution Graph Canvas   [COMPLETED]
    │
    ▼
-Slice 8: Deliverables Dossier Viewer & Aether Explain Cards     [NEXT]
+Slice 8: Deliverables Dossier Viewer & Aether Explain Cards     [COMPLETED]
    │
    ▼
-Slice 9: Aether Replay ("Flight Recorder") Timeline & Workforce Health
+Slice 9: Aether Replay ("Flight Recorder") Timeline & Workforce Health [NEXT]
 ```
 
 ---

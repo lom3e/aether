@@ -278,6 +278,7 @@ class MissionStore:
         metadata: dict[str, Any] | None = None,
         milestones: list[dict[str, Any]] | None = None,
         mission_id: str | None = None,
+        id: str | None = None,
     ) -> Mission:
         """Create a new mission with optional initial milestones."""
         clean_title = str(title).strip()
@@ -287,7 +288,7 @@ class MissionStore:
         if not clean_objective:
             raise ValueError("Mission objective cannot be empty.")
 
-        mid = mission_id or uuid.uuid4().hex
+        mid = mission_id or id or uuid.uuid4().hex
         status_val = status.value if isinstance(status, MissionStatus) else str(status)
         now = datetime.now(timezone.utc).isoformat()
         meta_json = json.dumps(metadata or {})
@@ -745,6 +746,7 @@ class MissionStore:
         order_idx: int | None = None,
         dependencies: list[str] | None = None,
         milestone_id: str | None = None,
+        id: str | None = None,
     ) -> Milestone:
         """Add a new milestone to an existing mission."""
         clean_title = str(title).strip()
@@ -756,7 +758,7 @@ class MissionStore:
         if not mission:
             raise ValueError(f"Mission with id '{mission_id}' does not exist.")
 
-        mid = milestone_id or uuid.uuid4().hex
+        mid = milestone_id or id or uuid.uuid4().hex
         status_val = status.value if isinstance(status, MilestoneStatus) else str(status)
         now = datetime.now(timezone.utc).isoformat()
         deps_json = json.dumps(dependencies or [])
@@ -990,6 +992,18 @@ class MissionStore:
             self._graph_compiler = compiler
         return compiler.compile(mission_id=mission_id, execution_id=execution_id)
 
+    def explain_deliverable(self, mission_id: str, deliverable_id: str):
+        """Generates an ExplainCard for a specific deliverable."""
+        from aether.missions.explain import ExplainBuilder
+        builder = ExplainBuilder(self)
+        return builder.build_deliverable_explain(mission_id, deliverable_id)
+
+    def explain_mission(self, mission_id: str, execution_id: str | None = None):
+        """Generates a MissionExplainSummary for the mission or target execution."""
+        from aether.missions.explain import ExplainBuilder
+        builder = ExplainBuilder(self)
+        return builder.build_mission_explain(mission_id, execution_id=execution_id)
+
 
     # ---------------------------------------------------------------------------
     # Deliverables Management & Lineage
@@ -1199,18 +1213,34 @@ class MissionStore:
 
         return True
 
-    def get_deliverable(self, deliverable_id: str) -> Deliverable | None:
-        """Fetch a single deliverable by ID."""
+    def get_deliverable(self, arg1: str, arg2: str | None = None) -> Deliverable | None:
+        """Fetch a single deliverable by (mission_id, deliverable_id) or (deliverable_id)."""
+        if arg2 is not None:
+            mission_id, deliverable_id = arg1, arg2
+        else:
+            mission_id, deliverable_id = None, arg1
+
         with self._get_connection() as conn:
-            r = conn.execute(
-                """
-                SELECT id, mission_id, execution_id, milestone_id, name, path,
-                       type, size_bytes, sha256, status, metadata, created_at, updated_at
-                FROM mission_deliverables
-                WHERE id = ?
-                """,
-                (deliverable_id,),
-            ).fetchone()
+            if mission_id:
+                r = conn.execute(
+                    """
+                    SELECT id, mission_id, execution_id, milestone_id, name, path,
+                           type, size_bytes, sha256, status, metadata, created_at, updated_at
+                    FROM mission_deliverables
+                    WHERE id = ? AND mission_id = ?
+                    """,
+                    (deliverable_id, mission_id),
+                ).fetchone()
+            else:
+                r = conn.execute(
+                    """
+                    SELECT id, mission_id, execution_id, milestone_id, name, path,
+                           type, size_bytes, sha256, status, metadata, created_at, updated_at
+                    FROM mission_deliverables
+                    WHERE id = ?
+                    """,
+                    (deliverable_id,),
+                ).fetchone()
             if not r:
                 return None
             meta = {}
@@ -1353,6 +1383,54 @@ class MissionStore:
             created_at=now,
             updated_at=now,
         )
+
+    def save_execution(self, execution: MissionExecution) -> MissionExecution:
+        """Insert or replace a MissionExecution directly."""
+        now = datetime.now(timezone.utc).isoformat()
+        status_val = execution.status.value if isinstance(execution.status, ExecutionStatus) else str(execution.status)
+        pending_json = json.dumps(execution.pending_approval) if execution.pending_approval else None
+        appr_json = json.dumps(execution.approval_history or [])
+        m_states_json = json.dumps([ms.to_dict() if hasattr(ms, "to_dict") else ms for ms in (execution.milestone_states or [])])
+        meta_json = json.dumps(execution.metadata or {})
+
+        with self._get_connection() as conn:
+            conn.execute(
+                """
+                INSERT OR REPLACE INTO mission_executions (
+                    id, mission_id, run_number, status, current_milestone_id,
+                    team_name, started_at, completed_at, interrupted_at,
+                    duration_seconds, error_message, error_details,
+                    lease_owner, lease_expires_at, heartbeat_at, recovery_state,
+                    pending_approval, approval_history, milestone_states, metadata,
+                    created_at, updated_at
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    execution.id,
+                    execution.mission_id,
+                    execution.run_number,
+                    status_val,
+                    execution.current_milestone_id,
+                    execution.team_name,
+                    execution.started_at or now,
+                    execution.completed_at,
+                    execution.interrupted_at,
+                    execution.duration_seconds or 0.0,
+                    execution.error_message,
+                    execution.error_details,
+                    execution.lease_owner,
+                    execution.lease_expires_at,
+                    execution.heartbeat_at,
+                    execution.recovery_state or "none",
+                    pending_json,
+                    appr_json,
+                    m_states_json,
+                    meta_json,
+                    execution.created_at or now,
+                    now,
+                ),
+            )
+        return execution
 
     def get_execution(self, execution_id: str) -> MissionExecution | None:
         """Retrieve a specific execution run by ID."""

@@ -16,6 +16,15 @@ from aether.missions.models import (
     MissionGraph,
     MissionStatus,
 )
+from aether.missions.explain import (
+    Contributor,
+    EvidenceItem,
+    ExplainBuilder,
+    ExplainCard,
+    MissionExplainSummary,
+    VerificationCheck,
+    VerificationSummary,
+)
 from aether.missions.graph_compiler import ExecutionGraphCompiler
 from aether.missions.reviewer import QualityGateEvaluation, QualityGateEvaluator, QualityGateRuleResult
 from aether.missions.runtime import ConflictError, MissionRuntime, NotFoundError
@@ -42,4 +51,11 @@ __all__ = [
     "QualityGateEvaluation",
     "QualityGateEvaluator",
     "QualityGateRuleResult",
+    "ExplainBuilder",
+    "ExplainCard",
+    "MissionExplainSummary",
+    "VerificationCheck",
+    "VerificationSummary",
+    "Contributor",
+    "EvidenceItem",
 ]
