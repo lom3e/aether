@@ -1152,12 +1152,12 @@ Development follows **Four Sequential Strategic Phases**:
 | Notification Fabric ("Notify me") | Notifications | `Core` | Phase C |
 | Campaign & Business Intelligence | Business Intelligence| `Differentiator` | Phase C |
 | Client Work Automation Workflows | Actions / Workforces | `Core` | Phase C |
-| Aether Companion Surface | Companion | `Long-term` | Phase D |
-| Telegram Companion | Companion | `Long-term` | Phase D |
-| Conversational Voice Interaction | Companion | `Long-term` | Phase D |
-| Aether Personal Agent | Workforces | `Core` | Phase D |
-| External Agent Orchestration | Orchestration | `Differentiator` | Phase D |
-| Local Execution Fabric & Mesh | Execution Fabric | `Long-term` | Phase D |
+| Aether Companion Surface (Ambient Desktop HUD) | Companion | `Core` | Phase D (Slice 2: Completed & Verified ✅) |
+| Aether Personal Agent & Autonomous Companion Engine | Companion / Core | `Core` | Phase D (Slice 1: Completed & Verified ✅) |
+| Telegram Companion | Companion | `Long-term` | Phase D (Future) |
+| Conversational Voice Primitives | Companion | `Core` | Phase D (Completed & Verified ✅) |
+| External Agent Orchestration | Orchestration | `Differentiator` | Phase D (Future) |
+| Local Execution Fabric & Mesh | Execution Fabric | `Long-term` | Phase D (Future) |
 
 ---
 

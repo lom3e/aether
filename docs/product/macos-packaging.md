@@ -143,3 +143,49 @@ Misurazioni rilevate eseguendo `Aether.app` e `Aether.dmg` su macOS Apple Silico
 | **Tempo Copia DMG -> /Applications** | **~185 ms** | Installazione drag-and-drop |
 | **Readiness Time (`/api/health` 200 OK)** | **~914 ms** | Process spawn + dynamic port binding + health probe |
 | **Consumo RAM Idle (RSS) del Runtime** | **~68.9 MB** | Memoria residente del processo Python isolato |
+
+---
+
+## 8. Architettura Multi-Surface & Desktop Lifecycle (DSK-06)
+
+A partire dalla versione desktop 1.6.0, Aether implementa una gestione multi-surface nativa coordinata da Rust/Tauri:
+
+```text
+                               ┌────────────────────────────────┐
+                               │   Aether Supervisor (Rust)     │
+                               └──────────────┬─────────────────┘
+                                              │
+                     ┌────────────────────────┴────────────────────────┐
+                     ▼                                                 ▼
+        ┌─────────────────────────┐                       ┌─────────────────────────┐
+        │   Full Workspace Window │                       │  Ambient Companion Window│
+        │   - Label: "main"       │                       │  - Label: "companion"   │
+        │   - 1200 x 800          │                       │  - 420 x 580 (Frameless)│
+        │   - Full navigation     │                       │  - Always on top        │
+        │   - Hide on close       │                       │  - Toggle via Option+Spc│
+        └─────────────────────────┘                       └─────────────────────────┘
+                     │                                                 │
+                     └────────────────────────┬────────────────────────┘
+                                              ▼
+                               ┌────────────────────────────────┐
+                               │   Single Python Sidecar Engine │
+                               │   - Port & handshake condivisi │
+                               │   - Zero duplicazione di stato │
+                               │   - Shared SSE Event Hub       │
+                               └────────────────────────────────┘
+```
+
+### Caratteristiche Chiave:
+1. **System Tray Nativa**:
+   * Icona nel menu bar di macOS / system tray con supporto al clic sinistro per summon istantaneo.
+   * Voci: *Open Companion*, *Open Full Workspace*, *Status (idle/running)*, *Mute Notifications*, *Quit Aether*.
+2. **Intercettazione Chiusura Finestra**:
+   * La chiusura della finestra principale (`CloseRequested`) viene intercettata prevenendo la terminazione (`api.prevent_close()`) e nascondendo la finestra. L'applicazione rimane viva in background nella tray.
+3. **Global Shortcut (Option+Space / Alt+Space)**:
+   * Registrato tramite `tauri-plugin-global-shortcut`.
+   * Summon immediato e centrato (Spotlight-style al top 28% dello schermo attivo).
+   * Dismiss rapido con `Escape`.
+4. **Transizione Bidirezionale**:
+   * Companion → Workspace: pulsante *"Open Full Workspace"*.
+   * Workspace → Companion: pulsante *"Minimize to Companion"* nell'header.
+

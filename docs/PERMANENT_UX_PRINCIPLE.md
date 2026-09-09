@@ -84,6 +84,18 @@ Every feature, screen, component, and workflow must pass this single verificatio
 
 $$\mathbf{\text{“Powerful enough for experts, simple enough for everyone.”}}$$
 
+## 7. Ambient Desktop Companion Surface Principle
+
+Aether manifests as a single unified operational intelligence accessible through two coordinated surfaces:
+1. **The Full Workspace**: Comprehensive views for project exploration, knowledge management, multi-agent missions, automations, and settings.
+2. **The Ambient Desktop Companion**: A compact, persistent, lightweight HUD window summoned via global shortcut (`Option+Space` / `Alt+Space`) for immediate natural-language assistance, progress checks, and safety approvals.
+
+### Ambient UX Directives:
+- **Zero Duplication**: The Companion is NOT a second product, mini admin dashboard, or compressed replica of the full UI. It is a streamlined ambient aperture into the exact same Personal Agent, tasks, approvals, and notifications.
+- **Intent to Outcome**: The primary focus is always immediate interaction: intent → action → progress → approval → result.
+- **Ambient & Non-Intrusive**: Summoned instantly, dismissed with `Escape`, always on top when summoned, frameless and visually calm.
+- **Two-Way Seamless Transition**: One click on "Open Full Workspace" reveals the deep context; one click on "Minimize to Companion" tucks the workspace away into ambient readiness.
+
 ---
 
 *This document is a **permanent, non-negotiable architectural and product invariant** for all future Aether features, interfaces, APIs, and workflows.*

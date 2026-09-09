@@ -11,13 +11,18 @@ use std::time::{Duration, Instant};
 use rand::distributions::Alphanumeric;
 use rand::Rng;
 use serde::Serialize;
-use tauri::{Manager, RunEvent, State};
+use std::sync::atomic::{AtomicBool, Ordering};
+use tauri::menu::{MenuBuilder, MenuItemBuilder};
+use tauri::tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent};
+use tauri::{AppHandle, Manager, RunEvent, State, WebviewUrl, WebviewWindow, WebviewWindowBuilder};
+use tauri_plugin_global_shortcut::{GlobalShortcutExt, Shortcut, ShortcutState};
 
 #[allow(dead_code)]
 struct RuntimeState {
     port: u16,
     token: String,
     child: Arc<Mutex<Option<Child>>>,
+    notifications_muted: Arc<AtomicBool>,
 }
 
 #[derive(Serialize)]
@@ -26,6 +31,7 @@ struct RuntimeInfo {
     session_token: String,
     port: u16,
     version: String,
+    notifications_muted: bool,
 }
 
 #[tauri::command]
@@ -34,8 +40,59 @@ fn get_runtime_info(state: State<RuntimeState>) -> Result<RuntimeInfo, String> {
         api_url: format!("http://127.0.0.1:{}", state.port),
         session_token: state.token.clone(),
         port: state.port,
-        version: "1.5.0".to_string(),
+        version: "1.6.0".to_string(),
+        notifications_muted: state.notifications_muted.load(Ordering::Relaxed),
     })
+}
+
+#[tauri::command]
+fn get_surface_type(window: WebviewWindow) -> String {
+    if window.label() == "companion" {
+        "companion".to_string()
+    } else {
+        "workspace".to_string()
+    }
+}
+
+#[tauri::command]
+fn toggle_companion(app: AppHandle) {
+    toggle_companion_window(&app);
+}
+
+#[tauri::command]
+fn hide_companion(app: AppHandle) {
+    if let Some(companion) = app.get_webview_window("companion") {
+        let _ = companion.hide();
+    }
+}
+
+#[tauri::command]
+fn show_main_window(app: AppHandle) {
+    show_main_window_action(&app);
+}
+
+#[tauri::command]
+fn minimize_to_companion(app: AppHandle) {
+    if let Some(main) = app.get_webview_window("main") {
+        let _ = main.hide();
+    }
+    toggle_companion_window(&app);
+}
+
+#[tauri::command]
+fn is_notifications_muted(state: State<RuntimeState>) -> bool {
+    state.notifications_muted.load(Ordering::Relaxed)
+}
+
+#[tauri::command]
+fn set_notifications_muted(muted: bool, state: State<RuntimeState>) {
+    state.notifications_muted.store(muted, Ordering::Relaxed);
+}
+
+#[tauri::command]
+fn quit_aether(app: AppHandle, state: State<RuntimeState>) {
+    graceful_shutdown(state.port, &state.token, &state.child);
+    app.exit(0);
 }
 
 enum RuntimeTarget {
@@ -377,6 +434,49 @@ fn graceful_shutdown(port: u16, token: &str, child_lock: &Arc<Mutex<Option<Child
     }
 }
 
+pub fn center_window_on_active_monitor(window: &WebviewWindow, width: u32, height: u32) {
+    if let Ok(Some(monitor)) = window.current_monitor() {
+        let m_pos = monitor.position();
+        let m_size = monitor.size();
+        let scale = monitor.scale_factor();
+
+        let win_w = (width as f64 * scale) as i32;
+        let win_h = (height as f64 * scale) as i32;
+
+        let center_x = m_pos.x + (m_size.width as i32 - win_w) / 2;
+        // Position at top 28% of display (classic Spotlight / ambient HUD position)
+        let center_y = m_pos.y + (m_size.height as i32 - win_h) / 3;
+
+        let _ = window.set_position(tauri::PhysicalPosition::new(center_x, center_y));
+    }
+}
+
+pub fn toggle_companion_window(app: &AppHandle) {
+    if let Some(companion) = app.get_webview_window("companion") {
+        if let Ok(is_visible) = companion.is_visible() {
+            if is_visible {
+                let _ = companion.hide();
+            } else {
+                center_window_on_active_monitor(&companion, 420, 580);
+                let _ = companion.show();
+                let _ = companion.unminimize();
+                let _ = companion.set_focus();
+            }
+        }
+    }
+}
+
+pub fn show_main_window_action(app: &AppHandle) {
+    if let Some(companion) = app.get_webview_window("companion") {
+        let _ = companion.hide();
+    }
+    if let Some(main) = app.get_webview_window("main") {
+        let _ = main.show();
+        let _ = main.unminimize();
+        let _ = main.set_focus();
+    }
+}
+
 fn main() {
     let (child, port, token) = match spawn_backend_and_handshake() {
         Ok(res) => res,
@@ -389,30 +489,182 @@ fn main() {
     let child_arc = Arc::new(Mutex::new(Some(child)));
     let child_arc_clone = Arc::clone(&child_arc);
     let token_clone = token.clone();
+    let notifications_muted = Arc::new(AtomicBool::new(false));
 
     let init_script = format!(
         r#"
         window.__AETHER_API_URL__ = 'http://127.0.0.1:{}';
         window.__AETHER_SESSION_TOKEN__ = '{}';
+        window.__AETHER_SURFACE__ = 'workspace';
         "#,
         port, token
     );
+
+    let companion_script = format!(
+        r#"
+        window.__AETHER_API_URL__ = 'http://127.0.0.1:{}';
+        window.__AETHER_SESSION_TOKEN__ = '{}';
+        window.__AETHER_SURFACE__ = 'companion';
+        "#,
+        port, token
+    );
+
+    let notifications_muted_for_state = Arc::clone(&notifications_muted);
+    let notifications_muted_for_tray = Arc::clone(&notifications_muted);
 
     let app = tauri::Builder::default()
         .manage(RuntimeState {
             port,
             token: token.clone(),
             child: Arc::clone(&child_arc),
+            notifications_muted: notifications_muted_for_state,
         })
-        .invoke_handler(tauri::generate_handler![get_runtime_info])
+        .invoke_handler(tauri::generate_handler![
+            get_runtime_info,
+            get_surface_type,
+            toggle_companion,
+            hide_companion,
+            show_main_window,
+            minimize_to_companion,
+            is_notifications_muted,
+            set_notifications_muted,
+            quit_aether,
+        ])
         .setup(move |app| {
-            tauri::WebviewWindowBuilder::new(app, "main", tauri::WebviewUrl::default())
+            // 1. Build Main Workspace Window
+            let main_window = WebviewWindowBuilder::new(app, "main", WebviewUrl::default())
                 .initialization_script(&init_script)
                 .title("Aether")
                 .inner_size(1200.0, 800.0)
                 .min_inner_size(900.0, 600.0)
                 .resizable(true)
                 .build()?;
+
+            let main_win_clone = main_window.clone();
+            main_window.on_window_event(move |event| {
+                if let tauri::WindowEvent::CloseRequested { api, .. } = event {
+                    api.prevent_close();
+                    let _ = main_win_clone.hide();
+                    println!("[Aether Desktop] Main window hidden to system tray.");
+                }
+            });
+
+            // 2. Build Ambient Companion Window
+            let companion_window = WebviewWindowBuilder::new(
+                app,
+                "companion",
+                WebviewUrl::App("index.html?surface=companion".into()),
+            )
+            .initialization_script(&companion_script)
+            .title("Aether Companion")
+            .inner_size(420.0, 580.0)
+            .resizable(false)
+            .decorations(false)
+            .always_on_top(true)
+            .skip_taskbar(true)
+            .visible(false)
+            .shadow(true)
+            .build()?;
+
+            let companion_win_clone = companion_window.clone();
+            companion_window.on_window_event(move |event| {
+                if let tauri::WindowEvent::CloseRequested { api, .. } = event {
+                    api.prevent_close();
+                    let _ = companion_win_clone.hide();
+                }
+            });
+
+            // 3. System Tray & Menu Setup
+            let tray_menu = MenuBuilder::new(app)
+                .item(&MenuItemBuilder::with_id("open_companion", "Open Companion").build(app)?)
+                .item(&MenuItemBuilder::with_id("open_workspace", "Open Full Workspace").build(app)?)
+                .separator()
+                .item(&MenuItemBuilder::with_id("status", "Status: Ready (idle)").enabled(false).build(app)?)
+                .item(&MenuItemBuilder::with_id("mute_notifications", "Mute Notifications").build(app)?)
+                .separator()
+                .item(&MenuItemBuilder::with_id("quit", "Quit Aether").build(app)?)
+                .build()?;
+
+            let tray_child_arc = Arc::clone(&child_arc);
+            let tray_token = token.clone();
+            let tray_port = port;
+
+            let mut tray_builder = TrayIconBuilder::new()
+                .menu(&tray_menu)
+                .show_menu_on_left_click(false)
+                .tooltip("Aether - Personal AI Assistant")
+                .on_menu_event(move |app, event| {
+                    match event.id().as_ref() {
+                        "open_companion" => {
+                            toggle_companion_window(app);
+                        }
+                        "open_workspace" => {
+                            show_main_window_action(app);
+                        }
+                        "mute_notifications" => {
+                            let current = notifications_muted_for_tray.load(Ordering::Relaxed);
+                            notifications_muted_for_tray.store(!current, Ordering::Relaxed);
+                            println!("[Aether Desktop] Notifications muted: {}", !current);
+                        }
+                        "quit" => {
+                            graceful_shutdown(tray_port, &tray_token, &tray_child_arc);
+                            app.exit(0);
+                        }
+                        _ => {}
+                    }
+                })
+                .on_tray_icon_event(|tray, event| {
+                    if let TrayIconEvent::Click {
+                        button: MouseButton::Left,
+                        button_state: MouseButtonState::Up,
+                        ..
+                    } = event
+                    {
+                        let app = tray.app_handle();
+                        toggle_companion_window(app);
+                    }
+                });
+
+            if let Some(default_icon) = app.default_window_icon() {
+                tray_builder = tray_builder.icon(default_icon.clone());
+            }
+
+            let _tray = tray_builder.build(app)?;
+            println!("[Aether Desktop] System tray initialized successfully.");
+
+            // 4. Global Hotkey Registration
+            app.handle().plugin(
+                tauri_plugin_global_shortcut::Builder::new()
+                    .with_handler(|app, _shortcut, event| {
+                        if event.state() == ShortcutState::Pressed {
+                            toggle_companion_window(app);
+                        }
+                    })
+                    .build(),
+            )?;
+
+            let primary_shortcut_str = if cfg!(target_os = "macos") {
+                "Option+Space"
+            } else {
+                "Alt+Space"
+            };
+
+            let shortcut: Result<Shortcut, _> = primary_shortcut_str.parse();
+            if let Ok(s) = shortcut {
+                if let Err(e) = app.global_shortcut().register(s) {
+                    eprintln!(
+                        "[Aether Desktop] Could not register '{}': {}. Trying fallback 'CommandOrControl+Shift+Space'...",
+                        primary_shortcut_str, e
+                    );
+                    if let Ok(fallback) = "CommandOrControl+Shift+Space".parse::<Shortcut>() {
+                        let _ = app.global_shortcut().register(fallback);
+                        println!("[Aether Desktop] Registered fallback global Companion shortcut: CommandOrControl+Shift+Space");
+                    }
+                } else {
+                    println!("[Aether Desktop] Registered global Companion shortcut: {}", primary_shortcut_str);
+                }
+            }
+
             Ok(())
         })
         .build(tauri::generate_context!())

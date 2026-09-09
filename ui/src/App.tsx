@@ -18,6 +18,8 @@ import { ToastProvider, ToastContext } from './toast';
 import { LanguageProvider } from './i18n';
 import { ThemeProvider } from './theme';
 import { apiUrl } from './api';
+import { isCompanionSurface } from './desktop';
+import { AmbientCompanion } from './AmbientCompanion';
 
 function MainApp() {
   const [currentView, setCurrentView] = useState('home');
@@ -331,6 +333,20 @@ function MainApp() {
 }
 
 export default function App() {
+  const isCompanion = isCompanionSurface();
+
+  if (isCompanion) {
+    return (
+      <ThemeProvider>
+        <LanguageProvider>
+          <ToastProvider>
+            <AmbientCompanion />
+          </ToastProvider>
+        </LanguageProvider>
+      </ThemeProvider>
+    );
+  }
+
   return (
     <ThemeProvider>
       <LanguageProvider>

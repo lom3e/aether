@@ -1,4 +1,6 @@
 import type { ReactNode, CSSProperties, ComponentType } from 'react';
+import { Minimize2 } from 'lucide-react';
+import { isTauri, minimizeToCompanion } from './desktop';
 
 export interface TopHeaderProps {
   title: ReactNode;
@@ -67,10 +69,33 @@ export function TopHeader({
         </div>
       </div>
 
-      {(actions || children) && (
+      {(actions || children || isTauri()) && (
         <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flexShrink: 0 }}>
           {actions}
           {children}
+          {isTauri() && (
+            <button
+              onClick={() => minimizeToCompanion()}
+              title="Minimize to Companion (Option+Space)"
+              data-testid="minimize-to-companion-btn"
+              style={{
+                display: 'inline-flex',
+                alignItems: 'center',
+                gap: '5px',
+                padding: '4px 8px',
+                fontSize: '12px',
+                fontWeight: 500,
+                borderRadius: '6px',
+                border: '1px solid hsl(var(--border))',
+                backgroundColor: 'hsl(var(--card))',
+                color: 'hsl(var(--muted-fg))',
+                cursor: 'pointer',
+              }}
+            >
+              <Minimize2 size={13} />
+              <span>Minimize to Companion</span>
+            </button>
+          )}
         </div>
       )}
     </header>
