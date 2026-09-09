@@ -14,6 +14,9 @@ import {
   Shield,
   Loader2,
   Bell,
+  Eye,
+  MessageSquare,
+  Info,
 } from "lucide-react";
 import { apiUrl, getSessionToken } from "./api";
 import { hideCompanion, showMainWindow } from "./desktop";
@@ -62,8 +65,10 @@ interface BackgroundTask {
   title: string;
   status: string;
   progress_pct?: number | null;
+  progress_percent?: number | null;
   current_step?: string;
   started_at?: string;
+  deliverable_path?: string;
 }
 
 interface NotificationItem {
@@ -91,6 +96,10 @@ export function AmbientCompanion({
   const [backgroundTasks, setBackgroundTasks] = useState<BackgroundTask[]>([]);
   const [unreadNotifications, setUnreadNotifications] = useState<NotificationItem[]>([]);
   const [unreadCount, setUnreadCount] = useState<number>(0);
+
+  // Progressive UI Modes
+  const [showVisualNotice, setShowVisualNotice] = useState(false);
+  const [showSuggestions, setShowSuggestions] = useState(true);
 
   // Voice State
   const [isListening, setIsListening] = useState(false);
@@ -127,7 +136,9 @@ export function AmbientCompanion({
   const fetchOverview = useCallback(async () => {
     if (!activeWorkspace) return;
     try {
-      const res = await fetch(apiUrl(`/api/personal/overview?workspace_id=${encodeURIComponent(activeWorkspace)}`));
+      const res = await fetch(
+        apiUrl(`/api/personal/overview?workspace_id=${encodeURIComponent(activeWorkspace)}`)
+      );
       if (res.ok) {
         const data = await res.json();
         if (data) {
@@ -150,7 +161,9 @@ export function AmbientCompanion({
   const fetchUnreadNotifications = useCallback(async () => {
     if (!activeWorkspace) return;
     try {
-      const res = await fetch(apiUrl(`/api/notifications?workspace_id=${encodeURIComponent(activeWorkspace)}&limit=5`));
+      const res = await fetch(
+        apiUrl(`/api/notifications?workspace_id=${encodeURIComponent(activeWorkspace)}&limit=5`)
+      );
       if (res.ok) {
         const data = await res.json();
         if (Array.isArray(data)) {
@@ -230,6 +243,7 @@ export function AmbientCompanion({
                     ? {
                         ...t,
                         progress_pct: data.progress_pct,
+                        progress_percent: data.progress_pct,
                         current_step: data.step_title,
                         status: data.status || t.status,
                       }
@@ -242,6 +256,7 @@ export function AmbientCompanion({
                   title: data.step_title || "Running task",
                   status: data.status || "running",
                   progress_pct: data.progress_pct,
+                  progress_percent: data.progress_pct,
                   current_step: data.step_title,
                 },
                 ...prev,
@@ -280,7 +295,7 @@ export function AmbientCompanion({
       const rec = new SpeechRecognition();
       rec.continuous = false;
       rec.interimResults = true;
-      rec.lang = "en-US";
+      rec.lang = "it-IT,en-US";
 
       rec.onresult = (event: any) => {
         let transcript = "";
@@ -382,7 +397,7 @@ export function AmbientCompanion({
     }
   };
 
-  // 6. Action Layer Approvals
+  // 6. Action Layer Approvals (Human-friendly non-technical confirmation)
   const handleApproveAction = async (executionId: string) => {
     try {
       const res = await fetch(apiUrl(`/api/actions/executions/${executionId}/approve`), {
@@ -421,21 +436,6 @@ export function AmbientCompanion({
     }
   };
 
-  const handleMarkNotificationRead = async (id: string) => {
-    try {
-      const res = await fetch(
-        apiUrl(`/api/notifications/${id}/read?workspace_id=${encodeURIComponent(activeWorkspace)}`),
-        { method: "POST" }
-      );
-      if (res.ok) {
-        setUnreadNotifications(prev => prev.filter(n => n.id !== id));
-        setUnreadCount(prev => Math.max(0, prev - 1));
-      }
-    } catch {
-      // Ignore
-    }
-  };
-
   // 7. Surface Transitions
   const handleOpenFullWorkspace = () => {
     if (onOpenWorkspace) {
@@ -449,7 +449,7 @@ export function AmbientCompanion({
     hideCompanion();
   };
 
-  // Keyboard shortcuts (Escape to dismiss, Cmd+O for Workspace, Cmd+M for Voice, Cmd+K to clear)
+  // Keyboard shortcuts (Escape to dismiss, Cmd+O for Workspace, Cmd+M for Voice)
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
       if (e.key === "Escape") {
@@ -475,6 +475,9 @@ export function AmbientCompanion({
   const activeRunningTasks = backgroundTasks.filter(
     t => t.status === "running" || t.status === "pending"
   );
+  const completedTaskWithDeliverable = backgroundTasks.find(
+    t => t.status === "completed" && t.deliverable_path
+  );
 
   return (
     <div
@@ -484,64 +487,75 @@ export function AmbientCompanion({
         flexDirection: "column",
         width: "100vw",
         height: "100vh",
-        backgroundColor: "hsl(var(--bg))",
+        backgroundColor: "rgba(15, 23, 42, 0.90)",
+        backdropFilter: "blur(28px) saturate(190%)",
+        WebkitBackdropFilter: "blur(28px) saturate(190%)",
         color: "hsl(var(--fg))",
         boxSizing: "border-box",
         overflow: "hidden",
-        border: "1px solid hsl(var(--border))",
-        borderRadius: "12px",
-        boxShadow: "0 20px 40px rgba(0,0,0,0.24)",
-        userSelect: "none",
+        border: "1px solid rgba(255, 255, 255, 0.12)",
+        borderRadius: "18px",
+        boxShadow: "0 20px 50px rgba(0, 0, 0, 0.65), 0 0 40px rgba(56, 189, 248, 0.12)",
+        fontFamily: "-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif",
       }}
     >
-      {/* 1. Frameless Ambient Header with Drag Region */}
+      {/* 1. Sleek Ambient HUD Header */}
       <header
         data-tauri-drag-region
         style={{
-          height: "46px",
+          height: "44px",
           display: "flex",
           alignItems: "center",
           justifyContent: "space-between",
           padding: "0 14px",
-          borderBottom: "1px solid hsl(var(--border))",
-          backgroundColor: "hsl(var(--card))",
+          borderBottom: "1px solid rgba(255, 255, 255, 0.08)",
+          backgroundColor: "rgba(255, 255, 255, 0.03)",
           cursor: "grab",
           flexShrink: 0,
         }}
       >
         <div style={{ display: "flex", alignItems: "center", gap: "8px", pointerEvents: "none" }}>
+          {/* Pulsing Jarvis Orb */}
           <div
             style={{
-              width: "22px",
-              height: "22px",
-              borderRadius: "6px",
-              backgroundColor: "hsl(var(--primary)/0.15)",
-              display: "flex",
-              alignItems: "center",
-              justifyContent: "center",
+              width: "10px",
+              height: "10px",
+              borderRadius: "50%",
+              backgroundColor: isListening
+                ? "#ef4444"
+                : activeRunningTasks.length > 0
+                ? "#f59e0b"
+                : "#38bdf8",
+              boxShadow: isListening
+                ? "0 0 12px #ef4444"
+                : activeRunningTasks.length > 0
+                ? "0 0 12px #f59e0b"
+                : "0 0 10px rgba(56, 189, 248, 0.8)",
+              animation: isListening || activeRunningTasks.length > 0 ? "pulse 1.4s infinite" : "none",
             }}
-          >
-            <Sparkles size={13} className="text-primary" />
-          </div>
-          <span style={{ fontSize: "13px", fontWeight: 600, letterSpacing: "-0.01em" }}>Aether</span>
+          />
+          <span style={{ fontSize: "13px", fontWeight: 700, letterSpacing: "-0.01em", color: "#f8fafc" }}>
+            Aether
+          </span>
           <span
             style={{
               fontSize: "10px",
               fontWeight: 500,
               padding: "2px 6px",
-              borderRadius: "4px",
-              backgroundColor: "hsl(var(--muted))",
-              color: "hsl(var(--muted-fg))",
+              borderRadius: "10px",
+              backgroundColor: "rgba(255, 255, 255, 0.08)",
+              color: "rgba(255, 255, 255, 0.6)",
+              letterSpacing: "0.02em",
             }}
           >
-            Companion
+            {isListening ? "Listening" : activeRunningTasks.length > 0 ? "Active" : "Ambient"}
           </span>
           {activeWorkspace && (
             <span
               style={{
                 fontSize: "11px",
-                color: "hsl(var(--muted-fg))",
-                maxWidth: "120px",
+                color: "rgba(255, 255, 255, 0.45)",
+                maxWidth: "110px",
                 overflow: "hidden",
                 textOverflow: "ellipsis",
                 whiteSpace: "nowrap",
@@ -550,29 +564,48 @@ export function AmbientCompanion({
               · {activeWorkspace}
             </span>
           )}
+          {unreadCount > 0 && (
+            <span
+              title={`${unreadCount} notification${unreadCount > 1 ? "s" : ""}`}
+              style={{
+                fontSize: "10px",
+                padding: "2px 6px",
+                borderRadius: "10px",
+                backgroundColor: "rgba(56, 189, 248, 0.15)",
+                color: "#38bdf8",
+                display: "inline-flex",
+                alignItems: "center",
+                gap: "3px",
+              }}
+            >
+              <Bell size={10} />
+              <span>{unreadCount}</span>
+            </span>
+          )}
         </div>
 
-        <div style={{ display: "flex", alignItems: "center", gap: "4px", cursor: "default" }}>
+        {/* Quick Transition Controls */}
+        <div style={{ display: "flex", alignItems: "center", gap: "6px", cursor: "default" }}>
           <button
             onClick={handleOpenFullWorkspace}
-            title="Open Full Workspace"
+            title="Open Full Workspace (Cmd+O)"
             data-testid="companion-open-workspace-btn"
             style={{
               display: "inline-flex",
               alignItems: "center",
               gap: "5px",
-              padding: "4px 8px",
+              padding: "3px 8px",
               fontSize: "11px",
               fontWeight: 500,
               borderRadius: "6px",
-              border: "1px solid hsl(var(--border))",
-              backgroundColor: "hsl(var(--bg))",
-              color: "hsl(var(--fg))",
+              border: "1px solid rgba(255, 255, 255, 0.12)",
+              backgroundColor: "rgba(255, 255, 255, 0.06)",
+              color: "#e2e8f0",
               cursor: "pointer",
-              transition: "background 0.15s",
+              transition: "all 0.15s ease",
             }}
           >
-            <ExternalLink size={12} />
+            <ExternalLink size={11} />
             <span>Workspace</span>
           </button>
           <button
@@ -580,28 +613,28 @@ export function AmbientCompanion({
             title="Dismiss (Esc)"
             data-testid="companion-dismiss-btn"
             style={{
-              padding: "5px",
+              padding: "4px 6px",
               borderRadius: "6px",
               border: "none",
               background: "transparent",
-              color: "hsl(var(--muted-fg))",
+              color: "rgba(255, 255, 255, 0.5)",
               cursor: "pointer",
               display: "flex",
               alignItems: "center",
               justifyContent: "center",
             }}
           >
-            <X size={15} />
+            <X size={14} />
           </button>
         </div>
       </header>
 
-      {/* 2. Top-Anchored Command Bar (Ambient HUD) */}
+      {/* 2. Top-Anchored Jarvis Command Bar */}
       <div
         style={{
-          padding: "12px 14px 10px",
-          borderBottom: "1px solid hsl(var(--border))",
-          backgroundColor: "hsl(var(--card))",
+          padding: "10px 14px",
+          borderBottom: "1px solid rgba(255, 255, 255, 0.06)",
+          backgroundColor: "rgba(0, 0, 0, 0.15)",
           flexShrink: 0,
           display: "flex",
           flexDirection: "column",
@@ -613,14 +646,17 @@ export function AmbientCompanion({
             display: "flex",
             alignItems: "center",
             gap: "8px",
-            backgroundColor: "hsl(var(--bg))",
-            border: "1px solid hsl(var(--border))",
-            borderRadius: "10px",
+            backgroundColor: "rgba(255, 255, 255, 0.06)",
+            border: isListening
+              ? "1px solid rgba(239, 68, 68, 0.6)"
+              : "1px solid rgba(255, 255, 255, 0.14)",
+            borderRadius: "12px",
             padding: "6px 10px",
-            boxShadow: "0 2px 6px rgba(0,0,0,0.04)",
+            boxShadow: "0 4px 12px rgba(0,0,0,0.2)",
+            transition: "border 0.2s ease",
           }}
         >
-          <Sparkles size={15} className="text-primary" style={{ flexShrink: 0, opacity: 0.85 }} />
+          <Sparkles size={14} color="#38bdf8" style={{ flexShrink: 0, opacity: 0.9 }} />
           <input
             ref={inputRef}
             type="text"
@@ -633,14 +669,14 @@ export function AmbientCompanion({
                 handleSendPrompt();
               }
             }}
-            placeholder="Ask Aether, take actions, or dispatch workforce..."
+            placeholder={isListening ? "Listening to your voice..." : "Ask Aether, execute actions, or dispatch workforce..."}
             disabled={isSubmitting}
             style={{
               flex: 1,
               border: "none",
               outline: "none",
               background: "transparent",
-              color: "hsl(var(--fg))",
+              color: "#f8fafc",
               fontSize: "13px",
               padding: "4px 2px",
             }}
@@ -652,16 +688,15 @@ export function AmbientCompanion({
             title={isListening ? "Listening... click to stop (Cmd+M)" : "Voice input (Cmd+M)"}
             data-testid="companion-voice-btn"
             style={{
-              padding: "6px",
+              padding: "5px",
               borderRadius: "6px",
               border: "none",
-              backgroundColor: isListening ? "hsl(0 84% 60% / 0.15)" : "transparent",
-              color: isListening ? "hsl(0 84% 60%)" : "hsl(var(--muted-fg))",
+              backgroundColor: isListening ? "rgba(239, 68, 68, 0.25)" : "transparent",
+              color: isListening ? "#ef4444" : "rgba(255, 255, 255, 0.6)",
               cursor: "pointer",
               display: "flex",
               alignItems: "center",
               justifyContent: "center",
-              animation: isListening ? "pulse 1.5s infinite" : "none",
             }}
           >
             {isListening ? <MicOff size={15} /> : <Mic size={15} />}
@@ -673,29 +708,154 @@ export function AmbientCompanion({
             disabled={!promptInput.trim() || isSubmitting}
             data-testid="companion-send-btn"
             style={{
-              padding: "6px",
+              padding: "5px 8px",
               borderRadius: "6px",
               border: "none",
-              backgroundColor: promptInput.trim() ? "hsl(var(--primary))" : "hsl(var(--muted))",
-              color: promptInput.trim() ? "hsl(var(--primary-fg))" : "hsl(var(--muted-fg))",
+              backgroundColor: promptInput.trim() ? "hsl(var(--primary))" : "rgba(255, 255, 255, 0.08)",
+              color: promptInput.trim() ? "hsl(var(--primary-fg))" : "rgba(255, 255, 255, 0.4)",
               cursor: promptInput.trim() && !isSubmitting ? "pointer" : "default",
               display: "flex",
               alignItems: "center",
               justifyContent: "center",
               opacity: isSubmitting ? 0.6 : 1,
+              transition: "all 0.15s ease",
             }}
           >
             {isSubmitting ? (
-              <Loader2 size={15} className="animate-spin" />
+              <Loader2 size={13} className="animate-spin" />
             ) : (
-              <Send size={14} />
+              <Send size={13} />
             )}
           </button>
         </div>
 
-        {/* Quick Suggestion Chips */}
-        {!promptInput && (
+        {/* Quick Ambient Modalities Bar: [Chat] [Voice] [Visual] [Suggestions] */}
+        <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", paddingTop: "2px" }}>
+          <div style={{ display: "flex", gap: "6px" }}>
+            <button
+              onClick={() => {
+                inputRef.current?.focus();
+              }}
+              title="Chat mode"
+              style={{
+                display: "inline-flex",
+                alignItems: "center",
+                gap: "4px",
+                fontSize: "11px",
+                fontWeight: 500,
+                padding: "3px 8px",
+                borderRadius: "6px",
+                border: "1px solid rgba(255, 255, 255, 0.08)",
+                backgroundColor: "rgba(255, 255, 255, 0.04)",
+                color: "rgba(255, 255, 255, 0.75)",
+                cursor: "pointer",
+              }}
+            >
+              <MessageSquare size={11} />
+              <span>Chat</span>
+            </button>
+
+            <button
+              onClick={toggleVoiceListening}
+              title="Voice Push-To-Talk"
+              style={{
+                display: "inline-flex",
+                alignItems: "center",
+                gap: "4px",
+                fontSize: "11px",
+                fontWeight: 500,
+                padding: "3px 8px",
+                borderRadius: "6px",
+                border: isListening ? "1px solid rgba(239, 68, 68, 0.4)" : "1px solid rgba(255, 255, 255, 0.08)",
+                backgroundColor: isListening ? "rgba(239, 68, 68, 0.15)" : "rgba(255, 255, 255, 0.04)",
+                color: isListening ? "#ef4444" : "rgba(255, 255, 255, 0.75)",
+                cursor: "pointer",
+              }}
+            >
+              <Mic size={11} />
+              <span>Voice</span>
+            </button>
+
+            {/* Truthful Visual Capability Button */}
+            <button
+              onClick={() => setShowVisualNotice(prev => !prev)}
+              title="Visual Intelligence state"
+              style={{
+                display: "inline-flex",
+                alignItems: "center",
+                gap: "4px",
+                fontSize: "11px",
+                fontWeight: 500,
+                padding: "3px 8px",
+                borderRadius: "6px",
+                border: "1px solid rgba(255, 255, 255, 0.08)",
+                backgroundColor: "rgba(255, 255, 255, 0.04)",
+                color: "rgba(255, 255, 255, 0.5)",
+                cursor: "pointer",
+              }}
+            >
+              <Eye size={11} />
+              <span>Visual</span>
+              <span style={{ fontSize: "9px", opacity: 0.6 }}>(Upcoming)</span>
+            </button>
+          </div>
+
+          <button
+            onClick={() => setShowSuggestions(prev => !prev)}
+            title="Toggle prompt suggestions"
+            style={{
+              fontSize: "11px",
+              padding: "2px 6px",
+              borderRadius: "4px",
+              border: "none",
+              backgroundColor: "transparent",
+              color: "rgba(255, 255, 255, 0.4)",
+              cursor: "pointer",
+            }}
+          >
+            {showSuggestions ? "Hide suggestions" : "Suggestions"}
+          </button>
+        </div>
+
+        {/* Suggestion Chips */}
+        {showSuggestions && !latestResponse && !promptInput && (
           <div style={{ display: "flex", gap: "6px", overflowX: "auto", paddingBottom: "2px" }}>
+            <button
+              onClick={() => {
+                setPromptInput("ciao come stai?");
+                inputRef.current?.focus();
+              }}
+              style={{
+                fontSize: "11px",
+                padding: "3px 8px",
+                borderRadius: "6px",
+                border: "1px solid rgba(255, 255, 255, 0.08)",
+                backgroundColor: "rgba(255, 255, 255, 0.03)",
+                color: "rgba(255, 255, 255, 0.7)",
+                cursor: "pointer",
+                whiteSpace: "nowrap",
+              }}
+            >
+              💬 "ciao come stai?"
+            </button>
+            <button
+              onClick={() => {
+                setPromptInput("Analisi di mercato per CarShine");
+                inputRef.current?.focus();
+              }}
+              style={{
+                fontSize: "11px",
+                padding: "3px 8px",
+                borderRadius: "6px",
+                border: "1px solid rgba(255, 255, 255, 0.08)",
+                backgroundColor: "rgba(255, 255, 255, 0.03)",
+                color: "rgba(255, 255, 255, 0.7)",
+                cursor: "pointer",
+                whiteSpace: "nowrap",
+              }}
+            >
+              🚀 CarShine Research
+            </button>
             <button
               onClick={() => {
                 setPromptInput("Schedule a meeting with ");
@@ -705,9 +865,9 @@ export function AmbientCompanion({
                 fontSize: "11px",
                 padding: "3px 8px",
                 borderRadius: "6px",
-                border: "1px solid hsl(var(--border))",
-                backgroundColor: "hsl(var(--bg))",
-                color: "hsl(var(--muted-fg))",
+                border: "1px solid rgba(255, 255, 255, 0.08)",
+                backgroundColor: "rgba(255, 255, 255, 0.03)",
+                color: "rgba(255, 255, 255, 0.7)",
                 cursor: "pointer",
                 whiteSpace: "nowrap",
               }}
@@ -723,56 +883,56 @@ export function AmbientCompanion({
                 fontSize: "11px",
                 padding: "3px 8px",
                 borderRadius: "6px",
-                border: "1px solid hsl(var(--border))",
-                backgroundColor: "hsl(var(--bg))",
-                color: "hsl(var(--muted-fg))",
+                border: "1px solid rgba(255, 255, 255, 0.08)",
+                backgroundColor: "rgba(255, 255, 255, 0.03)",
+                color: "rgba(255, 255, 255, 0.7)",
                 cursor: "pointer",
                 whiteSpace: "nowrap",
               }}
             >
               📝 Create Doc
             </button>
-            <button
-              onClick={() => {
-                setPromptInput("Deploy workforce to ");
-                inputRef.current?.focus();
-              }}
-              style={{
-                fontSize: "11px",
-                padding: "3px 8px",
-                borderRadius: "6px",
-                border: "1px solid hsl(var(--border))",
-                backgroundColor: "hsl(var(--bg))",
-                color: "hsl(var(--muted-fg))",
-                cursor: "pointer",
-                whiteSpace: "nowrap",
-              }}
-            >
-              🚀 Workforce
-            </button>
-            <button
-              onClick={() => {
-                setPromptInput("What are your capabilities?");
-                inputRef.current?.focus();
-              }}
-              style={{
-                fontSize: "11px",
-                padding: "3px 8px",
-                borderRadius: "6px",
-                border: "1px solid hsl(var(--border))",
-                backgroundColor: "hsl(var(--bg))",
-                color: "hsl(var(--muted-fg))",
-                cursor: "pointer",
-                whiteSpace: "nowrap",
-              }}
-            >
-              ⚡ Capabilities
-            </button>
           </div>
         )}
       </div>
 
-      {/* 3. Scrollable Body */}
+      {/* Visual Intelligence Truthful Banner (if triggered) */}
+      {showVisualNotice && (
+        <div
+          style={{
+            margin: "8px 14px 0",
+            padding: "8px 12px",
+            borderRadius: "8px",
+            backgroundColor: "rgba(56, 189, 248, 0.1)",
+            border: "1px solid rgba(56, 189, 248, 0.25)",
+            display: "flex",
+            alignItems: "flex-start",
+            justifyContent: "space-between",
+            gap: "8px",
+          }}
+        >
+          <div style={{ display: "flex", gap: "8px", alignItems: "flex-start" }}>
+            <Info size={14} color="#38bdf8" style={{ marginTop: "2px", flexShrink: 0 }} />
+            <span style={{ fontSize: "11px", color: "#e0f2fe", lineHeight: 1.4 }}>
+              <strong>Visual Intelligence</strong>: In arrivo nel prossimo aggiornamento desktop. La cattura dello schermo e della webcam è attualmente disattivata per tutelare la tua privacy.
+            </span>
+          </div>
+          <button
+            onClick={() => setShowVisualNotice(false)}
+            style={{
+              background: "transparent",
+              border: "none",
+              color: "rgba(255, 255, 255, 0.5)",
+              cursor: "pointer",
+              padding: "2px",
+            }}
+          >
+            <X size={13} />
+          </button>
+        </div>
+      )}
+
+      {/* 3. Main Interactive Body */}
       <div
         style={{
           flex: 1,
@@ -783,30 +943,38 @@ export function AmbientCompanion({
           gap: "12px",
         }}
       >
-        {/* Pending Approvals Widget (High Priority) */}
+        {/* Human-Centric Safety Approvals (Only visible when pending) */}
         {pendingApprovals.length > 0 && (
           <div
             data-testid="companion-approvals-card"
             style={{
               padding: "12px 14px",
-              borderRadius: "10px",
-              border: "1px solid hsl(38 92% 50% / 0.35)",
-              backgroundColor: "hsl(38 92% 50% / 0.08)",
+              borderRadius: "12px",
+              border: "1px solid rgba(245, 158, 11, 0.4)",
+              backgroundColor: "rgba(245, 158, 11, 0.08)",
               display: "flex",
               flexDirection: "column",
               gap: "10px",
+              boxShadow: "0 4px 14px rgba(0,0,0,0.25)",
             }}
           >
             <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
-              <Shield size={16} color="hsl(38 92% 50%)" />
-              <span style={{ fontSize: "12px", fontWeight: 600, color: "hsl(38 92% 40%)" }}>
-                Action requires your approval
+              <Shield size={16} color="#f59e0b" />
+              <span style={{ fontSize: "12px", fontWeight: 600, color: "#fbbf24" }}>
+                Approval Required
               </span>
             </div>
 
             {pendingApprovals.map(approval => {
-              const approvalId = approval.execution_id || approval.id || '';
-              const approvalTitle = approval.action_name || approval.title || approval.action_type || "Action Execution";
+              const approvalId = approval.execution_id || approval.id || "";
+              const friendlyAction =
+                approval.action_name || approval.title || "external action";
+              const targetDetail =
+                approval.input_data?.title ||
+                approval.params?.title ||
+                approval.description ||
+                "";
+
               return (
                 <div
                   key={approvalId}
@@ -814,20 +982,19 @@ export function AmbientCompanion({
                     display: "flex",
                     flexDirection: "column",
                     gap: "6px",
-                    backgroundColor: "hsl(var(--card))",
+                    backgroundColor: "rgba(0, 0, 0, 0.25)",
                     padding: "10px",
                     borderRadius: "8px",
-                    border: "1px solid hsl(var(--border))",
+                    border: "1px solid rgba(255, 255, 255, 0.08)",
                   }}
                 >
-                  <div style={{ fontSize: "13px", fontWeight: 500 }}>
-                    {approvalTitle}
+                  <div style={{ fontSize: "13px", fontWeight: 500, color: "#f8fafc" }}>
+                    Aether wants to {friendlyAction.toLowerCase()}{targetDetail ? `: "${targetDetail}"` : "."}
                   </div>
-                  {approval.description && (
-                    <div style={{ fontSize: "11px", color: "hsl(var(--muted-fg))" }}>
-                      {approval.description}
-                    </div>
-                  )}
+                  <div style={{ fontSize: "11px", color: "rgba(255, 255, 255, 0.55)" }}>
+                    This will safely update your calendar or external account. Review and confirm to proceed.
+                  </div>
+
                   <div style={{ display: "flex", gap: "8px", marginTop: "4px" }}>
                     <button
                       onClick={() => handleApproveAction(approvalId)}
@@ -839,8 +1006,8 @@ export function AmbientCompanion({
                         fontWeight: 600,
                         borderRadius: "6px",
                         border: "none",
-                        backgroundColor: "hsl(var(--primary))",
-                        color: "hsl(var(--primary-fg))",
+                        backgroundColor: "#38bdf8",
+                        color: "#0f172a",
                         cursor: "pointer",
                         display: "flex",
                         alignItems: "center",
@@ -859,13 +1026,13 @@ export function AmbientCompanion({
                         fontSize: "12px",
                         fontWeight: 500,
                         borderRadius: "6px",
-                        border: "1px solid hsl(var(--border))",
-                        backgroundColor: "hsl(var(--card))",
-                        color: "hsl(var(--muted-fg))",
+                        border: "1px solid rgba(255, 255, 255, 0.12)",
+                        backgroundColor: "rgba(255, 255, 255, 0.05)",
+                        color: "rgba(255, 255, 255, 0.75)",
                         cursor: "pointer",
                       }}
                     >
-                      Reject
+                      Not now
                     </button>
                   </div>
                 </div>
@@ -874,249 +1041,150 @@ export function AmbientCompanion({
           </div>
         )}
 
-        {/* Active Work / Background Tasks */}
-        {activeRunningTasks.length > 0 && (
-          <div
-            data-testid="companion-active-work"
-            style={{
-              padding: "12px 14px",
-              borderRadius: "10px",
-              border: "1px solid hsl(var(--border))",
-              backgroundColor: "hsl(var(--card))",
-              display: "flex",
-              flexDirection: "column",
-              gap: "8px",
-            }}
-          >
-            <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
-              <div style={{ display: "flex", alignItems: "center", gap: "6px" }}>
-                <Loader2 size={13} className="animate-spin text-primary" />
-                <span style={{ fontSize: "11px", fontWeight: 600, textTransform: "uppercase", letterSpacing: "0.04em", color: "hsl(var(--muted-fg))" }}>
-                  Active Work
-                </span>
-              </div>
-              <span style={{ fontSize: "11px", color: "hsl(var(--muted-fg))" }}>
-                {activeRunningTasks.length} task{activeRunningTasks.length > 1 ? "s" : ""} running
-              </span>
-            </div>
-
-            {activeRunningTasks.map(task => (
-              <div
-                key={task.id}
-                style={{
-                  display: "flex",
-                  flexDirection: "column",
-                  gap: "4px",
-                  padding: "8px",
-                  backgroundColor: "hsl(var(--bg))",
-                  borderRadius: "6px",
-                  border: "1px solid hsl(var(--border)/0.6)",
-                }}
-              >
-                <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
-                  <span style={{ fontSize: "12px", fontWeight: 500 }}>{task.title}</span>
-                  {typeof task.progress_pct === "number" && (
-                    <span style={{ fontSize: "11px", fontWeight: 600, color: "hsl(var(--primary))" }}>
-                      {Math.round(task.progress_pct)}%
-                    </span>
-                  )}
-                </div>
-                {task.current_step && (
-                  <span style={{ fontSize: "11px", color: "hsl(var(--muted-fg))" }}>
-                    {task.current_step}
-                  </span>
-                )}
-                {typeof task.progress_pct === "number" && (
-                  <div
-                    style={{
-                      height: "4px",
-                      borderRadius: "2px",
-                      backgroundColor: "hsl(var(--muted))",
-                      overflow: "hidden",
-                      marginTop: "4px",
-                    }}
-                  >
-                    <div
-                      style={{
-                        height: "100%",
-                        width: `${Math.min(100, Math.max(0, task.progress_pct))}%`,
-                        backgroundColor: "hsl(var(--primary))",
-                        transition: "width 0.3s ease",
-                      }}
-                    />
-                  </div>
-                )}
-              </div>
-            ))}
-          </div>
-        )}
-
-        {/* Unread Notifications (Compact) */}
-        {unreadNotifications.length > 0 && (
-          <div
-            data-testid="companion-notifications-card"
-            style={{
-              padding: "10px 12px",
-              borderRadius: "10px",
-              border: "1px solid hsl(var(--border))",
-              backgroundColor: "hsl(var(--card))",
-              display: "flex",
-              flexDirection: "column",
-              gap: "6px",
-            }}
-          >
-            <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
-              <div style={{ display: "flex", alignItems: "center", gap: "6px" }}>
-                <Bell size={13} className="text-primary" />
-                <span style={{ fontSize: "11px", fontWeight: 600, textTransform: "uppercase", letterSpacing: "0.04em", color: "hsl(var(--muted-fg))" }}>
-                  Notifications ({unreadCount})
-                </span>
-              </div>
-            </div>
-
-            {unreadNotifications.map(item => (
-              <div
-                key={item.id}
-                style={{
-                  display: "flex",
-                  alignItems: "flex-start",
-                  justifyContent: "space-between",
-                  gap: "8px",
-                  padding: "6px 8px",
-                  borderRadius: "6px",
-                  backgroundColor: "hsl(var(--bg))",
-                }}
-              >
-                <div style={{ display: "flex", flexDirection: "column", minWidth: 0 }}>
-                  <span style={{ fontSize: "12px", fontWeight: 500 }}>{item.title}</span>
-                  <span
-                    style={{
-                      fontSize: "11px",
-                      color: "hsl(var(--muted-fg))",
-                      whiteSpace: "nowrap",
-                      overflow: "hidden",
-                      textOverflow: "ellipsis",
-                    }}
-                  >
-                    {item.message}
-                  </span>
-                </div>
-                <button
-                  onClick={() => handleMarkNotificationRead(item.id)}
-                  title="Mark as read"
-                  style={{
-                    padding: "3px",
-                    borderRadius: "4px",
-                    border: "none",
-                    background: "transparent",
-                    color: "hsl(var(--muted-fg))",
-                    cursor: "pointer",
-                  }}
-                >
-                  <Check size={13} />
-                </button>
-              </div>
-            ))}
-          </div>
-        )}
-
-        {/* Previous Interaction / Active Session Result */}
-        {latestResponse && (
-          <div
-            data-testid="companion-response-box"
-            style={{
-              padding: "12px 14px",
-              borderRadius: "10px",
-              border: "1px solid hsl(var(--border))",
-              backgroundColor: "hsl(var(--card))",
-              display: "flex",
-              flexDirection: "column",
-              gap: "8px",
-            }}
-          >
+        {/* Active Conversational Transcript */}
+        {(lastUserPrompt || latestResponse) && (
+          <div style={{ display: "flex", flexDirection: "column", gap: "10px" }}>
+            {/* User Message Bubble */}
             {lastUserPrompt && (
               <div
                 style={{
-                  fontSize: "11px",
-                  color: "hsl(var(--muted-fg))",
-                  borderBottom: "1px solid hsl(var(--border)/0.5)",
-                  paddingBottom: "6px",
+                  alignSelf: "flex-end",
+                  maxWidth: "85%",
+                  padding: "8px 12px",
+                  borderRadius: "12px 12px 2px 12px",
+                  backgroundColor: "rgba(56, 189, 248, 0.15)",
+                  border: "1px solid rgba(56, 189, 248, 0.3)",
+                  color: "#f0f9ff",
+                  fontSize: "13px",
+                  lineHeight: 1.4,
                 }}
               >
-                You: <span style={{ color: "hsl(var(--fg))" }}>{lastUserPrompt}</span>
+                {lastUserPrompt}
               </div>
             )}
-            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start" }}>
+
+            {/* Assistant Response Card */}
+            {latestResponse && (
               <div
                 style={{
-                  fontSize: "13px",
-                  lineHeight: "1.5",
-                  color: "hsl(var(--fg))",
-                  whiteSpace: "pre-wrap",
+                  alignSelf: "flex-start",
+                  width: "100%",
+                  padding: "12px",
+                  borderRadius: "12px 12px 12px 2px",
+                  backgroundColor: "rgba(255, 255, 255, 0.04)",
+                  border: "1px solid rgba(255, 255, 255, 0.08)",
+                  display: "flex",
+                  flexDirection: "column",
+                  gap: "8px",
                 }}
               >
-                {latestResponse.content}
-              </div>
-              <button
-                onClick={() => speakText(latestResponse.content)}
-                title={isSpeaking ? "Stop speaking" : "Read aloud"}
-                style={{
-                  padding: "4px",
-                  borderRadius: "4px",
-                  border: "none",
-                  background: "transparent",
-                  color: isSpeaking ? "hsl(var(--primary))" : "hsl(var(--muted-fg))",
-                  cursor: "pointer",
-                }}
-              >
-                {isSpeaking ? <VolumeX size={14} /> : <Volume2 size={14} />}
-              </button>
-            </div>
-
-            {/* Steps pills */}
-            {latestResponse.steps && latestResponse.steps.length > 0 && (
-              <div style={{ display: "flex", flexWrap: "wrap", gap: "4px", marginTop: "4px" }}>
-                {latestResponse.steps.map(step => (
-                  <div
-                    key={step.id}
+                <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
+                  <div style={{ display: "flex", alignItems: "center", gap: "6px" }}>
+                    <Sparkles size={13} color="#38bdf8" />
+                    <span style={{ fontSize: "11px", fontWeight: 600, color: "rgba(255, 255, 255, 0.7)" }}>
+                      Aether
+                    </span>
+                  </div>
+                  <button
+                    onClick={() => speakText(latestResponse.content)}
+                    title={isSpeaking ? "Stop speaking" : "Listen to response"}
                     style={{
-                      display: "inline-flex",
+                      padding: "3px",
+                      background: "transparent",
+                      border: "none",
+                      color: isSpeaking ? "#38bdf8" : "rgba(255, 255, 255, 0.5)",
+                      cursor: "pointer",
+                      display: "flex",
                       alignItems: "center",
-                      gap: "4px",
-                      fontSize: "10px",
-                      padding: "2px 8px",
-                      borderRadius: "12px",
-                      backgroundColor:
-                        step.status === "completed"
-                          ? "hsl(var(--primary)/0.12)"
-                          : step.status === "failed"
-                          ? "hsl(0 84% 60% / 0.12)"
-                          : "hsl(var(--muted))",
-                      color:
-                        step.status === "completed"
-                          ? "hsl(var(--primary))"
-                          : step.status === "failed"
-                          ? "hsl(0 84% 60%)"
-                          : "hsl(var(--muted-fg))",
                     }}
                   >
-                    {step.status === "completed" ? (
-                      <CheckCircle2 size={10} />
-                    ) : step.status === "pending_approval" ? (
-                      <Shield size={10} />
-                    ) : (
-                      <Clock size={10} />
-                    )}
-                    <span>{step.title}</span>
+                    {isSpeaking ? <VolumeX size={13} /> : <Volume2 size={13} />}
+                  </button>
+                </div>
+
+                <div
+                  style={{
+                    fontSize: "13px",
+                    lineHeight: 1.5,
+                    color: "#f8fafc",
+                    whiteSpace: "pre-wrap",
+                  }}
+                >
+                  {latestResponse.content}
+                </div>
+
+                {/* Steps detail (if any) */}
+                {latestResponse.steps && latestResponse.steps.length > 0 && (
+                  <div
+                    style={{
+                      marginTop: "6px",
+                      paddingTop: "6px",
+                      borderTop: "1px solid rgba(255, 255, 255, 0.06)",
+                      display: "flex",
+                      flexWrap: "wrap",
+                      gap: "6px",
+                    }}
+                  >
+                    {latestResponse.steps.map(s => (
+                      <span
+                        key={s.id}
+                        style={{
+                          fontSize: "10px",
+                          padding: "2px 6px",
+                          borderRadius: "4px",
+                          backgroundColor: "rgba(255, 255, 255, 0.06)",
+                          color: "rgba(255, 255, 255, 0.6)",
+                          display: "inline-flex",
+                          alignItems: "center",
+                          gap: "4px",
+                        }}
+                      >
+                        {s.status === "completed" ? (
+                          <CheckCircle2 size={10} color="#22c55e" />
+                        ) : (
+                          <Clock size={10} color="#f59e0b" />
+                        )}
+                        <span>{s.title}</span>
+                      </span>
+                    ))}
                   </div>
-                ))}
+                )}
               </div>
             )}
           </div>
         )}
 
-        {/* Empty state when no previous prompt and no active tasks */}
-        {!latestResponse && activeRunningTasks.length === 0 && pendingApprovals.length === 0 && (
+        {/* Unread Notifications (discreet banner) */}
+        {unreadNotifications.length > 0 && !lastUserPrompt && !latestResponse && pendingApprovals.length === 0 && (
+          <div
+            data-testid="companion-notifications-card"
+            style={{
+              padding: "8px 12px",
+              borderRadius: "10px",
+              backgroundColor: "rgba(255, 255, 255, 0.04)",
+              border: "1px solid rgba(255, 255, 255, 0.08)",
+              display: "flex",
+              alignItems: "center",
+              gap: "8px",
+            }}
+          >
+            <Bell size={12} color="#38bdf8" style={{ flexShrink: 0 }} />
+            <span
+              style={{
+                fontSize: "11px",
+                color: "rgba(255, 255, 255, 0.8)",
+                overflow: "hidden",
+                textOverflow: "ellipsis",
+                whiteSpace: "nowrap",
+              }}
+            >
+              {unreadNotifications[0].title}: {unreadNotifications[0].message}
+            </span>
+          </div>
+        )}
+
+        {/* Resting / Idle State when no prompt has been submitted */}
+        {!lastUserPrompt && !latestResponse && (
           <div
             style={{
               flex: 1,
@@ -1125,60 +1193,107 @@ export function AmbientCompanion({
               alignItems: "center",
               justifyContent: "center",
               textAlign: "center",
-              padding: "24px 12px",
-              color: "hsl(var(--muted-fg))",
+              gap: "12px",
+              padding: "20px 10px",
+              opacity: 0.85,
             }}
           >
             <div
               style={{
-                width: "40px",
-                height: "40px",
-                borderRadius: "12px",
-                backgroundColor: "hsl(var(--card))",
-                border: "1px solid hsl(var(--border))",
+                width: "48px",
+                height: "48px",
+                borderRadius: "50%",
+                background: "radial-gradient(circle, rgba(56,189,248,0.25) 0%, rgba(56,189,248,0) 70%)",
                 display: "flex",
                 alignItems: "center",
                 justifyContent: "center",
-                marginBottom: "10px",
+                boxShadow: "0 0 25px rgba(56,189,248,0.3)",
               }}
             >
-              <Sparkles size={20} className="text-primary" />
+              <Sparkles size={22} color="#38bdf8" />
             </div>
-            <div style={{ fontSize: "13px", fontWeight: 500, color: "hsl(var(--fg))" }}>
-              Aether Ambient Companion
-            </div>
-            <div style={{ fontSize: "11px", marginTop: "4px", maxWidth: "240px", lineHeight: 1.4 }}>
-              Type any instruction or click the mic. Press Esc to hide or Alt+Space anytime.
+            <div style={{ display: "flex", flexDirection: "column", gap: "4px" }}>
+              <span style={{ fontSize: "14px", fontWeight: 600, color: "#f8fafc" }}>
+                Aether Ambient Presence
+              </span>
+              <span style={{ fontSize: "12px", color: "rgba(255, 255, 255, 0.5)", maxWidth: "260px" }}>
+                Evocato vicino al tuo cursore. Chiedi, dialoga o assegna compiti operativi alla workforce.
+              </span>
             </div>
           </div>
         )}
       </div>
 
-      {/* 4. Ambient HUD Shortcut Footer */}
-      <footer
-        style={{
-          height: "28px",
-          display: "flex",
-          alignItems: "center",
-          justifyContent: "space-between",
-          padding: "0 14px",
-          borderTop: "1px solid hsl(var(--border))",
-          backgroundColor: "hsl(var(--card))",
-          fontSize: "10.5px",
-          color: "hsl(var(--muted-fg))",
-          flexShrink: 0,
-        }}
-      >
-        <div style={{ display: "flex", gap: "10px", alignItems: "center" }}>
-          <span><kbd style={{ padding: "1px 4px", borderRadius: "3px", backgroundColor: "hsl(var(--muted))" }}>Esc</kbd> hide</span>
-          <span><kbd style={{ padding: "1px 4px", borderRadius: "3px", backgroundColor: "hsl(var(--muted))" }}>Enter</kbd> run</span>
-          <span><kbd style={{ padding: "1px 4px", borderRadius: "3px", backgroundColor: "hsl(var(--muted))" }}>⌘O</kbd> workspace</span>
+      {/* 4. Minimal Floating Background Work & Deliverable Indicator */}
+      {(activeRunningTasks.length > 0 || completedTaskWithDeliverable) && (
+        <div
+          data-testid="companion-active-work"
+          style={{
+            padding: "8px 14px",
+            borderTop: "1px solid rgba(255, 255, 255, 0.08)",
+            backgroundColor: "rgba(0, 0, 0, 0.35)",
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "space-between",
+            flexShrink: 0,
+          }}
+        >
+          {activeRunningTasks.length > 0 ? (
+            <div style={{ display: "flex", alignItems: "center", gap: "8px", flex: 1, minWidth: 0 }}>
+              <Loader2 size={13} className="animate-spin text-primary" color="#38bdf8" />
+              <div style={{ display: "flex", flexDirection: "column", minWidth: 0, flex: 1 }}>
+                <div style={{ display: "flex", alignItems: "center", gap: "6px" }}>
+                  <span style={{ fontSize: "11px", fontWeight: 600, color: "#e2e8f0" }}>
+                    {activeRunningTasks[0].title}
+                  </span>
+                  {typeof (activeRunningTasks[0].progress_pct ?? activeRunningTasks[0].progress_percent) === "number" && (
+                    <span style={{ fontSize: "10px", fontWeight: 600, color: "#38bdf8" }}>
+                      {Math.round((activeRunningTasks[0].progress_pct ?? activeRunningTasks[0].progress_percent) || 0)}%
+                    </span>
+                  )}
+                </div>
+                {activeRunningTasks[0].current_step && (
+                  <span
+                    style={{
+                      fontSize: "10px",
+                      color: "rgba(255, 255, 255, 0.5)",
+                      whiteSpace: "nowrap",
+                      overflow: "hidden",
+                      textOverflow: "ellipsis",
+                    }}
+                  >
+                    {activeRunningTasks[0].current_step}
+                  </span>
+                )}
+              </div>
+            </div>
+          ) : (
+            <div style={{ display: "flex", alignItems: "center", gap: "6px", flex: 1 }}>
+              <CheckCircle2 size={13} color="#22c55e" />
+              <span style={{ fontSize: "11px", fontWeight: 500, color: "#86efac" }}>
+                Deliverable completato ({completedTaskWithDeliverable?.title})
+              </span>
+            </div>
+          )}
+
+          <button
+            onClick={handleOpenFullWorkspace}
+            style={{
+              fontSize: "10px",
+              padding: "3px 7px",
+              borderRadius: "5px",
+              border: "1px solid rgba(255, 255, 255, 0.1)",
+              backgroundColor: "rgba(255, 255, 255, 0.06)",
+              color: "#38bdf8",
+              cursor: "pointer",
+              marginLeft: "10px",
+              whiteSpace: "nowrap",
+            }}
+          >
+            Open in Aether ↗
+          </button>
         </div>
-        <div style={{ display: "flex", gap: "10px", alignItems: "center" }}>
-          <span><kbd style={{ padding: "1px 4px", borderRadius: "3px", backgroundColor: "hsl(var(--muted))" }}>⌘M</kbd> mic</span>
-          <span><kbd style={{ padding: "1px 4px", borderRadius: "3px", backgroundColor: "hsl(var(--muted))" }}>⌘K</kbd> clear</span>
-        </div>
-      </footer>
+      )}
     </div>
   );
 }

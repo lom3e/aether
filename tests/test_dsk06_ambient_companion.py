@@ -521,3 +521,96 @@ async def test_o_acceptance_simulation_22_steps(workspace):
     companion_window_active = False
     app_running = False
     assert app_running is False
+
+
+# ---------------------------------------------------------------------------
+# Test P: Pointer-Relative Positioning Contract
+# ---------------------------------------------------------------------------
+def test_p_pointer_relative_positioning_contract():
+    """Verify companion window uses pointer-relative positioning with screen clamp."""
+    repo_root = _get_repo_root()
+    main_rs = repo_root / "src-tauri" / "src" / "main.rs"
+    code = main_rs.read_text(encoding="utf-8")
+
+    assert "pub fn position_companion_near_cursor" in code
+    assert "app.cursor_position()" in code
+    assert "window.current_monitor()" in code
+    assert "position_companion_near_cursor(&companion, 420, 580)" in code
+
+
+# ---------------------------------------------------------------------------
+# Test Q: Conversational Natural Greetings & Jarvis Persona
+# ---------------------------------------------------------------------------
+@pytest.mark.asyncio
+async def test_q_conversational_natural_greetings(workspace):
+    """Verify conversational greetings receive natural human responses without rigid boilerplate."""
+    app.state.workspace = workspace
+
+    # 1. Italian greeting
+    req1 = make_request("POST", "/api/personal/chat")
+    res1 = await personal_chat_route(
+        req1,
+        PersonalChatPayload(prompt="ciao come stai?", workspace_id=workspace.name),
+    )
+    assert res1["role"] == "assistant"
+    assert "Ciao! Sto bene e sono pronto a darti una mano" in res1["content"]
+    assert "Ho preso in carico la tua richiesta relativa a" not in res1["content"]
+
+    # 2. English greeting
+    req2 = make_request("POST", "/api/personal/chat")
+    res2 = await personal_chat_route(
+        req2,
+        PersonalChatPayload(prompt="hello, how are you?", workspace_id=workspace.name),
+    )
+    assert res2["role"] == "assistant"
+    assert "Hello! I'm doing well and ready to assist you" in res2["content"]
+
+    # 3. Thanks
+    req3 = make_request("POST", "/api/personal/chat")
+    res3 = await personal_chat_route(
+        req3,
+        PersonalChatPayload(prompt="grazie mille!", workspace_id=workspace.name),
+    )
+    assert res3["role"] == "assistant"
+    assert "Prego!" in res3["content"]
+
+
+# ---------------------------------------------------------------------------
+# Test R: Real CarShine Specialist Delegation Pipeline
+# ---------------------------------------------------------------------------
+@pytest.mark.asyncio
+async def test_r_carshine_specialist_delegation(workspace):
+    """Verify CarShine market analysis triggers real specialist delegation and delivers verified report."""
+    import time
+    app.state.workspace = workspace
+
+    req = make_request("POST", "/api/personal/chat")
+    res = await personal_chat_route(
+        req,
+        PersonalChatPayload(
+            prompt="Analisi di mercato per CarShine",
+            workspace_id=workspace.name,
+        ),
+    )
+    assert res["role"] == "assistant"
+    assert "CarShine" in res["content"]
+    assert res["tier"] == IntentTier.DELEGATE.value
+
+    # Wait for the background worker thread to finish
+    time.sleep(0.5)
+
+    tasks = workspace.personal.task_manager.list_tasks(workspace_id=workspace.name)
+    assert len(tasks) >= 1
+    carshine_task = next((t for t in tasks if "CarShine" in t.title), None)
+    assert carshine_task is not None
+    assert carshine_task.status == PersonalTaskStatus.COMPLETED
+    assert carshine_task.progress_percent == 100
+    assert carshine_task.deliverable_path is not None
+
+    deliv_file = Path(carshine_task.deliverable_path)
+    assert deliv_file.exists()
+    report_text = deliv_file.read_text(encoding="utf-8")
+    assert "CarShine — Strategic Market Analysis" in report_text
+    assert "Market Researcher" in report_text
+    assert "Executive Strategic Synthesis" in report_text
+

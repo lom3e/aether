@@ -355,6 +355,7 @@ class Workspace:
             connection_service=self.connections,
             notification_service=self.notifications,
             event_hub=get_personal_event_hub(),
+            workspace=self,
         )
 
     @property

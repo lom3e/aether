@@ -451,13 +451,53 @@ pub fn center_window_on_active_monitor(window: &WebviewWindow, width: u32, heigh
     }
 }
 
+pub fn position_companion_near_cursor(window: &WebviewWindow, width: u32, height: u32) {
+    let app = window.app_handle();
+    if let Ok(cursor_pos) = app.cursor_position() {
+        if let Ok(Some(monitor)) = window.current_monitor() {
+            let m_pos = monitor.position();
+            let m_size = monitor.size();
+            let scale = monitor.scale_factor();
+
+            let win_w = (width as f64 * scale) as i32;
+            let win_h = (height as f64 * scale) as i32;
+            let margin = (16.0 * scale) as i32;
+
+            // Offset slightly from cursor (e.g. 12px right and 16px down)
+            let mut target_x = cursor_pos.x as i32 + (12.0 * scale) as i32;
+            let mut target_y = cursor_pos.y as i32 + (16.0 * scale) as i32;
+
+            let max_x = m_pos.x + m_size.width as i32 - win_w - margin;
+            let min_x = m_pos.x + margin;
+            let max_y = m_pos.y + m_size.height as i32 - win_h - margin;
+            let min_y = m_pos.y + margin;
+
+            // Flip to left/above if overflowing screen bounds
+            if target_x > max_x {
+                target_x = (cursor_pos.x as i32 - win_w - (12.0 * scale) as i32).max(min_x);
+            }
+            if target_y > max_y {
+                target_y = (cursor_pos.y as i32 - win_h - (16.0 * scale) as i32).max(min_y);
+            }
+
+            let final_x = target_x.clamp(min_x, max_x.max(min_x));
+            let final_y = target_y.clamp(min_y, max_y.max(min_y));
+
+            let _ = window.set_position(tauri::PhysicalPosition::new(final_x, final_y));
+            return;
+        }
+    }
+    // Fallback to center if cursor position cannot be determined
+    center_window_on_active_monitor(window, width, height);
+}
+
 pub fn toggle_companion_window(app: &AppHandle) {
     if let Some(companion) = app.get_webview_window("companion") {
         if let Ok(is_visible) = companion.is_visible() {
             if is_visible {
                 let _ = companion.hide();
             } else {
-                center_window_on_active_monitor(&companion, 420, 580);
+                position_companion_near_cursor(&companion, 420, 580);
                 let _ = companion.show();
                 let _ = companion.unminimize();
                 let _ = companion.set_focus();
