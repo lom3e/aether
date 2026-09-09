@@ -316,9 +316,35 @@ class Workspace:
         return PersonalStore(self.personal_db_path)
 
     @property
+    def notifications_db_path(self) -> str:
+        """Path to the persistent notifications database."""
+        if self.data_dir.exists() or self.config_path.exists():
+            return str(self.data_dir / "notifications.db")
+        return str(self.legacy_aether_dir / "notifications.db")
+
+    @property
+    def notification_store(self):
+        """Return the NotificationStore for this workspace."""
+        from aether.notifications.store import NotificationStore
+        Path(self.notifications_db_path).parent.mkdir(parents=True, exist_ok=True)
+        return NotificationStore(self.notifications_db_path)
+
+    @property
+    def notifications(self):
+        """Return the NotificationService for this workspace."""
+        from aether.notifications.service import NotificationService
+        from aether.personal.events import get_personal_event_hub
+        return NotificationService(
+            store=self.notification_store,
+            activity_service=self.activity,
+            event_hub=get_personal_event_hub(),
+        )
+
+    @property
     def personal(self):
         """Return the PersonalAgentService for this workspace."""
         from aether.personal.service import PersonalAgentService
+        from aether.personal.events import get_personal_event_hub
         return PersonalAgentService(
             store=self.personal_store,
             action_executor=self.actions,
@@ -326,6 +352,8 @@ class Workspace:
             intelligence_service=self.intelligence,
             mission_store=self.missions,
             connection_service=self.connections,
+            notification_service=self.notifications,
+            event_hub=get_personal_event_hub(),
         )
 
     @property

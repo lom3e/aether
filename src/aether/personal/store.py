@@ -12,7 +12,14 @@ import threading
 from typing import Any, Generator
 import uuid
 
-from aether.personal.models import IntentTier, PersonalMessage, PersonalSession, PersonalStep
+from aether.personal.models import (
+    IntentTier,
+    PersonalMessage,
+    PersonalSession,
+    PersonalStep,
+    PersonalTask,
+    PersonalTaskStatus,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -89,6 +96,29 @@ class PersonalStore:
             )
             cursor.execute("CREATE INDEX IF NOT EXISTS idx_pm_session ON personal_messages(session_id, created_at ASC);")
 
+            cursor.execute(
+                """
+                CREATE TABLE IF NOT EXISTS personal_tasks (
+                    id TEXT PRIMARY KEY,
+                    session_id TEXT NOT NULL,
+                    workspace_id TEXT NOT NULL,
+                    title TEXT NOT NULL,
+                    status TEXT NOT NULL,
+                    tier TEXT NOT NULL,
+                    progress_percent INTEGER NOT NULL DEFAULT 0,
+                    current_step TEXT,
+                    result_summary TEXT,
+                    mission_id TEXT,
+                    action_execution_id TEXT,
+                    error TEXT,
+                    metadata TEXT,
+                    created_at TEXT NOT NULL,
+                    updated_at TEXT NOT NULL
+                );
+                """
+            )
+            cursor.execute("CREATE INDEX IF NOT EXISTS idx_pt_ws_status ON personal_tasks(workspace_id, status, updated_at DESC);")
+
     def save_session(self, session: PersonalSession) -> PersonalSession:
         """Saves or updates session metadata."""
         with self._transaction() as cursor:
@@ -153,6 +183,14 @@ class PersonalStore:
 
     def add_message(self, message: PersonalMessage) -> PersonalMessage:
         """Adds a message to a session."""
+        if not self.get_session(message.session_id):
+            self.save_session(
+                PersonalSession(
+                    id=message.session_id,
+                    workspace_id=message.workspace_id,
+                    title=f"Session {message.session_id[:8]}",
+                )
+            )
         with self._transaction() as cursor:
             cursor.execute(
                 """
@@ -197,6 +235,140 @@ class PersonalStore:
             mission_id=row["mission_id"],
             metadata=json.loads(row["metadata"]) if row["metadata"] else {},
             created_at=row["created_at"],
+        )
+
+    def get_messages(self, session_id: str) -> list[PersonalMessage]:
+        """Retrieves all messages for a session ordered by creation time."""
+        conn = self._get_connection()
+        rows = conn.execute(
+            "SELECT * FROM personal_messages WHERE session_id = ? ORDER BY created_at ASC",
+            (session_id,),
+        ).fetchall()
+        return [self._row_to_message(r) for r in rows]
+
+    def get_recent_messages(self, session_id: str, limit: int = 6) -> list[PersonalMessage]:
+        """Retrieves the most recent messages for conversational context."""
+        conn = self._get_connection()
+        rows = conn.execute(
+            """
+            SELECT * FROM (
+                SELECT * FROM personal_messages WHERE session_id = ? ORDER BY created_at DESC LIMIT ?
+            ) ORDER BY created_at ASC
+            """,
+            (session_id, max(1, limit)),
+        ).fetchall()
+        return [self._row_to_message(r) for r in rows]
+
+    def save_task(self, task: PersonalTask) -> PersonalTask:
+        """Inserts or updates a persistent personal task."""
+        with self._transaction() as cursor:
+            cursor.execute(
+                """
+                INSERT OR REPLACE INTO personal_tasks (
+                    id, session_id, workspace_id, title, status, tier,
+                    progress_percent, current_step, result_summary, mission_id,
+                    action_execution_id, error, metadata, created_at, updated_at
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    task.id,
+                    task.session_id,
+                    task.workspace_id,
+                    task.title,
+                    task.status.value if isinstance(task.status, PersonalTaskStatus) else str(task.status),
+                    task.tier.value if isinstance(task.tier, IntentTier) else str(task.tier),
+                    task.progress_percent,
+                    task.current_step,
+                    task.result_summary,
+                    task.mission_id,
+                    task.action_execution_id,
+                    task.error,
+                    json.dumps(task.metadata),
+                    task.created_at,
+                    task.updated_at,
+                ),
+            )
+        return task
+
+    def get_task(self, task_id: str) -> PersonalTask | None:
+        """Retrieves a personal task by ID."""
+        conn = self._get_connection()
+        row = conn.execute("SELECT * FROM personal_tasks WHERE id = ?", (task_id,)).fetchone()
+        if not row:
+            return None
+        return self._row_to_task(row)
+
+    def list_tasks(
+        self,
+        workspace_id: str,
+        session_id: str | None = None,
+        status: str | None = None,
+        limit: int = 20,
+    ) -> list[PersonalTask]:
+        """Lists personal tasks for a workspace, optionally filtered by session or status."""
+        conn = self._get_connection()
+        conditions = ["workspace_id = ?"]
+        params: list[Any] = [workspace_id]
+
+        if session_id:
+            conditions.append("session_id = ?")
+            params.append(session_id)
+        if status:
+            conditions.append("status = ?")
+            params.append(status)
+
+        where_clause = " AND ".join(conditions)
+        sql = f"SELECT * FROM personal_tasks WHERE {where_clause} ORDER BY updated_at DESC LIMIT ?"
+        params.append(max(1, limit))
+
+        rows = conn.execute(sql, params).fetchall()
+        return [self._row_to_task(r) for r in rows]
+
+    def update_task_progress(
+        self,
+        task_id: str,
+        progress_percent: int,
+        current_step: str,
+        status: PersonalTaskStatus | str | None = None,
+        result_summary: str | None = None,
+        error: str | None = None,
+    ) -> PersonalTask | None:
+        """Updates progress, step, status, and outcome of a personal task."""
+        task = self.get_task(task_id)
+        if not task:
+            return None
+
+        task.progress_percent = progress_percent
+        task.current_step = current_step
+        if status:
+            task.status = status if isinstance(status, PersonalTaskStatus) else PersonalTaskStatus.from_str(str(status))
+        if result_summary is not None:
+            task.result_summary = result_summary
+        if error is not None:
+            task.error = error
+        task.updated_at = task.updated_at = str(task.created_at)  # refreshed below
+        from datetime import datetime, timezone
+        task.updated_at = datetime.now(timezone.utc).isoformat()
+
+        return self.save_task(task)
+
+    def _row_to_task(self, row: sqlite3.Row) -> PersonalTask:
+        return PersonalTask(
+            id=row["id"],
+            session_id=row["session_id"],
+            workspace_id=row["workspace_id"],
+            title=row["title"],
+            status=PersonalTaskStatus.from_str(row["status"]),
+            tier=IntentTier.from_str(row["tier"]),
+            progress_percent=int(row["progress_percent"]),
+            current_step=row["current_step"] or "",
+            result_summary=row["result_summary"],
+            mission_id=row["mission_id"],
+            action_execution_id=row["action_execution_id"],
+            error=row["error"],
+            metadata=json.loads(row["metadata"]) if row["metadata"] else {},
+            created_at=row["created_at"],
+            updated_at=row["updated_at"],
         )
 
     def close(self) -> None:

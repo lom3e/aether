@@ -1,13 +1,15 @@
-import { useState, useEffect, useContext } from 'react';
+import { useState, useEffect, useContext, useRef } from 'react';
 import {
   Sparkles, Send, CheckCircle2, Clock, AlertTriangle, ArrowRight,
-  Plus, Calendar, FileText, Users, Activity, Check, X, Shield, RefreshCw
+  Plus, Calendar, FileText, Users, Activity, Check, X, Shield, RefreshCw,
+  Mic, MicOff, Volume2, VolumeX, ExternalLink
 } from 'lucide-react';
 import { apiUrl } from './api';
 import { useTranslation } from './i18n';
 import { ToastContext } from './toast';
 import { AutoArchitectModal } from './AutoArchitectModal';
 import { TopHeader } from './TopHeader';
+import { NotificationCenter } from './NotificationCenter';
 
 interface HomeProps {
   navigate: (view: string, params?: any) => void;
@@ -53,8 +55,16 @@ export function Home({
     connected_apps_count: 0,
     active_works: [],
     recent_works: [],
+    background_tasks: [],
+    unread_notifications: 0,
   });
   const [isAutoArchitectOpen, setIsAutoArchitectOpen] = useState(false);
+
+  // Voice state
+  const [isListening, setIsListening] = useState(false);
+  const [isSpeaking, setIsSpeaking] = useState(false);
+  const [speakingMessageId, setSpeakingMessageId] = useState<string | null>(null);
+  const recognitionRef = useRef<any>(null);
 
   const showToast = useContext(ToastContext);
   const { t } = useTranslation();
@@ -76,6 +86,161 @@ export function Home({
       fetchOverview();
     }
   }, [workspaceName]);
+
+  // Real-time SSE Connection (Phase D Event Hub)
+  useEffect(() => {
+    if (!workspaceName) return;
+
+    let eventSource: EventSource | null = null;
+    try {
+      const token = (typeof window !== 'undefined' && (window as any).__AETHER_SESSION_TOKEN__) || '';
+      const tokenQuery = token ? `&token=${encodeURIComponent(token)}` : '';
+      eventSource = new EventSource(apiUrl(`/api/personal/events?workspace_id=${encodeURIComponent(workspaceName)}${tokenQuery}`));
+
+      eventSource.addEventListener('step_update', (e: MessageEvent) => {
+        try {
+          const data = JSON.parse(e.data);
+          if (data && data.step) {
+            setMessages(prev => {
+              if (prev.length === 0) return prev;
+              const last = prev[prev.length - 1];
+              if (last.role === 'assistant') {
+                const exists = last.steps.some(s => s.id === data.step.id);
+                const updated = exists
+                  ? last.steps.map(s => s.id === data.step.id ? data.step : s)
+                  : [...last.steps, data.step];
+                return [...prev.slice(0, -1), { ...last, steps: updated }];
+              }
+              return prev;
+            });
+          }
+        } catch {
+          // Ignore parse errors
+        }
+      });
+
+      eventSource.addEventListener('task_progress', (e: MessageEvent) => {
+        try {
+          const data = JSON.parse(e.data);
+          if (data) {
+            setOverview((prev: any) => {
+              const bgTasks = prev.background_tasks || [];
+              const exists = bgTasks.some((t: any) => t.id === data.task_id);
+              const updated = exists
+                ? bgTasks.map((t: any) => t.id === data.task_id ? {
+                    ...t,
+                    progress_pct: data.progress_pct,
+                    current_step: data.step_title,
+                    status: data.status,
+                  } : t)
+                : [{
+                    id: data.task_id,
+                    title: data.step_title,
+                    status: data.status,
+                    progress_pct: data.progress_pct,
+                    current_step: data.step_title,
+                  }, ...bgTasks];
+              return { ...prev, background_tasks: updated };
+            });
+          }
+        } catch {
+          // Ignore
+        }
+      });
+
+      eventSource.addEventListener('task_completed', () => {
+        fetchOverview();
+      });
+
+      eventSource.addEventListener('notification', () => {
+        fetchOverview();
+      });
+    } catch (err) {
+      console.debug('EventSource not connected', err);
+    }
+
+    return () => {
+      if (eventSource) {
+        eventSource.close();
+      }
+    };
+  }, [workspaceName]);
+
+  // Voice Web Speech Recognition initialization
+  useEffect(() => {
+    const SpeechRecognition = (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition;
+    if (SpeechRecognition) {
+      const rec = new SpeechRecognition();
+      rec.continuous = false;
+      rec.interimResults = true;
+      rec.lang = 'en-US';
+
+      rec.onresult = (event: any) => {
+        let transcript = '';
+        for (let i = event.resultIndex; i < event.results.length; ++i) {
+          transcript += event.results[i][0].transcript;
+        }
+        if (transcript) {
+          setPromptInput(transcript);
+        }
+      };
+
+      rec.onerror = () => {
+        setIsListening(false);
+      };
+
+      rec.onend = () => {
+        setIsListening(false);
+      };
+
+      recognitionRef.current = rec;
+    }
+  }, []);
+
+  const toggleListening = () => {
+    if (!recognitionRef.current) {
+      showToast('Speech recognition not supported in this browser.', 'warning');
+      return;
+    }
+    if (isListening) {
+      recognitionRef.current.stop();
+      setIsListening(false);
+    } else {
+      try {
+        recognitionRef.current.start();
+        setIsListening(true);
+        showToast('Listening... Speak your request.', 'info');
+      } catch (e) {
+        console.error(e);
+      }
+    }
+  };
+
+  const handleSpeakText = (msgId: string, text: string) => {
+    if (!('speechSynthesis' in window)) {
+      showToast('Audio synthesis not supported in this browser.', 'warning');
+      return;
+    }
+    if (isSpeaking && speakingMessageId === msgId) {
+      window.speechSynthesis.cancel();
+      setIsSpeaking(false);
+      setSpeakingMessageId(null);
+      return;
+    }
+    window.speechSynthesis.cancel();
+    const utterance = new SpeechSynthesisUtterance(text);
+    utterance.onend = () => {
+      setIsSpeaking(false);
+      setSpeakingMessageId(null);
+    };
+    utterance.onerror = () => {
+      setIsSpeaking(false);
+      setSpeakingMessageId(null);
+    };
+    setIsSpeaking(true);
+    setSpeakingMessageId(msgId);
+    window.speechSynthesis.speak(utterance);
+  };
 
   // If no workspace exists or is active, show the explicit no-workspace empty state
   if (!workspaceName) {
@@ -122,6 +287,11 @@ export function Home({
   const handleSendPrompt = async (promptText: string) => {
     const text = promptText.trim();
     if (!text || isSubmitting) return;
+
+    if (isListening && recognitionRef.current) {
+      recognitionRef.current.stop();
+      setIsListening(false);
+    }
 
     setIsSubmitting(true);
     const userMsg: PersonalMsg = {
@@ -184,7 +354,7 @@ export function Home({
           return msg;
         }));
       }
-    } catch (e) {
+    } catch {
       showToast('Error approving action.', 'error');
     }
   };
@@ -209,7 +379,7 @@ export function Home({
           return msg;
         }));
       }
-    } catch (e) {
+    } catch {
       showToast('Error declining action.', 'error');
     }
   };
@@ -221,13 +391,16 @@ export function Home({
         subtitle={workspaceName}
         icon={Sparkles}
         actions={
-          <button
-            className="btn btn-ghost"
-            onClick={fetchOverview}
-            style={{ display: 'flex', alignItems: 'center', gap: '6px', fontSize: '13px' }}
-          >
-            <RefreshCw size={14} /> Refresh
-          </button>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+            <NotificationCenter workspaceName={workspaceName} onNavigate={navigate} />
+            <button
+              className="btn btn-ghost"
+              onClick={fetchOverview}
+              style={{ display: 'flex', alignItems: 'center', gap: '6px', fontSize: '13px' }}
+            >
+              <RefreshCw size={14} /> Refresh
+            </button>
+          </div>
         }
       />
       <div style={{ flex: 1, overflowY: 'auto', padding: '32px 28px', maxWidth: '1000px', margin: '0 auto', width: '100%' }}>
@@ -262,20 +435,22 @@ export function Home({
               width: '40px',
               height: '40px',
               borderRadius: '12px',
-              backgroundColor: 'hsl(var(--primary)/0.15)',
-              color: 'hsl(var(--primary))',
+              backgroundColor: isListening ? '#ef444420' : 'hsl(var(--primary)/0.15)',
+              color: isListening ? '#ef4444' : 'hsl(var(--primary))',
               display: 'flex',
               alignItems: 'center',
               justifyContent: 'center',
               flexShrink: 0,
+              transition: 'all 0.2s ease',
             }}>
-              <Sparkles size={22} />
+              {isListening ? <Mic size={22} className="animate-pulse" /> : <Sparkles size={22} />}
             </div>
             <div style={{ flex: 1 }}>
               <textarea
+                data-testid="companion-input-field"
                 className="input"
                 rows={2}
-                placeholder="What would you like Aether to take care of? (e.g. 'Schedule a meeting with Sarah tomorrow', 'Create a brief', 'Run full market analysis')"
+                placeholder={isListening ? "Listening... Speak your goal clearly" : "What would you like Aether to take care of? (e.g. 'Schedule a meeting with Sarah tomorrow', 'Create a brief', 'Run full market analysis')"}
                 value={promptInput}
                 onChange={e => setPromptInput(e.target.value)}
                 onKeyDown={e => {
@@ -326,215 +501,322 @@ export function Home({
                   </button>
                 </div>
 
-                <button
-                className="btn btn-primary"
-                disabled={!promptInput.trim() || isSubmitting}
-                onClick={() => handleSendPrompt(promptInput)}
-                style={{ padding: '6px 16px', display: 'flex', alignItems: 'center', gap: '6px', fontSize: '13px' }}
-              >
-                {isSubmitting ? 'Thinking...' : 'Take Care of It'}
-                <Send size={14} />
-              </button>
+                <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                  {/* Push-to-Talk Microphone Button */}
+                  <button
+                    type="button"
+                    data-testid="voice-mic-btn"
+                    onClick={toggleListening}
+                    title={isListening ? "Stop listening" : "Voice input (push to speak)"}
+                    className={`btn ${isListening ? 'btn-danger' : 'btn-ghost'}`}
+                    style={{
+                      padding: '6px 10px',
+                      display: 'flex',
+                      alignItems: 'center',
+                      gap: '4px',
+                      fontSize: '13px',
+                      color: isListening ? '#ef4444' : undefined,
+                    }}
+                  >
+                    {isListening ? <MicOff size={16} /> : <Mic size={16} />}
+                    <span style={{ fontSize: '12px' }}>{isListening ? 'Listening...' : 'Voice'}</span>
+                  </button>
+
+                  <button
+                    data-testid="companion-submit-btn"
+                    className="btn btn-primary"
+                    disabled={!promptInput.trim() || isSubmitting}
+                    onClick={() => handleSendPrompt(promptInput)}
+                    style={{ padding: '6px 16px', display: 'flex', alignItems: 'center', gap: '6px', fontSize: '13px' }}
+                  >
+                    {isSubmitting ? 'Thinking...' : 'Take Care of It'}
+                    <Send size={14} />
+                  </button>
+                </div>
+              </div>
             </div>
           </div>
         </div>
-      </div>
 
-      {/* Live Conversation Stream (if any) */}
-      {messages.length > 0 && (
-        <div style={{ display: 'flex', flexDirection: 'column', gap: '16px', marginBottom: '32px' }}>
-          {messages.map(msg => (
-            <div
-              key={msg.id}
-              className="card"
-              style={{
-                padding: '18px 22px',
-                borderRadius: '14px',
-                backgroundColor: msg.role === 'user' ? 'hsl(var(--muted)/0.3)' : 'hsl(var(--card))',
-                border: msg.role === 'user' ? '1px solid hsl(var(--border))' : '1px solid hsl(var(--primary)/0.25)',
-              }}
-            >
-              <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '8px' }}>
-                <span style={{ fontWeight: 600, fontSize: '13px', color: msg.role === 'user' ? 'hsl(var(--fg))' : 'hsl(var(--primary))' }}>
-                  {msg.role === 'user' ? 'You' : 'Personal Aether'}
-                </span>
-                <span style={{ fontSize: '11px', color: 'hsl(var(--muted-fg))' }}>
-                  {msg.created_at ? new Date(msg.created_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : ''}
-                </span>
-              </div>
-
-              {/* Steps Stepper */}
-              {msg.steps && msg.steps.length > 0 && (
-                <div style={{ display: 'flex', flexDirection: 'column', gap: '6px', margin: '10px 0 14px', padding: '10px 14px', backgroundColor: 'hsl(var(--muted)/0.2)', borderRadius: '8px' }}>
-                  {msg.steps.map(st => (
-                    <div key={st.id} style={{ display: 'flex', alignItems: 'center', gap: '8px', fontSize: '12px' }}>
-                      {st.status === 'completed' ? (
-                        <CheckCircle2 size={14} color="#10b981" />
-                      ) : st.status === 'pending_approval' ? (
-                        <AlertTriangle size={14} color="#f59e0b" />
-                      ) : (
-                        <Clock size={14} color="hsl(var(--primary))" />
-                      )}
-                      <span style={{ fontWeight: 500, color: st.status === 'pending_approval' ? '#f59e0b' : 'hsl(var(--fg))' }}>
-                        {st.title}
-                      </span>
-                    </div>
-                  ))}
-                </div>
-              )}
-
-              <div style={{ fontSize: '14px', lineHeight: 1.6, color: 'hsl(var(--fg))', whiteSpace: 'pre-wrap' }}>
-                {msg.content}
-              </div>
-
-              {/* Pending Approval Action Card in Message */}
-              {msg.action_execution_id && msg.steps.some(s => s.status === 'pending_approval') && (
-                <div style={{ marginTop: '14px', padding: '12px 16px', borderRadius: '10px', backgroundColor: '#f59e0b10', border: '1px solid #f59e0b40', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+        {/* Live Conversation Stream (if any) */}
+        {messages.length > 0 && (
+          <div data-testid="companion-messages-container" style={{ display: 'flex', flexDirection: 'column', gap: '16px', marginBottom: '32px' }}>
+            {messages.map(msg => (
+              <div
+                key={msg.id}
+                className="card"
+                style={{
+                  padding: '18px 22px',
+                  borderRadius: '14px',
+                  backgroundColor: msg.role === 'user' ? 'hsl(var(--muted)/0.3)' : 'hsl(var(--card))',
+                  border: msg.role === 'user' ? '1px solid hsl(var(--border))' : '1px solid hsl(var(--primary)/0.25)',
+                }}
+              >
+                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '8px' }}>
                   <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-                    <Shield size={16} color="#f59e0b" />
-                    <span style={{ fontSize: '13px', fontWeight: 600, color: '#f59e0b' }}>Confirmation Required</span>
+                    <span style={{ fontWeight: 600, fontSize: '13px', color: msg.role === 'user' ? 'hsl(var(--fg))' : 'hsl(var(--primary))' }}>
+                      {msg.role === 'user' ? 'You' : 'Personal Aether'}
+                    </span>
+                    <span style={{ fontSize: '11px', color: 'hsl(var(--muted-fg))' }}>
+                      {msg.created_at ? new Date(msg.created_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : ''}
+                    </span>
+                  </div>
+
+                  {msg.role === 'assistant' && (
+                    <button
+                      type="button"
+                      onClick={() => handleSpeakText(msg.id, msg.content)}
+                      title={isSpeaking && speakingMessageId === msg.id ? "Stop audio" : "Read aloud"}
+                      className="btn btn-ghost"
+                      style={{ padding: '4px', height: 'auto', color: 'hsl(var(--muted-fg))' }}
+                    >
+                      {isSpeaking && speakingMessageId === msg.id ? <VolumeX size={15} color="hsl(var(--primary))" /> : <Volume2 size={15} />}
+                    </button>
+                  )}
+                </div>
+
+                {/* Steps Stepper */}
+                {msg.steps && msg.steps.length > 0 && (
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: '6px', margin: '10px 0 14px', padding: '10px 14px', backgroundColor: 'hsl(var(--muted)/0.2)', borderRadius: '8px' }}>
+                    {msg.steps.map(st => (
+                      <div key={st.id} style={{ display: 'flex', alignItems: 'center', gap: '8px', fontSize: '12px' }}>
+                        {st.status === 'completed' ? (
+                          <CheckCircle2 size={14} color="#10b981" />
+                        ) : st.status === 'pending_approval' ? (
+                          <AlertTriangle size={14} color="#f59e0b" />
+                        ) : (
+                          <Clock size={14} color="hsl(var(--primary))" />
+                        )}
+                        <span style={{ fontWeight: 500, color: st.status === 'pending_approval' ? '#f59e0b' : 'hsl(var(--fg))' }}>
+                          {st.title}
+                        </span>
+                      </div>
+                    ))}
+                  </div>
+                )}
+
+                <div style={{ fontSize: '14px', lineHeight: 1.6, color: 'hsl(var(--fg))', whiteSpace: 'pre-wrap' }}>
+                  {msg.content}
+                </div>
+
+                {/* Pending Approval Action Card in Message */}
+                {msg.action_execution_id && msg.steps.some(s => s.status === 'pending_approval') && (
+                  <div style={{ marginTop: '14px', padding: '12px 16px', borderRadius: '10px', backgroundColor: '#f59e0b10', border: '1px solid #f59e0b40', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                      <Shield size={16} color="#f59e0b" />
+                      <span style={{ fontSize: '13px', fontWeight: 600, color: '#f59e0b' }}>Confirmation Required</span>
+                    </div>
+                    <div style={{ display: 'flex', gap: '8px' }}>
+                      <button
+                        className="btn btn-ghost"
+                        onClick={() => handleRejectAction(msg.action_execution_id!)}
+                        style={{ fontSize: '12px', padding: '4px 10px', color: 'hsl(var(--destructive))' }}
+                      >
+                        <X size={13} style={{ marginRight: '4px' }} /> Decline
+                      </button>
+                      <button
+                        className="btn btn-primary"
+                        onClick={() => handleApproveAction(msg.action_execution_id!)}
+                        style={{ fontSize: '12px', padding: '4px 14px', backgroundColor: '#10b981', borderColor: '#10b981' }}
+                      >
+                        <Check size={13} style={{ marginRight: '4px' }} /> Approve
+                      </button>
+                    </div>
+                  </div>
+                )}
+              </div>
+            ))}
+          </div>
+        )}
+
+        {/* Real-time Background Operations (Phase D Background Tasks) */}
+        {overview.background_tasks && overview.background_tasks.length > 0 && (
+          <div data-testid="background-tasks-section" style={{ marginBottom: '32px' }}>
+            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '12px' }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                <Clock size={16} className="text-primary" />
+                <h2 style={{ fontSize: '16px', fontWeight: 700, margin: 0, color: 'hsl(var(--fg))' }}>
+                  Operational Tasks ({overview.background_tasks.length})
+                </h2>
+              </div>
+            </div>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
+              {overview.background_tasks.map((task: any) => (
+                <div
+                  key={task.id}
+                  className="card"
+                  data-testid="background-task-card"
+                  style={{
+                    padding: '16px 20px',
+                    borderRadius: '12px',
+                    border: '1px solid hsl(var(--border))',
+                    display: 'flex',
+                    flexDirection: 'column',
+                    gap: '8px',
+                  }}
+                >
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                    <div>
+                      <span style={{ fontWeight: 600, fontSize: '14px' }}>{task.title || 'Operational Background Task'}</span>
+                      <div style={{ fontSize: '12px', color: 'hsl(var(--muted-fg))', marginTop: '2px' }}>
+                        {task.current_step || task.status}
+                      </div>
+                    </div>
+                    <span
+                      className={`badge ${task.status === 'completed' ? 'badge-success' : task.status === 'running' ? 'badge-primary' : 'badge-warning'}`}
+                      style={{ fontSize: '11px', textTransform: 'capitalize' }}
+                    >
+                      {task.status}
+                    </span>
+                  </div>
+
+                  {/* Progress Bar */}
+                  <div style={{ width: '100%', height: '6px', borderRadius: '3px', backgroundColor: 'hsl(var(--muted))', overflow: 'hidden' }}>
+                    <div
+                      style={{
+                        width: `${task.progress_pct || (task.status === 'completed' ? 100 : 25)}%`,
+                        height: '100%',
+                        backgroundColor: task.status === 'completed' ? '#10b981' : 'hsl(var(--primary))',
+                        transition: 'width 0.4s ease',
+                      }}
+                    />
+                  </div>
+
+                  {task.deliverable_path && (
+                    <div style={{ display: 'flex', justifyContent: 'flex-end', marginTop: '4px' }}>
+                      <button
+                        className="btn btn-ghost"
+                        onClick={() => navigate('missions')}
+                        style={{ fontSize: '12px', padding: '4px 8px', color: 'hsl(var(--primary))', display: 'inline-flex', alignItems: 'center', gap: '4px' }}
+                      >
+                        <ExternalLink size={12} /> View Deliverable
+                      </button>
+                    </div>
+                  )}
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
+
+        {/* Pending Approvals Global Section (if any exists in workspace) */}
+        {overview.pending_approvals && overview.pending_approvals.length > 0 && (
+          <div style={{ marginBottom: '32px' }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '12px' }}>
+              <Shield size={18} color="#f59e0b" />
+              <h2 style={{ fontSize: '16px', fontWeight: 700, margin: 0, color: 'hsl(var(--fg))' }}>
+                Pending Approvals ({overview.pending_approvals.length})
+              </h2>
+            </div>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
+              {overview.pending_approvals.map((appr: any) => (
+                <div
+                  key={appr.execution_id}
+                  className="card"
+                  style={{
+                    padding: '16px 20px',
+                    borderRadius: '12px',
+                    border: '1px solid #f59e0b50',
+                    backgroundColor: '#f59e0b08',
+                    display: 'flex',
+                    justifyContent: 'space-between',
+                    alignItems: 'center',
+                  }}
+                >
+                  <div>
+                    <div style={{ fontWeight: 600, fontSize: '15px' }}>{appr.action_name}</div>
+                    <div style={{ fontSize: '13px', color: 'hsl(var(--muted-fg))', marginTop: '2px' }}>
+                      {appr.description} • {JSON.stringify(appr.input_data)}
+                    </div>
                   </div>
                   <div style={{ display: 'flex', gap: '8px' }}>
                     <button
                       className="btn btn-ghost"
-                      onClick={() => handleRejectAction(msg.action_execution_id!)}
-                      style={{ fontSize: '12px', padding: '4px 10px', color: 'hsl(var(--destructive))' }}
+                      onClick={() => handleRejectAction(appr.execution_id)}
+                      style={{ fontSize: '12px', padding: '6px 12px', color: 'hsl(var(--destructive))' }}
                     >
-                      <X size={13} style={{ marginRight: '4px' }} /> Decline
+                      Decline
                     </button>
                     <button
                       className="btn btn-primary"
-                      onClick={() => handleApproveAction(msg.action_execution_id!)}
-                      style={{ fontSize: '12px', padding: '4px 14px', backgroundColor: '#10b981', borderColor: '#10b981' }}
+                      onClick={() => handleApproveAction(appr.execution_id)}
+                      style={{ fontSize: '12px', padding: '6px 16px', backgroundColor: '#10b981', borderColor: '#10b981' }}
                     >
-                      <Check size={13} style={{ marginRight: '4px' }} /> Approve
+                      Approve
                     </button>
                   </div>
                 </div>
+              ))}
+            </div>
+          </div>
+        )}
+
+        {/* Hub Cards Grid: Work, Connections, Activity */}
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(280px, 1fr))', gap: '16px', marginBottom: '28px' }}>
+          {/* Work Hub Card */}
+          <div
+            className="card"
+            style={{ padding: '20px', borderRadius: '12px', cursor: 'pointer' }}
+            onClick={() => navigate('missions')}
+          >
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '10px' }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '8px', fontWeight: 600, fontSize: '15px' }}>
+                <Users size={18} color="hsl(var(--primary))" /> Work in Progress
+              </div>
+              <ArrowRight size={16} color="hsl(var(--muted-fg))" />
+            </div>
+            <div style={{ fontSize: '13px', color: 'hsl(var(--muted-fg))' }}>
+              {overview.active_works?.length > 0 ? (
+                <span><strong>{overview.active_works.length}</strong> active missions running with digital workforce.</span>
+              ) : (
+                <span>No active missions. Click to view deliverables and execution history.</span>
               )}
             </div>
-          ))}
-        </div>
-      )}
-
-      {/* Pending Approvals Global Section (if any exists in workspace) */}
-      {overview.pending_approvals && overview.pending_approvals.length > 0 && (
-        <div style={{ marginBottom: '32px' }}>
-          <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '12px' }}>
-            <Shield size={18} color="#f59e0b" />
-            <h2 style={{ fontSize: '16px', fontWeight: 700, margin: 0, color: 'hsl(var(--fg))' }}>
-              Pending Approvals ({overview.pending_approvals.length})
-            </h2>
           </div>
-          <div style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
-            {overview.pending_approvals.map((appr: any) => (
-              <div
-                key={appr.execution_id}
-                className="card"
-                style={{
-                  padding: '16px 20px',
-                  borderRadius: '12px',
-                  border: '1px solid #f59e0b50',
-                  backgroundColor: '#f59e0b08',
-                  display: 'flex',
-                  justifyContent: 'space-between',
-                  alignItems: 'center',
-                }}
-              >
-                <div>
-                  <div style={{ fontWeight: 600, fontSize: '15px' }}>{appr.action_name}</div>
-                  <div style={{ fontSize: '13px', color: 'hsl(var(--muted-fg))', marginTop: '2px' }}>
-                    {appr.description} • {JSON.stringify(appr.input_data)}
-                  </div>
-                </div>
-                <div style={{ display: 'flex', gap: '8px' }}>
-                  <button
-                    className="btn btn-ghost"
-                    onClick={() => handleRejectAction(appr.execution_id)}
-                    style={{ fontSize: '12px', padding: '6px 12px', color: 'hsl(var(--destructive))' }}
-                  >
-                    Decline
-                  </button>
-                  <button
-                    className="btn btn-primary"
-                    onClick={() => handleApproveAction(appr.execution_id)}
-                    style={{ fontSize: '12px', padding: '6px 16px', backgroundColor: '#10b981', borderColor: '#10b981' }}
-                  >
-                    Approve
-                  </button>
-                </div>
+
+          {/* Connections Hub Card */}
+          <div
+            className="card"
+            style={{ padding: '20px', borderRadius: '12px', cursor: 'pointer' }}
+            onClick={() => navigate('connections')}
+          >
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '10px' }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '8px', fontWeight: 600, fontSize: '15px' }}>
+                <Calendar size={18} color="#4285F4" /> Connections & Apps
               </div>
-            ))}
-          </div>
-        </div>
-      )}
-
-      {/* Hub Cards Grid: Work, Connections, Activity */}
-      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(280px, 1fr))', gap: '16px', marginBottom: '28px' }}>
-        {/* Work Hub Card */}
-        <div
-          className="card"
-          style={{ padding: '20px', borderRadius: '12px', cursor: 'pointer' }}
-          onClick={() => navigate('missions')}
-        >
-          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '10px' }}>
-            <div style={{ display: 'flex', alignItems: 'center', gap: '8px', fontWeight: 600, fontSize: '15px' }}>
-              <Users size={18} color="hsl(var(--primary))" /> Work in Progress
+              <ArrowRight size={16} color="hsl(var(--muted-fg))" />
             </div>
-            <ArrowRight size={16} color="hsl(var(--muted-fg))" />
-          </div>
-          <div style={{ fontSize: '13px', color: 'hsl(var(--muted-fg))' }}>
-            {overview.active_works?.length > 0 ? (
-              <span><strong>{overview.active_works.length}</strong> active missions running with digital workforce.</span>
-            ) : (
-              <span>No active missions. Click to view deliverables and execution history.</span>
-            )}
-          </div>
-        </div>
-
-        {/* Connections Hub Card */}
-        <div
-          className="card"
-          style={{ padding: '20px', borderRadius: '12px', cursor: 'pointer' }}
-          onClick={() => navigate('connections')}
-        >
-          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '10px' }}>
-            <div style={{ display: 'flex', alignItems: 'center', gap: '8px', fontWeight: 600, fontSize: '15px' }}>
-              <Calendar size={18} color="#4285F4" /> Connections & Apps
+            <div style={{ fontSize: '13px', color: 'hsl(var(--muted-fg))' }}>
+              <span><strong>{overview.connected_apps_count || 1}</strong> apps connected (Calendar sync active).</span>
             </div>
-            <ArrowRight size={16} color="hsl(var(--muted-fg))" />
           </div>
-          <div style={{ fontSize: '13px', color: 'hsl(var(--muted-fg))' }}>
-            <span><strong>{overview.connected_apps_count || 1}</strong> apps connected (Calendar sync active).</span>
-          </div>
-        </div>
 
-        {/* Activity Hub Card */}
-        <div
-          className="card"
-          style={{ padding: '20px', borderRadius: '12px', cursor: 'pointer' }}
-          onClick={() => navigate('activity')}
-        >
-          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '10px' }}>
-            <div style={{ display: 'flex', alignItems: 'center', gap: '8px', fontWeight: 600, fontSize: '15px' }}>
-              <Activity size={18} color="#10b981" /> Activity Feed
+          {/* Activity Hub Card */}
+          <div
+            className="card"
+            style={{ padding: '20px', borderRadius: '12px', cursor: 'pointer' }}
+            onClick={() => navigate('activity')}
+          >
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '10px' }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '8px', fontWeight: 600, fontSize: '15px' }}>
+                <Activity size={18} color="#10b981" /> Activity Feed
+              </div>
+              <ArrowRight size={16} color="hsl(var(--muted-fg))" />
             </div>
-            <ArrowRight size={16} color="hsl(var(--muted-fg))" />
-          </div>
-          <div style={{ fontSize: '13px', color: 'hsl(var(--muted-fg))' }}>
-            <span>View plain-language audit trail of operations and outcomes.</span>
+            <div style={{ fontSize: '13px', color: 'hsl(var(--muted-fg))' }}>
+              <span>View plain-language audit trail of operations and outcomes.</span>
+            </div>
           </div>
         </div>
-      </div>
 
-      {/* AutoArchitect Modal */}
-      {isAutoArchitectOpen && (
-        <AutoArchitectModal
-          isOpen={isAutoArchitectOpen}
-          onClose={() => setIsAutoArchitectOpen(false)}
-          onSuccess={() => fetchOverview()}
-        />
-      )}
+        {/* AutoArchitect Modal */}
+        {isAutoArchitectOpen && (
+          <AutoArchitectModal
+            isOpen={isAutoArchitectOpen}
+            onClose={() => setIsAutoArchitectOpen(false)}
+            onSuccess={() => fetchOverview()}
+          />
+        )}
       </div>
     </div>
   );

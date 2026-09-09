@@ -473,6 +473,7 @@ def test_p_personal_agent_delegate_flow(workspace):
     assert res.tier == IntentTier.DELEGATE
     assert res.mission_id is not None
     assert any(s.category == "delegation" for s in res.steps)
+    personal_svc.task_manager._executor.shutdown(wait=True)
 
 
 def test_q_personal_overview_aggregation(workspace):

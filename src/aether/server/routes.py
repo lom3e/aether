@@ -1,7 +1,7 @@
 import asyncio
 import json
 from fastapi import APIRouter, Request, HTTPException, UploadFile, File, Form, status, Query
-from fastapi.responses import FileResponse
+from fastapi.responses import FileResponse, StreamingResponse
 from pydantic import BaseModel, Field
 from typing import Any
 import hashlib
@@ -4607,6 +4607,193 @@ async def list_activity_route(
         offset=offset,
     )
     return [e.to_dict() for e in events]
+
+
+# ===========================================================================
+# PHASE D — THE AUTONOMOUS OPERATIONAL COMPANION ENGINE
+# ===========================================================================
+
+# ---------------------------------------------------------------------------
+# Notification Fabric Endpoints
+# ---------------------------------------------------------------------------
+
+@router.get("/notifications")
+async def list_notifications_route(
+    request: Request,
+    workspace_id: str | None = None,
+    unread_only: bool = False,
+    status: str | None = None,
+    limit: int = 50,
+):
+    ws = getattr(request.app.state, "workspace", None)
+    if not ws:
+        return []
+    ws_id = (workspace_id or ws.name).strip()
+    notifications = ws.notifications.list_notifications(
+        workspace_id=ws_id,
+        unread_only=unread_only,
+        status=status,
+        limit=limit,
+    )
+    return [n.to_dict() for n in notifications]
+
+
+@router.get("/notifications/unread-count")
+async def get_unread_notification_count_route(request: Request, workspace_id: str | None = None):
+    ws = getattr(request.app.state, "workspace", None)
+    if not ws:
+        return {"unread_count": 0}
+    ws_id = (workspace_id or ws.name).strip()
+    count = ws.notifications.get_unread_count(ws_id)
+    return {"unread_count": count}
+
+
+@router.post("/notifications/{notification_id}/read")
+async def mark_notification_read_route(request: Request, notification_id: str, workspace_id: str | None = None):
+    ws = getattr(request.app.state, "workspace", None)
+    if not ws:
+        raise HTTPException(status_code=503, detail="Workspace not initialized.")
+    ws_id = (workspace_id or ws.name).strip()
+    success = ws.notifications.mark_as_read(ws_id, notification_id)
+    return {"status": "ok" if success else "not_found", "id": notification_id}
+
+
+@router.post("/notifications/read-all")
+async def mark_all_notifications_read_route(request: Request, workspace_id: str | None = None):
+    ws = getattr(request.app.state, "workspace", None)
+    if not ws:
+        raise HTTPException(status_code=503, detail="Workspace not initialized.")
+    ws_id = (workspace_id or ws.name).strip()
+    count = ws.notifications.mark_all_read(ws_id)
+    return {"status": "ok", "marked_count": count}
+
+
+@router.post("/notifications/{notification_id}/dismiss")
+async def dismiss_notification_route(request: Request, notification_id: str, workspace_id: str | None = None):
+    ws = getattr(request.app.state, "workspace", None)
+    if not ws:
+        raise HTTPException(status_code=503, detail="Workspace not initialized.")
+    ws_id = (workspace_id or ws.name).strip()
+    success = ws.notifications.dismiss(ws_id, notification_id)
+    return {"status": "ok" if success else "not_found", "id": notification_id}
+
+
+# ---------------------------------------------------------------------------
+# Personal Background Tasks Endpoints
+# ---------------------------------------------------------------------------
+
+@router.get("/personal/tasks")
+async def list_personal_tasks_route(
+    request: Request,
+    workspace_id: str | None = None,
+    session_id: str | None = None,
+    status: str | None = None,
+    limit: int = 50,
+):
+    ws = getattr(request.app.state, "workspace", None)
+    if not ws:
+        return []
+    ws_id = (workspace_id or ws.name).strip()
+    tasks = ws.personal_store.list_tasks(
+        workspace_id=ws_id,
+        session_id=session_id,
+        status=status,
+        limit=limit,
+    )
+    return [t.to_dict() for t in tasks]
+
+
+@router.get("/personal/tasks/{task_id}")
+async def get_personal_task_route(request: Request, task_id: str):
+    ws = getattr(request.app.state, "workspace", None)
+    if not ws:
+        raise HTTPException(status_code=503, detail="Workspace not initialized.")
+    task = ws.personal_store.get_task(task_id)
+    if not task:
+        raise HTTPException(status_code=404, detail="Task not found.")
+    return task.to_dict()
+
+
+# ---------------------------------------------------------------------------
+# Real-Time Event Hub (SSE)
+# ---------------------------------------------------------------------------
+
+@router.get("/personal/events")
+async def personal_events_sse(request: Request, workspace_id: str | None = None):
+    ws = getattr(request.app.state, "workspace", None)
+    if not ws:
+        raise HTTPException(status_code=503, detail="Workspace not initialized.")
+    ws_id = (workspace_id or ws.name).strip()
+    from aether.personal.events import get_personal_event_hub
+    hub = getattr(ws.personal, "event_hub", None) or get_personal_event_hub()
+    return StreamingResponse(
+        hub.event_generator(workspace_id=ws_id),
+        media_type="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache",
+            "Connection": "keep-alive",
+            "X-Accel-Buffering": "no",
+        },
+    )
+
+
+# ---------------------------------------------------------------------------
+# Voice I/O Pipeline Endpoints
+# ---------------------------------------------------------------------------
+
+class SpeakPayload(BaseModel):
+    text: str
+    voice: str = "standard"
+    language: str = "auto"
+
+
+@router.get("/personal/voice/status")
+async def get_voice_status(request: Request):
+    ws = getattr(request.app.state, "workspace", None)
+    if not ws:
+        return {
+            "mode": "native_browser_speech",
+            "has_server_whisper": False,
+            "browser_web_speech_supported": True,
+            "voice_synthesis_supported": True,
+        }
+    return ws.personal.voice.get_capabilities()
+
+
+@router.post("/personal/voice/speak")
+async def voice_speak(request: Request, payload: SpeakPayload):
+    ws = getattr(request.app.state, "workspace", None)
+    if not ws:
+        raise HTTPException(status_code=503, detail="Workspace not initialized.")
+    directive = ws.personal.voice.synthesize_speech_directive(
+        text=payload.text,
+        voice=payload.voice,
+        language=payload.language,
+    )
+    return directive
+
+
+@router.post("/personal/voice/transcribe")
+async def voice_transcribe(
+    request: Request,
+    file: UploadFile = File(None),
+):
+    ws = getattr(request.app.state, "workspace", None)
+    if not ws:
+        raise HTTPException(status_code=503, detail="Workspace not initialized.")
+    
+    audio_bytes = b""
+    mime_type = "audio/webm"
+    if file is not None:
+        audio_bytes = await file.read()
+        mime_type = file.content_type or "audio/webm"
+    
+    result = ws.personal.voice.transcribe_audio_bytes(
+        audio_bytes=audio_bytes,
+        mime_type=mime_type,
+    )
+    return result
+
 
 
 

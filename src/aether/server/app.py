@@ -54,12 +54,20 @@ async def session_token_middleware(request: Request, call_next):
         path = request.url.path
         # Health check and static UI files are exempt from token authentication
         if path != "/api/health" and path.startswith("/api/"):
+            query_token = None
+            if "query_string" in request.scope:
+                try:
+                    query_token = request.query_params.get("token") or request.query_params.get("session_token")
+                except Exception:
+                    query_token = None
             auth_header = request.headers.get("X-Aether-Session-Token") or request.headers.get("Authorization")
             expected_bearer = f"Bearer {session_token}"
             token_valid = False
             if auth_header:
                 if auth_header == session_token or auth_header == expected_bearer:
                     token_valid = True
+            elif query_token and query_token == session_token:
+                token_valid = True
 
             if not token_valid:
                 return JSONResponse(
