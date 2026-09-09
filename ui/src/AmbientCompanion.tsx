@@ -449,17 +449,28 @@ export function AmbientCompanion({
     hideCompanion();
   };
 
-  // Keyboard dismiss (Escape) & focus
+  // Keyboard shortcuts (Escape to dismiss, Cmd+O for Workspace, Cmd+M for Voice, Cmd+K to clear)
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
       if (e.key === "Escape") {
         handleDismiss();
+      } else if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === "o") {
+        e.preventDefault();
+        handleOpenFullWorkspace();
+      } else if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === "m") {
+        e.preventDefault();
+        toggleVoiceListening();
+      } else if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === "k") {
+        e.preventDefault();
+        setPromptInput("");
+        setLatestResponse(null);
+        inputRef.current?.focus();
       }
     };
     window.addEventListener("keydown", handleKeyDown);
     inputRef.current?.focus();
     return () => window.removeEventListener("keydown", handleKeyDown);
-  }, []);
+  }, [handleDismiss, handleOpenFullWorkspace, toggleVoiceListening]);
 
   const activeRunningTasks = backgroundTasks.filter(
     t => t.status === "running" || t.status === "pending"
@@ -585,7 +596,183 @@ export function AmbientCompanion({
         </div>
       </header>
 
-      {/* 2. Scrollable Body */}
+      {/* 2. Top-Anchored Command Bar (Ambient HUD) */}
+      <div
+        style={{
+          padding: "12px 14px 10px",
+          borderBottom: "1px solid hsl(var(--border))",
+          backgroundColor: "hsl(var(--card))",
+          flexShrink: 0,
+          display: "flex",
+          flexDirection: "column",
+          gap: "8px",
+        }}
+      >
+        <div
+          style={{
+            display: "flex",
+            alignItems: "center",
+            gap: "8px",
+            backgroundColor: "hsl(var(--bg))",
+            border: "1px solid hsl(var(--border))",
+            borderRadius: "10px",
+            padding: "6px 10px",
+            boxShadow: "0 2px 6px rgba(0,0,0,0.04)",
+          }}
+        >
+          <Sparkles size={15} className="text-primary" style={{ flexShrink: 0, opacity: 0.85 }} />
+          <input
+            ref={inputRef}
+            type="text"
+            data-testid="companion-chat-input"
+            value={promptInput}
+            onChange={e => setPromptInput(e.target.value)}
+            onKeyDown={e => {
+              if (e.key === "Enter" && !e.shiftKey) {
+                e.preventDefault();
+                handleSendPrompt();
+              }
+            }}
+            placeholder="Ask Aether, take actions, or dispatch workforce..."
+            disabled={isSubmitting}
+            style={{
+              flex: 1,
+              border: "none",
+              outline: "none",
+              background: "transparent",
+              color: "hsl(var(--fg))",
+              fontSize: "13px",
+              padding: "4px 2px",
+            }}
+          />
+
+          {/* Voice Mic Button */}
+          <button
+            onClick={toggleVoiceListening}
+            title={isListening ? "Listening... click to stop (Cmd+M)" : "Voice input (Cmd+M)"}
+            data-testid="companion-voice-btn"
+            style={{
+              padding: "6px",
+              borderRadius: "6px",
+              border: "none",
+              backgroundColor: isListening ? "hsl(0 84% 60% / 0.15)" : "transparent",
+              color: isListening ? "hsl(0 84% 60%)" : "hsl(var(--muted-fg))",
+              cursor: "pointer",
+              display: "flex",
+              alignItems: "center",
+              justifyContent: "center",
+              animation: isListening ? "pulse 1.5s infinite" : "none",
+            }}
+          >
+            {isListening ? <MicOff size={15} /> : <Mic size={15} />}
+          </button>
+
+          {/* Send Button */}
+          <button
+            onClick={handleSendPrompt}
+            disabled={!promptInput.trim() || isSubmitting}
+            data-testid="companion-send-btn"
+            style={{
+              padding: "6px",
+              borderRadius: "6px",
+              border: "none",
+              backgroundColor: promptInput.trim() ? "hsl(var(--primary))" : "hsl(var(--muted))",
+              color: promptInput.trim() ? "hsl(var(--primary-fg))" : "hsl(var(--muted-fg))",
+              cursor: promptInput.trim() && !isSubmitting ? "pointer" : "default",
+              display: "flex",
+              alignItems: "center",
+              justifyContent: "center",
+              opacity: isSubmitting ? 0.6 : 1,
+            }}
+          >
+            {isSubmitting ? (
+              <Loader2 size={15} className="animate-spin" />
+            ) : (
+              <Send size={14} />
+            )}
+          </button>
+        </div>
+
+        {/* Quick Suggestion Chips */}
+        {!promptInput && (
+          <div style={{ display: "flex", gap: "6px", overflowX: "auto", paddingBottom: "2px" }}>
+            <button
+              onClick={() => {
+                setPromptInput("Schedule a meeting with ");
+                inputRef.current?.focus();
+              }}
+              style={{
+                fontSize: "11px",
+                padding: "3px 8px",
+                borderRadius: "6px",
+                border: "1px solid hsl(var(--border))",
+                backgroundColor: "hsl(var(--bg))",
+                color: "hsl(var(--muted-fg))",
+                cursor: "pointer",
+                whiteSpace: "nowrap",
+              }}
+            >
+              📅 Schedule Meeting
+            </button>
+            <button
+              onClick={() => {
+                setPromptInput("Create a document called ");
+                inputRef.current?.focus();
+              }}
+              style={{
+                fontSize: "11px",
+                padding: "3px 8px",
+                borderRadius: "6px",
+                border: "1px solid hsl(var(--border))",
+                backgroundColor: "hsl(var(--bg))",
+                color: "hsl(var(--muted-fg))",
+                cursor: "pointer",
+                whiteSpace: "nowrap",
+              }}
+            >
+              📝 Create Doc
+            </button>
+            <button
+              onClick={() => {
+                setPromptInput("Deploy workforce to ");
+                inputRef.current?.focus();
+              }}
+              style={{
+                fontSize: "11px",
+                padding: "3px 8px",
+                borderRadius: "6px",
+                border: "1px solid hsl(var(--border))",
+                backgroundColor: "hsl(var(--bg))",
+                color: "hsl(var(--muted-fg))",
+                cursor: "pointer",
+                whiteSpace: "nowrap",
+              }}
+            >
+              🚀 Workforce
+            </button>
+            <button
+              onClick={() => {
+                setPromptInput("What are your capabilities?");
+                inputRef.current?.focus();
+              }}
+              style={{
+                fontSize: "11px",
+                padding: "3px 8px",
+                borderRadius: "6px",
+                border: "1px solid hsl(var(--border))",
+                backgroundColor: "hsl(var(--bg))",
+                color: "hsl(var(--muted-fg))",
+                cursor: "pointer",
+                whiteSpace: "nowrap",
+              }}
+            >
+              ⚡ Capabilities
+            </button>
+          </div>
+        )}
+      </div>
+
+      {/* 3. Scrollable Body */}
       <div
         style={{
           flex: 1,
@@ -967,99 +1154,31 @@ export function AmbientCompanion({
         )}
       </div>
 
-      {/* 3. Dominant Natural-Language Input Bar */}
-      <div
+      {/* 4. Ambient HUD Shortcut Footer */}
+      <footer
         style={{
-          padding: "12px 14px",
+          height: "28px",
+          display: "flex",
+          alignItems: "center",
+          justifyContent: "space-between",
+          padding: "0 14px",
           borderTop: "1px solid hsl(var(--border))",
           backgroundColor: "hsl(var(--card))",
+          fontSize: "10.5px",
+          color: "hsl(var(--muted-fg))",
           flexShrink: 0,
         }}
       >
-        <div
-          style={{
-            display: "flex",
-            alignItems: "center",
-            gap: "8px",
-            backgroundColor: "hsl(var(--bg))",
-            border: "1px solid hsl(var(--border))",
-            borderRadius: "10px",
-            padding: "6px 10px",
-            boxShadow: "0 2px 6px rgba(0,0,0,0.04)",
-          }}
-        >
-          <input
-            ref={inputRef}
-            type="text"
-            data-testid="companion-chat-input"
-            value={promptInput}
-            onChange={e => setPromptInput(e.target.value)}
-            onKeyDown={e => {
-              if (e.key === "Enter" && !e.shiftKey) {
-                e.preventDefault();
-                handleSendPrompt();
-              }
-            }}
-            placeholder="How can I help you?"
-            disabled={isSubmitting}
-            style={{
-              flex: 1,
-              border: "none",
-              outline: "none",
-              background: "transparent",
-              color: "hsl(var(--fg))",
-              fontSize: "13px",
-              padding: "4px 2px",
-            }}
-          />
-
-          {/* Voice Mic Button */}
-          <button
-            onClick={toggleVoiceListening}
-            title={isListening ? "Listening... click to stop" : "Voice input"}
-            data-testid="companion-voice-btn"
-            style={{
-              padding: "6px",
-              borderRadius: "6px",
-              border: "none",
-              backgroundColor: isListening ? "hsl(0 84% 60% / 0.15)" : "transparent",
-              color: isListening ? "hsl(0 84% 60%)" : "hsl(var(--muted-fg))",
-              cursor: "pointer",
-              display: "flex",
-              alignItems: "center",
-              justifyContent: "center",
-              animation: isListening ? "pulse 1.5s infinite" : "none",
-            }}
-          >
-            {isListening ? <MicOff size={15} /> : <Mic size={15} />}
-          </button>
-
-          {/* Send Button */}
-          <button
-            onClick={handleSendPrompt}
-            disabled={!promptInput.trim() || isSubmitting}
-            data-testid="companion-send-btn"
-            style={{
-              padding: "6px",
-              borderRadius: "6px",
-              border: "none",
-              backgroundColor: promptInput.trim() ? "hsl(var(--primary))" : "hsl(var(--muted))",
-              color: promptInput.trim() ? "hsl(var(--primary-fg))" : "hsl(var(--muted-fg))",
-              cursor: promptInput.trim() && !isSubmitting ? "pointer" : "default",
-              display: "flex",
-              alignItems: "center",
-              justifyContent: "center",
-              opacity: isSubmitting ? 0.6 : 1,
-            }}
-          >
-            {isSubmitting ? (
-              <Loader2 size={15} className="animate-spin" />
-            ) : (
-              <Send size={14} />
-            )}
-          </button>
+        <div style={{ display: "flex", gap: "10px", alignItems: "center" }}>
+          <span><kbd style={{ padding: "1px 4px", borderRadius: "3px", backgroundColor: "hsl(var(--muted))" }}>Esc</kbd> hide</span>
+          <span><kbd style={{ padding: "1px 4px", borderRadius: "3px", backgroundColor: "hsl(var(--muted))" }}>Enter</kbd> run</span>
+          <span><kbd style={{ padding: "1px 4px", borderRadius: "3px", backgroundColor: "hsl(var(--muted))" }}>⌘O</kbd> workspace</span>
         </div>
-      </div>
+        <div style={{ display: "flex", gap: "10px", alignItems: "center" }}>
+          <span><kbd style={{ padding: "1px 4px", borderRadius: "3px", backgroundColor: "hsl(var(--muted))" }}>⌘M</kbd> mic</span>
+          <span><kbd style={{ padding: "1px 4px", borderRadius: "3px", backgroundColor: "hsl(var(--muted))" }}>⌘K</kbd> clear</span>
+        </div>
+      </footer>
     </div>
   );
 }

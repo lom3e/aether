@@ -49,6 +49,7 @@ from aether.server.routes import (
     reject_action_execution_route,
     list_connections_route,
     connect_service_route,
+    verify_connection_route,
     disconnect_service_route,
     list_calendar_events_route,
     create_calendar_event_route,
@@ -58,6 +59,7 @@ from aether.server.routes import (
     ApproveActionPayload,
     RejectActionPayload,
     ConnectPayload,
+    VerifyConnectionPayload,
     CreateCalendarEventPayload,
 )
 from aether.workspace.workspace import Workspace
@@ -145,6 +147,7 @@ def test_c_action_executor_direct_execution_do_tier(temp_workspace_dir):
         registry=reg,
         store=act_store,
         activity_service=activity_svc,
+        project_path=temp_workspace_dir,
     )
 
     result = executor.execute(
@@ -597,3 +600,110 @@ async def test_t_rest_connections_and_activity(workspace):
     req5 = make_request("GET", "/api/activity")
     acts = await list_activity_route(req5, workspace_id=workspace.name)
     assert len(acts) >= 1
+
+
+@pytest.mark.asyncio
+async def test_u_personal_agent_real_file_operations_and_intelligence(workspace):
+    personal_svc = workspace.personal
+
+    # 1. Create real document in workspace
+    res_create = personal_svc.process_prompt(
+        workspace_id=workspace.name,
+        prompt="Create a file called release_notes.txt with version 1.6.0 updates",
+    )
+    assert res_create.tier == IntentTier.DO
+    assert "release_notes.txt" in res_create.content
+
+    # Verify physical file creation on disk
+    created_file = workspace.root / "release_notes.txt"
+    assert created_file.exists()
+    assert "1.6.0" in created_file.read_text(encoding="utf-8")
+
+    # 2. Read back real document
+    intent_read = personal_svc.classify_intent("Read file release_notes.txt")
+    assert intent_read.tier == IntentTier.ANSWER
+    assert intent_read.action_id == "files.read_document"
+
+    res_read = personal_svc.process_prompt(
+        workspace_id=workspace.name,
+        prompt="Read file release_notes.txt",
+    )
+    assert res_read.tier == IntentTier.ANSWER
+    assert "release_notes.txt" in res_read.content
+    assert "1.6.0" in res_read.content
+
+    # 3. Intelligent operational synthesis on query
+    res_query = personal_svc.process_prompt(
+        workspace_id=workspace.name,
+        prompt="Who are you and what can you do?",
+    )
+    assert "Aether" in res_query.content
+    assert "Digital Workforce" in res_query.content
+
+
+@pytest.mark.asyncio
+async def test_v_connection_verification_and_secret_masking(workspace):
+    from aether.connections.service import verify_credentials
+
+    # 1. Test verify_credentials unit logic
+    assert verify_credentials("calendar", {})[0] is True
+    assert verify_credentials("github", {})[0] is False
+    assert verify_credentials("github", {"token": "ghp_1234567890abcdef1234"})[0] is True
+    assert verify_credentials("github", {"token": "invalid_format"})[0] is False
+
+    assert verify_credentials("slack", {"bot_token": "xoxb-1234567890"})[0] is True
+    assert verify_credentials("slack", {"webhook_url": "https://hooks.slack.com/services/T00/B00/X00"})[0] is True
+    assert verify_credentials("slack", {"bot_token": "bad_token"})[0] is False
+
+    assert verify_credentials("email", {"username": "u@aether.ai", "password": "pwd", "smtp_host": "smtp.gmail.com"})[0] is True
+    assert verify_credentials("email", {"username": "u@aether.ai", "password": "pwd"})[0] is False
+
+    # 2. Test verify_connection_route endpoint
+    app.state.workspace = workspace
+    req_verify_bad = make_request("POST", "/api/connections/github/verify")
+    resp_bad = await verify_connection_route(
+        req_verify_bad,
+        "github",
+        VerifyConnectionPayload(auth_metadata={"token": "bad"}),
+    )
+    assert resp_bad["valid"] is False
+    assert "Invalid GitHub token format" in resp_bad["message"]
+
+    req_verify_good = make_request("POST", "/api/connections/github/verify")
+    resp_good = await verify_connection_route(
+        req_verify_good,
+        "github",
+        VerifyConnectionPayload(auth_metadata={"token": "ghp_1234567890abcdef1234"}),
+    )
+    assert resp_good["valid"] is True
+
+    # 3. Connect with credentials and check secret masking
+    raw_token = "ghp_secret_access_token_1234567890"
+    req_conn = make_request("POST", "/api/connections")
+    conn_res = await connect_service_route(
+        req_conn,
+        ConnectPayload(
+            provider="github",
+            account_name="Engineering Org",
+            workspace_id=workspace.name,
+            auth_metadata={"token": raw_token, "org": "aether-corp"},
+        ),
+    )
+    assert conn_res["status"] == "connected"
+    # Secret must be masked in response
+    assert conn_res["auth_metadata"]["token"] != raw_token
+    assert "..." in conn_res["auth_metadata"]["token"]
+    assert conn_res["auth_metadata"]["org"] == "aether-corp"
+
+    # 4. List connections also masks secrets
+    req_list = make_request("GET", "/api/connections")
+    conns = await list_connections_route(req_list, workspace_id=workspace.name)
+    gh_conn = next(c for c in conns if c["provider"] == "github")
+    assert gh_conn["auth_metadata"]["token"] != raw_token
+    assert "..." in gh_conn["auth_metadata"]["token"]
+
+    # 5. Underlying store keeps actual secret for backend tool execution
+    db_conn = workspace.connections.get_connection(workspace.name, "github")
+    assert db_conn.auth_metadata["token"] == raw_token
+
+

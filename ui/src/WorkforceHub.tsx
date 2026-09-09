@@ -67,6 +67,23 @@ export function WorkforceHub({ initialTab = 'teams', navigate = () => {} }: Work
         </button>
 
         <button
+          className={`btn btn-ghost ${currentTab === 'skills' ? 'active' : ''}`}
+          onClick={() => setCurrentTab('skills')}
+          style={{
+            borderBottom: currentTab === 'skills' ? '2px solid hsl(var(--primary))' : 'none',
+            borderRadius: 0,
+            padding: '8px 14px',
+            fontSize: '13px',
+            fontWeight: 600,
+            display: 'flex',
+            alignItems: 'center',
+            gap: '6px',
+          }}
+        >
+          <Puzzle size={15} /> Skills
+        </button>
+
+        <button
           data-testid="tab-memory"
           className={`btn btn-ghost ${currentTab === 'memory' ? 'active' : ''}`}
           onClick={() => setCurrentTab('memory')}
@@ -117,23 +134,6 @@ export function WorkforceHub({ initialTab = 'teams', navigate = () => {} }: Work
           }}
         >
           <Activity size={15} /> Workforce Health
-        </button>
-
-        <button
-          className={`btn btn-ghost ${currentTab === 'skills' ? 'active' : ''}`}
-          onClick={() => setCurrentTab('skills')}
-          style={{
-            borderBottom: currentTab === 'skills' ? '2px solid hsl(var(--primary))' : 'none',
-            borderRadius: 0,
-            padding: '8px 14px',
-            fontSize: '13px',
-            fontWeight: 600,
-            display: 'flex',
-            alignItems: 'center',
-            gap: '6px',
-          }}
-        >
-          <Puzzle size={15} /> Skills
         </button>
       </div>
 

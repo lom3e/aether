@@ -144,8 +144,12 @@ export const WorkforceHealthView: React.FC<WorkforceHealthViewProps> = ({
       style={{
         display: 'flex',
         flexDirection: 'column',
-        gap: '20px',
-        padding: '4px',
+        gap: '24px',
+        padding: '24px 32px',
+        maxWidth: '1200px',
+        margin: '0 auto',
+        width: '100%',
+        boxSizing: 'border-box',
       }}
     >
       {/* 1. Overall Status Header Card */}

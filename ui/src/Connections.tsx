@@ -1,7 +1,7 @@
 import { useState, useEffect, useContext } from 'react';
 import {
   Calendar, Mail, GitBranch, MessageSquare, FileText, CheckCircle2,
-  Plus, RefreshCw, Clock, Zap
+  AlertCircle, ShieldCheck, Settings, Plus, RefreshCw, Clock, Zap
 } from 'lucide-react';
 import { apiUrl } from './api';
 import { ToastContext } from './toast';
@@ -13,6 +13,7 @@ interface ConnectionItem {
   status: string;
   scopes: string[];
   capabilities: string[];
+  auth_metadata?: Record<string, any>;
   updated_at?: string;
 }
 
@@ -48,6 +49,28 @@ export function Connections({ navigate: _navigate }: { navigate?: (view: string,
   const [newStartTime, setNewStartTime] = useState('');
   const [newLocation, setNewLocation] = useState('');
   const [creatingEvent, setCreatingEvent] = useState(false);
+
+  // Config Modal State
+  const [configModalProvider, setConfigModalProvider] = useState<{
+    id: string;
+    name: string;
+    icon: any;
+    description: string;
+    color: string;
+    builtIn: boolean;
+  } | null>(null);
+  const [credAccountName, setCredAccountName] = useState('');
+  const [githubToken, setGithubToken] = useState('');
+  const [slackToken, setSlackToken] = useState('');
+  const [slackWebhook, setSlackWebhook] = useState('');
+  const [emailUser, setEmailUser] = useState('');
+  const [emailPass, setEmailPass] = useState('');
+  const [emailHost, setEmailHost] = useState('smtp.gmail.com');
+  const [emailPort, setEmailPort] = useState('587');
+  const [notionToken, setNotionToken] = useState('');
+  const [testingCreds, setTestingCreds] = useState(false);
+  const [savingCreds, setSavingCreds] = useState(false);
+  const [testResult, setTestResult] = useState<{ valid: boolean; message: string } | null>(null);
 
   const showToast = useContext(ToastContext);
 
@@ -116,22 +139,151 @@ export function Connections({ navigate: _navigate }: { navigate?: (view: string,
     fetchAll();
   }, []);
 
-  const handleConnect = async (provider: string) => {
+  const openConfigModal = (provider: (typeof availableProviders)[0], existingConn?: ConnectionItem) => {
+    setConfigModalProvider(provider);
+    setCredAccountName(existingConn?.account_name || `Personal ${provider.name}`);
+    setTestResult(null);
+    setGithubToken('');
+    setSlackToken('');
+    setSlackWebhook('');
+    setEmailUser('');
+    setEmailPass('');
+    setEmailHost('smtp.gmail.com');
+    setEmailPort('587');
+    setNotionToken('');
+
+    if (existingConn?.auth_metadata) {
+      const meta = existingConn.auth_metadata;
+      if (provider.id === 'github' && meta.token) setGithubToken(meta.token);
+      if (provider.id === 'slack') {
+        if (meta.bot_token) setSlackToken(meta.bot_token);
+        if (meta.webhook_url) setSlackWebhook(meta.webhook_url);
+      }
+      if (provider.id === 'email') {
+        if (meta.username) setEmailUser(meta.username);
+        if (meta.password) setEmailPass(meta.password);
+        if (meta.smtp_host) setEmailHost(meta.smtp_host);
+        if (meta.smtp_port) setEmailPort(String(meta.smtp_port));
+      }
+      if (provider.id === 'notion' && meta.token) setNotionToken(meta.token);
+    }
+  };
+
+  const buildAuthMetadata = (providerId: string) => {
+    if (providerId === 'github') {
+      return { token: githubToken.trim() };
+    }
+    if (providerId === 'slack') {
+      const meta: Record<string, string> = {};
+      if (slackToken.trim()) meta.bot_token = slackToken.trim();
+      if (slackWebhook.trim()) meta.webhook_url = slackWebhook.trim();
+      return meta;
+    }
+    if (providerId === 'email') {
+      return {
+        username: emailUser.trim(),
+        password: emailPass.trim(),
+        smtp_host: emailHost.trim() || 'smtp.gmail.com',
+        smtp_port: parseInt(emailPort.trim(), 10) || 587,
+      };
+    }
+    if (providerId === 'notion') {
+      return { token: notionToken.trim() };
+    }
+    return {};
+  };
+
+  const handleTestCreds = async () => {
+    if (!configModalProvider) return;
+    setTestingCreds(true);
+    setTestResult(null);
+    try {
+      const authMeta = buildAuthMetadata(configModalProvider.id);
+      const res = await fetch(apiUrl(`/api/connections/${configModalProvider.id}/verify`), {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          auth_metadata: authMeta,
+        }),
+      });
+      const data = await res.json();
+      setTestResult({
+        valid: Boolean(data.valid),
+        message: data.message || (data.valid ? 'Credentials format verified.' : 'Verification failed.'),
+      });
+    } catch (err) {
+      setTestResult({
+        valid: false,
+        message: 'Could not connect to backend server for verification.',
+      });
+    } finally {
+      setTestingCreds(false);
+    }
+  };
+
+  const handleSaveAndConnect = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!configModalProvider) return;
+
+    const authMeta = buildAuthMetadata(configModalProvider.id);
+    setSavingCreds(true);
+    try {
+      const verifyRes = await fetch(apiUrl(`/api/connections/${configModalProvider.id}/verify`), {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ auth_metadata: authMeta }),
+      });
+      const verifyData = await verifyRes.json();
+      if (!verifyData.valid) {
+        setTestResult({
+          valid: false,
+          message: verifyData.message || 'Invalid credentials format. Please review requirements.',
+        });
+        setSavingCreds(false);
+        return;
+      }
+
+      const res = await fetch(apiUrl('/api/connections'), {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          provider: configModalProvider.id,
+          account_name: credAccountName.trim() || `Personal ${configModalProvider.name}`,
+          auth_metadata: authMeta,
+        }),
+      });
+      if (res.ok) {
+        showToast(`Connected ${configModalProvider.name} successfully.`, 'success');
+        setConfigModalProvider(null);
+        fetchAll();
+      } else {
+        const err = await res.json().catch(() => ({}));
+        showToast(err.detail || 'Failed to save connection.', 'error');
+      }
+    } catch (err) {
+      showToast('Error connecting service.', 'error');
+    } finally {
+      setSavingCreds(false);
+    }
+  };
+
+  const handleConnectCalendar = async () => {
     try {
       const res = await fetch(apiUrl('/api/connections'), {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          provider,
-          account_name: `Default ${provider.toUpperCase()}`,
+          provider: 'calendar',
+          account_name: 'Primary Calendar (Sync)',
+          auth_metadata: { type: 'sqlite_built_in' },
         }),
       });
       if (res.ok) {
-        showToast(`Connected ${provider} successfully.`, 'success');
+        showToast('Connected Calendar successfully.', 'success');
         fetchAll();
       }
     } catch (e) {
-      showToast('Failed to connect service.', 'error');
+      showToast('Failed to connect Calendar.', 'error');
     }
   };
 
@@ -233,6 +385,7 @@ export function Connections({ navigate: _navigate }: { navigate?: (view: string,
           {availableProviders.map(p => {
             const conn = connections.find(c => c.provider === p.id);
             const isConnected = conn?.status === 'connected';
+            const hasAuth = p.builtIn || (conn?.auth_metadata && Object.keys(conn.auth_metadata).length > 0);
             const Icon = p.icon;
 
             return (
@@ -267,17 +420,23 @@ export function Connections({ navigate: _navigate }: { navigate?: (view: string,
                       <div>
                         <div style={{ fontWeight: 600, fontSize: '15px' }}>{p.name}</div>
                         <div style={{ fontSize: '12px', color: 'hsl(var(--muted-fg))' }}>
-                          {conn ? conn.account_name : 'Not connected'}
+                          {conn ? conn.account_name : (p.builtIn ? 'Local Engine' : 'Not configured')}
                         </div>
                       </div>
                     </div>
                     {isConnected ? (
-                      <span style={{ display: 'flex', alignItems: 'center', gap: '4px', fontSize: '12px', color: '#10b981', fontWeight: 600 }}>
-                        <CheckCircle2 size={14} /> Connected
-                      </span>
+                      hasAuth ? (
+                        <span style={{ display: 'flex', alignItems: 'center', gap: '4px', fontSize: '12px', color: '#10b981', fontWeight: 600 }}>
+                          <CheckCircle2 size={14} /> Connected
+                        </span>
+                      ) : (
+                        <span style={{ display: 'flex', alignItems: 'center', gap: '4px', fontSize: '12px', color: '#f59e0b', fontWeight: 600 }}>
+                          Needs Auth
+                        </span>
+                      )
                     ) : (
                       <span style={{ fontSize: '12px', color: 'hsl(var(--muted-fg))' }}>
-                        Ready
+                        {p.builtIn ? 'Ready' : 'Not configured'}
                       </span>
                     )}
                   </div>
@@ -289,13 +448,21 @@ export function Connections({ navigate: _navigate }: { navigate?: (view: string,
                 <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '8px', borderTop: '1px solid hsl(var(--border)/0.5)', paddingTop: '14px' }}>
                   {isConnected ? (
                     <>
-                      {p.id === 'calendar' && (
+                      {p.id === 'calendar' ? (
                         <button
                           className="btn btn-secondary"
                           onClick={() => setActiveTab('calendar')}
                           style={{ fontSize: '12px', padding: '6px 12px' }}
                         >
                           View Schedule
+                        </button>
+                      ) : (
+                        <button
+                          className="btn btn-secondary"
+                          onClick={() => openConfigModal(p, conn)}
+                          style={{ fontSize: '12px', padding: '6px 12px', display: 'flex', alignItems: 'center', gap: '4px' }}
+                        >
+                          <Settings size={12} /> Configure
                         </button>
                       )}
                       <button
@@ -309,10 +476,16 @@ export function Connections({ navigate: _navigate }: { navigate?: (view: string,
                   ) : (
                     <button
                       className="btn btn-primary"
-                      onClick={() => handleConnect(p.id)}
+                      onClick={() => {
+                        if (p.builtIn) {
+                          handleConnectCalendar();
+                        } else {
+                          openConfigModal(p);
+                        }
+                      }}
                       style={{ fontSize: '12px', padding: '6px 14px' }}
                     >
-                      Connect
+                      {p.builtIn ? 'Connect' : 'Configure & Connect'}
                     </button>
                   )}
                 </div>
@@ -504,6 +677,226 @@ export function Connections({ navigate: _navigate }: { navigate?: (view: string,
                 >
                   {creatingEvent ? 'Creating...' : 'Save Event'}
                 </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* Credential Configuration Modal */}
+      {configModalProvider && (
+        <div style={{
+          position: 'fixed',
+          inset: 0,
+          backgroundColor: 'rgba(0, 0, 0, 0.6)',
+          backdropFilter: 'blur(4px)',
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'center',
+          zIndex: 1000,
+        }}>
+          <div className="card" style={{ width: '480px', maxHeight: '90vh', overflowY: 'auto', padding: '24px', borderRadius: '12px' }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '10px', marginBottom: '16px' }}>
+              <div style={{
+                width: '36px',
+                height: '36px',
+                borderRadius: '8px',
+                backgroundColor: `${configModalProvider.color}15`,
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                color: configModalProvider.color,
+              }}>
+                <configModalProvider.icon size={20} />
+              </div>
+              <div>
+                <h3 style={{ margin: 0, fontSize: '18px', fontWeight: 600 }}>Configure {configModalProvider.name}</h3>
+                <div style={{ fontSize: '12px', color: 'hsl(var(--muted-fg))' }}>
+                  Provide authentic credentials to enable real agentic actions
+                </div>
+              </div>
+            </div>
+
+            {/* Test result message if any */}
+            {testResult && (
+              <div style={{
+                padding: '10px 14px',
+                borderRadius: '8px',
+                marginBottom: '16px',
+                fontSize: '13px',
+                display: 'flex',
+                alignItems: 'center',
+                gap: '8px',
+                backgroundColor: testResult.valid ? '#10b98115' : '#ef444415',
+                color: testResult.valid ? '#10b981' : '#ef4444',
+                border: `1px solid ${testResult.valid ? '#10b98130' : '#ef444430'}`
+              }}>
+                {testResult.valid ? <CheckCircle2 size={16} /> : <AlertCircle size={16} />}
+                <span>{testResult.message}</span>
+              </div>
+            )}
+
+            <form onSubmit={handleSaveAndConnect} style={{ display: 'flex', flexDirection: 'column', gap: '14px' }}>
+              <div>
+                <label style={{ fontSize: '12px', fontWeight: 600, display: 'block', marginBottom: '4px' }}>Account Name / Label</label>
+                <input
+                  type="text"
+                  className="input"
+                  required
+                  placeholder={`e.g. Primary ${configModalProvider.name}`}
+                  value={credAccountName}
+                  onChange={e => setCredAccountName(e.target.value)}
+                  style={{ width: '100%' }}
+                />
+              </div>
+
+              {/* Provider-specific inputs */}
+              {configModalProvider.id === 'github' && (
+                <div>
+                  <label style={{ fontSize: '12px', fontWeight: 600, display: 'block', marginBottom: '4px' }}>Personal Access Token (PAT)</label>
+                  <input
+                    type="password"
+                    className="input"
+                    required
+                    placeholder="ghp_xxxxxxxxxxxxxxxxxxxx or github_pat_..."
+                    value={githubToken}
+                    onChange={e => { setGithubToken(e.target.value); setTestResult(null); }}
+                    style={{ width: '100%' }}
+                  />
+                  <div style={{ fontSize: '11px', color: 'hsl(var(--muted-fg))', marginTop: '4px' }}>
+                    Requires repo and workflow read/write permissions.
+                  </div>
+                </div>
+              )}
+
+              {configModalProvider.id === 'slack' && (
+                <>
+                  <div>
+                    <label style={{ fontSize: '12px', fontWeight: 600, display: 'block', marginBottom: '4px' }}>Bot User OAuth Token</label>
+                    <input
+                      type="password"
+                      className="input"
+                      placeholder="xoxb-xxxxxxxxxxxx-xxxxxxxxxxxx"
+                      value={slackToken}
+                      onChange={e => { setSlackToken(e.target.value); setTestResult(null); }}
+                      style={{ width: '100%' }}
+                    />
+                  </div>
+                  <div style={{ textAlign: 'center', fontSize: '11px', color: 'hsl(var(--muted-fg))' }}>— OR —</div>
+                  <div>
+                    <label style={{ fontSize: '12px', fontWeight: 600, display: 'block', marginBottom: '4px' }}>Incoming Webhook URL</label>
+                    <input
+                      type="url"
+                      className="input"
+                      placeholder="https://hooks.slack.com/services/..."
+                      value={slackWebhook}
+                      onChange={e => { setSlackWebhook(e.target.value); setTestResult(null); }}
+                      style={{ width: '100%' }}
+                    />
+                  </div>
+                </>
+              )}
+
+              {configModalProvider.id === 'email' && (
+                <>
+                  <div>
+                    <label style={{ fontSize: '12px', fontWeight: 600, display: 'block', marginBottom: '4px' }}>Email Address / Username</label>
+                    <input
+                      type="email"
+                      className="input"
+                      required
+                      placeholder="user@example.com"
+                      value={emailUser}
+                      onChange={e => { setEmailUser(e.target.value); setTestResult(null); }}
+                      style={{ width: '100%' }}
+                    />
+                  </div>
+                  <div>
+                    <label style={{ fontSize: '12px', fontWeight: 600, display: 'block', marginBottom: '4px' }}>App Password / Token</label>
+                    <input
+                      type="password"
+                      className="input"
+                      required
+                      placeholder="Application specific password"
+                      value={emailPass}
+                      onChange={e => { setEmailPass(e.target.value); setTestResult(null); }}
+                      style={{ width: '100%' }}
+                    />
+                  </div>
+                  <div style={{ display: 'grid', gridTemplateColumns: '2fr 1fr', gap: '8px' }}>
+                    <div>
+                      <label style={{ fontSize: '12px', fontWeight: 600, display: 'block', marginBottom: '4px' }}>SMTP Host</label>
+                      <input
+                        type="text"
+                        className="input"
+                        placeholder="smtp.gmail.com"
+                        value={emailHost}
+                        onChange={e => { setEmailHost(e.target.value); setTestResult(null); }}
+                        style={{ width: '100%' }}
+                      />
+                    </div>
+                    <div>
+                      <label style={{ fontSize: '12px', fontWeight: 600, display: 'block', marginBottom: '4px' }}>Port</label>
+                      <input
+                        type="text"
+                        className="input"
+                        placeholder="587"
+                        value={emailPort}
+                        onChange={e => { setEmailPort(e.target.value); setTestResult(null); }}
+                        style={{ width: '100%' }}
+                      />
+                    </div>
+                  </div>
+                </>
+              )}
+
+              {configModalProvider.id === 'notion' && (
+                <div>
+                  <label style={{ fontSize: '12px', fontWeight: 600, display: 'block', marginBottom: '4px' }}>Integration Token</label>
+                  <input
+                    type="password"
+                    className="input"
+                    required
+                    placeholder="secret_xxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
+                    value={notionToken}
+                    onChange={e => { setNotionToken(e.target.value); setTestResult(null); }}
+                    style={{ width: '100%' }}
+                  />
+                  <div style={{ fontSize: '11px', color: 'hsl(var(--muted-fg))', marginTop: '4px' }}>
+                    Internal integration token with read/write database permissions.
+                  </div>
+                </div>
+              )}
+
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginTop: '14px', paddingTop: '14px', borderTop: '1px solid hsl(var(--border))' }}>
+                <button
+                  type="button"
+                  className="btn btn-secondary"
+                  disabled={testingCreds || savingCreds}
+                  onClick={handleTestCreds}
+                  style={{ display: 'flex', alignItems: 'center', gap: '6px', fontSize: '12px' }}
+                >
+                  <ShieldCheck size={14} />
+                  {testingCreds ? 'Verifying...' : 'Test Connection'}
+                </button>
+
+                <div style={{ display: 'flex', gap: '8px' }}>
+                  <button
+                    type="button"
+                    className="btn btn-ghost"
+                    onClick={() => setConfigModalProvider(null)}
+                    disabled={savingCreds}
+                  >
+                    Cancel
+                  </button>
+                  <button
+                    type="submit"
+                    className="btn btn-primary"
+                    disabled={savingCreds}
+                  >
+                    {savingCreds ? 'Saving...' : 'Save & Connect'}
+                  </button>
+                </div>
               </div>
             </form>
           </div>

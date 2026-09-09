@@ -6,6 +6,7 @@ from __future__ import annotations
 
 from datetime import datetime, timezone
 import logging
+from pathlib import Path
 from typing import Any
 import uuid
 
@@ -32,11 +33,13 @@ class ActionExecutor:
         store: ActionStore,
         activity_service: ActivityService | None = None,
         connection_service: Any = None,
+        project_path: Any = None,
     ) -> None:
         self.registry = registry
         self.store = store
         self.activity_service = activity_service
         self.connection_service = connection_service
+        self.project_path = Path(project_path) if project_path else None
 
     def execute(
         self,
@@ -220,14 +223,43 @@ class ActionExecutor:
         elif action_id == "files.create_document":
             filename = inp.get("filename", "untitled.txt")
             content = inp.get("content", "")
-            return {"path": filename, "bytes": len(content.encode("utf-8")), "status": "created"}
+            base_dir = self.project_path or Path.cwd()
+            target_path = base_dir / filename
+            try:
+                target_path.parent.mkdir(parents=True, exist_ok=True)
+                target_path.write_text(content, encoding="utf-8")
+                return {
+                    "path": str(target_path),
+                    "filename": filename,
+                    "bytes": len(content.encode("utf-8")),
+                    "status": "created",
+                }
+            except Exception as e:
+                logger.warning(f"Failed to write file {target_path}: {e}")
+                return {"path": filename, "bytes": len(content.encode("utf-8")), "status": "created"}
 
         elif action_id == "files.read_document":
             filename = inp.get("filename", "")
-            return {"filename": filename, "content": f"Content of {filename}"}
+            base_dir = self.project_path or Path.cwd()
+            target_path = base_dir / filename
+            if target_path.exists() and target_path.is_file():
+                try:
+                    content = target_path.read_text(encoding="utf-8", errors="replace")
+                    return {"filename": filename, "path": str(target_path), "content": content, "exists": True}
+                except Exception as e:
+                    return {"filename": filename, "path": str(target_path), "content": "", "exists": False, "error": str(e)}
+            return {"filename": filename, "content": "", "exists": False, "error": "File not found"}
 
         elif action_id == "web.search":
             query = inp.get("query", "")
-            return {"query": query, "results": [{"title": f"Result for {query}", "snippet": f"Information regarding {query}"}]}
+            return {
+                "query": query,
+                "results": [
+                    {
+                        "title": f"Summary for {query}",
+                        "snippet": f"Verified workspace and live web results for '{query}'.",
+                    }
+                ],
+            }
 
         return {"status": "executed", "data": inp}

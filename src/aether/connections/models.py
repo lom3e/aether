@@ -39,7 +39,22 @@ class Connection:
     created_at: str = field(default_factory=lambda: datetime.now(timezone.utc).isoformat())
     updated_at: str = field(default_factory=lambda: datetime.now(timezone.utc).isoformat())
 
-    def to_dict(self) -> dict[str, Any]:
+    def to_dict(self, mask_secrets: bool = False) -> dict[str, Any]:
+        meta = dict(self.auth_metadata or {})
+        if mask_secrets:
+            masked = {}
+            for k, v in meta.items():
+                if any(secret_word in k.lower() for secret_word in ("token", "secret", "password", "key", "webhook", "pat")):
+                    if isinstance(v, str) and len(v) > 6:
+                        masked[k] = f"{v[:4]}...{v[-3:]}"
+                    elif isinstance(v, str) and v:
+                        masked[k] = "••••••••"
+                    else:
+                        masked[k] = v
+                else:
+                    masked[k] = v
+            meta = masked
+
         return {
             "id": self.id,
             "workspace_id": self.workspace_id,
@@ -48,7 +63,7 @@ class Connection:
             "status": self.status.value if isinstance(self.status, ConnectionStatus) else str(self.status),
             "scopes": self.scopes,
             "capabilities": self.capabilities,
-            "auth_metadata": self.auth_metadata,
+            "auth_metadata": meta,
             "created_at": self.created_at,
             "updated_at": self.updated_at,
         }

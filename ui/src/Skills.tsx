@@ -1,11 +1,12 @@
-import { useState, useContext, useMemo } from 'react';
+import { useState, useContext, useMemo, useEffect, useCallback } from 'react';
 import {
   Puzzle, Globe, FileText, Database, Terminal, Mail, GitBranch,
-  MessageSquare, CheckCircle2, Sliders, Search, X, Sparkles, ArrowRight
+  MessageSquare, CheckCircle2, Sliders, Search, X, Sparkles, ArrowRight, UserCheck
 } from 'lucide-react';
 import { TopHeader } from './TopHeader';
 import { useTranslation } from './i18n';
 import { ToastContext } from './toast';
+import { apiUrl } from './api';
 
 interface SkillItem {
   id: string;
@@ -144,14 +145,80 @@ export function Skills({ navigate }: { navigate?: (view: string) => void } = {})
   const showToast = useContext(ToastContext);
 
   const [skills, setSkills] = useState<SkillItem[]>(INITIAL_SKILLS);
+  const [agents, setAgents] = useState<any[]>([]);
+  const [selectedAgent, setSelectedAgent] = useState<string>('all');
   const [filterCategory, setFilterCategory] = useState<'all' | 'native' | 'integration' | 'mcp'>('all');
   const [searchQuery, setSearchQuery] = useState('');
   const [configuringSkill, setConfiguringSkill] = useState<SkillItem | null>(null);
   const [configValues, setConfigValues] = useState<Record<string, string>>({});
+  const [loading, setLoading] = useState(false);
 
-  const handleToggleSkill = (skill: SkillItem) => {
+  const fetchSkillsData = useCallback(async () => {
+    setLoading(true);
+    try {
+      const [skillsRes, agentsRes, configsRes] = await Promise.all([
+        fetch(apiUrl('/api/skills')),
+        fetch(apiUrl('/api/agents')),
+        fetch(apiUrl('/api/skills/configs')),
+      ]);
+
+      let backendSkills: any[] = [];
+      if (skillsRes.ok) {
+        backendSkills = await skillsRes.json();
+      }
+
+      let backendAgents: any[] = [];
+      if (agentsRes.ok) {
+        backendAgents = await agentsRes.json();
+        setAgents(backendAgents);
+      }
+
+      let configs: Record<string, any> = {};
+      if (configsRes.ok) {
+        configs = await configsRes.json();
+      }
+
+      setSkills(prev => {
+        return prev.map(item => {
+          const isAssigned = backendAgents.some(a => Array.isArray(a.skills) && a.skills.includes(item.id));
+          const hasConfig = configs[item.id] && Object.keys(configs[item.id]).length > 0;
+          const backendMatch = backendSkills.find(bs => bs.name === item.id);
+          return {
+            ...item,
+            version: backendMatch?.version || item.version,
+            enabled: isAssigned || item.category === 'native' || hasConfig,
+          };
+        });
+      });
+    } catch (e) {
+      console.warn("Could not load skills or agents:", e);
+    } finally {
+      setLoading(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    fetchSkillsData();
+  }, [fetchSkillsData]);
+
+  const handleToggleSkill = async (skill: SkillItem) => {
     const next = !skill.enabled;
     setSkills(prev => prev.map(s => s.id === skill.id ? { ...s, enabled: next } : s));
+
+    // Persist assignment to backend if agents are available
+    if (agents.length > 0) {
+      const targetAgent = selectedAgent !== 'all' ? selectedAgent : agents[0].name;
+      try {
+        await fetch(apiUrl(`/api/skills/${skill.id}/assign`), {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ agent_name: targetAgent, enabled: next }),
+        });
+      } catch (err) {
+        console.warn("Failed to persist skill assignment:", err);
+      }
+    }
+
     showToast(
       next
         ? `${skill.name} ${t('skillEnabled') || 'enabled'}`
@@ -164,10 +231,20 @@ export function Skills({ navigate }: { navigate?: (view: string) => void } = {})
     setConfiguringSkill(skill);
   };
 
-  const handleSaveConfig = () => {
+  const handleSaveConfig = async () => {
     if (!configuringSkill) return;
-    showToast(`${configuringSkill.name} ${t('configSaved') || 'configuration saved'}`, 'success');
+    try {
+      await fetch(apiUrl(`/api/skills/${configuringSkill.id}/config`), {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ config: configValues }),
+      });
+      showToast(`${configuringSkill.name} ${t('configSaved') || 'configuration saved'}`, 'success');
+    } catch (err) {
+      showToast('Error saving configuration', 'error');
+    }
     setConfiguringSkill(null);
+    fetchSkillsData();
   };
 
   const filteredSkills = useMemo(() => {
@@ -188,6 +265,7 @@ export function Skills({ navigate }: { navigate?: (view: string) => void } = {})
         icon={Puzzle}
         actions={
           <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+            {loading && <span className="text-muted" style={{ fontSize: '12px' }}>Syncing...</span>}
             <span className="badge badge-primary" style={{ fontSize: '11.5px', padding: '4px 10px' }}>
               {activeCount} / {skills.length} {t('activeSkills') || 'Active'}
             </span>
@@ -227,15 +305,34 @@ export function Skills({ navigate }: { navigate?: (view: string) => void } = {})
             ))}
           </div>
 
-          <div style={{ position: 'relative', width: '260px' }}>
-            <Search size={14} style={{ position: 'absolute', left: '10px', top: '50%', transform: 'translateY(-50%)', color: 'hsl(var(--muted-fg))' }} />
-            <input
-              className="form-input"
-              value={searchQuery}
-              onChange={e => setSearchQuery(e.target.value)}
-              placeholder={t('searchSkills') || 'Search tools & skills...'}
-              style={{ paddingLeft: '32px', height: '36px', fontSize: '13px' }}
-            />
+          <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+            {agents.length > 0 && (
+              <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+                <UserCheck size={14} style={{ color: 'hsl(var(--muted-fg))' }} />
+                <select
+                  value={selectedAgent}
+                  onChange={e => setSelectedAgent(e.target.value)}
+                  className="form-select"
+                  style={{ height: '36px', fontSize: '12.5px', padding: '0 28px 0 10px', minWidth: '160px' }}
+                >
+                  <option value="all">Assign To: All Agents</option>
+                  {agents.map(a => (
+                    <option key={a.name} value={a.name}>{a.name} ({a.role || 'Agent'})</option>
+                  ))}
+                </select>
+              </div>
+            )}
+
+            <div style={{ position: 'relative', width: '220px' }}>
+              <Search size={14} style={{ position: 'absolute', left: '10px', top: '50%', transform: 'translateY(-50%)', color: 'hsl(var(--muted-fg))' }} />
+              <input
+                className="form-input"
+                value={searchQuery}
+                onChange={e => setSearchQuery(e.target.value)}
+                placeholder={t('searchSkills') || 'Search tools & skills...'}
+                style={{ paddingLeft: '32px', height: '36px', fontSize: '13px' }}
+              />
+            </div>
           </div>
         </div>
 

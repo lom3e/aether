@@ -52,6 +52,8 @@ class PersonalAgentService:
         task_manager: PersonalTaskManager | None = None,
         event_hub: PersonalEventHub | None = None,
         voice_service: VoiceService | None = None,
+        provider: Any = None,
+        provider_manager: Any = None,
     ) -> None:
         self.store = store
         self.action_executor = action_executor
@@ -62,6 +64,8 @@ class PersonalAgentService:
         self.notification_service = notification_service
         self.event_hub = event_hub or get_personal_event_hub()
         self.voice_service = voice_service or VoiceService()
+        self.provider = provider
+        self.provider_manager = provider_manager
         self.task_manager = task_manager or PersonalTaskManager(
             store=self.store,
             notification_service=self.notification_service,
@@ -158,6 +162,24 @@ class PersonalAgentService:
                     "filename": filename,
                     "content": f"# Document created by Aether\n\nPrompt: {prompt}\nCreated at: {datetime.now(timezone.utc).isoformat()}",
                 },
+            )
+
+        # 3b. File / Document reading (ANSWER tier with read action)
+        file_read_triggers = [
+            "read document", "read file", "read the file", "show file", "view file",
+            "what's in", "what is in", "leggi il file", "mostra il file", "leggi documento",
+        ]
+        if any(k in p_lower for k in file_read_triggers):
+            file_match = re.search(r"(?:file|document|documento)\s+([a-zA-Z0-9_\-\.]+)", prompt, re.IGNORECASE)
+            if not file_match:
+                file_match = re.search(r"(?:in|called|named)\s+([a-zA-Z0-9_\-\.]+)", prompt, re.IGNORECASE)
+            filename = file_match.group(1).strip() if file_match else "notes.txt"
+            return UserIntent(
+                raw_prompt=effective_prompt,
+                tier=IntentTier.ANSWER,
+                summary=f"Read workspace document: {filename}",
+                action_id="files.read_document",
+                action_args={"filename": filename},
             )
 
         # 4. Multi-agent workforce delegation & deep research / report generation (DELEGATE tier)
@@ -491,6 +513,29 @@ class PersonalAgentService:
                     response_text = "Ecco i tuoi prossimi impegni in calendario:\n\n" + "\n".join(lines)
                 else:
                     response_text = "Non hai eventi programmati in calendario al momento."
+
+            elif intent.action_id == "files.read_document":
+                execution = self.action_executor.execute(
+                    action_id=intent.action_id,
+                    workspace_id=workspace_id,
+                    input_data=intent.action_args,
+                    auto_approve=True,
+                )
+                filename = intent.action_args.get("filename", "file")
+                steps.append(
+                    PersonalStep(
+                        id=f"step-{uuid.uuid4().hex[:8]}",
+                        title=f"Reading document: {filename}",
+                        status="completed",
+                        category="action",
+                    )
+                )
+                if execution.output_data.get("exists"):
+                    content = execution.output_data.get("content", "")
+                    response_text = f"Content of `{filename}`:\n\n```\n{content}\n```"
+                else:
+                    response_text = f"File `{filename}` was not found in the workspace project directory."
+
             else:
                 steps.append(
                     PersonalStep(
@@ -525,12 +570,11 @@ class PersonalAgentService:
                         f"Dettaglio: {session_tasks[0].current_step}."
                     )
                 else:
-                    knowledge_hint = ""
-                    if intel_context and intel_context.evidence:
-                        knowledge_hint = f"\n\n*(Informed by {len(intel_context.evidence)} organizational memory records)*"
-                    response_text = (
-                        f"Certamente! In base al contesto del tuo workspace, posso occuparmene io.\n\n"
-                        f"Puoi chiedermi di coordinare la tua forza lavoro digitale, verificare o programmare appuntamenti, creare documenti o monitorare i progetti attivi.{knowledge_hint}"
+                    response_text = self._generate_intelligent_response(
+                        prompt=prompt,
+                        workspace_id=workspace_id,
+                        intel_context=intel_context,
+                        recent_history=recent_history,
                     )
 
         # 7. Record assistant message
@@ -567,6 +611,129 @@ class PersonalAgentService:
         )
 
         return assistant_msg
+
+    def _resolve_provider(self) -> Any:
+        """Resolves available AI Provider via direct injection, provider manager, or environment."""
+        if self.provider is not None:
+            return self.provider
+        try:
+            from aether.providers.manager import ProviderManager
+            from aether.providers.types import ProviderConfig
+            import os
+            mgr = self.provider_manager or ProviderManager()
+            if os.environ.get("OPENAI_API_KEY"):
+                return mgr.get("openai", ProviderConfig(api_key=os.environ["OPENAI_API_KEY"]))
+            if os.environ.get("ANTHROPIC_API_KEY"):
+                return mgr.get("anthropic", ProviderConfig(api_key=os.environ["ANTHROPIC_API_KEY"]))
+            if os.environ.get("GEMINI_API_KEY"):
+                return mgr.get("gemini", ProviderConfig(api_key=os.environ["GEMINI_API_KEY"]))
+            # Fallback to local Ollama if reachable
+            try:
+                return mgr.get("ollama", ProviderConfig(timeout=3.0))
+            except Exception:
+                pass
+        except Exception as e:
+            logger.debug(f"Provider resolution skipped: {e}")
+        return None
+
+    def _generate_intelligent_response(
+        self,
+        prompt: str,
+        workspace_id: str,
+        intel_context: Any = None,
+        recent_history: list[PersonalMessage] | None = None,
+    ) -> str:
+        """Generates dynamic response using AI Provider if configured, or operational context synthesis."""
+        provider = self._resolve_provider()
+        if provider is not None:
+            try:
+                from aether.providers.types import Message
+                sys_prompt = (
+                    f"You are Personal Aether, the personal operational AI assistant for workspace '{workspace_id}'. "
+                    "You are concise, direct, helpful, and action-oriented. "
+                    "You coordinate workspace files, calendar events, background tasks, and the digital workforce."
+                )
+                if intel_context and getattr(intel_context, "summary", None):
+                    sys_prompt += f"\n\nOrganizational Memory Summary:\n{intel_context.summary}"
+                if intel_context and getattr(intel_context, "evidence", None):
+                    ev_items = [f"- [{e.source}] {e.title}: {e.content[:140]}" for e in intel_context.evidence[:5]]
+                    sys_prompt += f"\nRelevant Memory Evidence:\n" + "\n".join(ev_items)
+
+                messages = [Message(role="system", content=sys_prompt)]
+                if recent_history:
+                    for m in recent_history[-4:]:
+                        messages.append(Message(role=m.role, content=m.content))
+                messages.append(Message(role="user", content=prompt))
+
+                res = provider.generate(messages)
+                if res and getattr(res, "content", None) and res.content.strip():
+                    return res.content.strip()
+            except Exception as e:
+                logger.debug(f"Live provider call exception, using contextual synthesis: {e}")
+
+        return self._synthesize_contextual_response(
+            prompt=prompt,
+            workspace_id=workspace_id,
+            intel_context=intel_context,
+            recent_history=recent_history,
+        )
+
+    def _synthesize_contextual_response(
+        self,
+        prompt: str,
+        workspace_id: str,
+        intel_context: Any = None,
+        recent_history: list[PersonalMessage] | None = None,
+    ) -> str:
+        """Generates dynamic contextual synthesis from memory, workspace state, and user intent."""
+        p_lower = prompt.lower().strip()
+        is_italian = any(w in p_lower for w in ["chi", "cosa", "come", "perché", "perche", "dove", "dimmi", "puoi", "aiutami", "ciao", "buongiorno", "qual è", "quali"])
+
+        evidence_items = []
+        if intel_context and getattr(intel_context, "evidence", None):
+            for ev in intel_context.evidence[:4]:
+                evidence_items.append(f"• **{ev.title}**: {ev.content.strip()}")
+
+        if evidence_items:
+            if is_italian:
+                header = f"In base alla memoria e conoscenza del tuo workspace `{workspace_id}`:\n\n"
+                footer = "\n\nPosso approfondire questi dettagli o avviare un'azione operativa se lo desideri."
+            else:
+                header = f"Based on organizational memory for `{workspace_id}`:\n\n"
+                footer = "\n\nI can expand on any of these points or launch operational actions upon request."
+            return header + "\n".join(evidence_items) + footer
+
+        # Identity or capability inquiry
+        if any(k in p_lower for k in ["who are you", "what can you do", "capabilities", "chi sei", "cosa puoi fare"]):
+            if is_italian:
+                return (
+                    f"Sono **Aether**, il tuo assistente operativo personale nel workspace `{workspace_id}`.\n\n"
+                    "Ecco cosa posso gestire direttamente per te:\n"
+                    "• **Azioni e File**: creare documenti, leggere file di progetto e gestire impegni in calendario.\n"
+                    "• **Digital Workforce**: coordinare team autonomi per ricerche competitive, audit di codice e report.\n"
+                    "• **Memoria Organizzativa**: consultare la knowledge base aziendale e applicare lezioni verificate."
+                )
+            else:
+                return (
+                    f"I am **Aether**, your personal operational AI companion for `{workspace_id}`.\n\n"
+                    "Here is what I can handle directly for you:\n"
+                    "• **Actions & Files**: create documents, inspect project files, and schedule calendar meetings.\n"
+                    "• **Digital Workforce**: orchestrate autonomous multi-agent teams for deep research, code audits, and strategic reports.\n"
+                    "• **Organizational Memory**: recall knowledge graph records, user preferences, and verified lessons across runs."
+                )
+
+        if is_italian:
+            return (
+                f"Ho preso in carico la tua richiesta relativa a: *\"{prompt}\"*.\n\n"
+                f"Nel workspace `{workspace_id}`, posso operare direttamente su file e calendario, "
+                f"oppure attivare la Digital Workforce per un'analisi approfondita."
+            )
+        else:
+            return (
+                f"I've processed your request regarding: *\"{prompt}\"*.\n\n"
+                f"Within `{workspace_id}`, I can carry this out directly with local actions, "
+                f"or coordinate your digital workforce to complete this objective."
+            )
 
     def get_overview(self, workspace_id: str) -> dict[str, Any]:
         """Provides aggregated overview for the Home Companion hub."""

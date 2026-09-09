@@ -289,6 +289,7 @@ class Workspace:
             store=self.action_store,
             activity_service=self.activity,
             connection_service=self.connections,
+            project_path=self.project_path or self.root,
         )
 
     @property

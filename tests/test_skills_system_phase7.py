@@ -31,7 +31,16 @@ from aether.core.execution import Task, ExecutionContext
 from aether.providers.mock import MockProvider
 from aether.presets.loader import PresetLoader
 from aether.server.app import app
-from aether.server.routes import list_available_skills, get_agents, get_workspace
+from aether.server.routes import (
+    list_available_skills,
+    get_agents,
+    get_workspace,
+    assign_skill_to_agent_route,
+    get_skill_configs_route,
+    save_skill_config_route,
+    SkillAssignPayload,
+    SkillConfigPayload,
+)
 
 
 def test_skill_creation_and_validation():
@@ -255,3 +264,53 @@ agents:
     assert agent.skills == []
     res = team.run("Hi")
     assert res.success is True
+
+
+@pytest.mark.asyncio
+async def test_skills_assign_and_config_routes():
+    """Verify assigning skills to workforce agents and persisting skill configurations."""
+    config = TeamConfig(
+        name="test-skills-team",
+        agents=[
+            AgentConfig(name="researcher", role="Researcher", skills=["coding"]),
+        ],
+    )
+    team = Team(config=config, provider=MockProvider())
+    app.state.team = team
+
+    req = Request({"type": "http", "app": app, "headers": [], "path": "/api/skills/researcher/assign", "method": "POST"})
+
+    # 1. Assign new skill to researcher
+    assign_res = await assign_skill_to_agent_route(
+        req,
+        skill_name="web_search",
+        payload=SkillAssignPayload(agent_name="researcher", enabled=True),
+    )
+    assert assign_res["status"] == "success"
+    assert "web_search" in assign_res["skills"]
+
+    # 2. Save skill configuration
+    cfg_req = Request({"type": "http", "app": app, "headers": [], "path": "/api/skills/web_search/config", "method": "POST"})
+    save_res = await save_skill_config_route(
+        cfg_req,
+        skill_name="web_search",
+        payload=SkillConfigPayload(config={"search_depth": "deep", "max_results": 10}),
+    )
+    assert save_res["status"] == "saved"
+    assert save_res["config"]["search_depth"] == "deep"
+
+    # 3. Retrieve skill configs
+    get_cfg_req = Request({"type": "http", "app": app, "headers": [], "path": "/api/skills/configs", "method": "GET"})
+    configs_data = await get_skill_configs_route(get_cfg_req)
+    assert "web_search" in configs_data
+    assert configs_data["web_search"]["max_results"] == 10
+
+    # 4. Unassign skill from researcher
+    unassign_res = await assign_skill_to_agent_route(
+        req,
+        skill_name="web_search",
+        payload=SkillAssignPayload(agent_name="researcher", enabled=False),
+    )
+    assert unassign_res["status"] == "success"
+    assert "web_search" not in unassign_res["skills"]
+

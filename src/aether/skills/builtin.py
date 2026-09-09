@@ -69,6 +69,55 @@ BUILTIN_SKILLS: list[Skill] = [
         ),
         metadata={"builtin": True, "category": "documentation"},
     ),
+    Skill(
+        name="web_search",
+        description="Search live information across the web using DuckDuckGo to augment model knowledge with real-time data.",
+        version="1.5.0",
+        instructions="Use search queries to retrieve up-to-date facts, verify citations, and fetch external references.",
+        metadata={"builtin": True, "category": "native", "permissions": ["net:http", "search:duckduckgo"]},
+    ),
+    Skill(
+        name="filesystem_tools",
+        description="Inspect directories, read project files, patch source code, and create workspace deliverables.",
+        version="1.5.0",
+        instructions="Execute local file reads and safe workspace modifications with strict path boundary validation.",
+        metadata={"builtin": True, "category": "native", "permissions": ["fs:read", "fs:write", "fs:patch"]},
+    ),
+    Skill(
+        name="knowledge_retrieval",
+        description="Perform semantic and lexical search across indexed workspace and system knowledge documents.",
+        version="1.5.0",
+        instructions="Retrieve relevant knowledge graph entities, concepts, and memory notes to provide grounded context.",
+        metadata={"builtin": True, "category": "native", "permissions": ["kb:read", "vectors:query"]},
+    ),
+    Skill(
+        name="terminal_sandbox",
+        description="Execute shell commands, run tests, compile builds, and verify code execution in a secure sandbox.",
+        version="1.5.0",
+        instructions="Run terminal commands in isolated sandboxed subshells, inspect standard output, and verify exit codes.",
+        metadata={"builtin": True, "category": "native", "permissions": ["exec:shell", "sandbox:isolated"]},
+    ),
+    Skill(
+        name="gmail_integration",
+        description="Read, search, draft, and organize emails and thread communications through Google Workspace APIs.",
+        version="1.0.0",
+        instructions="Prepare email drafts and summarize thread communications with user approval.",
+        metadata={"builtin": True, "category": "integration", "permissions": ["email:read", "email:draft"]},
+    ),
+    Skill(
+        name="github_tools",
+        description="Connect private repositories, create pull requests, review issues, and synchronize project trees.",
+        version="1.2.0",
+        instructions="Interact with Git branches, inspect diffs, and create PRs with safety checks.",
+        metadata={"builtin": True, "category": "integration", "permissions": ["git:read", "git:commit"]},
+    ),
+    Skill(
+        name="slack_notifications",
+        description="Broadcast task updates, human-in-the-loop approvals, and workflow notifications to Slack channels.",
+        version="1.0.0",
+        instructions="Post structured notifications and workflow alerts to configured team Slack channels.",
+        metadata={"builtin": True, "category": "integration", "permissions": ["chat:write"]},
+    ),
 ]
 
 

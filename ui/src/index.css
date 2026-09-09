@@ -36,6 +36,11 @@
   --warning-bg: 38 92% 95%;
   --info: 262 83% 58%;
   --info-bg: 262 83% 95%;
+
+  /* Legacy variable aliases for unified dark mode */
+  --bg-card: hsl(var(--card));
+  --border-color: hsl(var(--border));
+  --text-muted: hsl(var(--muted-fg));
 }
 
 .dark {
@@ -70,6 +75,22 @@
   --warning-bg: 38 92% 12%;
   --info: 263 70% 66%;
   --info-bg: 263 70% 14%;
+
+  /* Legacy variable aliases for unified dark mode */
+  --bg-card: hsl(var(--card));
+  --border-color: hsl(var(--border));
+  --text-muted: hsl(var(--muted-fg));
+}
+
+input, textarea, select {
+  font-family: inherit;
+  color: hsl(var(--fg));
+  background-color: hsl(var(--card));
+  border-color: hsl(var(--border));
+}
+
+input::placeholder, textarea::placeholder {
+  color: hsl(var(--muted-fg));
 }
 
 * {

@@ -145,6 +145,10 @@ class ConnectionService:
         """Retrieves connection for provider."""
         return self.store.get_connection_by_provider(workspace_id, provider)
 
+    def verify(self, provider: str, auth_metadata: dict[str, Any] | None = None) -> tuple[bool, str]:
+        """Validates credentials for a provider."""
+        return verify_credentials(provider, auth_metadata)
+
     def get_calendar_connector(self, workspace_id: str) -> CalendarConnector:
         """Returns active calendar connector, ensuring connection record exists."""
         conn = self.store.get_connection_by_provider(workspace_id, "calendar")
@@ -157,3 +161,57 @@ class ConnectionService:
                 capabilities=["calendar.create_event", "calendar.list_events"],
             )
         return CalendarConnector(self.store, workspace_id, conn.id)
+
+
+def verify_credentials(provider: str, auth_metadata: dict[str, Any] | None) -> tuple[bool, str]:
+    """Validates presence and format of connection credentials."""
+    prov = (provider or "").lower().strip()
+    meta = auth_metadata or {}
+
+    if prov == "calendar":
+        return True, "Built-in calendar connection ready."
+
+    elif prov == "github":
+        token = str(meta.get("token") or meta.get("pat") or meta.get("api_key") or "").strip()
+        if not token:
+            return False, "GitHub Personal Access Token (PAT) is required."
+        if not (token.startswith("ghp_") or token.startswith("github_pat_") or len(token) >= 20):
+            return False, "Invalid GitHub token format. Must be a Personal Access Token (e.g. starting with 'ghp_' or 'github_pat_')."
+        return True, "GitHub Personal Access Token format verified."
+
+    elif prov == "slack":
+        bot_token = str(meta.get("bot_token") or meta.get("token") or "").strip()
+        webhook_url = str(meta.get("webhook_url") or "").strip()
+        if not bot_token and not webhook_url:
+            return False, "Slack Bot User OAuth Token (xoxb-...) or Incoming Webhook URL is required."
+        if bot_token and not (bot_token.startswith("xoxb-") or bot_token.startswith("xoxp-")):
+            return False, "Invalid Slack Bot Token format. Must start with 'xoxb-' or 'xoxp-'."
+        if webhook_url and not webhook_url.startswith("https://hooks.slack.com/"):
+            return False, "Invalid Slack Webhook URL. Must start with 'https://hooks.slack.com/'."
+        return True, "Slack credentials format verified."
+
+    elif prov == "email":
+        username = str(meta.get("username") or meta.get("email") or "").strip()
+        password = str(meta.get("password") or meta.get("app_password") or meta.get("token") or "").strip()
+        smtp_host = str(meta.get("smtp_host") or "").strip()
+        if not username:
+            return False, "Email address or username is required."
+        if not password:
+            return False, "App password or token is required."
+        if not smtp_host:
+            return False, "SMTP Host is required (e.g. smtp.gmail.com)."
+        return True, "Email SMTP credentials format verified."
+
+    elif prov == "notion":
+        token = str(meta.get("token") or meta.get("api_key") or "").strip()
+        if not token:
+            return False, "Notion Integration Token is required."
+        if not (token.startswith("secret_") or token.startswith("ntn_") or len(token) >= 20):
+            return False, "Invalid Notion token format. Must start with 'secret_' or 'ntn_'."
+        return True, "Notion integration token format verified."
+
+    else:
+        if not meta or not any(str(v).strip() for v in meta.values()):
+            return False, f"Credentials required for {provider}."
+        return True, f"{provider} credentials verified."
+

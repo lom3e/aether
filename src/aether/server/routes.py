@@ -987,6 +987,15 @@ class SkillInfo(BaseModel):
     instructions: str
     version: str
     builtin: bool = True
+    category: str = "native"
+    permissions: list[str] = Field(default_factory=list)
+
+class SkillAssignPayload(BaseModel):
+    agent_name: str
+    enabled: bool = True
+
+class SkillConfigPayload(BaseModel):
+    config: dict[str, Any]
 
 @router.get("/skills", response_model=list[SkillInfo])
 async def list_available_skills(request: Request):
@@ -1004,9 +1013,77 @@ async def list_available_skills(request: Request):
             instructions=getattr(s, "instructions", "") or "",
             version=getattr(s, "version", "1.0.0"),
             builtin=bool(s.metadata.get("builtin", True) if s.metadata else True),
+            category=str(s.metadata.get("category", "native") if s.metadata else "native"),
+            permissions=list(s.metadata.get("permissions", []) if s.metadata else []),
         )
         for s in skills_list
     ]
+
+@router.post("/skills/{skill_name}/assign")
+async def assign_skill_to_agent_route(request: Request, skill_name: str, payload: SkillAssignPayload):
+    team = getattr(request.app.state, "team", None)
+    if not team:
+        raise HTTPException(status_code=503, detail="Team workforce not initialized.")
+
+    agent_config = team.config.get_agent(payload.agent_name)
+    if not agent_config:
+        raise HTTPException(status_code=404, detail=f"Agent '{payload.agent_name}' not found.")
+
+    current_skills = list(agent_config.skills or [])
+    if payload.enabled:
+        if skill_name not in current_skills:
+            current_skills.append(skill_name)
+    else:
+        if skill_name in current_skills:
+            current_skills.remove(skill_name)
+
+    agent_config.skills = current_skills
+
+    # Synchronize live agent instance if loaded
+    for a in team.agents():
+        if a.name == payload.agent_name:
+            if hasattr(a, "skills") and isinstance(a.skills, list):
+                # Update runtime skills list
+                from aether.skills.skill import Skill
+                if payload.enabled:
+                    if not any(s.name == skill_name for s in a.skills):
+                        a.skills.append(Skill(name=skill_name, description=f"Skill {skill_name}"))
+                else:
+                    a.skills = [s for s in a.skills if s.name != skill_name]
+
+    from aether.team.loader import TeamLoader
+    try:
+        if hasattr(team, "config_path") and team.config_path:
+            TeamLoader().save(team.config, team.config_path)
+    except Exception as e:
+        logger.warning(f"Could not persist team config after skill assignment: {e}")
+
+    return {"status": "success", "skill": skill_name, "agent": payload.agent_name, "skills": current_skills}
+
+@router.get("/skills/configs")
+async def get_skill_configs_route(request: Request):
+    team = getattr(request.app.state, "team", None)
+    if not team:
+        return {}
+    return team.config.metadata.get("skill_configs", {})
+
+@router.post("/skills/{skill_name}/config")
+async def save_skill_config_route(request: Request, skill_name: str, payload: SkillConfigPayload):
+    team = getattr(request.app.state, "team", None)
+    if not team:
+        raise HTTPException(status_code=503, detail="Team workforce not initialized.")
+
+    configs = team.config.metadata.setdefault("skill_configs", {})
+    configs[skill_name] = payload.config
+
+    from aether.team.loader import TeamLoader
+    try:
+        if hasattr(team, "config_path") and team.config_path:
+            TeamLoader().save(team.config, team.config_path)
+    except Exception as e:
+        logger.warning(f"Could not persist team config after skill config update: {e}")
+
+    return {"status": "saved", "skill": skill_name, "config": payload.config}
 
 @router.get("/agents")
 async def get_agents(request: Request):
@@ -4354,7 +4431,13 @@ class ConnectPayload(BaseModel):
     account_name: str = "Connected Account"
     scopes: list[str] | None = None
     capabilities: list[str] | None = None
+    auth_metadata: dict[str, Any] | None = None
     workspace_id: str | None = None
+
+
+class VerifyConnectionPayload(BaseModel):
+    workspace_id: str | None = None
+    auth_metadata: dict[str, Any] = Field(default_factory=dict)
 
 
 class CreateCalendarEventPayload(BaseModel):
@@ -4526,7 +4609,7 @@ async def list_connections_route(request: Request, workspace_id: str | None = No
         return []
     ws_id = (workspace_id or ws.name).strip()
     conns = ws.connections.list_connections(workspace_id=ws_id)
-    return [c.to_dict() for c in conns]
+    return [c.to_dict(mask_secrets=True) for c in conns]
 
 
 @router.post("/connections")
@@ -4541,8 +4624,37 @@ async def connect_service_route(request: Request, payload: ConnectPayload):
         account_name=payload.account_name,
         scopes=payload.scopes,
         capabilities=payload.capabilities,
+        auth_metadata=payload.auth_metadata,
     )
-    return conn.to_dict()
+    return conn.to_dict(mask_secrets=True)
+
+
+@router.post("/connections/{provider}/verify")
+async def verify_connection_route(
+    request: Request,
+    provider: str,
+    payload: VerifyConnectionPayload | None = None,
+):
+    ws = getattr(request.app.state, "workspace", None)
+    if not ws:
+        raise HTTPException(status_code=503, detail="Workspace not initialized.")
+    ws_id = ((payload.workspace_id if payload else None) or ws.name).strip()
+
+    meta = payload.auth_metadata if (payload and payload.auth_metadata) else None
+    if not meta:
+        existing = ws.connections.get_connection(ws_id, provider)
+        if existing and existing.auth_metadata:
+            meta = existing.auth_metadata
+        else:
+            meta = {}
+
+    from aether.connections.service import verify_credentials
+    valid, message = verify_credentials(provider, meta)
+    return {
+        "provider": provider,
+        "valid": valid,
+        "message": message,
+    }
 
 
 @router.post("/connections/{provider}/disconnect")
