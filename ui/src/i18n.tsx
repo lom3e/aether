@@ -7,6 +7,9 @@ export const translations = {
     // Navigation & Shell
     navHome: 'Home',
     navMissions: 'Missions',
+    navWorkforce: 'Workforce',
+    navConnections: 'Connections',
+    navActivity: 'Activity',
     navConversations: 'Conversations',
     navAgents: 'Agents',
     navTeams: 'Teams',
@@ -867,6 +870,9 @@ export const translations = {
     // Navigation & Shell
     navHome: 'Home',
     navMissions: 'Missioni',
+    navWorkforce: 'Forza Lavoro',
+    navConnections: 'Connessioni',
+    navActivity: 'Attività',
     navConversations: 'Conversazioni',
     navAgents: 'Agenti',
     navTeams: 'Team',

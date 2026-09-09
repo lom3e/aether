@@ -4324,5 +4324,291 @@ async def distill_lesson_route(
         raise HTTPException(status_code=404, detail=str(exc))
 
 
+# ===========================================================================
+# PHASE C — PERSONAL AGENT, ACTIONS, CONNECTIONS, AND ACTIVITY API
+# ===========================================================================
+
+class PersonalChatPayload(BaseModel):
+    prompt: str
+    session_id: str | None = None
+    workspace_id: str | None = None
+
+
+class ExecuteActionPayload(BaseModel):
+    action_id: str
+    input_data: dict[str, Any] = Field(default_factory=dict)
+    auto_approve: bool = False
+    workspace_id: str | None = None
+
+
+class ApproveActionPayload(BaseModel):
+    approver: str = "user"
+
+
+class RejectActionPayload(BaseModel):
+    reason: str = "User declined"
+
+
+class ConnectPayload(BaseModel):
+    provider: str
+    account_name: str = "Connected Account"
+    scopes: list[str] | None = None
+    capabilities: list[str] | None = None
+    workspace_id: str | None = None
+
+
+class CreateCalendarEventPayload(BaseModel):
+    title: str
+    start_time: str
+    end_time: str | None = None
+    description: str = ""
+    location: str = ""
+    workspace_id: str | None = None
+
+
+# ---------------------------------------------------------------------------
+# Personal Agent Endpoints
+# ---------------------------------------------------------------------------
+
+@router.post("/personal/chat")
+async def personal_chat_route(request: Request, payload: PersonalChatPayload):
+    ws = getattr(request.app.state, "workspace", None)
+    if not ws:
+        raise HTTPException(status_code=503, detail="Workspace not initialized.")
+    ws_id = (payload.workspace_id or ws.name).strip()
+    msg = ws.personal.process_prompt(
+        workspace_id=ws_id,
+        prompt=payload.prompt,
+        session_id=payload.session_id,
+    )
+    return msg.to_dict()
+
+
+@router.get("/personal/sessions")
+async def list_personal_sessions_route(request: Request, workspace_id: str | None = None, limit: int = 20):
+    ws = getattr(request.app.state, "workspace", None)
+    if not ws:
+        return []
+    ws_id = (workspace_id or ws.name).strip()
+    sessions = ws.personal_store.list_sessions(workspace_id=ws_id, limit=limit)
+    return [s.to_dict() for s in sessions]
+
+
+@router.get("/personal/sessions/{session_id}")
+async def get_personal_session_route(request: Request, session_id: str):
+    ws = getattr(request.app.state, "workspace", None)
+    if not ws:
+        raise HTTPException(status_code=503, detail="Workspace not initialized.")
+    session = ws.personal_store.get_session(session_id)
+    if not session:
+        raise HTTPException(status_code=404, detail="Session not found.")
+    return session.to_dict()
+
+
+@router.get("/personal/overview")
+async def get_personal_overview_route(request: Request, workspace_id: str | None = None):
+    ws = getattr(request.app.state, "workspace", None)
+    if not ws:
+        return {
+            "pending_approvals": [],
+            "recent_activities": [],
+            "connected_apps_count": 0,
+            "active_works": [],
+            "recent_works": [],
+        }
+    ws_id = (workspace_id or ws.name).strip()
+    return ws.personal.get_overview(workspace_id=ws_id)
+
+
+# ---------------------------------------------------------------------------
+# Action Layer Endpoints
+# ---------------------------------------------------------------------------
+
+@router.get("/actions")
+async def list_actions_route(request: Request):
+    ws = getattr(request.app.state, "workspace", None)
+    if not ws:
+        return []
+    actions = ws.action_registry.list_all()
+    return [a.to_dict() for a in actions]
+
+
+@router.post("/actions/execute")
+async def execute_action_route(request: Request, payload: ExecuteActionPayload):
+    ws = getattr(request.app.state, "workspace", None)
+    if not ws:
+        raise HTTPException(status_code=503, detail="Workspace not initialized.")
+    ws_id = (payload.workspace_id or ws.name).strip()
+    try:
+        execution = ws.actions.execute(
+            action_id=payload.action_id,
+            workspace_id=ws_id,
+            input_data=payload.input_data,
+            auto_approve=payload.auto_approve,
+        )
+        return execution.to_dict()
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+
+
+@router.get("/actions/executions")
+async def list_action_executions_route(
+    request: Request,
+    workspace_id: str | None = None,
+    status: str | None = None,
+    limit: int = 50,
+    offset: int = 0,
+):
+    ws = getattr(request.app.state, "workspace", None)
+    if not ws:
+        return []
+    ws_id = (workspace_id or ws.name).strip()
+    executions = ws.action_store.list_executions(
+        workspace_id=ws_id,
+        status=status,
+        limit=limit,
+        offset=offset,
+    )
+    return [e.to_dict() for e in executions]
+
+
+@router.get("/actions/executions/{execution_id}")
+async def get_action_execution_route(request: Request, execution_id: str):
+    ws = getattr(request.app.state, "workspace", None)
+    if not ws:
+        raise HTTPException(status_code=503, detail="Workspace not initialized.")
+    execution = ws.action_store.get_execution(execution_id)
+    if not execution:
+        raise HTTPException(status_code=404, detail="Execution not found.")
+    return execution.to_dict()
+
+
+@router.post("/actions/executions/{execution_id}/approve")
+async def approve_action_execution_route(
+    request: Request,
+    execution_id: str,
+    payload: ApproveActionPayload = ApproveActionPayload(),
+):
+    ws = getattr(request.app.state, "workspace", None)
+    if not ws:
+        raise HTTPException(status_code=503, detail="Workspace not initialized.")
+    try:
+        execution = ws.actions.approve(execution_id, approver=payload.approver)
+        return execution.to_dict()
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+
+
+@router.post("/actions/executions/{execution_id}/reject")
+async def reject_action_execution_route(
+    request: Request,
+    execution_id: str,
+    payload: RejectActionPayload = RejectActionPayload(),
+):
+    ws = getattr(request.app.state, "workspace", None)
+    if not ws:
+        raise HTTPException(status_code=503, detail="Workspace not initialized.")
+    try:
+        execution = ws.actions.reject(execution_id, reason=payload.reason)
+        return execution.to_dict()
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+
+
+# ---------------------------------------------------------------------------
+# Connections Endpoints
+# ---------------------------------------------------------------------------
+
+@router.get("/connections")
+async def list_connections_route(request: Request, workspace_id: str | None = None):
+    ws = getattr(request.app.state, "workspace", None)
+    if not ws:
+        return []
+    ws_id = (workspace_id or ws.name).strip()
+    conns = ws.connections.list_connections(workspace_id=ws_id)
+    return [c.to_dict() for c in conns]
+
+
+@router.post("/connections")
+async def connect_service_route(request: Request, payload: ConnectPayload):
+    ws = getattr(request.app.state, "workspace", None)
+    if not ws:
+        raise HTTPException(status_code=503, detail="Workspace not initialized.")
+    ws_id = (payload.workspace_id or ws.name).strip()
+    conn = ws.connections.connect(
+        workspace_id=ws_id,
+        provider=payload.provider,
+        account_name=payload.account_name,
+        scopes=payload.scopes,
+        capabilities=payload.capabilities,
+    )
+    return conn.to_dict()
+
+
+@router.post("/connections/{provider}/disconnect")
+async def disconnect_service_route(request: Request, provider: str, workspace_id: str | None = None):
+    ws = getattr(request.app.state, "workspace", None)
+    if not ws:
+        raise HTTPException(status_code=503, detail="Workspace not initialized.")
+    ws_id = (workspace_id or ws.name).strip()
+    ws.connections.disconnect(workspace_id=ws_id, provider=provider)
+    return {"status": "disconnected", "provider": provider}
+
+
+@router.get("/connections/calendar/events")
+async def list_calendar_events_route(request: Request, workspace_id: str | None = None, limit: int = 50):
+    ws = getattr(request.app.state, "workspace", None)
+    if not ws:
+        return []
+    ws_id = (workspace_id or ws.name).strip()
+    connector = ws.connections.get_calendar_connector(workspace_id=ws_id)
+    return connector.list_events(limit=limit)
+
+
+@router.post("/connections/calendar/events")
+async def create_calendar_event_route(request: Request, payload: CreateCalendarEventPayload):
+    ws = getattr(request.app.state, "workspace", None)
+    if not ws:
+        raise HTTPException(status_code=503, detail="Workspace not initialized.")
+    ws_id = (payload.workspace_id or ws.name).strip()
+    connector = ws.connections.get_calendar_connector(workspace_id=ws_id)
+    event = connector.create_event(
+        title=payload.title,
+        start_time=payload.start_time,
+        end_time=payload.end_time,
+        description=payload.description,
+        location=payload.location,
+    )
+    return event
+
+
+# ---------------------------------------------------------------------------
+# Activity Feed Endpoints
+# ---------------------------------------------------------------------------
+
+@router.get("/activity")
+async def list_activity_route(
+    request: Request,
+    workspace_id: str | None = None,
+    category: str | None = None,
+    status: str | None = None,
+    limit: int = 50,
+    offset: int = 0,
+):
+    ws = getattr(request.app.state, "workspace", None)
+    if not ws:
+        return []
+    ws_id = (workspace_id or ws.name).strip()
+    events = ws.activity.list(
+        workspace_id=ws_id,
+        category=category,
+        status=status,
+        limit=limit,
+        offset=offset,
+    )
+    return [e.to_dict() for e in events]
+
+
+
 
 

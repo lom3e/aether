@@ -219,6 +219,116 @@ class Workspace:
         )
 
     @property
+    def activity_db_path(self) -> str:
+        """Path to the persistent activity database."""
+        if self.data_dir.exists() or self.config_path.exists():
+            return str(self.data_dir / "activity.db")
+        return str(self.legacy_aether_dir / "activity.db")
+
+    @property
+    def activity_store(self):
+        """Return the ActivityStore for this workspace."""
+        from aether.activity.store import ActivityStore
+        Path(self.activity_db_path).parent.mkdir(parents=True, exist_ok=True)
+        return ActivityStore(self.activity_db_path)
+
+    @property
+    def activity(self):
+        """Return the ActivityService for this workspace."""
+        from aether.activity.service import ActivityService
+        return ActivityService(self.activity_store)
+
+    @property
+    def actions_db_path(self) -> str:
+        """Path to the persistent actions database."""
+        if self.data_dir.exists() or self.config_path.exists():
+            return str(self.data_dir / "actions.db")
+        return str(self.legacy_aether_dir / "actions.db")
+
+    @property
+    def action_store(self):
+        """Return the ActionStore for this workspace."""
+        from aether.actions.store import ActionStore
+        Path(self.actions_db_path).parent.mkdir(parents=True, exist_ok=True)
+        return ActionStore(self.actions_db_path)
+
+    @property
+    def connections_db_path(self) -> str:
+        """Path to the persistent connections database."""
+        if self.data_dir.exists() or self.config_path.exists():
+            return str(self.data_dir / "connections.db")
+        return str(self.legacy_aether_dir / "connections.db")
+
+    @property
+    def connection_store(self):
+        """Return the ConnectionStore for this workspace."""
+        from aether.connections.store import ConnectionStore
+        Path(self.connections_db_path).parent.mkdir(parents=True, exist_ok=True)
+        return ConnectionStore(self.connections_db_path)
+
+    @property
+    def connections(self):
+        """Return the ConnectionService for this workspace."""
+        from aether.connections.service import ConnectionService
+        return ConnectionService(self.connection_store, activity_service=self.activity)
+
+    @property
+    def action_registry(self):
+        """Return the ActionRegistry for this workspace."""
+        if not hasattr(self, "_action_registry") or self._action_registry is None:
+            from aether.actions.registry import ActionRegistry
+            self._action_registry = ActionRegistry()
+        return self._action_registry
+
+    @property
+    def actions(self):
+        """Return the ActionExecutor for this workspace."""
+        from aether.actions.executor import ActionExecutor
+        return ActionExecutor(
+            registry=self.action_registry,
+            store=self.action_store,
+            activity_service=self.activity,
+            connection_service=self.connections,
+        )
+
+    @property
+    def intelligence(self):
+        """Return the UnifiedIntelligenceService for this workspace."""
+        from aether.intelligence.service import UnifiedIntelligenceService
+        return UnifiedIntelligenceService(
+            workforce_memory_store=self.memory,
+            knowledge_graph_store=self.knowledge_graph,
+            default_workspace_id=self.name,
+        )
+
+    @property
+    def personal_db_path(self) -> str:
+        """Path to the persistent personal agent database."""
+        if self.data_dir.exists() or self.config_path.exists():
+            return str(self.data_dir / "personal.db")
+        return str(self.legacy_aether_dir / "personal.db")
+
+    @property
+    def personal_store(self):
+        """Return the PersonalStore for this workspace."""
+        from aether.personal.store import PersonalStore
+        Path(self.personal_db_path).parent.mkdir(parents=True, exist_ok=True)
+        return PersonalStore(self.personal_db_path)
+
+    @property
+    def personal(self):
+        """Return the PersonalAgentService for this workspace."""
+        from aether.personal.service import PersonalAgentService
+        return PersonalAgentService(
+            store=self.personal_store,
+            action_executor=self.actions,
+            activity_service=self.activity,
+            intelligence_service=self.intelligence,
+            mission_store=self.missions,
+            connection_service=self.connections,
+        )
+
+    @property
     def project_path(self) -> Path | None:
         """Return the resolved Path of the connected project root if configured and existing."""
         raw_path = self.config.get("workspace", {}).get("project", {}).get("path")

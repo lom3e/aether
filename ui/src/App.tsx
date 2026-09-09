@@ -1,18 +1,16 @@
 import { useState, useEffect, useCallback, useContext } from 'react';
 import { Sidebar } from './Sidebar';
 import { Chat } from './Chat';
-import { Agents } from './Agents';
 import { Knowledge } from './Knowledge';
 import { Settings } from './Settings';
-import { Teams } from './Teams';
 import { Automations } from './Automations';
-import { Skills } from './Skills';
 import { Home } from './Home';
 import { Missions } from './Missions';
-import { Memory } from './Memory';
-import { Learning } from './Learning';
 import { Marketplace } from './Marketplace';
 import { AgentProfile } from './AgentProfile';
+import { Connections } from './Connections';
+import { WorkforceHub } from './WorkforceHub';
+import { ActivityFeed } from './ActivityFeed';
 import { CommandPalette } from './CommandPalette';
 import { WorkspaceModal } from './WorkspaceModal';
 import { ShortcutsProvider, useKeyboardShortcuts, ShortcutsModal } from './shortcuts';
@@ -280,9 +278,12 @@ function MainApp() {
             onOpenWorkspaceModal={() => handleOpenWorkspaceModal('create')}
           />
         )}
-        {currentView === 'missions' && (
+        {(currentView === 'missions' || currentView === 'work') && (
           <Missions navigate={navigate} initialMissionId={viewParams} />
         )}
+        {currentView === 'workforce' && <WorkforceHub navigate={navigate} />}
+        {currentView === 'connections' && <Connections navigate={navigate} />}
+        {currentView === 'activity' && <ActivityFeed navigate={navigate} />}
         {currentView === 'chat' && (
           <Chat
             conversationId={activeConversationId}
@@ -293,14 +294,14 @@ function MainApp() {
             onOpenWorkspaceModal={() => handleOpenWorkspaceModal('create')}
           />
         )}
-        {currentView === 'agents' && <Agents navigate={navigate} />}
+        {currentView === 'agents' && <WorkforceHub initialTab="agents" navigate={navigate} />}
         {currentView === 'agent' && <AgentProfile name={viewParams} navigate={navigate} />}
-        {currentView === 'teams' && <Teams />}
+        {currentView === 'teams' && <WorkforceHub initialTab="teams" navigate={navigate} />}
         {currentView === 'knowledge' && <Knowledge />}
-        {currentView === 'memory' && <Memory />}
-        {currentView === 'learning' && <Learning />}
+        {currentView === 'memory' && <WorkforceHub initialTab="memory" navigate={navigate} />}
+        {currentView === 'learning' && <WorkforceHub initialTab="learning" navigate={navigate} />}
         {currentView === 'automations' && <Automations />}
-        {currentView === 'skills' && <Skills navigate={navigate} />}
+        {currentView === 'skills' && <WorkforceHub initialTab="skills" navigate={navigate} />}
         {currentView === 'settings' && <Settings onWorkspaceSwitched={handleWorkspaceSwitched} />}
         {currentView === 'marketplace' && <Marketplace />}
       </div>

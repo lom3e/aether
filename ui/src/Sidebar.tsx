@@ -1,9 +1,10 @@
 import { useState, useEffect, useRef, useContext } from 'react';
 import {
-  Sparkles, MessageSquare, Bot, Users, Database, Settings, ShoppingBag,
+  Sparkles, MessageSquare, Users, Database, Settings, ShoppingBag,
   Plus, ChevronLeft, Moon, Sun, Globe, Trash2, Search,
   ChevronDown, MoreVertical, Archive, Copy, Edit2, Check,
-  Pin, Folder, GitBranch, ExternalLink, RefreshCw, X, Zap, Puzzle, Target, Brain, GraduationCap
+  Pin, Folder, GitBranch, ExternalLink, RefreshCw, X, Target,
+  Link2, Activity as ActivityIcon
 } from 'lucide-react';
 import { useTranslation } from './i18n';
 import { useTheme } from './theme';
@@ -665,7 +666,7 @@ export function Sidebar({
 
         {/* Navigation & Conversations Scroll Area */}
         <div style={{ flex: 1, overflowY: 'auto', padding: '6px 8px 16px', display: 'flex', flexDirection: 'column', gap: '12px' }}>
-          {/* Main Navigation */}
+          {/* Main Navigation — 6 Hub Architecture */}
           <div>
             {!collapsed && (
               <div style={{ fontSize: '10px', fontWeight: 600, color: 'hsl(var(--muted-fg))', padding: '2px 8px', textTransform: 'uppercase', letterSpacing: '0.05em' }}>
@@ -674,6 +675,7 @@ export function Sidebar({
             )}
             <Tooltip content={t('navHome')} position={collapsed ? 'right' : 'top'} disabled={!collapsed}>
               <button
+                data-testid="nav-home"
                 className={`btn btn-ghost ${currentView === 'home' ? 'active' : ''}`}
                 style={{ width: '100%', justifyContent: collapsed ? 'center' : 'flex-start', padding: '7px 8px', fontSize: '13px' }}
                 onClick={() => onNavigate('home')}
@@ -683,15 +685,108 @@ export function Sidebar({
               </button>
             </Tooltip>
 
-            <Tooltip content={t('navMissions')} position={collapsed ? 'right' : 'top'} disabled={!collapsed}>
+            <Tooltip content={t('navMissions') || 'Work'} position={collapsed ? 'right' : 'top'} disabled={!collapsed}>
               <button
                 data-testid="nav-missions"
-                className={`btn btn-ghost ${currentView === 'missions' ? 'active' : ''}`}
+                className={`btn btn-ghost ${currentView === 'missions' || currentView === 'work' ? 'active' : ''}`}
                 style={{ width: '100%', justifyContent: collapsed ? 'center' : 'flex-start', padding: '7px 8px', fontSize: '13px', marginTop: '2px' }}
                 onClick={() => onNavigate('missions')}
               >
                 <Target size={15} />
-                {!collapsed && <span>{t('navMissions')}</span>}
+                {!collapsed && <span>{t('navMissions') || 'Work'}</span>}
+              </button>
+            </Tooltip>
+
+            <Tooltip content={t('navWorkforce') || 'Workforce'} position={collapsed ? 'right' : 'top'} disabled={!collapsed}>
+              <button
+                data-testid="nav-workforce"
+                className={`btn btn-ghost ${currentView === 'workforce' || currentView === 'teams' || currentView === 'agents' || currentView === 'memory' || currentView === 'learning' || currentView === 'skills' || currentView === 'automations' ? 'active' : ''}`}
+                style={{ width: '100%', justifyContent: collapsed ? 'center' : 'flex-start', padding: '7px 8px', fontSize: '13px', marginTop: '2px' }}
+                onClick={() => onNavigate('workforce')}
+              >
+                <Users size={15} />
+                {!collapsed && <span>{t('navWorkforce') || 'Workforce'}</span>}
+              </button>
+            </Tooltip>
+
+            {!collapsed && (
+              <div style={{ display: 'flex', flexDirection: 'column', gap: '1px', paddingLeft: '18px', margin: '2px 0 4px', borderLeft: '1px solid hsl(var(--border)/0.5)' }}>
+                <button
+                  data-testid="nav-teams"
+                  className={`btn btn-ghost ${currentView === 'teams' ? 'active' : ''}`}
+                  style={{ width: '100%', justifyContent: 'flex-start', padding: '4px 8px', fontSize: '12px' }}
+                  onClick={() => onNavigate('teams')}
+                >
+                  <span>{t('navTeams')}</span>
+                </button>
+                <button
+                  data-testid="nav-agents"
+                  className={`btn btn-ghost ${currentView === 'agents' ? 'active' : ''}`}
+                  style={{ width: '100%', justifyContent: 'flex-start', padding: '4px 8px', fontSize: '12px' }}
+                  onClick={() => onNavigate('agents')}
+                >
+                  <span>{t('navAgents')}</span>
+                </button>
+                <button
+                  data-testid="nav-memory"
+                  className={`btn btn-ghost ${currentView === 'memory' ? 'active' : ''}`}
+                  style={{ width: '100%', justifyContent: 'flex-start', padding: '4px 8px', fontSize: '12px' }}
+                  onClick={() => onNavigate('memory')}
+                >
+                  <span>{t('navMemory')}</span>
+                </button>
+                <button
+                  data-testid="nav-learning"
+                  className={`btn btn-ghost ${currentView === 'learning' ? 'active' : ''}`}
+                  style={{ width: '100%', justifyContent: 'flex-start', padding: '4px 8px', fontSize: '12px' }}
+                  onClick={() => onNavigate('learning')}
+                >
+                  <span>{t('navLearning')}</span>
+                </button>
+                <button
+                  data-testid="nav-automations"
+                  className={`btn btn-ghost ${currentView === 'automations' ? 'active' : ''}`}
+                  style={{ width: '100%', justifyContent: 'flex-start', padding: '4px 8px', fontSize: '12px' }}
+                  onClick={() => onNavigate('automations')}
+                >
+                  <span>{t('navAutomations')}</span>
+                </button>
+              </div>
+            )}
+
+            <Tooltip content={t('navKnowledge')} position={collapsed ? 'right' : 'top'} disabled={!collapsed}>
+              <button
+                data-testid="nav-knowledge"
+                className={`btn btn-ghost ${currentView === 'knowledge' ? 'active' : ''}`}
+                style={{ width: '100%', justifyContent: collapsed ? 'center' : 'flex-start', padding: '7px 8px', fontSize: '13px', marginTop: '2px' }}
+                onClick={() => onNavigate('knowledge')}
+              >
+                <Database size={15} />
+                {!collapsed && <span>{t('navKnowledge')}</span>}
+              </button>
+            </Tooltip>
+
+            <Tooltip content="Connections" position={collapsed ? 'right' : 'top'} disabled={!collapsed}>
+              <button
+                data-testid="nav-connections"
+                className={`btn btn-ghost ${currentView === 'connections' ? 'active' : ''}`}
+                style={{ width: '100%', justifyContent: collapsed ? 'center' : 'flex-start', padding: '7px 8px', fontSize: '13px', marginTop: '2px' }}
+                onClick={() => onNavigate('connections')}
+              >
+                <Link2 size={15} />
+                {!collapsed && <span>Connections</span>}
+              </button>
+            </Tooltip>
+
+            <Tooltip content="Activity" position={collapsed ? 'right' : 'top'} disabled={!collapsed}>
+              <button
+                data-testid="nav-activity"
+                className={`btn btn-ghost ${currentView === 'activity' ? 'active' : ''}`}
+                style={{ width: '100%', justifyContent: collapsed ? 'center' : 'flex-start', padding: '7px 8px', fontSize: '13px', marginTop: '2px' }}
+                onClick={() => onNavigate('activity')}
+              >
+                <ActivityIcon size={15} />
+                {!collapsed && <span>Activity</span>}
               </button>
             </Tooltip>
           </div>
@@ -1106,96 +1201,6 @@ export function Sidebar({
                   </div>
                 );
               })}
-            </div>
-          </div>
-
-          {/* Workforce Section */}
-          <div>
-            {!collapsed && (
-              <div style={{ fontSize: '10px', fontWeight: 600, color: 'hsl(var(--muted-fg))', padding: '2px 8px', textTransform: 'uppercase', letterSpacing: '0.05em' }}>
-                {t('workforce')}
-              </div>
-            )}
-            <div style={{ display: 'flex', flexDirection: 'column', gap: '2px', marginTop: '2px' }}>
-              <Tooltip content={t('navAgents')} position={collapsed ? 'right' : 'top'} disabled={!collapsed}>
-                <button
-                  className={`btn btn-ghost ${currentView === 'agents' ? 'active' : ''}`}
-                  style={{ width: '100%', justifyContent: collapsed ? 'center' : 'flex-start', padding: '7px 8px', fontSize: '13px' }}
-                  onClick={() => onNavigate('agents')}
-                >
-                  <Bot size={15} />
-                  {!collapsed && <span>{t('navAgents')}</span>}
-                </button>
-              </Tooltip>
-
-              <Tooltip content={t('navTeams')} position={collapsed ? 'right' : 'top'} disabled={!collapsed}>
-                <button
-                  className={`btn btn-ghost ${currentView === 'teams' ? 'active' : ''}`}
-                  style={{ width: '100%', justifyContent: collapsed ? 'center' : 'flex-start', padding: '7px 8px', fontSize: '13px' }}
-                  onClick={() => onNavigate('teams')}
-                >
-                  <Users size={15} />
-                  {!collapsed && <span>{t('navTeams')}</span>}
-                </button>
-              </Tooltip>
-
-              <Tooltip content={t('navKnowledge')} position={collapsed ? 'right' : 'top'} disabled={!collapsed}>
-                <button
-                  data-testid="nav-knowledge"
-                  className={`btn btn-ghost ${currentView === 'knowledge' ? 'active' : ''}`}
-                  style={{ width: '100%', justifyContent: collapsed ? 'center' : 'flex-start', padding: '7px 8px', fontSize: '13px' }}
-                  onClick={() => onNavigate('knowledge')}
-                >
-                  <Database size={15} />
-                  {!collapsed && <span>{t('navKnowledge')}</span>}
-                </button>
-              </Tooltip>
-
-              <Tooltip content={t('navMemory')} position={collapsed ? 'right' : 'top'} disabled={!collapsed}>
-                <button
-                  data-testid="nav-memory"
-                  className={`btn btn-ghost ${currentView === 'memory' ? 'active' : ''}`}
-                  style={{ width: '100%', justifyContent: collapsed ? 'center' : 'flex-start', padding: '7px 8px', fontSize: '13px' }}
-                  onClick={() => onNavigate('memory')}
-                >
-                  <Brain size={15} />
-                  {!collapsed && <span>{t('navMemory')}</span>}
-                </button>
-              </Tooltip>
-
-              <Tooltip content={t('navLearning')} position={collapsed ? 'right' : 'top'} disabled={!collapsed}>
-                <button
-                  data-testid="nav-learning"
-                  className={`btn btn-ghost ${currentView === 'learning' ? 'active' : ''}`}
-                  style={{ width: '100%', justifyContent: collapsed ? 'center' : 'flex-start', padding: '7px 8px', fontSize: '13px' }}
-                  onClick={() => onNavigate('learning')}
-                >
-                  <GraduationCap size={15} />
-                  {!collapsed && <span>{t('navLearning')}</span>}
-                </button>
-              </Tooltip>
-
-              <Tooltip content={t('navAutomations')} position={collapsed ? 'right' : 'top'} disabled={!collapsed}>
-                <button
-                  className={`btn btn-ghost ${currentView === 'automations' ? 'active' : ''}`}
-                  style={{ width: '100%', justifyContent: collapsed ? 'center' : 'flex-start', padding: '7px 8px', fontSize: '13px' }}
-                  onClick={() => onNavigate('automations')}
-                >
-                  <Zap size={15} />
-                  {!collapsed && <span>{t('navAutomations')}</span>}
-                </button>
-              </Tooltip>
-
-              <Tooltip content={t('navSkills')} position={collapsed ? 'right' : 'top'} disabled={!collapsed}>
-                <button
-                  className={`btn btn-ghost ${currentView === 'skills' ? 'active' : ''}`}
-                  style={{ width: '100%', justifyContent: collapsed ? 'center' : 'flex-start', padding: '7px 8px', fontSize: '13px' }}
-                  onClick={() => onNavigate('skills')}
-                >
-                  <Puzzle size={15} />
-                  {!collapsed && <span>{t('navSkills')}</span>}
-                </button>
-              </Tooltip>
             </div>
           </div>
 
