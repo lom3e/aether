@@ -85,6 +85,32 @@ HIDDEN_IMPORTS = [
     "aether.automation.store",
     "aether.automation.scheduler",
     "aether.automation.engine",
+    "aether.actions",
+    "aether.actions.models",
+    "aether.actions.store",
+    "aether.actions.runner",
+    "aether.activity",
+    "aether.activity.models",
+    "aether.activity.store",
+    "aether.bus",
+    "aether.commands",
+    "aether.connections",
+    "aether.connections.models",
+    "aether.connections.store",
+    "aether.conversations",
+    "aether.coordination",
+    "aether.engine",
+    "aether.github",
+    "aether.intelligence",
+    "aether.learning",
+    "aether.notifications",
+    "aether.observability",
+    "aether.personal",
+    "aether.personal.models",
+    "aether.personal.store",
+    "aether.personal.service",
+    "aether.planning",
+    "aether.tools",
 ]
 
 
@@ -147,6 +173,8 @@ def build_runtime() -> Path:
     # Add hidden imports
     for imp in HIDDEN_IMPORTS:
         cmd.extend(["--hidden-import", imp])
+
+    cmd.extend(["--collect-submodules", "aether"])
 
     cmd.append(str(ENTRYPOINT))
 

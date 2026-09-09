@@ -148,7 +148,10 @@ def main():
     print("=" * 70)
 
     # Step 1: Build Aether.app
-    run_command([PYTHON_BIN, str(BUILD_DESKTOP_SCRIPT)])
+    desktop_cmd = [PYTHON_BIN, str(BUILD_DESKTOP_SCRIPT)]
+    if "--skip-ui" in sys.argv:
+        desktop_cmd.append("--skip-ui")
+    run_command(desktop_cmd)
 
     # Step 2: Create Aether.dmg
     create_dmg()

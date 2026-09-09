@@ -5,7 +5,8 @@
   "type": "module",
   "scripts": {
     "dev": "vite",
-    "build": "tsc -b && vite build",
+    "build:ui": "tsc -b && vite build",
+    "build": "npm run build:ui && python3 ../scripts/package_after_build.py",
     "lint": "oxlint",
     "preview": "vite preview"
   },

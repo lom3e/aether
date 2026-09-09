@@ -41,24 +41,43 @@ L'utente finale installa l'applicazione trascinando `Aether.app` nella cartella 
 
 ## 3. Pipeline di Compilazione e Distribuzione
 
-L'intera sequenza di packaging e generazione degli installer è orchestrata da:
+L'architettura di compilazione e packaging garantisce che il bundle desktop e il file `.dmg` siano sempre allineati all'ultima versione del codice.
+
+### 3.1 Ambiente di Sviluppo (`development` branch)
+
+Durante lo sviluppo attivo, l'esecuzione del build frontend standard avvia automaticamente l'intera pipeline di packaging desktop e generazione del DMG:
 
 ```bash
-# Esecuzione dalla root del repository con virtualenv attivo
-python scripts/build_distribution.py
+# Esecuzione dalla directory del frontend:
+cd ui
+npm run build
 ```
 
-### Fasi del Workflow:
-1. **Frontend Build**: Compilazione degli asset statici React 19 + Vite (`npm --prefix ui run build`).
-2. **Python Freeze**: Compilazione del runtime standalone PyInstaller (`python scripts/build_python_runtime.py`).
-3. **Sidecar Sync**: Copia e validazione della cartella `build/aether-runtime/` in `src-tauri/resources/aether-runtime/`.
-4. **Tauri Release Build**: Compilazione del supervisore Rust in modalità release (`--release`) e generazione del bundle `.app` nativo.
-5. **DMG Generation**: Creazione di `build/Aether.dmg` compresso in formato `UDZO` con link ad `Applications` via `hdiutil`.
-6. **Artifact Validation**: Validazione automatica del montaggio del DMG e della conformità dei metadati e dei permessi di esecuzione.
+#### Sequenza Sequenziale Garantita:
+1. **Frontend Compilation (`build:ui`)**: Typecheck TypeScript (`tsc -b`) e compilazione bundle React 19 / Vite (`vite build` in `ui/dist/`). Se la compilazione fallisce, l'intero processo si interrompe immediatamente con exit code non-zero.
+2. **Frontend Static Sync**: Copia e sincronizzazione atomica da `ui/dist/` a `src/aether/server/static/` per il server Python integrato.
+3. **App Icons Generation**: Rigenerazione delle icone multi-risoluzione macOS (`icon.icns`, `icon.png`, ecc.) da `website/public/brand/favicon.svg`.
+4. **Python Freeze**: Congelamento del runtime sidecar isolato (CPython + FastAPI + Uvicorn + SQLite + tutte le capability) tramite PyInstaller onedir in `build/aether-runtime/`.
+5. **Sidecar Sync**: Sincronizzazione del runtime in `src-tauri/resources/aether-runtime/`.
+6. **Tauri Release Build**: Compilazione nativa del supervisore Rust in modalità release (`--bundles app`) in `build/Aether.app` con firma ad-hoc.
+7. **DMG Packaging**: Creazione dell'immagine disco compressa `UDZO` `build/Aether.dmg` contenente `Aether.app` e il symlink `/Applications`.
+8. **Automated Validation**: Montaggio temporaneo del DMG tramite `hdiutil`, verifica dell'integrità del volume e delle autorizzazioni di esecuzione (+x), e smontaggio pulito.
+9. **Stampa Finale**: Output a terminale del percorso completo e della dimensione esatta del DMG generato.
 
-Gli artefatti finali sono collocati in:
-* `build/Aether.app` (Bundle nativo decompresso)
-* `build/Aether.dmg` (Installer compresso per la distribuzione)
+> [!NOTE]
+> Per eseguire solo la compilazione frontend senza ricompilare il DMG, è disponibile lo script separato:
+> `npm run build:ui` (nella cartella `ui/`).
+
+### 3.2 Ambiente di Produzione (`production` branch)
+
+Il branch `production` ospita le release pubbliche stabili isolate. 
+
+* **Isolamento della Release Pubblica**: Il DMG di produzione pubblico destinato agli utenti finali viene generato esclusivamente tramite la pipeline di release ufficiale (CI/CD / Release Tagging) e firmato con credenziali Apple Developer ID / notarizzazione (DSK-04B).
+* **Nessun Rilascio Automatico**: I build locali generati tramite `npm run build` su branch di sviluppo creano artefatti locali in `build/Aether.dmg` ad uso locale e **non** pubblicano né sovrascrivono la release pubblica di produzione.
+* **Script Standalone**: È possibile invocare manualmente l'intera pipeline di distribuzione anche dalla root del repository tramite:
+  ```bash
+  python scripts/build_distribution.py
+  ```
 
 ---
 

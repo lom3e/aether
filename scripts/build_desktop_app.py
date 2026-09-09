@@ -54,8 +54,12 @@ def main():
     run_command([PYTHON_BIN, str(gen_icons_script)])
 
     # 2. Build React UI
-    print("\n--- 2. Building React Frontend UI Bundle ---")
-    run_command(["npm", "--prefix", "ui", "run", "build"])
+    skip_ui = "--skip-ui" in sys.argv
+    if not skip_ui:
+        print("\n--- 2. Building React Frontend UI Bundle ---")
+        run_command(["npm", "--prefix", "ui", "run", "build:ui"])
+    else:
+        print("\n--- 2. Skipping React Frontend UI Bundle Compilation (--skip-ui specified) ---")
 
     # Synchronize built UI to Python backend static directory
     ui_dist_dir = REPO_ROOT / "ui" / "dist"
