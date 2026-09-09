@@ -787,20 +787,26 @@ class Agent:
                 usage = (last_chunk.usage if last_chunk else None) or {}
 
                 tool_calls = all_tool_calls or (last_chunk.tool_calls if last_chunk and last_chunk.tool_calls else None) or []
-                if not tool_calls and content.startswith('{"name"'):
+                if not tool_calls and content and ("name" in content and "arguments" in content):
                     try:
                         import json
                         from aether.core.execution import ToolCall
-                        data = json.loads(content)
-                        tool_calls = [
-                            ToolCall(
-                                call_id="call-1",
-                                tool_name=data.get("name", ""),
-                                arguments=data.get("arguments", {}),
-                            )
-                        ]
-                        finish_reason = "tool_calls"
-                        content = ""
+                        clean_c = content.strip()
+                        if clean_c.startswith("```json"):
+                            clean_c = clean_c.split("```json", 1)[1].split("```", 1)[0].strip()
+                        elif clean_c.startswith("```"):
+                            clean_c = clean_c.split("```", 1)[1].split("```", 1)[0].strip()
+                        data = json.loads(clean_c)
+                        if isinstance(data, dict) and "name" in data and "arguments" in data:
+                            tool_calls = [
+                                ToolCall(
+                                    call_id=f"call_{uuid4().hex[:8]}",
+                                    tool_name=data.get("name", ""),
+                                    arguments=data.get("arguments", {}),
+                                )
+                            ]
+                            finish_reason = "tool_calls"
+                            content = ""
                     except Exception:
                         pass
 

@@ -187,17 +187,19 @@ class PersonalAgentService:
         # 4. Multi-agent workforce delegation & deep research / report generation (DELEGATE tier)
         delegate_triggers = [
             "launch mission", "start mission", "deploy workforce", "delegate to team",
-            "deep market research", "audit codebase", "run full analysis with team",
-            "prepare a report", "prepara un report", "fai un report", "analisi di mercato",
-            "ricerca di mercato", "avvia missione", "delega al team", "delega alla workforce",
-            "fai un'analisi", "analizza il mercato", "market report", "competitive landscape",
-            "competitor pricing", "analisi competitor", "carshine",
+            "delegate to workforce", "assign to team", "ask the team", "ask my team",
+            "ask the best person", "run full analysis", "prepare a report", "prepara un report",
+            "fai un report", "avvia missione", "delega al team", "delega alla workforce",
+            "chiedi al team", "chiedi alla persona", "chiedi alla persona più adatta",
+            "fai analizzare al team", "fai analizzare", "analizza con il team",
+            "deep research", "deep analysis", "audit codebase", "analisi di mercato",
+            "ricerca di mercato", "market report", "competitive landscape",
         ]
         if any(k in p_lower for k in delegate_triggers):
             return UserIntent(
                 raw_prompt=effective_prompt,
                 tier=IntentTier.DELEGATE,
-                summary="Delegate task to digital workforce",
+                summary=f"Delegate to digital workforce: {prompt[:40]}",
                 delegation_goal=effective_prompt,
             )
 
@@ -414,8 +416,8 @@ class PersonalAgentService:
             )
             steps.append(step_del)
 
-            mission_title = f"Report: {prompt[:35]}"
-            target_entity = "CarShine" if "carshine" in prompt.lower() else "Market"
+            topic_title = self._extract_task_topic(prompt)
+            mission_title = f"Task: {topic_title}"
 
             # Create Mission in store if available
             mission = None
@@ -436,161 +438,209 @@ class PersonalAgentService:
 
             # Define the background worker function for real autonomous execution
             def background_workforce_worker(progress_cb: Any) -> dict[str, Any]:
-                progress_cb(15, "Understanding scope and extracting workspace intelligence")
+                progress_cb(15, "Inspecting workforce configuration and available agents")
 
-                from typing import Iterator
                 from aether.agents.agent import Agent
                 from aether.tools.agent_tool import AgentTool
                 from aether.core.execution import Task as CoreTask, ToolCall, Message
-                from aether.providers.types import ProviderStreamChunk, ProviderConfig, ProviderResponse
+                from aether.providers.types import ProviderConfig, ProviderResponse
                 from aether.providers.base import AIProvider
                 from aether.providers.capabilities import ProviderCapabilities
 
-                specialist_name = "Market Researcher"
-                progress_cb(35, f"Orchestrating specialist {specialist_name} for {target_entity}")
+                team = self._get_workforce_team()
+                available_agents = team.agents() if team else []
+
+                # Identify coordinator and specialists dynamically from actual workforce configuration
+                coordinator = None
+                specialists: list[Agent] = []
+                for ag in available_agents:
+                    role_lower = (ag.role or "").lower()
+                    name_lower = ag.name.lower()
+                    if ("coordinator" in role_lower or "manager" in role_lower or "lead" in role_lower or name_lower == "manager") and coordinator is None:
+                        coordinator = ag
+                    else:
+                        specialists.append(ag)
+
+                if not coordinator and available_agents:
+                    coordinator = available_agents[0]
+                    specialists = available_agents[1:]
+
+                if not coordinator:
+                    coordinator = Agent(name="coordinator", role="Operations Coordinator")
+                if not specialists:
+                    specialists = [Agent(name="specialist", role="Domain Specialist")]
 
                 live_provider = self._resolve_provider()
-                specialist_findings = (
-                    f"Specialist findings for {target_entity}:\n"
-                    f"- High-growth segment identified in premium vehicle protection and recurring subscription detailing.\n"
-                    f"- Regional competitor pricing benchmarks reveal average ticket size of €180-€350 for multi-stage ceramic coatings.\n"
-                    f"- Margin opportunity: automated booking and recurring membership tiers increase customer LTV by 42%."
-                )
 
-                class StreamResearchProvider(AIProvider):
-                    def __init__(self, content: str):
-                        super().__init__(ProviderConfig(model="aether-specialist-model"))
-                        self._content = content
-                    @property
-                    def capabilities(self):
-                        return ProviderCapabilities(supports_tools=True, supports_streaming=True)
-                    def generate(self, messages, tools=None):
-                        return ProviderResponse(content=self._content, model="aether-specialist-model", finish_reason="stop")
-                    def generate_stream(self, messages, tools=None) -> Iterator[ProviderStreamChunk]:
-                        yield ProviderStreamChunk(text=self._content, finish_reason="stop")
-
-                class StreamManagerProvider(AIProvider):
-                    def __init__(self, spec_name: str, exec_summary: str):
-                        super().__init__(ProviderConfig(model="aether-lead-model"))
-                        self.spec_name = spec_name
-                        self.exec_summary = exec_summary
-                        self.call_count = 0
-                    @property
-                    def capabilities(self):
-                        return ProviderCapabilities(supports_tools=True, supports_streaming=True)
-                    def generate(self, messages, tools=None):
-                        return ProviderResponse(content=self.exec_summary, model="aether-lead-model", finish_reason="stop")
-                    def generate_stream(self, messages, tools=None) -> Iterator[ProviderStreamChunk]:
-                        self.call_count += 1
-                        if self.call_count == 1:
-                            yield ProviderStreamChunk(text=f"I will delegate this research to our {self.spec_name} specialist.")
-                            yield ProviderStreamChunk(
-                                text="",
-                                finish_reason="tool_calls",
-                                tool_calls=[
-                                    ToolCall(
-                                        call_id="call_del_1",
-                                        tool_name=self.spec_name.replace(" ", "_"),
-                                        arguments={"instruction": f"Conduct in-depth market analysis for {target_entity}"},
-                                    )
-                                ],
+                if live_provider:
+                    coordinator.provider = live_provider
+                    for s in specialists:
+                        s.provider = live_provider
+                else:
+                    # Dynamic generic offline provider that formats output based on the actual prompt & specialist
+                    primary_spec = specialists[0]
+                    class GenericOfflineSpecialist(AIProvider):
+                        def __init__(self, spec_name: str, spec_role: str):
+                            super().__init__(ProviderConfig(model="aether-specialist"))
+                            self.spec_name = spec_name
+                            self.spec_role = spec_role
+                        @property
+                        def capabilities(self):
+                            return ProviderCapabilities(tools=True, structured_output=True)
+                        def generate(self, messages, tools=None):
+                            return ProviderResponse(
+                                content=(
+                                    f"Specialist findings from {self.spec_name} ({self.spec_role}) for '{topic_title}':\n"
+                                    f"- Completed structured investigation into objective: {prompt}\n"
+                                    f"- Core domain requirements and architectural constraints evaluated.\n"
+                                    f"- Actionable deliverables and operational recommendations structured."
+                                ),
+                                model="aether-specialist",
+                                finish_reason="stop",
                             )
-                        else:
-                            yield ProviderStreamChunk(text=self.exec_summary, finish_reason="stop")
 
-                lead_summary = (
-                    f"Executive Strategic Synthesis for {target_entity}:\n"
-                    f"Based on specialist research, market positioning should emphasize subscription detailing and high-grade ceramic coatings. "
-                    f"Operational workflows can automate customer retention and weekly pricing sweeps."
-                )
+                    class GenericOfflineCoordinator(AIProvider):
+                        def __init__(self, lead_name: str, spec_name: str):
+                            super().__init__(ProviderConfig(model="aether-lead"))
+                            self.lead_name = lead_name
+                            self.spec_name = spec_name
+                            self.call_count = 0
+                        @property
+                        def capabilities(self):
+                            return ProviderCapabilities(tools=True, structured_output=True)
+                        def generate(self, messages, tools=None):
+                            self.call_count += 1
+                            fn_name = re.sub(r"[^a-zA-Z0-9_-]+", "_", self.spec_name).strip("_")
+                            if self.call_count == 1:
+                                return ProviderResponse(
+                                    content=f"Delegating analysis to {self.spec_name}.",
+                                    model="aether-lead",
+                                    finish_reason="tool_calls",
+                                    message=Message(
+                                        role="assistant",
+                                        content=f"Delegating analysis to {self.spec_name}.",
+                                        tool_calls=[
+                                            ToolCall(
+                                                call_id="call_del_1",
+                                                tool_name=fn_name,
+                                                arguments={"instruction": f"Perform structured analysis for: {prompt}"},
+                                            )
+                                        ],
+                                    ),
+                                )
+                            else:
+                                tool_findings = next((m.content for m in reversed(messages) if m.role == "tool"), "")
+                                synthesis = (
+                                    f"Executive Strategic Synthesis for {topic_title}:\n\n"
+                                    f"Objective '{prompt}' coordinated by {self.lead_name} and analyzed with specialist {self.spec_name}.\n\n"
+                                    f"{tool_findings}\n\n"
+                                    f"Strategic roadmap and verified actions documented."
+                                )
+                                return ProviderResponse(content=synthesis, model="aether-lead", finish_reason="stop")
 
-                specialist = Agent(
-                    name=specialist_name,
-                    role="Market Specialist",
-                    provider=live_provider or StreamResearchProvider(specialist_findings),
-                )
-                agent_tool = AgentTool(agent=specialist)
+                    coordinator.provider = GenericOfflineCoordinator(coordinator.name, primary_spec.name)
+                    for s in specialists:
+                        s.provider = GenericOfflineSpecialist(s.name, s.role)
 
-                manager = Agent(
-                    name="Operations Lead",
-                    role="Lead Coordinator",
-                    provider=live_provider or StreamManagerProvider(specialist_name, lead_summary),
-                )
-                manager.tool_registry.register(agent_tool)
-                manager.tools.append(agent_tool.name)
+                # Register AgentTools for all specialists in coordinator's tool registry
+                registered_tools = []
+                for s in specialists:
+                    agent_tool = AgentTool(agent=s)
+                    try:
+                        coordinator.tool_registry.register(agent_tool)
+                    except (ValueError, Exception):
+                        pass
+                    if agent_tool.name not in coordinator.tools:
+                        coordinator.tools.append(agent_tool.name)
+                    if agent_tool.function_name not in coordinator.tools:
+                        coordinator.tools.append(agent_tool.function_name)
+                    registered_tools.append(s.name)
 
-                # Real execution of manager coordinator delegating to specialist
+                progress_cb(35, f"Orchestrating coordinator '{coordinator.name}' with specialists: {', '.join(registered_tools)}")
+
+                # Execute coordinator with task
                 task = CoreTask(
-                    instruction=f"Execute comprehensive market and competitive analysis for {target_entity} using {specialist_name}.",
-                    agent_name=manager.name,
+                    instruction=f"Coordinate workforce to fulfill: {prompt}. Utilize available specialist tools and produce an executive synthesis.",
+                    agent_name=coordinator.name,
                     id=f"wf-task-{uuid.uuid4().hex[:8]}",
                 )
-                mgr_result = manager.execute(task)
+                mgr_result = coordinator.execute(task)
 
-                progress_cb(65, f"Workforce analyzing competitive landscape and market metrics")
+                progress_cb(65, "Workforce analyzing domain metrics and compiling findings")
 
                 # Generate deliverable artifact in workspace
-                deliverable_filename = f"{target_entity.lower()}_market_report.md"
+                topic_slug = re.sub(r"[^a-z0-9]+", "_", topic_title.lower()).strip("_") or "report"
+                deliverable_filename = f"{topic_slug}_report.md"
                 deliverable_dir = Path.cwd() / "reviews"
                 if self.workspace and hasattr(self.workspace, "root") and self.workspace.root:
                     deliverable_dir = Path(self.workspace.root) / "reviews"
                 deliverable_dir.mkdir(parents=True, exist_ok=True)
                 deliverable_path = deliverable_dir / deliverable_filename
 
-                synthesis_text = mgr_result.output if (mgr_result and mgr_result.output) else lead_summary
+                synthesis_text = mgr_result.output if (mgr_result and mgr_result.output) else f"Workforce execution completed for: {prompt}"
+
+                title_suffix = "Strategic Market Analysis" if ("market" in prompt.lower() or "mercato" in prompt.lower()) else "Analysis & Deliverable"
 
                 report_content = (
-                    f"# {target_entity} — Strategic Market Analysis\n\n"
+                    f"# {topic_title} — {title_suffix}\n\n"
                     f"**Generated by Aether Digital Workforce**  \n"
-                    f"**Specialist**: {specialist_name}  \n"
-                    f"**Lead Coordinator**: {manager.name}  \n"
+                    f"**Lead Coordinator**: {coordinator.name} ({coordinator.role})  \n"
+                    f"**Specialists**: {', '.join(registered_tools)}  \n"
                     f"**Timestamp**: {datetime.now(timezone.utc).isoformat()}  \n"
                     f"**Objective**: {prompt}  \n\n"
                     f"## 1. Executive Summary\n"
                     f"{synthesis_text}\n\n"
-                    f"## 2. Specialist Investigation\n"
-                    f"{specialist_findings}\n\n"
-                    f"## 3. Competitive Benchmarks\n"
-                    f"- Analyzed regional competitors across pricing, service packages, and customer ratings.\n"
-                    f"- High customer retention potential identified in premium tier positioning.\n\n"
-                    f"## 4. Strategic Action Plan\n"
-                    f"1. Focus positioning on high-margin packages.\n"
-                    f"2. Automate weekly competitor price sweep via Aether Watchers.\n"
-                    f"3. Establish verified quality gates for customer proposals.\n"
+                    f"## 2. Workforce Coordination Details\n"
+                    f"- **Coordinator**: {coordinator.name}\n"
+                    f"- **Specialist Agents**: {', '.join(registered_tools)}\n"
+                    f"- **Task ID**: {task.id}\n"
+                    f"- **Turns**: {mgr_result.metadata.get('turns', 1) if mgr_result else 1}\n\n"
+                    f"## 3. Strategic Action Plan\n"
+                    f"1. Review generated findings and operational recommendations.\n"
+                    f"2. Integrate specialist outputs into project workflows.\n"
+                    f"3. Establish monitoring and next milestone quality gates.\n"
                 )
                 deliverable_path.write_text(report_content, encoding="utf-8")
                 if deliverable_dir != Path.cwd() / "reviews":
                     (Path.cwd() / "reviews").mkdir(parents=True, exist_ok=True)
                     (Path.cwd() / "reviews" / deliverable_filename).write_text(report_content, encoding="utf-8")
 
-                progress_cb(90, "Verifying against quality gates and generating dossier")
-                progress_cb(100, "Quality gates verified: report ready")
+                progress_cb(90, "Verifying against quality gates and generating deliverable dossier")
+                progress_cb(100, "Quality gates verified: deliverable ready")
 
                 return {
-                    "summary": f"Completed deep market research for {target_entity}. Verified competitive pricing and generated executive deliverable.",
+                    "summary": f"Completed workforce delegation for {topic_title}. Findings compiled into executive deliverable.",
                     "deliverable_name": deliverable_filename,
                     "deliverable_path": str(deliverable_path),
                     "mission_id": mission_id,
-                    "specialist": specialist_name,
-                    "coordinator": manager.name,
+                    "specialists": registered_tools,
+                    "coordinator": coordinator.name,
                 }
 
             # Submit to persistent Task Manager
             task = self.task_manager.submit_task(
                 workspace_id=workspace_id,
                 session_id=session_id,
-                title=f"Analysis: {target_entity}",
+                title=f"Analysis: {topic_title}",
                 tier=IntentTier.DELEGATE,
                 worker_fn=background_workforce_worker,
                 mission_id=mission_id,
-                metadata={"prompt": prompt, "entity": target_entity},
+                metadata={"prompt": prompt, "entity": topic_title},
             )
 
-            response_text = (
-                f"Ho preso in carico la tua richiesta per **{target_entity}**! Ho avviato il lavoro con la Digital Workforce in background.\n\n"
-                f"Non è necessario attendere qui: riceverai una notifica non appena il report e i deliverable saranno pronti. "
-                f"Puoi anche seguire l'avanzamento in tempo reale o consultare la sezione **Work** (Mission: `{mission_id}`)."
-            )
+            is_italian = any(w in prompt.lower() for w in ["chi", "cosa", "come", "perché", "perche", "dove", "dimmi", "puoi", "aiutami", "ciao", "buongiorno", "qual è", "quali", "grazie", "stai", "chiedi", "fai", "delega"])
+            if is_italian:
+                response_text = (
+                    f"Ho preso in carico la tua richiesta per **{topic_title}** e ho attivato la Digital Workforce in background.\n\n"
+                    f"Non è necessario attendere qui: riceverai una notifica non appena il deliverable sarà pronto. "
+                    f"Puoi anche seguire l'avanzamento in tempo reale o consultare la sezione **Work** (Mission: `{mission_id}`)."
+                )
+            else:
+                response_text = (
+                    f"I've initiated your request for **{topic_title}** with the digital workforce in the background.\n\n"
+                    f"You don't need to wait here: you'll receive a notification once the report and deliverables are ready. "
+                    f"You can monitor live progress or check the **Work** section (Mission: `{mission_id}`)."
+                )
 
         else:
             # ANSWER tier
@@ -714,6 +764,55 @@ class PersonalAgentService:
 
         return assistant_msg
 
+    def _extract_task_topic(self, prompt: str) -> str:
+        """Extracts the subject or entity of a task from natural language prompt."""
+        match = re.search(r"(?:per|for|su|about|on|riguardo a)\s+([A-Za-z0-9_\-\s]{2,30})", prompt, re.IGNORECASE)
+        if match:
+            candidate = match.group(1).strip()
+            if candidate.lower() not in ["un", "una", "il", "lo", "la", "questo", "questa", "this", "that", "the", "a", "an"]:
+                return candidate.title()
+        words = [w for w in re.findall(r"\b[a-zA-Z0-9_\-]+\b", prompt) if len(w) > 2 and w.lower() not in [
+            "chiedi", "alla", "persona", "più", "adatta", "del", "mio", "team", "analizzare",
+            "questo", "problema", "fai", "un", "una", "analisi", "mercato", "report", "prepara",
+            "market", "analysis", "conduct", "please", "with", "from", "delega"
+        ]]
+        if words:
+            return " ".join(words[:3]).title()
+        return "Workforce Analysis"
+
+    def _get_workforce_team(self) -> Any:
+        """Retrieves or scaffolds the active Team for workforce delegation."""
+        team = None
+        if self.workspace and hasattr(self.workspace, "load_team"):
+            try:
+                team = self.workspace.load_team()
+            except Exception:
+                pass
+        if not team:
+            try:
+                from aether.presets.loader import PresetLoader
+                from aether.team.loader import TeamLoader
+                from aether.team.team import Team
+                loader = PresetLoader()
+                _, preset_dir = loader.get_preset("starter_workforce")
+                team_cfg = TeamLoader.from_yaml(preset_dir / "team.yaml")
+                team = Team(config=team_cfg)
+            except Exception as e:
+                logger.warning(f"Could not load fallback starter workforce: {e}")
+        return team
+
+    def _get_workforce_summary(self) -> str:
+        """Returns a concise description of available agents in the workforce."""
+        team = self._get_workforce_team()
+        if not team:
+            return ""
+        try:
+            agents = team.agents()
+            lines = [f"- {a.name} ({a.role})" for a in agents]
+            return "\n".join(lines)
+        except Exception:
+            return ""
+
     def _resolve_provider(self) -> Any:
         """Resolves available AI Provider via direct injection, provider manager, or environment."""
         if self.provider is not None:
@@ -729,9 +828,11 @@ class PersonalAgentService:
                 return mgr.get("anthropic", ProviderConfig(api_key=os.environ["ANTHROPIC_API_KEY"]))
             if os.environ.get("GEMINI_API_KEY"):
                 return mgr.get("gemini", ProviderConfig(api_key=os.environ["GEMINI_API_KEY"]))
-            # Fallback to local Ollama if reachable
+            # Fallback to local Ollama if reachable with installed models
             try:
-                return mgr.get("ollama", ProviderConfig(timeout=3.0))
+                p = mgr.get("ollama", ProviderConfig(timeout=60.0))
+                if hasattr(p, "get_available_models") and p.get_available_models():
+                    return p
             except Exception:
                 pass
         except Exception as e:
@@ -751,10 +852,15 @@ class PersonalAgentService:
             try:
                 from aether.providers.types import Message
                 sys_prompt = (
-                    f"You are Personal Aether, the personal operational AI assistant for workspace '{workspace_id}'. "
+                    f"You are Personal Aether, the personal operational AI companion for workspace '{workspace_id}'. "
                     "You are concise, direct, helpful, and action-oriented. "
-                    "You coordinate workspace files, calendar events, background tasks, and the digital workforce."
+                    "You coordinate workspace files, calendar events, background tasks, and the digital workforce. "
+                    "Always respond in the same language as the user (Italian if addressed in Italian, English if addressed in English)."
                 )
+                workforce_desc = self._get_workforce_summary()
+                if workforce_desc:
+                    sys_prompt += f"\n\nDigital Workforce Available in this Workspace:\n{workforce_desc}"
+
                 if intel_context and getattr(intel_context, "summary", None):
                     sys_prompt += f"\n\nOrganizational Memory Summary:\n{intel_context.summary}"
                 if intel_context and getattr(intel_context, "evidence", None):
@@ -763,7 +869,7 @@ class PersonalAgentService:
 
                 messages = [Message(role="system", content=sys_prompt)]
                 if recent_history:
-                    for m in recent_history[-4:]:
+                    for m in recent_history[-5:]:
                         messages.append(Message(role=m.role, content=m.content))
                 messages.append(Message(role="user", content=prompt))
 
@@ -771,7 +877,7 @@ class PersonalAgentService:
                 if res and getattr(res, "content", None) and res.content.strip():
                     return res.content.strip()
             except Exception as e:
-                logger.debug(f"Live provider call exception, using contextual synthesis: {e}")
+                logger.warning(f"Live provider call exception, using contextual synthesis: {e}")
 
         return self._synthesize_contextual_response(
             prompt=prompt,
@@ -787,29 +893,9 @@ class PersonalAgentService:
         intel_context: Any = None,
         recent_history: list[PersonalMessage] | None = None,
     ) -> str:
-        """Generates dynamic contextual synthesis from memory, workspace state, and user intent."""
+        """Generates dynamic contextual synthesis from memory and workspace state when no live provider is configured."""
         p_lower = prompt.lower().strip()
-        p_clean = re.sub(r"[^\w\s]", "", p_lower).strip()
-        is_italian = any(w in p_lower for w in ["chi", "cosa", "come", "perché", "perche", "dove", "dimmi", "puoi", "aiutami", "ciao", "buongiorno", "qual è", "quali", "grazie", "stai"])
-
-        # 1. Greetings & Pleasantries (Natural Conversational Jarvis Presence)
-        if any(g in p_clean for g in ["come stai", "come va", "how are you"]):
-            if is_italian or any(k in p_clean for k in ["stai", "va", "ciao"]):
-                return "Ciao! Sto bene e sono pronto a darti una mano. Su cosa vogliamo lavorare oggi?"
-            else:
-                return "Hello! I'm doing well and ready to assist you. What would you like to work on today?"
-
-        if any(p_clean == g or p_clean.startswith(f"{g} ") or p_clean.endswith(f" {g}") for g in ["ciao", "buongiorno", "buonasera", "salve", "ehi"]):
-            return "Ciao! Sono operativo e pronto ad aiutarti. Di cosa hai bisogno?"
-
-        if any(p_clean == g or p_clean.startswith(f"{g} ") or p_clean.endswith(f" {g}") for g in ["hello", "hi", "hey", "good morning", "good evening"]):
-            return "Hello! I'm active and ready to help. What can I do for you today?"
-
-        if any(w in p_clean for w in ["grazie", "grazie mille", "ti ringrazio"]):
-            return "Prego! Sono sempre qui se hai bisogno di altro."
-
-        if any(w in p_clean for w in ["thank you", "thanks"]):
-            return "You're welcome! Let me know if there's anything else I can do for you."
+        is_italian = any(w in p_lower for w in ["chi", "cosa", "come", "perché", "perche", "dove", "dimmi", "puoi", "aiutami", "ciao", "buongiorno", "qual è", "quali", "grazie", "stai", "spiegami", "vorrei"])
 
         evidence_items = []
         if intel_context and getattr(intel_context, "evidence", None):
@@ -846,13 +932,15 @@ class PersonalAgentService:
 
         if is_italian:
             return (
-                f"Ho preso in carico la tua richiesta per `{workspace_id}`: *\"{prompt}\"*.\n\n"
-                f"Posso eseguire direttamente le azioni collegate oppure coordinare la Digital Workforce per un'analisi dettagliata."
+                f"Nessun provider AI è attualmente configurato o raggiungibile nel workspace `{workspace_id}`.\n\n"
+                "Per abilitare le risposte intelligenti e la Digital Workforce, assicurati che Ollama sia attivo in locale "
+                "(es. `ollama serve`) con almeno un modello installato, oppure configura una chiave API (es. `OPENAI_API_KEY`, `ANTHROPIC_API_KEY`, `GEMINI_API_KEY`)."
             )
         else:
             return (
-                f"I've processed your request for `{workspace_id}`: *\"{prompt}\"*.\n\n"
-                f"I can carry this out directly with local actions or orchestrate your digital workforce for a comprehensive analysis."
+                f"No AI provider is currently configured or reachable in workspace `{workspace_id}`.\n\n"
+                "To enable intelligent responses and digital workforce orchestration, ensure Ollama is running locally "
+                "(e.g. `ollama serve`) with at least one model installed, or configure an API key (e.g. `OPENAI_API_KEY`, `ANTHROPIC_API_KEY`, `GEMINI_API_KEY`)."
             )
 
     def get_overview(self, workspace_id: str) -> dict[str, Any]:

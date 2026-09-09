@@ -73,8 +73,56 @@ class OllamaProvider(AIProvider):
     def __init__(self, config: ProviderConfig | None = None) -> None:
         super().__init__(config)
         self._base_url = (self.config.base_url or _DEFAULT_BASE_URL).rstrip("/")
-        self._model = self.config.model or _DEFAULT_MODEL
         self._endpoint = f"{self._base_url}{_CHAT_PATH}"
+        self._model = self._resolve_model()
+
+    def _resolve_model(self) -> str:
+        """Dynamically resolves the best installed model for this Ollama instance."""
+        import os
+        # 1. Environment variable override
+        env_model = os.environ.get("OLLAMA_MODEL") or os.environ.get("AETHER_MODEL")
+        if env_model:
+            return env_model.strip()
+
+        configured = (self.config.model or "").strip()
+
+        # 2. Check locally installed models via /api/tags
+        installed = self.get_available_models()
+        if installed:
+            # If user explicitly configured a model that is installed, use it
+            if configured and configured in installed:
+                return configured
+
+            # If user configured a model with prefix match (e.g. "qwen2.5-coder" matches "qwen2.5-coder:14b")
+            if configured and configured != _DEFAULT_MODEL:
+                for m in installed:
+                    if m == configured or m.startswith(f"{configured}:"):
+                        return m
+
+            # Preferred models in order of capability & speed
+            preferred = [
+                "qwen2.5-coder:14b",
+                "qwen3.5:9b",
+                "qwen3:14b",
+                "gemma4:latest",
+                "qwen3.6:27b",
+                "qwen3.5:0.8b",
+                "llama3.1:latest",
+                "llama3:latest",
+                "llama3",
+                "mistral:latest",
+                "mistral",
+            ]
+            for pref in preferred:
+                for m in installed:
+                    if m == pref or m.startswith(pref.split(":")[0]):
+                        return m
+
+            # Otherwise return first installed model
+            return installed[0]
+
+        # 3. Fallback to configured model or default
+        return configured or _DEFAULT_MODEL
 
     @property
     def capabilities(self) -> ProviderCapabilities:
@@ -341,7 +389,8 @@ class OllamaProvider(AIProvider):
         tags_url = f"{self._base_url}/api/tags"
         req = urllib.request.Request(tags_url, method="GET")
         try:
-            with urllib.request.urlopen(req, timeout=self.config.timeout) as resp:
+            timeout = min(self.config.timeout, 5.0) if self.config.timeout else 2.0
+            with urllib.request.urlopen(req, timeout=timeout) as resp:
                 raw = json.loads(resp.read().decode("utf-8"))
                 models = raw.get("models", [])
                 return [m.get("name") for m in models if m.get("name")]
@@ -399,6 +448,40 @@ class OllamaProvider(AIProvider):
                         args = {"input": args}
                 call_id = tc.get("id") or f"call_{uuid.uuid4().hex[:8]}"
                 tool_calls.append(ToolCall(call_id=call_id, tool_name=name, arguments=args))
+
+        # Fallback: check if content itself is a JSON tool call (common in some local models)
+        if not tool_calls and content and "name" in content and "arguments" in content:
+            try:
+                clean_content = content.strip()
+                if clean_content.startswith("```json"):
+                    clean_content = clean_content.split("```json", 1)[1].split("```", 1)[0].strip()
+                elif clean_content.startswith("```"):
+                    clean_content = clean_content.split("```", 1)[1].split("```", 1)[0].strip()
+                parsed = json.loads(clean_content)
+                if isinstance(parsed, dict) and "name" in parsed and "arguments" in parsed:
+                    call_id = f"call_{uuid.uuid4().hex[:8]}"
+                    args = parsed["arguments"]
+                    if isinstance(args, str):
+                        try:
+                            args = json.loads(args)
+                        except json.JSONDecodeError:
+                            args = {"input": args}
+                    tool_calls = [ToolCall(call_id=call_id, tool_name=parsed["name"], arguments=args)]
+                    content = ""
+                elif isinstance(parsed, list) and len(parsed) > 0 and isinstance(parsed[0], dict) and "name" in parsed[0]:
+                    tool_calls = []
+                    for item in parsed:
+                        call_id = f"call_{uuid.uuid4().hex[:8]}"
+                        args = item.get("arguments", {})
+                        if isinstance(args, str):
+                            try:
+                                args = json.loads(args)
+                            except json.JSONDecodeError:
+                                args = {"input": args}
+                        tool_calls.append(ToolCall(call_id=call_id, tool_name=item["name"], arguments=args))
+                    content = ""
+            except Exception:
+                pass
 
         # Ollama usage keys
         usage: dict[str, int] = {}

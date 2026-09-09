@@ -544,6 +544,12 @@ def test_p_pointer_relative_positioning_contract():
 @pytest.mark.asyncio
 async def test_q_conversational_natural_greetings(workspace):
     """Verify conversational greetings receive natural human responses without rigid boilerplate."""
+    from aether.providers.mock import MockProvider
+    workspace.personal.provider = MockProvider(responses=[
+        "Ciao! Sono operativo e pronto ad aiutarti.",
+        "Hello! I am ready to help.",
+        "Prego!",
+    ])
     app.state.workspace = workspace
 
     # 1. Italian greeting
@@ -553,7 +559,7 @@ async def test_q_conversational_natural_greetings(workspace):
         PersonalChatPayload(prompt="ciao come stai?", workspace_id=workspace.name),
     )
     assert res1["role"] == "assistant"
-    assert "Ciao! Sto bene e sono pronto a darti una mano" in res1["content"]
+    assert "Ciao!" in res1["content"]
     assert "Ho preso in carico la tua richiesta relativa a" not in res1["content"]
 
     # 2. English greeting
@@ -563,7 +569,7 @@ async def test_q_conversational_natural_greetings(workspace):
         PersonalChatPayload(prompt="hello, how are you?", workspace_id=workspace.name),
     )
     assert res2["role"] == "assistant"
-    assert "Hello! I'm doing well and ready to assist you" in res2["content"]
+    assert "Hello!" in res2["content"]
 
     # 3. Thanks
     req3 = make_request("POST", "/api/personal/chat")
@@ -581,7 +587,10 @@ async def test_q_conversational_natural_greetings(workspace):
 @pytest.mark.asyncio
 async def test_r_carshine_specialist_delegation(workspace):
     """Verify CarShine market analysis triggers real specialist delegation and delivers verified report."""
-    import time
+    from aether.providers.mock import MockProvider
+    workspace.personal.provider = MockProvider(responses=[
+        "Executive Strategic Synthesis for CarShine: Market analysis completed.",
+    ])
     app.state.workspace = workspace
 
     req = make_request("POST", "/api/personal/chat")
@@ -597,7 +606,7 @@ async def test_r_carshine_specialist_delegation(workspace):
     assert res["tier"] == IntentTier.DELEGATE.value
 
     # Wait for the background worker thread to finish
-    time.sleep(0.5)
+    workspace.personal.task_manager._executor.shutdown(wait=True)
 
     tasks = workspace.personal.task_manager.list_tasks(workspace_id=workspace.name)
     assert len(tasks) >= 1
@@ -610,7 +619,45 @@ async def test_r_carshine_specialist_delegation(workspace):
     deliv_file = Path(carshine_task.deliverable_path)
     assert deliv_file.exists()
     report_text = deliv_file.read_text(encoding="utf-8")
-    assert "CarShine — Strategic Market Analysis" in report_text
-    assert "Market Researcher" in report_text
-    assert "Executive Strategic Synthesis" in report_text
+    assert "CarShine" in report_text
+    assert "Strategic Market Analysis" in report_text
+
+
+# ---------------------------------------------------------------------------
+# Test S: Generic Delegation for Arbitrary Domain & Topic
+# ---------------------------------------------------------------------------
+@pytest.mark.asyncio
+async def test_s_generic_workforce_delegation_arbitrary_topic(workspace):
+    """Verify generic workforce delegation works for arbitrary non-CarShine topics without hardcoded strings."""
+    from aether.providers.mock import MockProvider
+    workspace.personal.provider = MockProvider(responses=[
+        "Security audit synthesis for AuthModule: Zero critical vulnerabilities.",
+    ])
+    app.state.workspace = workspace
+
+    req = make_request("POST", "/api/personal/chat")
+    res = await personal_chat_route(
+        req,
+        PersonalChatPayload(
+            prompt="Audit di sicurezza per AuthModule",
+            workspace_id=workspace.name,
+        ),
+    )
+    assert res["role"] == "assistant"
+    assert "AuthModule" in res["content"]
+    assert res["tier"] == IntentTier.DELEGATE.value
+
+    workspace.personal.task_manager._executor.shutdown(wait=True)
+
+    tasks = workspace.personal.task_manager.list_tasks(workspace_id=workspace.name)
+    auth_task = next((t for t in tasks if "AuthModule" in t.title), None)
+    assert auth_task is not None
+    assert auth_task.status == PersonalTaskStatus.COMPLETED
+    assert auth_task.deliverable_path is not None
+
+    deliv_file = Path(auth_task.deliverable_path)
+    assert deliv_file.exists()
+    report_text = deliv_file.read_text(encoding="utf-8")
+    assert "AuthModule" in report_text
+    assert "CarShine" not in report_text
 
