@@ -75,6 +75,22 @@ class PersonalAgentService:
             event_hub=self.event_hub,
         )
 
+    def shutdown(self) -> None:
+        """Shuts down background executors and closes persistent stores."""
+        if hasattr(self, "task_manager") and self.task_manager:
+            try:
+                self.task_manager.shutdown()
+            except Exception:
+                pass
+        if hasattr(self, "store") and self.store and hasattr(self.store, "close"):
+            try:
+                self.store.close()
+            except Exception:
+                pass
+
+    def close(self) -> None:
+        self.shutdown()
+
     @property
     def voice(self) -> VoiceService:
         """Returns the VoiceService instance."""
@@ -203,7 +219,23 @@ class PersonalAgentService:
                 delegation_goal=effective_prompt,
             )
 
-        # 5. General Q&A / conversational inquiry (ANSWER tier)
+        # 5. Structural delegation detection: prompts with task-morphology patterns that indicate
+        #    multi-step analysis, audit, or research tasks directed at a specific entity or topic.
+        #    This is a structural match (not a keyword list) — it matches the SHAPE of delegation requests:
+        #    "<task verb> [preposition] <topic>" where task verbs signal complex multi-agent work.
+        #    Works for arbitrary topics in Italian and English without hardcoding specific names.
+        delegation_verbs = r"(?:audit|analisi|ricerca|analizza|analysis|research|report|review|studio|valutazione|assessment)"
+        delegation_prep = r"(?:\s+(?:di\s+)?(?:sicurezza|mercato|qualità|performance|codebase|codice|sistema|competitivo|strategico|market|security|competitive|strategic|quality|code|system))?"
+        delegation_target = r"\s+(?:per|di|su|for|of|on|about|su|riguardo)\s+\S+"
+        if re.search(delegation_verbs + r"(?:" + delegation_prep + delegation_target + r"|" + delegation_prep + r")", effective_prompt, re.IGNORECASE):
+            return UserIntent(
+                raw_prompt=effective_prompt,
+                tier=IntentTier.DELEGATE,
+                summary=f"Delegate to digital workforce: {prompt[:40]}",
+                delegation_goal=effective_prompt,
+            )
+
+        # 6. General Q&A / conversational inquiry (ANSWER tier)
         return UserIntent(
             raw_prompt=effective_prompt,
             tier=IntentTier.ANSWER,
@@ -375,6 +407,33 @@ class PersonalAgentService:
         elif intent.tier == IntentTier.DO and intent.action_id:
             action_def = self.action_executor.registry.get(intent.action_id)
             action_name = action_def.name if action_def else intent.action_id
+
+            # If creating a document and the content is the default template placeholder,
+            # replace it with real LLM-generated content if a provider is available.
+            if intent.action_id == "files.create_document":
+                raw_content = intent.action_args.get("content", "")
+                if raw_content.startswith("# Document created by Aether"):
+                    provider = self._resolve_provider()
+                    if provider is not None:
+                        try:
+                            from aether.providers.types import Message as _Msg
+                            filename = intent.action_args.get("filename", "document")
+                            gen_messages = [
+                                _Msg(role="system", content=(
+                                    "You are a helpful writing assistant. Generate the content for a document "
+                                    "based on the user's request. Write only the document content, not meta-commentary. "
+                                    "Use markdown formatting where appropriate."
+                                )),
+                                _Msg(role="user", content=(
+                                    f"Create the content for a file named '{filename}'. "
+                                    f"Original request: {prompt}"
+                                )),
+                            ]
+                            gen_res = provider.generate(gen_messages)
+                            if gen_res and getattr(gen_res, "content", None) and gen_res.content.strip():
+                                intent.action_args["content"] = gen_res.content.strip()
+                        except Exception as gen_err:
+                            logger.debug(f"LLM file content generation failed, using template: {gen_err}")
 
             steps.append(
                 PersonalStep(
@@ -764,20 +823,63 @@ class PersonalAgentService:
 
         return assistant_msg
 
+    def _llm_classify_tier(self, prompt: str) -> str:
+        """Ask the configured provider to classify an ambiguous prompt into 'answer', 'do', or 'delegate'.
+
+        Returns one of the strings 'answer', 'do', or 'delegate'.
+        Falls back to 'answer' on any error or timeout so the caller is always safe.
+        """
+        provider = self._resolve_provider()
+        if provider is None:
+            return "answer"
+        try:
+            from aether.providers.types import Message
+            classification_prompt = (
+                "Classify the following user request into exactly ONE of these categories:\n"
+                "- 'answer': a question or conversational request that needs an informational reply\n"
+                "- 'do': a local file/document action (create, read, save a local file or document)\n"
+                "- 'delegate': a complex multi-step task, research, analysis, audit, or report that "
+                "  benefits from coordinating a team of specialized AI agents over minutes\n\n"
+                f"User request: \"{prompt}\"\n\n"
+                "Reply with exactly one word: answer, do, or delegate."
+            )
+            messages = [Message(role="user", content=classification_prompt)]
+            res = provider.generate(messages)
+            if res and getattr(res, "content", None):
+                token = res.content.strip().lower().split()[0].rstrip(".,;:")
+                if token in ("answer", "do", "delegate"):
+                    return token
+        except Exception as e:
+            logger.debug(f"LLM intent classification skipped: {e}")
+        return "answer"
+
     def _extract_task_topic(self, prompt: str) -> str:
-        """Extracts the subject or entity of a task from natural language prompt."""
+        """Extracts the subject or entity of a task from natural language prompt, preserving original casing."""
         match = re.search(r"(?:per|for|su|about|on|riguardo a)\s+([A-Za-z0-9_\-\s]{2,30})", prompt, re.IGNORECASE)
         if match:
             candidate = match.group(1).strip()
             if candidate.lower() not in ["un", "una", "il", "lo", "la", "questo", "questa", "this", "that", "the", "a", "an"]:
-                return candidate.title()
+                # Preserve original-case proper nouns from the prompt instead of blindly .title()-ing
+                # Search for the candidate words in the original prompt and use their actual casing
+                words_in_prompt = prompt.split()
+                candidate_words = candidate.split()
+                preserved_words = []
+                for cword in candidate_words:
+                    # Find the original casing of this word in the prompt (case-insensitive search)
+                    original = next(
+                        (w for w in words_in_prompt if w.lower() == cword.lower()),
+                        cword.title(),
+                    )
+                    preserved_words.append(original)
+                return " ".join(preserved_words)
         words = [w for w in re.findall(r"\b[a-zA-Z0-9_\-]+\b", prompt) if len(w) > 2 and w.lower() not in [
             "chiedi", "alla", "persona", "più", "adatta", "del", "mio", "team", "analizzare",
             "questo", "problema", "fai", "un", "una", "analisi", "mercato", "report", "prepara",
-            "market", "analysis", "conduct", "please", "with", "from", "delega"
+            "market", "analysis", "conduct", "please", "with", "from", "delega", "audit",
+            "sicurezza", "security", "per", "for", "the", "and", "che", "con",
         ]]
         if words:
-            return " ".join(words[:3]).title()
+            return " ".join(words[:3])
         return "Workforce Analysis"
 
     def _get_workforce_team(self) -> Any:

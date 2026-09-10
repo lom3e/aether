@@ -24,6 +24,8 @@ class ActivityStore:
         self.db_path = Path(db_path)
         self.db_path.parent.mkdir(parents=True, exist_ok=True)
         self._local = threading.local()
+        self._conns_lock = threading.Lock()
+        self._all_conns: set[sqlite3.Connection] = set()
         self._init_db()
 
     def _get_connection(self) -> sqlite3.Connection:
@@ -39,6 +41,8 @@ class ActivityStore:
             conn.execute("PRAGMA synchronous = NORMAL;")
             conn.execute("PRAGMA busy_timeout = 5000;")
             conn.execute("PRAGMA foreign_keys = ON;")
+            with self._conns_lock:
+                self._all_conns.add(conn)
             self._local.conn = conn
         return self._local.conn
 
@@ -144,9 +148,18 @@ class ActivityStore:
         )
 
     def close(self) -> None:
-        if hasattr(self._local, "conn") and self._local.conn is not None:
-            try:
-                self._local.conn.close()
-            except Exception:
-                pass
+        with self._conns_lock:
+            for conn in list(self._all_conns):
+                try:
+                    conn.close()
+                except Exception:
+                    pass
+            self._all_conns.clear()
+        if hasattr(self._local, "conn"):
             self._local.conn = None
+
+    def __del__(self) -> None:
+        try:
+            self.close()
+        except Exception:
+            pass

@@ -79,7 +79,7 @@ class OllamaProvider(AIProvider):
     def _resolve_model(self) -> str:
         """Dynamically resolves the best installed model for this Ollama instance."""
         import os
-        # 1. Environment variable override
+        # 1. Environment variable override (highest priority)
         env_model = os.environ.get("OLLAMA_MODEL") or os.environ.get("AETHER_MODEL")
         if env_model:
             return env_model.strip()
@@ -89,7 +89,7 @@ class OllamaProvider(AIProvider):
         # 2. Check locally installed models via /api/tags
         installed = self.get_available_models()
         if installed:
-            # If user explicitly configured a model that is installed, use it
+            # If user explicitly configured a model that is installed, use it exactly
             if configured and configured in installed:
                 return configured
 
@@ -98,8 +98,12 @@ class OllamaProvider(AIProvider):
                 for m in installed:
                     if m == configured or m.startswith(f"{configured}:"):
                         return m
+                # Configured model not currently installed but explicitly set — honour it.
+                # Ollama will surface a clear error if the model is truly missing,
+                # which is better than silently switching to a different model.
+                return configured
 
-            # Preferred models in order of capability & speed
+            # No explicit model configured: auto-select from preferred list
             preferred = [
                 "qwen2.5-coder:14b",
                 "qwen3.5:9b",
@@ -121,7 +125,7 @@ class OllamaProvider(AIProvider):
             # Otherwise return first installed model
             return installed[0]
 
-        # 3. Fallback to configured model or default
+        # 3. Fallback to configured model or default (Ollama not reachable at init time)
         return configured or _DEFAULT_MODEL
 
     @property

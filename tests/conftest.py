@@ -32,11 +32,24 @@ def reset_app_state_and_paths():
     app.state.active_team_name = None
     set_aether_data_dir(None)
     os.environ.pop("AETHER_DATA_DIR", None)
-    os.environ.pop("AETHER_SESSION_TOKEN", None)
+    ws = getattr(app.state, "workspace", None)
+    if ws is not None and hasattr(ws, "close"):
+        try:
+            ws.close()
+        except Exception:
+            pass
+    app.state.workspace = None
 
     yield
 
     # Post-test cleanup
+    ws = getattr(app.state, "workspace", None)
+    if ws is not None and hasattr(ws, "close"):
+        try:
+            ws.close()
+        except Exception:
+            pass
+    app.state.workspace = None
     app.state.is_shutting_down = False
     app.state.session_token = None
     app.state.active_tasks = {}

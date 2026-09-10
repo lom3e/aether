@@ -97,7 +97,8 @@ def temp_workspace_dir():
 @pytest.fixture
 def workspace(temp_workspace_dir):
     ws = Workspace.init(temp_workspace_dir, name="ambient_ws")
-    return ws
+    yield ws
+    ws.close()
 
 
 def make_request(method: str = "GET", path: str = "/") -> Request:

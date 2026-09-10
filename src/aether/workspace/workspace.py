@@ -81,6 +81,9 @@ class Workspace:
         self.legacy_aether_dir = self.root / ".aether"
         self.legacy_team_yaml = self.root / "team.yaml"
 
+        # Cached instances (stores, services)
+        self._instances: dict[str, Any] = {}
+
     @property
     def config(self) -> dict[str, Any]:
         """Load and return the workspace configuration."""
@@ -131,26 +134,39 @@ class Workspace:
             return str(self.data_dir / "knowledge.db")
         return str(self.legacy_aether_dir / "knowledge.db")
 
+    def _get_or_create(self, key: str, factory):
+        if not hasattr(self, "_instances"):
+            self._instances = {}
+        if key not in self._instances or self._instances[key] is None:
+            self._instances[key] = factory()
+        return self._instances[key]
+
     @property
     def knowledge(self):
         """Return the KnowledgeStore for this workspace."""
-        from aether.knowledge.store import KnowledgeStore
-        Path(self.knowledge_db_path).parent.mkdir(parents=True, exist_ok=True)
-        return KnowledgeStore(self.knowledge_db_path)
+        def _factory():
+            from aether.knowledge.store import KnowledgeStore
+            Path(self.knowledge_db_path).parent.mkdir(parents=True, exist_ok=True)
+            return KnowledgeStore(self.knowledge_db_path)
+        return self._get_or_create("knowledge", _factory)
 
     @property
     def conversations(self):
         """Return the ConversationStore for this workspace."""
-        from aether.conversations.store import ConversationStore
-        Path(self.conversations_db_path).parent.mkdir(parents=True, exist_ok=True)
-        return ConversationStore(self.conversations_db_path)
+        def _factory():
+            from aether.conversations.store import ConversationStore
+            Path(self.conversations_db_path).parent.mkdir(parents=True, exist_ok=True)
+            return ConversationStore(self.conversations_db_path)
+        return self._get_or_create("conversations", _factory)
 
     @property
     def missions(self):
         """Return the MissionStore for this workspace."""
-        from aether.missions.store import MissionStore
-        Path(self.conversations_db_path).parent.mkdir(parents=True, exist_ok=True)
-        return MissionStore(self.conversations_db_path)
+        def _factory():
+            from aether.missions.store import MissionStore
+            Path(self.conversations_db_path).parent.mkdir(parents=True, exist_ok=True)
+            return MissionStore(self.conversations_db_path)
+        return self._get_or_create("missions", _factory)
 
     @property
     def automations_db_path(self) -> str:
@@ -162,9 +178,11 @@ class Workspace:
     @property
     def automations(self):
         """Return the AutomationStore for this workspace."""
-        from aether.automation.store import AutomationStore
-        Path(self.automations_db_path).parent.mkdir(parents=True, exist_ok=True)
-        return AutomationStore(self.automations_db_path)
+        def _factory():
+            from aether.automation.store import AutomationStore
+            Path(self.automations_db_path).parent.mkdir(parents=True, exist_ok=True)
+            return AutomationStore(self.automations_db_path)
+        return self._get_or_create("automations", _factory)
 
     @property
     def memory_db_path(self) -> str:
@@ -176,9 +194,11 @@ class Workspace:
     @property
     def memory(self):
         """Return the WorkforceMemoryStore for this workspace."""
-        from aether.memory.store import WorkforceMemoryStore
-        Path(self.memory_db_path).parent.mkdir(parents=True, exist_ok=True)
-        return WorkforceMemoryStore(self.memory_db_path, default_workspace_id=self.name)
+        def _factory():
+            from aether.memory.store import WorkforceMemoryStore
+            Path(self.memory_db_path).parent.mkdir(parents=True, exist_ok=True)
+            return WorkforceMemoryStore(self.memory_db_path, default_workspace_id=self.name)
+        return self._get_or_create("memory", _factory)
 
     @property
     def knowledge_graph_db_path(self) -> str:
@@ -190,9 +210,11 @@ class Workspace:
     @property
     def knowledge_graph(self):
         """Return the KnowledgeGraphStore for this workspace."""
-        from aether.knowledge.graph.store import KnowledgeGraphStore
-        Path(self.knowledge_graph_db_path).parent.mkdir(parents=True, exist_ok=True)
-        return KnowledgeGraphStore(self.knowledge_graph_db_path, default_workspace_id=self.name)
+        def _factory():
+            from aether.knowledge.graph.store import KnowledgeGraphStore
+            Path(self.knowledge_graph_db_path).parent.mkdir(parents=True, exist_ok=True)
+            return KnowledgeGraphStore(self.knowledge_graph_db_path, default_workspace_id=self.name)
+        return self._get_or_create("knowledge_graph", _factory)
 
     @property
     def learning_db_path(self) -> str:
@@ -204,19 +226,23 @@ class Workspace:
     @property
     def learning_store(self):
         """Return the LearningStore for this workspace."""
-        from aether.learning.store import LearningStore
-        Path(self.learning_db_path).parent.mkdir(parents=True, exist_ok=True)
-        return LearningStore(self.learning_db_path)
+        def _factory():
+            from aether.learning.store import LearningStore
+            Path(self.learning_db_path).parent.mkdir(parents=True, exist_ok=True)
+            return LearningStore(self.learning_db_path)
+        return self._get_or_create("learning_store", _factory)
 
     @property
     def learning(self):
         """Return the LearningService for this workspace."""
-        from aether.learning.service import LearningService
-        return LearningService(
-            learning_store=self.learning_store,
-            memory_store=self.memory,
-            knowledge_graph_store=self.knowledge_graph,
-        )
+        def _factory():
+            from aether.learning.service import LearningService
+            return LearningService(
+                learning_store=self.learning_store,
+                memory_store=self.memory,
+                knowledge_graph_store=self.knowledge_graph,
+            )
+        return self._get_or_create("learning", _factory)
 
     @property
     def activity_db_path(self) -> str:
@@ -228,15 +254,19 @@ class Workspace:
     @property
     def activity_store(self):
         """Return the ActivityStore for this workspace."""
-        from aether.activity.store import ActivityStore
-        Path(self.activity_db_path).parent.mkdir(parents=True, exist_ok=True)
-        return ActivityStore(self.activity_db_path)
+        def _factory():
+            from aether.activity.store import ActivityStore
+            Path(self.activity_db_path).parent.mkdir(parents=True, exist_ok=True)
+            return ActivityStore(self.activity_db_path)
+        return self._get_or_create("activity_store", _factory)
 
     @property
     def activity(self):
         """Return the ActivityService for this workspace."""
-        from aether.activity.service import ActivityService
-        return ActivityService(self.activity_store)
+        def _factory():
+            from aether.activity.service import ActivityService
+            return ActivityService(self.activity_store)
+        return self._get_or_create("activity", _factory)
 
     @property
     def actions_db_path(self) -> str:
@@ -248,9 +278,11 @@ class Workspace:
     @property
     def action_store(self):
         """Return the ActionStore for this workspace."""
-        from aether.actions.store import ActionStore
-        Path(self.actions_db_path).parent.mkdir(parents=True, exist_ok=True)
-        return ActionStore(self.actions_db_path)
+        def _factory():
+            from aether.actions.store import ActionStore
+            Path(self.actions_db_path).parent.mkdir(parents=True, exist_ok=True)
+            return ActionStore(self.actions_db_path)
+        return self._get_or_create("action_store", _factory)
 
     @property
     def connections_db_path(self) -> str:
@@ -262,15 +294,19 @@ class Workspace:
     @property
     def connection_store(self):
         """Return the ConnectionStore for this workspace."""
-        from aether.connections.store import ConnectionStore
-        Path(self.connections_db_path).parent.mkdir(parents=True, exist_ok=True)
-        return ConnectionStore(self.connections_db_path)
+        def _factory():
+            from aether.connections.store import ConnectionStore
+            Path(self.connections_db_path).parent.mkdir(parents=True, exist_ok=True)
+            return ConnectionStore(self.connections_db_path)
+        return self._get_or_create("connection_store", _factory)
 
     @property
     def connections(self):
         """Return the ConnectionService for this workspace."""
-        from aether.connections.service import ConnectionService
-        return ConnectionService(self.connection_store, activity_service=self.activity)
+        def _factory():
+            from aether.connections.service import ConnectionService
+            return ConnectionService(self.connection_store, activity_service=self.activity)
+        return self._get_or_create("connections", _factory)
 
     @property
     def action_registry(self):
@@ -283,24 +319,28 @@ class Workspace:
     @property
     def actions(self):
         """Return the ActionExecutor for this workspace."""
-        from aether.actions.executor import ActionExecutor
-        return ActionExecutor(
-            registry=self.action_registry,
-            store=self.action_store,
-            activity_service=self.activity,
-            connection_service=self.connections,
-            project_path=self.project_path or self.root,
-        )
+        def _factory():
+            from aether.actions.executor import ActionExecutor
+            return ActionExecutor(
+                registry=self.action_registry,
+                store=self.action_store,
+                activity_service=self.activity,
+                connection_service=self.connections,
+                project_path=self.project_path or self.root,
+            )
+        return self._get_or_create("actions", _factory)
 
     @property
     def intelligence(self):
         """Return the UnifiedIntelligenceService for this workspace."""
-        from aether.intelligence.service import UnifiedIntelligenceService
-        return UnifiedIntelligenceService(
-            workforce_memory_store=self.memory,
-            knowledge_graph_store=self.knowledge_graph,
-            default_workspace_id=self.name,
-        )
+        def _factory():
+            from aether.intelligence.service import UnifiedIntelligenceService
+            return UnifiedIntelligenceService(
+                workforce_memory_store=self.memory,
+                knowledge_graph_store=self.knowledge_graph,
+                default_workspace_id=self.name,
+            )
+        return self._get_or_create("intelligence", _factory)
 
     @property
     def personal_db_path(self) -> str:
@@ -312,9 +352,11 @@ class Workspace:
     @property
     def personal_store(self):
         """Return the PersonalStore for this workspace."""
-        from aether.personal.store import PersonalStore
-        Path(self.personal_db_path).parent.mkdir(parents=True, exist_ok=True)
-        return PersonalStore(self.personal_db_path)
+        def _factory():
+            from aether.personal.store import PersonalStore
+            Path(self.personal_db_path).parent.mkdir(parents=True, exist_ok=True)
+            return PersonalStore(self.personal_db_path)
+        return self._get_or_create("personal_store", _factory)
 
     @property
     def notifications_db_path(self) -> str:
@@ -326,37 +368,49 @@ class Workspace:
     @property
     def notification_store(self):
         """Return the NotificationStore for this workspace."""
-        from aether.notifications.store import NotificationStore
-        Path(self.notifications_db_path).parent.mkdir(parents=True, exist_ok=True)
-        return NotificationStore(self.notifications_db_path)
+        def _factory():
+            from aether.notifications.store import NotificationStore
+            Path(self.notifications_db_path).parent.mkdir(parents=True, exist_ok=True)
+            return NotificationStore(self.notifications_db_path)
+        return self._get_or_create("notification_store", _factory)
 
     @property
     def notifications(self):
         """Return the NotificationService for this workspace."""
-        from aether.notifications.service import NotificationService
-        from aether.personal.events import get_personal_event_hub
-        return NotificationService(
-            store=self.notification_store,
-            activity_service=self.activity,
-            event_hub=get_personal_event_hub(),
-        )
+        def _factory():
+            from aether.notifications.service import NotificationService
+            from aether.personal.events import get_personal_event_hub
+            return NotificationService(
+                store=self.notification_store,
+                activity_service=self.activity,
+                event_hub=get_personal_event_hub(),
+            )
+        return self._get_or_create("notifications", _factory)
 
     @property
     def personal(self):
         """Return the PersonalAgentService for this workspace."""
-        from aether.personal.service import PersonalAgentService
-        from aether.personal.events import get_personal_event_hub
-        return PersonalAgentService(
-            store=self.personal_store,
-            action_executor=self.actions,
-            activity_service=self.activity,
-            intelligence_service=self.intelligence,
-            mission_store=self.missions,
-            connection_service=self.connections,
-            notification_service=self.notifications,
-            event_hub=get_personal_event_hub(),
-            workspace=self,
-        )
+        def _factory():
+            from aether.personal.service import PersonalAgentService
+            from aether.personal.events import get_personal_event_hub
+            return PersonalAgentService(
+                store=self.personal_store,
+                action_executor=self.actions,
+                activity_service=self.activity,
+                intelligence_service=self.intelligence,
+                mission_store=self.missions,
+                connection_service=self.connections,
+                notification_service=self.notifications,
+                event_hub=get_personal_event_hub(),
+                workspace=self,
+            )
+        return self._get_or_create("personal", _factory)
+
+    @personal.setter
+    def personal(self, value):
+        if not hasattr(self, "_instances"):
+            self._instances = {}
+        self._instances["personal"] = value
 
     @property
     def project_path(self) -> Path | None:
@@ -577,3 +631,42 @@ class Workspace:
             set_as_default=set_as_default,
         )
         return self.load_team(team_name or preset_id)
+
+    def close(self) -> None:
+        """Close all persistent SQLite connections, thread pools, and release workspace resources."""
+        # 1. Shutdown personal service first
+        personal_svc = getattr(self, "_instances", {}).pop("personal", None)
+        if personal_svc is not None:
+            try:
+                if hasattr(personal_svc, "shutdown"):
+                    personal_svc.shutdown()
+                elif hasattr(personal_svc, "task_manager") and personal_svc.task_manager:
+                    personal_svc.task_manager.shutdown()
+            except Exception:
+                pass
+
+        # 2. Close all stores and services
+        instances = getattr(self, "_instances", {})
+        for key, inst in list(instances.items()):
+            if inst is not None:
+                for close_attr in ["close", "shutdown"]:
+                    close_fn = getattr(inst, close_attr, None)
+                    if callable(close_fn):
+                        try:
+                            close_fn()
+                        except Exception:
+                            pass
+        instances.clear()
+
+    def __enter__(self) -> "Workspace":
+        return self
+
+    def __exit__(self, exc_type, exc_val, exc_tb) -> None:
+        self.close()
+
+    def __del__(self) -> None:
+        try:
+            self.close()
+        except Exception:
+            pass
+
