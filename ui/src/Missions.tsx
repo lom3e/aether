@@ -112,9 +112,12 @@ interface Milestone {
   mission_id: string;
   title: string;
   description: string;
-  status: 'pending' | 'running' | 'completed' | 'failed';
+  status: 'pending' | 'running' | 'completed' | 'failed' | 'skipped' | 'waiting';
   order_idx: number;
   dependencies: string[];
+  assigned_agent?: string | null;
+  output?: string | null;
+  started_at?: string | null;
   completed_at?: string | null;
   created_at: string;
   updated_at: string;
@@ -1944,7 +1947,8 @@ export function Missions({ navigate, initialMissionId }: MissionsProps) {
                         const isRunning = effectiveStatus === 'running';
                         const isFailed = effectiveStatus === 'failed';
                         const isExpanded = expandedStageIds.has(m.id);
-                        const hasDetails = Boolean(execState?.output || execState?.error_message);
+                        const stageOutput = execState?.output || m.output;
+                        const hasDetails = Boolean(stageOutput || execState?.error_message);
 
                         return (
                           <div
@@ -2003,7 +2007,11 @@ export function Missions({ navigate, initialMissionId }: MissionsProps) {
                                     fontSize: '13.5px',
                                     fontWeight: isRunning ? 600 : 500,
                                     color: isDone ? 'hsl(var(--muted-fg))' : 'hsl(var(--fg))',
-                                    textDecoration: isDone ? 'line-through' : 'none'
+                                    textDecoration: isDone ? 'line-through' : 'none',
+                                    display: 'flex',
+                                    alignItems: 'center',
+                                    flexWrap: 'wrap',
+                                    gap: '6px'
                                   }}>
                                     <span style={{
                                       fontSize: '10px',
@@ -2012,12 +2020,23 @@ export function Missions({ navigate, initialMissionId }: MissionsProps) {
                                       padding: '1px 5px',
                                       borderRadius: '4px',
                                       backgroundColor: 'hsl(var(--muted))',
-                                      color: 'hsl(var(--muted-fg))',
-                                      marginRight: '8px'
+                                      color: 'hsl(var(--muted-fg))'
                                     }}>
                                       {t('stage')} {idx + 1}
                                     </span>
-                                    {m.title}
+                                    <span>{m.title}</span>
+                                    {m.assigned_agent && (
+                                      <span style={{
+                                        fontSize: '11px',
+                                        padding: '1px 6px',
+                                        borderRadius: '4px',
+                                        backgroundColor: 'hsl(var(--primary) / 0.1)',
+                                        color: 'hsl(var(--primary))',
+                                        fontWeight: 500
+                                      }}>
+                                        @{m.assigned_agent}
+                                      </span>
+                                    )}
                                   </div>
 
                                   <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
@@ -2082,7 +2101,7 @@ export function Missions({ navigate, initialMissionId }: MissionsProps) {
                             {/* Progressive Disclosure: Formatted Output When Expanded */}
                             {isExpanded && (
                               <div style={{ marginTop: '10px', paddingTop: '10px', borderTop: '1px solid hsl(var(--border))' }}>
-                                {execState?.output && (
+                                {stageOutput && (
                                   <div style={{
                                     fontSize: '12.5px',
                                     color: 'hsl(var(--fg))',
@@ -2092,7 +2111,7 @@ export function Missions({ navigate, initialMissionId }: MissionsProps) {
                                     backgroundColor: 'hsl(var(--bg))',
                                     border: '1px solid hsl(var(--border))'
                                   }}>
-                                    <MarkdownRenderer content={execState.output} />
+                                    <MarkdownRenderer content={stageOutput} />
                                   </div>
                                 )}
 

@@ -437,6 +437,20 @@ class Workspace:
         self._instances["runtime"] = value
 
     @property
+    def mission_runtime(self):
+        """Return the MissionRuntime engine for this workspace."""
+        def _factory():
+            from aether.missions.runtime import MissionRuntime
+            return MissionRuntime(self)
+        return self._get_or_create("mission_runtime", _factory)
+
+    @mission_runtime.setter
+    def mission_runtime(self, value):
+        if not hasattr(self, "_instances"):
+            self._instances = {}
+        self._instances["mission_runtime"] = value
+
+    @property
     def project_path(self) -> Path | None:
         """Return the resolved Path of the connected project root if configured and existing."""
         raw_path = self.config.get("workspace", {}).get("project", {}).get("path")

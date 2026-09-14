@@ -348,7 +348,7 @@ class Runtime:
         cb(15, "Inspecting workforce configuration and available agents")
 
         team = self._get_workforce_team()
-        available_agents = team.agents() if team else []
+        available_agents = team.agents() if (team and callable(getattr(team, "agents", None))) else (getattr(team, "agents", None) or [])
 
         # Dynamically identify coordinator and specialists from actual workforce
         coordinator = None

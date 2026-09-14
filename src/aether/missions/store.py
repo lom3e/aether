@@ -26,7 +26,10 @@ from aether.missions.models import (
     Mission,
     MissionExecution,
     MissionGraph,
+    MissionPlan,
+    MissionResult,
     MissionStatus,
+    MissionStep,
 )
 
 
@@ -420,15 +423,15 @@ class MissionStore:
                 return None
 
             active_exec_id = row["active_execution_id"] if "active_execution_id" in row.keys() else None
-            exec_milestone_map: dict[str, tuple[str, str | None]] = {}
+            exec_milestone_map: dict[str, dict[str, Any]] = {}
             if active_exec_id:
                 try:
                     em_rows = conn.execute(
-                        "SELECT milestone_id, status, completed_at FROM mission_execution_milestones WHERE execution_id = ?",
+                        "SELECT milestone_id, status, completed_at, started_at, output, metadata FROM mission_execution_milestones WHERE execution_id = ?",
                         (active_exec_id,),
                     ).fetchall()
                     for em in em_rows:
-                        exec_milestone_map[em["milestone_id"]] = (em["status"], em["completed_at"])
+                        exec_milestone_map[em["milestone_id"]] = dict(em)
                 except Exception:
                     pass
 
@@ -453,8 +456,19 @@ class MissionStore:
                         pass
                     st_val = mr["status"]
                     comp_at = mr["completed_at"]
+                    start_at = None
+                    out_val = None
+                    m_meta = {}
                     if mr["id"] in exec_milestone_map:
-                        st_val, comp_at = exec_milestone_map[mr["id"]]
+                        em_dict = exec_milestone_map[mr["id"]]
+                        st_val = em_dict.get("status", st_val)
+                        comp_at = em_dict.get("completed_at", comp_at)
+                        start_at = em_dict.get("started_at")
+                        out_val = em_dict.get("output")
+                        try:
+                            m_meta = json.loads(em_dict.get("metadata") or "{}")
+                        except Exception:
+                            pass
 
                     milestones.append(
                         Milestone(
@@ -465,7 +479,11 @@ class MissionStore:
                             status=MilestoneStatus(st_val) if st_val in MilestoneStatus._value2member_map_ else MilestoneStatus.PENDING,
                             order_idx=mr["order_idx"],
                             dependencies=deps,
+                            execution_id=active_exec_id,
+                            output=out_val,
+                            started_at=start_at,
                             completed_at=comp_at,
+                            metadata=m_meta,
                             created_at=mr["created_at"],
                             updated_at=mr["updated_at"],
                         )
@@ -480,6 +498,20 @@ class MissionStore:
         st_val = row["status"]
         active_exec = self.get_execution(active_exec_id) if active_exec_id else None
 
+        total_m = len(milestones)
+        completed_m = sum(1 for m in milestones if m.status == MilestoneStatus.COMPLETED)
+        calc_progress = int((completed_m / total_m) * 100) if total_m > 0 else 0
+        running_stage = next((m.title for m in milestones if m.status == MilestoneStatus.RUNNING), None)
+
+        delivs = []
+        try:
+            delivs = self.list_deliverables(row["id"])
+        except Exception:
+            pass
+
+        plan_obj = MissionPlan(id=f"plan_{row['id']}", mission_id=row["id"], steps=milestones) if milestones else None
+        res_obj = MissionResult.from_dict(meta["result"]) if isinstance(meta.get("result"), dict) else None
+
         return Mission(
             id=row["id"],
             workspace_id=row["workspace_id"],
@@ -492,6 +524,16 @@ class MissionStore:
             active_execution_id=active_exec_id,
             active_execution=active_exec,
             milestones=milestones,
+            started_at=active_exec.started_at if active_exec else meta.get("started_at"),
+            completed_at=active_exec.completed_at if active_exec else meta.get("completed_at"),
+            current_stage=running_stage or meta.get("current_stage"),
+            progress=calc_progress if calc_progress > 0 else int(meta.get("progress", 0)),
+            plan=plan_obj,
+            execution_ids=[active_exec_id] if active_exec_id else list(meta.get("execution_ids") or []),
+            deliverables=delivs,
+            result=res_obj,
+            verification=meta.get("verification"),
+            error=meta.get("error") or (active_exec.error_message if active_exec else None),
             metadata=meta,
             created_at=row["created_at"],
             updated_at=row["updated_at"],
@@ -550,16 +592,16 @@ class MissionStore:
             ).fetchall()
 
             active_exec_ids = [r["active_execution_id"] for r in rows if "active_execution_id" in r.keys() and r["active_execution_id"]]
-            exec_milestone_map: dict[str, dict[str, tuple[str, str | None]]] = {}
+            exec_milestone_map: dict[str, dict[str, dict[str, Any]]] = {}
             if active_exec_ids:
                 try:
                     pl = ",".join("?" for _ in active_exec_ids)
                     em_rows = conn.execute(
-                        f"SELECT execution_id, milestone_id, status, completed_at FROM mission_execution_milestones WHERE execution_id IN ({pl})",
+                        f"SELECT execution_id, milestone_id, status, completed_at, started_at, output, metadata FROM mission_execution_milestones WHERE execution_id IN ({pl})",
                         active_exec_ids,
                     ).fetchall()
                     for em in em_rows:
-                        exec_milestone_map.setdefault(em["execution_id"], {})[em["milestone_id"]] = (em["status"], em["completed_at"])
+                        exec_milestone_map.setdefault(em["execution_id"], {})[em["milestone_id"]] = dict(em)
                 except Exception:
                     pass
 
@@ -602,7 +644,16 @@ class MissionStore:
                 updated_ms = []
                 for m in m_milestones:
                     if m.id in e_map:
-                        st, cat = e_map[m.id]
+                        em_dict = e_map[m.id]
+                        st = em_dict.get("status", m.status)
+                        cat = em_dict.get("completed_at", m.completed_at)
+                        start_at = em_dict.get("started_at")
+                        out_val = em_dict.get("output")
+                        m_meta = {}
+                        try:
+                            m_meta = json.loads(em_dict.get("metadata") or "{}")
+                        except Exception:
+                            pass
                         updated_ms.append(
                             Milestone(
                                 id=m.id,
@@ -612,7 +663,11 @@ class MissionStore:
                                 status=MilestoneStatus(st) if st in MilestoneStatus._value2member_map_ else MilestoneStatus.PENDING,
                                 order_idx=m.order_idx,
                                 dependencies=m.dependencies,
+                                execution_id=active_eid,
+                                output=out_val,
+                                started_at=start_at,
                                 completed_at=cat,
+                                metadata=m_meta,
                                 created_at=m.created_at,
                                 updated_at=m.updated_at,
                             )
@@ -620,6 +675,12 @@ class MissionStore:
                     else:
                         updated_ms.append(m)
                 m_milestones = updated_ms
+
+            total_m = len(m_milestones)
+            completed_m = sum(1 for m in m_milestones if m.status == MilestoneStatus.COMPLETED)
+            prog_val = int((completed_m / total_m) * 100) if total_m > 0 else 0
+            running_stage = next((m.title for m in m_milestones if m.status == MilestoneStatus.RUNNING), None)
+            plan_obj = MissionPlan(id=f"plan_{r['id']}", mission_id=r["id"], steps=m_milestones) if m_milestones else None
 
             results.append(
                 Mission(
@@ -633,6 +694,9 @@ class MissionStore:
                     project_id=r["project_id"],
                     active_execution_id=active_eid,
                     milestones=m_milestones,
+                    progress=prog_val,
+                    current_stage=running_stage,
+                    plan=plan_obj,
                     metadata=meta,
                     created_at=r["created_at"],
                     updated_at=r["updated_at"],

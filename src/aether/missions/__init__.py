@@ -14,7 +14,11 @@ from aether.missions.models import (
     Mission,
     MissionExecution,
     MissionGraph,
+    MissionPlan,
+    MissionResult,
     MissionStatus,
+    MissionStep,
+    StepStatus,
 )
 from aether.missions.explain import (
     Contributor,
@@ -44,11 +48,15 @@ from aether.missions.store import MissionStore
 __all__ = [
     "Mission",
     "Milestone",
+    "MissionStep",
+    "MissionPlan",
+    "MissionResult",
     "Deliverable",
     "MissionExecution",
     "ExecutionMilestone",
     "MissionStatus",
     "MilestoneStatus",
+    "StepStatus",
     "ExecutionStatus",
     "MilestoneExecutionStatus",
     "GraphNode",

@@ -25,6 +25,7 @@ from aether.core.execution import (
     Task,
     ExecutionRequest,
 )
+from aether.missions.models import Deliverable, MilestoneStatus, MissionStatus
 from aether.personal.events import PersonalEventHub, get_personal_event_hub
 from aether.personal.models import (
     IntentTier,
@@ -485,10 +486,16 @@ class PersonalAgentService:
 
             if self.mission_store:
                 try:
+                    milestones = [
+                        {"title": f"Scope & Context: {topic_title}", "description": f"Gather context and scope objective for {prompt}"},
+                        {"title": f"Workforce Execution: {topic_title}", "description": f"Domain specialists perform structured analysis for {prompt}"},
+                        {"title": f"Synthesize Deliverables", "description": f"Consolidate domain findings and verify deliverables for {prompt}"},
+                    ]
                     mission = self.mission_store.create_mission(
                         title=mission_title,
                         objective=intent.delegation_goal or prompt,
                         workspace_id=workspace_id,
+                        milestones=milestones,
                     )
                     mission_id = mission.id
                     step_del.details = {"mission_id": mission_id}
@@ -498,11 +505,44 @@ class PersonalAgentService:
             else:
                 mission_id = f"msn-{uuid.uuid4().hex[:8]}"
 
+            exec_request.mission_id = mission_id
+
             def background_workforce_worker(progress_cb: Any) -> dict[str, Any]:
                 res = self.runtime.execute(exec_request, progress_callback=progress_cb)
                 deliverables = res.deliverables or []
                 deliv_path = deliverables[0]["path"] if deliverables else None
                 deliv_name = deliverables[0]["name"] if deliverables else None
+
+                if self.mission_store and mission_id:
+                    try:
+                        ms = self.mission_store.list_milestones(mission_id)
+                        for m in ms:
+                            self.mission_store.update_milestone(
+                                m.id,
+                                status=MilestoneStatus.COMPLETED if res.success else MilestoneStatus.FAILED,
+                            )
+                        self.mission_store.update_mission(
+                            mission_id,
+                            status=MissionStatus.COMPLETED if res.success else MissionStatus.FAILED,
+                        )
+                        if deliverables:
+                            for d in deliverables:
+                                if isinstance(d, dict) and d.get("path"):
+                                    self.mission_store.add_deliverable(
+                                        mission_id=mission_id,
+                                        deliverable=Deliverable(
+                                            id=f"del_{uuid.uuid4().hex[:12]}",
+                                            mission_id=mission_id,
+                                            execution_id=res.execution_id or "",
+                                            name=d.get("name", "deliverable"),
+                                            path=d.get("path", ""),
+                                            type=d.get("type", "document"),
+                                            status="verified",
+                                        ),
+                                    )
+                    except Exception as me:
+                        logger.warning(f"Failed to synchronize mission after workforce run: {me}")
+
                 return {
                     "summary": f"Completed workforce delegation for {topic_title}. Findings compiled into executive deliverable.",
                     "deliverable_name": deliv_name,

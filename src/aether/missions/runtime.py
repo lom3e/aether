@@ -20,12 +20,13 @@ from typing import Any, Callable
 import uuid
 
 from aether.coordination.events import EventType
-from aether.core.execution import ExecutionResult, ExecutionStatus as CoreExecStatus
+from aether.core.execution import ExecutionMode, ExecutionResult, ExecutionStatus as CoreExecStatus, Task
 from aether.missions.models import (
     Deliverable,
     ExecutionMilestone,
     ExecutionStatus,
     MilestoneExecutionStatus,
+    MilestoneStatus,
     Mission,
     MissionExecution,
     MissionStatus,
@@ -622,14 +623,16 @@ class MissionRuntime:
             try:
                 team = self.workspace.load_team(resolved_team_name)
             except Exception as exc:
-                logger.error("Failed to load team %s for mission %s: %s", resolved_team_name, mid, exc)
-                self.store.update_execution(
-                    exec_id,
-                    status=ExecutionStatus.FAILED,
-                    error_message=f"Failed to load workforce '{resolved_team_name}': {exc}",
-                )
-                self.store.update_mission(mid, status=MissionStatus.FAILED)
-                return
+                if not (hasattr(self.workspace, "runtime") and self.workspace.runtime is not None):
+                    logger.error("Failed to load team %s for mission %s: %s", resolved_team_name, mid, exc)
+                    self.store.update_execution(
+                        exec_id,
+                        status=ExecutionStatus.FAILED,
+                        error_message=f"Failed to load workforce '{resolved_team_name}': {exc}",
+                    )
+                    self.store.update_mission(mid, status=MissionStatus.FAILED)
+                    return
+                team = None
 
             created_files: list[dict[str, Any]] = []
 
@@ -772,32 +775,73 @@ class MissionRuntime:
                     f"Please complete this stage diligently and generate necessary deliverables."
                 )
 
-                target_agent = None
-                desc_lower = tmpl_m.description.lower()
-                if "research" in desc_lower or "analyst" in desc_lower:
-                    for a in getattr(team.config, "agents", []):
-                        if "research" in a.name.lower() or "analyst" in a.name.lower():
-                            target_agent = a.name
-                            break
-                elif "developer" in desc_lower or "code" in desc_lower or "test" in desc_lower:
-                    for a in getattr(team.config, "agents", []):
-                        if "dev" in a.name.lower() or "engineer" in a.name.lower():
-                            target_agent = a.name
-                            break
+                target_agent = getattr(tmpl_m, "assigned_agent", None)
+                if not target_agent and team:
+                    desc_lower = tmpl_m.description.lower()
+                    if "research" in desc_lower or "analyst" in desc_lower:
+                        for a in getattr(team.config, "agents", []):
+                            if "research" in a.name.lower() or "analyst" in a.name.lower():
+                                target_agent = a.name
+                                break
+                    elif "developer" in desc_lower or "code" in desc_lower or "test" in desc_lower:
+                        for a in getattr(team.config, "agents", []):
+                            if "dev" in a.name.lower() or "engineer" in a.name.lower():
+                                target_agent = a.name
+                                break
 
                 created_files.clear()
-                def _run_step():
-                    try:
-                        return team.run(
-                            task_instruction,
-                            session_id=mid,
-                            target_agent=target_agent,
-                            cancellation_token=handle.cancellation_token,
-                        )
-                    except TypeError:
-                        return team.run(task_instruction, session_id=mid)
+                ws_id = getattr(self.workspace, "name", None) or "default"
+                task_step = Task(
+                    instruction=task_instruction,
+                    agent_name=target_agent or "unknown",
+                    workspace_id=ws_id,
+                    session_id=mid,
+                    mission_id=mid,
+                    parent_id=exec_id,
+                    mode=None if (target_agent and hasattr(self.workspace, "runtime") and self.workspace.runtime and target_agent in getattr(self.workspace.runtime, "_agents", {})) else ExecutionMode.DELEGATE,
+                )
 
-                result: ExecutionResult = await asyncio.to_thread(_run_step)
+                if hasattr(self.workspace, "runtime") and self.workspace.runtime is not None:
+                    runtime = self.workspace.runtime
+                    if team and hasattr(team, "agents") and callable(getattr(team, "agents", None)):
+                        for a in team.agents():
+                            if a.name not in runtime._agents:
+                                try:
+                                    runtime.register_agent(a)
+                                except Exception:
+                                    pass
+
+                    def _run_step():
+                        try:
+                            return runtime.execute(task_step)
+                        except Exception as ex:
+                            if team and hasattr(team, "run"):
+                                try:
+                                    return team.run(
+                                        task_instruction,
+                                        session_id=mid,
+                                        target_agent=target_agent,
+                                        cancellation_token=handle.cancellation_token,
+                                    )
+                                except TypeError:
+                                    return team.run(task_instruction, session_id=mid)
+                            raise ex
+
+                    result: ExecutionResult = await asyncio.to_thread(_run_step)
+                else:
+                    def _run_step():
+                        try:
+                            return team.run(
+                                task_instruction,
+                                session_id=mid,
+                                target_agent=target_agent,
+                                cancellation_token=handle.cancellation_token,
+                            )
+                        except TypeError:
+                            return team.run(task_instruction, session_id=mid)
+
+                    result: ExecutionResult = await asyncio.to_thread(_run_step)
+
                 duration = time.time() - t0
 
                 if handle.cancellation_token.is_set() or (
@@ -805,6 +849,23 @@ class MissionRuntime:
                 ):
                     self._handle_interrupted(exec_id, mid)
                     return
+
+                # Collect deliverables / artifacts directly produced by execution result
+                if result:
+                    for d in getattr(result, "deliverables", None) or []:
+                        if isinstance(d, dict) and d.get("path"):
+                            created_files.append({
+                                "path": d["path"],
+                                "action": "created",
+                                "size_bytes": 0,
+                            })
+                    for a in getattr(result, "artifacts", None) or []:
+                        if isinstance(a, dict) and a.get("path"):
+                            created_files.append({
+                                "path": a["path"],
+                                "action": "created",
+                                "size_bytes": 0,
+                            })
 
                 self._harvest_deliverables(mid, exec_id, tmpl_m.id, created_files)
 
@@ -818,6 +879,10 @@ class MissionRuntime:
                         completed_at=now_done,
                         duration_seconds=duration,
                         output=out_text[:2000],
+                    )
+                    self.store.update_milestone(
+                        milestone_id=tmpl_m.id,
+                        status=MilestoneStatus.COMPLETED,
                     )
                     completed_context.append(f"Stage '{tmpl_m.title}': {out_text[:300]}")
 
@@ -843,6 +908,10 @@ class MissionRuntime:
                         status=MilestoneExecutionStatus.FAILED,
                         error=err_msg,
                         duration_seconds=duration,
+                    )
+                    self.store.update_milestone(
+                        milestone_id=tmpl_m.id,
+                        status=MilestoneStatus.FAILED,
                     )
                     self.store.update_execution(
                         exec_id,
@@ -1061,22 +1130,52 @@ class MissionRuntime:
 
 
                         created_files.clear()
-                        def _run_rework():
-                            try:
-                                return team.run(
-                                    rework_instruction,
-                                    session_id=mid,
-                                    cancellation_token=handle.cancellation_token,
-                                )
-                            except TypeError:
-                                return team.run(rework_instruction, session_id=mid)
+                        rework_task = Task(
+                            instruction=rework_instruction,
+                            agent_name=target_agent or "unknown",
+                            workspace_id=getattr(self.workspace, "name", None) or "default",
+                            session_id=mid,
+                            mission_id=mid,
+                            parent_id=exec_id,
+                            mode=ExecutionMode.DELEGATE,
+                        )
 
-                        rework_res = await asyncio.to_thread(_run_rework)
+                        if hasattr(self.workspace, "runtime") and self.workspace.runtime is not None:
+                            rework_res = await asyncio.to_thread(self.workspace.runtime.execute, rework_task)
+                        else:
+                            def _run_rework():
+                                try:
+                                    return team.run(
+                                        rework_instruction,
+                                        session_id=mid,
+                                        cancellation_token=handle.cancellation_token,
+                                    )
+                                except TypeError:
+                                    return team.run(rework_instruction, session_id=mid)
+
+                            rework_res = await asyncio.to_thread(_run_rework)
+
                         if handle.cancellation_token.is_set() or (
                             rework_res and getattr(rework_res, "status", None) and getattr(rework_res.status, "value", None) == "interrupted"
                         ):
                             self._handle_interrupted(exec_id, mid)
                             return
+
+                        if rework_res:
+                            for d in getattr(rework_res, "deliverables", None) or []:
+                                if isinstance(d, dict) and d.get("path"):
+                                    created_files.append({
+                                        "path": d["path"],
+                                        "action": "created",
+                                        "size_bytes": 0,
+                                    })
+                            for a in getattr(rework_res, "artifacts", None) or []:
+                                if isinstance(a, dict) and a.get("path"):
+                                    created_files.append({
+                                        "path": a["path"],
+                                        "action": "created",
+                                        "size_bytes": 0,
+                                    })
 
                         last_m_id = exec_milestones[-1].milestone_id if exec_milestones else "rework"
                         self._harvest_deliverables(mid, exec_id, last_m_id, created_files)

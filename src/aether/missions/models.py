@@ -14,7 +14,9 @@ import uuid
 class MissionStatus(StrEnum):
     DRAFT = "draft"
     PLANNING = "planning"
+    READY = "ready"
     RUNNING = "running"
+    WAITING = "waiting"
     VERIFYING = "verifying"
     AWAITING_APPROVAL = "awaiting_approval"
     COMPLETED = "completed"
@@ -29,6 +31,11 @@ class MilestoneStatus(StrEnum):
     RUNNING = "running"
     COMPLETED = "completed"
     FAILED = "failed"
+    SKIPPED = "skipped"
+    WAITING = "waiting"
+
+
+StepStatus = MilestoneStatus
 
 
 class ExecutionStatus(StrEnum):
@@ -199,7 +206,12 @@ class Milestone:
     status: MilestoneStatus = MilestoneStatus.PENDING
     order_idx: int = 0
     dependencies: list[str] = field(default_factory=list)
+    assigned_agent: str | None = None
+    execution_id: str | None = None
+    output: str | None = None
+    started_at: str | None = None
     completed_at: str | None = None
+    metadata: dict[str, Any] = field(default_factory=dict)
     created_at: str = field(default_factory=lambda: datetime.now(timezone.utc).isoformat())
     updated_at: str = field(default_factory=lambda: datetime.now(timezone.utc).isoformat())
 
@@ -212,7 +224,12 @@ class Milestone:
             "status": self.status.value if isinstance(self.status, MilestoneStatus) else str(self.status),
             "order_idx": self.order_idx,
             "dependencies": list(self.dependencies),
+            "assigned_agent": self.assigned_agent,
+            "execution_id": self.execution_id,
+            "output": self.output,
+            "started_at": self.started_at,
             "completed_at": self.completed_at,
+            "metadata": self.metadata,
             "created_at": self.created_at,
             "updated_at": self.updated_at,
         }
@@ -230,15 +247,90 @@ class Milestone:
 
         return cls(
             id=data.get("id") or uuid.uuid4().hex,
-            mission_id=data["mission_id"],
+            mission_id=data.get("mission_id", ""),
             title=data.get("title", "Untitled Milestone"),
             description=data.get("description", ""),
             status=status,
             order_idx=int(data.get("order_idx", 0)),
             dependencies=deps,
+            assigned_agent=data.get("assigned_agent"),
+            execution_id=data.get("execution_id"),
+            output=data.get("output"),
+            started_at=data.get("started_at"),
             completed_at=data.get("completed_at"),
+            metadata=data.get("metadata") or {},
             created_at=data.get("created_at") or datetime.now(timezone.utc).isoformat(),
             updated_at=data.get("updated_at") or datetime.now(timezone.utc).isoformat(),
+        )
+
+
+MissionStep = Milestone
+
+
+@dataclass(slots=True)
+class MissionPlan:
+    id: str
+    mission_id: str
+    steps: list[Milestone] = field(default_factory=list)
+    created_at: str = field(default_factory=lambda: datetime.now(timezone.utc).isoformat())
+    updated_at: str = field(default_factory=lambda: datetime.now(timezone.utc).isoformat())
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "id": self.id,
+            "mission_id": self.mission_id,
+            "steps": [s.to_dict() for s in self.steps],
+            "created_at": self.created_at,
+            "updated_at": self.updated_at,
+        }
+
+    @classmethod
+    def from_dict(cls, data: dict[str, Any]) -> MissionPlan:
+        raw_steps = data.get("steps") or []
+        steps = [
+            Milestone.from_dict(s) if isinstance(s, dict) else s
+            for s in raw_steps
+        ]
+        return cls(
+            id=data.get("id") or uuid.uuid4().hex,
+            mission_id=data.get("mission_id", ""),
+            steps=steps,
+            created_at=data.get("created_at") or datetime.now(timezone.utc).isoformat(),
+            updated_at=data.get("updated_at") or datetime.now(timezone.utc).isoformat(),
+        )
+
+
+@dataclass(slots=True)
+class MissionResult:
+    mission_id: str
+    summary: str
+    key_findings: list[str] = field(default_factory=list)
+    deliverables: list[dict[str, Any]] = field(default_factory=list)
+    verification_status: str = "verified"  # "verified", "unverified", "failed"
+    error: str | None = None
+    metadata: dict[str, Any] = field(default_factory=dict)
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "mission_id": self.mission_id,
+            "summary": self.summary,
+            "key_findings": self.key_findings,
+            "deliverables": self.deliverables,
+            "verification_status": self.verification_status,
+            "error": self.error,
+            "metadata": self.metadata,
+        }
+
+    @classmethod
+    def from_dict(cls, data: dict[str, Any]) -> MissionResult:
+        return cls(
+            mission_id=data.get("mission_id", ""),
+            summary=data.get("summary", ""),
+            key_findings=data.get("key_findings") or [],
+            deliverables=data.get("deliverables") or [],
+            verification_status=data.get("verification_status", "verified"),
+            error=data.get("error"),
+            metadata=data.get("metadata") or {},
         )
 
 
@@ -255,6 +347,16 @@ class Mission:
     active_execution_id: str | None = None
     active_execution: MissionExecution | None = None
     milestones: list[Milestone] = field(default_factory=list)
+    started_at: str | None = None
+    completed_at: str | None = None
+    current_stage: str | None = None
+    progress: int = 0
+    plan: MissionPlan | None = None
+    execution_ids: list[str] = field(default_factory=list)
+    deliverables: list[Deliverable] = field(default_factory=list)
+    result: MissionResult | None = None
+    verification: dict[str, Any] | None = None
+    error: str | None = None
     metadata: dict[str, Any] = field(default_factory=dict)
     created_at: str = field(default_factory=lambda: datetime.now(timezone.utc).isoformat())
     updated_at: str = field(default_factory=lambda: datetime.now(timezone.utc).isoformat())
@@ -271,6 +373,16 @@ class Mission:
             "project_id": self.project_id,
             "active_execution_id": self.active_execution_id,
             "milestones": [m.to_dict() for m in self.milestones],
+            "started_at": self.started_at,
+            "completed_at": self.completed_at,
+            "current_stage": self.current_stage,
+            "progress": self.progress,
+            "plan": self.plan.to_dict() if self.plan else None,
+            "execution_ids": list(self.execution_ids),
+            "deliverables": [d.to_dict() for d in self.deliverables],
+            "result": self.result.to_dict() if self.result else None,
+            "verification": self.verification,
+            "error": self.error,
             "metadata": self.metadata,
             "created_at": self.created_at,
             "updated_at": self.updated_at,
@@ -297,6 +409,20 @@ class Mission:
         if isinstance(data.get("active_execution"), dict):
             active_exec = MissionExecution.from_dict(data["active_execution"])
 
+        plan = None
+        if isinstance(data.get("plan"), dict):
+            plan = MissionPlan.from_dict(data["plan"])
+
+        raw_deliverables = data.get("deliverables") or []
+        deliverables = [
+            Deliverable.from_dict(d) if isinstance(d, dict) else d
+            for d in raw_deliverables
+        ]
+
+        result = None
+        if isinstance(data.get("result"), dict):
+            result = MissionResult.from_dict(data["result"])
+
         return cls(
             id=data.get("id") or uuid.uuid4().hex,
             workspace_id=data.get("workspace_id", "default"),
@@ -309,6 +435,16 @@ class Mission:
             active_execution_id=data.get("active_execution_id"),
             active_execution=active_exec,
             milestones=milestones,
+            started_at=data.get("started_at"),
+            completed_at=data.get("completed_at"),
+            current_stage=data.get("current_stage"),
+            progress=int(data.get("progress", 0)),
+            plan=plan,
+            execution_ids=list(data.get("execution_ids") or []),
+            deliverables=deliverables,
+            result=result,
+            verification=data.get("verification"),
+            error=data.get("error"),
             metadata=data.get("metadata") or {},
             created_at=data.get("created_at") or datetime.now(timezone.utc).isoformat(),
             updated_at=data.get("updated_at") or datetime.now(timezone.utc).isoformat(),

@@ -102,6 +102,7 @@ class Task:
     workspace_id: str | None = None
     session_id: str | None = None
     parent_id: str | None = None
+    mission_id: str | None = None
     mode: ExecutionMode | str | None = None
     action_id: str | None = None
     action_args: dict[str, Any] = field(default_factory=dict)
@@ -159,11 +160,26 @@ class ExecutionResult:
     deliverables: list[dict[str, Any]] = field(default_factory=list)
     child_execution_ids: list[str] = field(default_factory=list)
     execution_id: str | None = None
+    mission_id: str | None = None
 
     def __post_init__(self):
         # Backward compatibility: automatically set status if not provided explicitly
         if not self.success and self.status == ExecutionStatus.COMPLETED:
             self.status = ExecutionStatus.FAILED
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "success": self.success,
+            "output": self.output,
+            "error": self.error,
+            "metadata": dict(self.metadata),
+            "status": self.status.value if isinstance(self.status, ExecutionStatus) else str(self.status),
+            "artifacts": list(self.artifacts),
+            "deliverables": list(self.deliverables),
+            "child_execution_ids": list(self.child_execution_ids),
+            "execution_id": self.execution_id,
+            "mission_id": self.mission_id,
+        }
 
 
 @dataclass(slots=True)
