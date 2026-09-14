@@ -19,6 +19,12 @@ from aether.activity.models import ActivityCategory, ActivityStatus
 from aether.activity.service import ActivityService
 from aether.notifications.models import NotificationPriority, NotificationType
 from aether.notifications.service import NotificationService
+from aether.core.execution import (
+    ExecutionMode,
+    ExecutionStatus,
+    Task,
+    ExecutionRequest,
+)
 from aether.personal.events import PersonalEventHub, get_personal_event_hub
 from aether.personal.models import (
     IntentTier,
@@ -55,6 +61,7 @@ class PersonalAgentService:
         provider: Any = None,
         provider_manager: Any = None,
         workspace: Any = None,
+        runtime: Any = None,
     ) -> None:
         self.store = store
         self.action_executor = action_executor
@@ -65,7 +72,7 @@ class PersonalAgentService:
         self.notification_service = notification_service
         self.event_hub = event_hub or get_personal_event_hub()
         self.voice_service = voice_service or VoiceService()
-        self.provider = provider
+        self._provider = provider
         self.provider_manager = provider_manager
         self.workspace = workspace
         self.task_manager = task_manager or PersonalTaskManager(
@@ -74,6 +81,33 @@ class PersonalAgentService:
             activity_service=self.activity_service,
             event_hub=self.event_hub,
         )
+        self.runtime = runtime or (
+            getattr(workspace, "runtime", None) if workspace else None
+        )
+        if not self.runtime:
+            from aether.core.runtime import Runtime
+            self.runtime = Runtime(
+                workspace=self.workspace,
+                action_executor=self.action_executor,
+                activity_service=self.activity_service,
+                notification_service=self.notification_service,
+                intelligence_service=self.intelligence_service,
+                mission_store=self.mission_store,
+                event_hub=self.event_hub,
+                task_manager=self.task_manager,
+                provider=self._provider,
+                provider_manager=self.provider_manager,
+            )
+
+    @property
+    def provider(self) -> Any:
+        return getattr(self, "_provider", None)
+
+    @provider.setter
+    def provider(self, val: Any) -> None:
+        self._provider = val
+        if hasattr(self, "runtime") and self.runtime:
+            self.runtime.provider = val
 
     def shutdown(self) -> None:
         """Shuts down background executors and closes persistent stores."""
@@ -340,13 +374,23 @@ class PersonalAgentService:
             except Exception as e:
                 logger.warning(f"Unified intelligence retrieval skipped: {e}")
 
-        # 6. Tier execution & dispatch
+        # 6. Tier execution & dispatch via canonical Aether Runtime
+        exec_request = Task(
+            instruction=prompt,
+            workspace_id=workspace_id,
+            session_id=session_id,
+            mode=intent.tier.value,
+            action_id=intent.action_id,
+            action_args=intent.action_args,
+            context_data={"recent_history": recent_history, "intel_context": intel_context},
+        )
+
         action_execution_id = None
         mission_id = None
         response_text = ""
 
         if intent.tier == IntentTier.ACT and intent.action_id:
-            action_def = self.action_executor.registry.get(intent.action_id)
+            action_def = self.action_executor.registry.get(intent.action_id) if self.action_executor else None
             action_name = action_def.name if action_def else intent.action_id
 
             step_prep = PersonalStep(
@@ -358,30 +402,24 @@ class PersonalAgentService:
             )
             steps.append(step_prep)
 
-            execution = self.action_executor.execute(
-                action_id=intent.action_id,
-                workspace_id=workspace_id,
-                input_data=intent.action_args,
-                auto_approve=False,
-            )
-            action_execution_id = execution.id
+            runtime_res = self.runtime.execute(exec_request)
+            action_execution_id = runtime_res.metadata.get("action_execution_id")
 
-            if execution.status == ActionExecutionStatus.PENDING_APPROVAL:
+            if runtime_res.status == ExecutionStatus.WAITING_FOR_APPROVAL:
                 step_appr = PersonalStep(
                     id=f"step-{uuid.uuid4().hex[:8]}",
                     title="Awaiting your approval",
                     status="pending_approval",
                     category="action",
-                    details={"execution_id": execution.id},
+                    details={"execution_id": action_execution_id},
                 )
                 steps.append(step_appr)
-                response_text = (
+                response_text = runtime_res.output or (
                     f"I've prepared to **{action_name}** ({intent.action_args.get('title', '')}).\n\n"
                     f"Because this changes your external calendar or service, please confirm or decline below."
                 )
 
-                # Emit real Notification for approval requirement
-                if self.notification_service:
+                if self.notification_service and action_execution_id:
                     self.notification_service.notify(
                         workspace_id=workspace_id,
                         type=NotificationType.APPROVAL_REQUIRED,
@@ -389,9 +427,9 @@ class PersonalAgentService:
                         message=f"Aether is ready to {action_name.lower()} '{intent.action_args.get('title', '')}'. Review and confirm to execute.",
                         priority=NotificationPriority.HIGH,
                         link_view="home",
-                        link_id=execution.id,
+                        link_id=action_execution_id,
                         action_required=True,
-                        metadata={"execution_id": execution.id, "action_id": intent.action_id},
+                        metadata={"execution_id": action_execution_id, "action_id": intent.action_id},
                     )
             else:
                 steps.append(
@@ -402,38 +440,11 @@ class PersonalAgentService:
                         category="action",
                     )
                 )
-                response_text = f"Done! I've successfully executed **{action_name}**."
+                response_text = runtime_res.output or f"Done! I've successfully executed **{action_name}**."
 
         elif intent.tier == IntentTier.DO and intent.action_id:
-            action_def = self.action_executor.registry.get(intent.action_id)
+            action_def = self.action_executor.registry.get(intent.action_id) if self.action_executor else None
             action_name = action_def.name if action_def else intent.action_id
-
-            # If creating a document and the content is the default template placeholder,
-            # replace it with real LLM-generated content if a provider is available.
-            if intent.action_id == "files.create_document":
-                raw_content = intent.action_args.get("content", "")
-                if raw_content.startswith("# Document created by Aether"):
-                    provider = self._resolve_provider()
-                    if provider is not None:
-                        try:
-                            from aether.providers.types import Message as _Msg
-                            filename = intent.action_args.get("filename", "document")
-                            gen_messages = [
-                                _Msg(role="system", content=(
-                                    "You are a helpful writing assistant. Generate the content for a document "
-                                    "based on the user's request. Write only the document content, not meta-commentary. "
-                                    "Use markdown formatting where appropriate."
-                                )),
-                                _Msg(role="user", content=(
-                                    f"Create the content for a file named '{filename}'. "
-                                    f"Original request: {prompt}"
-                                )),
-                            ]
-                            gen_res = provider.generate(gen_messages)
-                            if gen_res and getattr(gen_res, "content", None) and gen_res.content.strip():
-                                intent.action_args["content"] = gen_res.content.strip()
-                        except Exception as gen_err:
-                            logger.debug(f"LLM file content generation failed, using template: {gen_err}")
 
             steps.append(
                 PersonalStep(
@@ -443,18 +454,13 @@ class PersonalAgentService:
                     category="action",
                 )
             )
-            execution = self.action_executor.execute(
-                action_id=intent.action_id,
-                workspace_id=workspace_id,
-                input_data=intent.action_args,
-                auto_approve=True,
-            )
-            action_execution_id = execution.id
-            target = intent.action_args.get("filename", "item")
-            response_text = f"I've taken care of it! **{target}** has been created in your workspace."
 
-            # Notify user of completion
-            if self.notification_service:
+            runtime_res = self.runtime.execute(exec_request)
+            action_execution_id = runtime_res.metadata.get("action_execution_id")
+            target = intent.action_args.get("filename", "item")
+            response_text = runtime_res.output or f"I've taken care of it! **{target}** has been created in your workspace."
+
+            if self.notification_service and action_execution_id:
                 self.notification_service.notify(
                     workspace_id=workspace_id,
                     type=NotificationType.ACTION_COMPLETED,
@@ -462,11 +468,10 @@ class PersonalAgentService:
                     message=f"Document {target} was created successfully.",
                     priority=NotificationPriority.LOW,
                     link_view="home",
-                    link_id=execution.id,
+                    link_id=action_execution_id,
                 )
 
         elif intent.tier == IntentTier.DELEGATE:
-            # Multi-agent workforce delegation — Execute via persistent Background Task
             step_del = PersonalStep(
                 id=f"step-{uuid.uuid4().hex[:8]}",
                 title="Orchestrating digital workforce",
@@ -478,8 +483,6 @@ class PersonalAgentService:
             topic_title = self._extract_task_topic(prompt)
             mission_title = f"Task: {topic_title}"
 
-            # Create Mission in store if available
-            mission = None
             if self.mission_store:
                 try:
                     mission = self.mission_store.create_mission(
@@ -495,188 +498,20 @@ class PersonalAgentService:
             else:
                 mission_id = f"msn-{uuid.uuid4().hex[:8]}"
 
-            # Define the background worker function for real autonomous execution
             def background_workforce_worker(progress_cb: Any) -> dict[str, Any]:
-                progress_cb(15, "Inspecting workforce configuration and available agents")
-
-                from aether.agents.agent import Agent
-                from aether.tools.agent_tool import AgentTool
-                from aether.core.execution import Task as CoreTask, ToolCall, Message
-                from aether.providers.types import ProviderConfig, ProviderResponse
-                from aether.providers.base import AIProvider
-                from aether.providers.capabilities import ProviderCapabilities
-
-                team = self._get_workforce_team()
-                available_agents = team.agents() if team else []
-
-                # Identify coordinator and specialists dynamically from actual workforce configuration
-                coordinator = None
-                specialists: list[Agent] = []
-                for ag in available_agents:
-                    role_lower = (ag.role or "").lower()
-                    name_lower = ag.name.lower()
-                    if ("coordinator" in role_lower or "manager" in role_lower or "lead" in role_lower or name_lower == "manager") and coordinator is None:
-                        coordinator = ag
-                    else:
-                        specialists.append(ag)
-
-                if not coordinator and available_agents:
-                    coordinator = available_agents[0]
-                    specialists = available_agents[1:]
-
-                if not coordinator:
-                    coordinator = Agent(name="coordinator", role="Operations Coordinator")
-                if not specialists:
-                    specialists = [Agent(name="specialist", role="Domain Specialist")]
-
-                live_provider = self._resolve_provider()
-
-                if live_provider:
-                    coordinator.provider = live_provider
-                    for s in specialists:
-                        s.provider = live_provider
-                else:
-                    # Dynamic generic offline provider that formats output based on the actual prompt & specialist
-                    primary_spec = specialists[0]
-                    class GenericOfflineSpecialist(AIProvider):
-                        def __init__(self, spec_name: str, spec_role: str):
-                            super().__init__(ProviderConfig(model="aether-specialist"))
-                            self.spec_name = spec_name
-                            self.spec_role = spec_role
-                        @property
-                        def capabilities(self):
-                            return ProviderCapabilities(tools=True, structured_output=True)
-                        def generate(self, messages, tools=None):
-                            return ProviderResponse(
-                                content=(
-                                    f"Specialist findings from {self.spec_name} ({self.spec_role}) for '{topic_title}':\n"
-                                    f"- Completed structured investigation into objective: {prompt}\n"
-                                    f"- Core domain requirements and architectural constraints evaluated.\n"
-                                    f"- Actionable deliverables and operational recommendations structured."
-                                ),
-                                model="aether-specialist",
-                                finish_reason="stop",
-                            )
-
-                    class GenericOfflineCoordinator(AIProvider):
-                        def __init__(self, lead_name: str, spec_name: str):
-                            super().__init__(ProviderConfig(model="aether-lead"))
-                            self.lead_name = lead_name
-                            self.spec_name = spec_name
-                            self.call_count = 0
-                        @property
-                        def capabilities(self):
-                            return ProviderCapabilities(tools=True, structured_output=True)
-                        def generate(self, messages, tools=None):
-                            self.call_count += 1
-                            fn_name = re.sub(r"[^a-zA-Z0-9_-]+", "_", self.spec_name).strip("_")
-                            if self.call_count == 1:
-                                return ProviderResponse(
-                                    content=f"Delegating analysis to {self.spec_name}.",
-                                    model="aether-lead",
-                                    finish_reason="tool_calls",
-                                    message=Message(
-                                        role="assistant",
-                                        content=f"Delegating analysis to {self.spec_name}.",
-                                        tool_calls=[
-                                            ToolCall(
-                                                call_id="call_del_1",
-                                                tool_name=fn_name,
-                                                arguments={"instruction": f"Perform structured analysis for: {prompt}"},
-                                            )
-                                        ],
-                                    ),
-                                )
-                            else:
-                                tool_findings = next((m.content for m in reversed(messages) if m.role == "tool"), "")
-                                synthesis = (
-                                    f"Executive Strategic Synthesis for {topic_title}:\n\n"
-                                    f"Objective '{prompt}' coordinated by {self.lead_name} and analyzed with specialist {self.spec_name}.\n\n"
-                                    f"{tool_findings}\n\n"
-                                    f"Strategic roadmap and verified actions documented."
-                                )
-                                return ProviderResponse(content=synthesis, model="aether-lead", finish_reason="stop")
-
-                    coordinator.provider = GenericOfflineCoordinator(coordinator.name, primary_spec.name)
-                    for s in specialists:
-                        s.provider = GenericOfflineSpecialist(s.name, s.role)
-
-                # Register AgentTools for all specialists in coordinator's tool registry
-                registered_tools = []
-                for s in specialists:
-                    agent_tool = AgentTool(agent=s)
-                    try:
-                        coordinator.tool_registry.register(agent_tool)
-                    except (ValueError, Exception):
-                        pass
-                    if agent_tool.name not in coordinator.tools:
-                        coordinator.tools.append(agent_tool.name)
-                    if agent_tool.function_name not in coordinator.tools:
-                        coordinator.tools.append(agent_tool.function_name)
-                    registered_tools.append(s.name)
-
-                progress_cb(35, f"Orchestrating coordinator '{coordinator.name}' with specialists: {', '.join(registered_tools)}")
-
-                # Execute coordinator with task
-                task = CoreTask(
-                    instruction=f"Coordinate workforce to fulfill: {prompt}. Utilize available specialist tools and produce an executive synthesis.",
-                    agent_name=coordinator.name,
-                    id=f"wf-task-{uuid.uuid4().hex[:8]}",
-                )
-                mgr_result = coordinator.execute(task)
-
-                progress_cb(65, "Workforce analyzing domain metrics and compiling findings")
-
-                # Generate deliverable artifact in workspace
-                topic_slug = re.sub(r"[^a-z0-9]+", "_", topic_title.lower()).strip("_") or "report"
-                deliverable_filename = f"{topic_slug}_report.md"
-                deliverable_dir = Path.cwd() / "reviews"
-                if self.workspace and hasattr(self.workspace, "root") and self.workspace.root:
-                    deliverable_dir = Path(self.workspace.root) / "reviews"
-                deliverable_dir.mkdir(parents=True, exist_ok=True)
-                deliverable_path = deliverable_dir / deliverable_filename
-
-                synthesis_text = mgr_result.output if (mgr_result and mgr_result.output) else f"Workforce execution completed for: {prompt}"
-
-                title_suffix = "Strategic Market Analysis" if ("market" in prompt.lower() or "mercato" in prompt.lower()) else "Analysis & Deliverable"
-
-                report_content = (
-                    f"# {topic_title} — {title_suffix}\n\n"
-                    f"**Generated by Aether Digital Workforce**  \n"
-                    f"**Lead Coordinator**: {coordinator.name} ({coordinator.role})  \n"
-                    f"**Specialists**: {', '.join(registered_tools)}  \n"
-                    f"**Timestamp**: {datetime.now(timezone.utc).isoformat()}  \n"
-                    f"**Objective**: {prompt}  \n\n"
-                    f"## 1. Executive Summary\n"
-                    f"{synthesis_text}\n\n"
-                    f"## 2. Workforce Coordination Details\n"
-                    f"- **Coordinator**: {coordinator.name}\n"
-                    f"- **Specialist Agents**: {', '.join(registered_tools)}\n"
-                    f"- **Task ID**: {task.id}\n"
-                    f"- **Turns**: {mgr_result.metadata.get('turns', 1) if mgr_result else 1}\n\n"
-                    f"## 3. Strategic Action Plan\n"
-                    f"1. Review generated findings and operational recommendations.\n"
-                    f"2. Integrate specialist outputs into project workflows.\n"
-                    f"3. Establish monitoring and next milestone quality gates.\n"
-                )
-                deliverable_path.write_text(report_content, encoding="utf-8")
-                if deliverable_dir != Path.cwd() / "reviews":
-                    (Path.cwd() / "reviews").mkdir(parents=True, exist_ok=True)
-                    (Path.cwd() / "reviews" / deliverable_filename).write_text(report_content, encoding="utf-8")
-
-                progress_cb(90, "Verifying against quality gates and generating deliverable dossier")
-                progress_cb(100, "Quality gates verified: deliverable ready")
-
+                res = self.runtime.execute(exec_request, progress_callback=progress_cb)
+                deliverables = res.deliverables or []
+                deliv_path = deliverables[0]["path"] if deliverables else None
+                deliv_name = deliverables[0]["name"] if deliverables else None
                 return {
                     "summary": f"Completed workforce delegation for {topic_title}. Findings compiled into executive deliverable.",
-                    "deliverable_name": deliverable_filename,
-                    "deliverable_path": str(deliverable_path),
+                    "deliverable_name": deliv_name,
+                    "deliverable_path": deliv_path,
                     "mission_id": mission_id,
-                    "specialists": registered_tools,
-                    "coordinator": coordinator.name,
+                    "specialists": res.metadata.get("specialists", []),
+                    "coordinator": res.metadata.get("coordinator", "coordinator"),
                 }
 
-            # Submit to persistent Task Manager
             task = self.task_manager.submit_task(
                 workspace_id=workspace_id,
                 session_id=session_id,
@@ -756,7 +591,6 @@ class PersonalAgentService:
                         category="response",
                     )
                 )
-                # Check for queries about previous reports or deliverables in this session / workspace
                 p_lower = prompt.lower().strip()
                 is_asking_about_report = any(k in p_lower for k in [
                     "where was that report", "where did we save", "where is that report",
@@ -781,12 +615,8 @@ class PersonalAgentService:
                         f"Dettaglio: {session_tasks[0].current_step}."
                     )
                 else:
-                    response_text = self._generate_intelligent_response(
-                        prompt=prompt,
-                        workspace_id=workspace_id,
-                        intel_context=intel_context,
-                        recent_history=recent_history,
-                    )
+                    runtime_res = self.runtime.execute(exec_request)
+                    response_text = runtime_res.output or ""
 
         # 7. Record assistant message
         assistant_msg = PersonalMessage(
@@ -916,30 +746,8 @@ class PersonalAgentService:
             return ""
 
     def _resolve_provider(self) -> Any:
-        """Resolves available AI Provider via direct injection, provider manager, or environment."""
-        if self.provider is not None:
-            return self.provider
-        try:
-            from aether.providers.manager import ProviderManager
-            from aether.providers.types import ProviderConfig
-            import os
-            mgr = self.provider_manager or ProviderManager()
-            if os.environ.get("OPENAI_API_KEY"):
-                return mgr.get("openai", ProviderConfig(api_key=os.environ["OPENAI_API_KEY"]))
-            if os.environ.get("ANTHROPIC_API_KEY"):
-                return mgr.get("anthropic", ProviderConfig(api_key=os.environ["ANTHROPIC_API_KEY"]))
-            if os.environ.get("GEMINI_API_KEY"):
-                return mgr.get("gemini", ProviderConfig(api_key=os.environ["GEMINI_API_KEY"]))
-            # Fallback to local Ollama if reachable with installed models
-            try:
-                p = mgr.get("ollama", ProviderConfig(timeout=60.0))
-                if hasattr(p, "get_available_models") and p.get_available_models():
-                    return p
-            except Exception:
-                pass
-        except Exception as e:
-            logger.debug(f"Provider resolution skipped: {e}")
-        return None
+        """Resolves available AI Provider adhering to deterministic precedence via runtime."""
+        return self.runtime.resolve_provider()
 
     def _generate_intelligent_response(
         self,
@@ -948,45 +756,18 @@ class PersonalAgentService:
         intel_context: Any = None,
         recent_history: list[PersonalMessage] | None = None,
     ) -> str:
-        """Generates dynamic response using AI Provider if configured, or operational context synthesis."""
-        provider = self._resolve_provider()
-        if provider is not None:
-            try:
-                from aether.providers.types import Message
-                sys_prompt = (
-                    f"You are Personal Aether, the personal operational AI companion for workspace '{workspace_id}'. "
-                    "You are concise, direct, helpful, and action-oriented. "
-                    "You coordinate workspace files, calendar events, background tasks, and the digital workforce. "
-                    "Always respond in the same language as the user (Italian if addressed in Italian, English if addressed in English)."
-                )
-                workforce_desc = self._get_workforce_summary()
-                if workforce_desc:
-                    sys_prompt += f"\n\nDigital Workforce Available in this Workspace:\n{workforce_desc}"
-
-                if intel_context and getattr(intel_context, "summary", None):
-                    sys_prompt += f"\n\nOrganizational Memory Summary:\n{intel_context.summary}"
-                if intel_context and getattr(intel_context, "evidence", None):
-                    ev_items = [f"- [{e.source}] {e.title}: {e.content[:140]}" for e in intel_context.evidence[:5]]
-                    sys_prompt += f"\nRelevant Memory Evidence:\n" + "\n".join(ev_items)
-
-                messages = [Message(role="system", content=sys_prompt)]
-                if recent_history:
-                    for m in recent_history[-5:]:
-                        messages.append(Message(role=m.role, content=m.content))
-                messages.append(Message(role="user", content=prompt))
-
-                res = provider.generate(messages)
-                if res and getattr(res, "content", None) and res.content.strip():
-                    return res.content.strip()
-            except Exception as e:
-                logger.warning(f"Live provider call exception, using contextual synthesis: {e}")
-
-        return self._synthesize_contextual_response(
-            prompt=prompt,
+        """Generates dynamic response using standardized Runtime.execute in ANSWER mode."""
+        task = Task(
+            instruction=prompt,
+            mode=ExecutionMode.ANSWER,
             workspace_id=workspace_id,
-            intel_context=intel_context,
-            recent_history=recent_history,
+            context_data={
+                "intel_context": intel_context,
+                "recent_history": recent_history,
+            },
         )
+        res = self.runtime.execute(task)
+        return res.output or ""
 
     def _synthesize_contextual_response(
         self,
@@ -996,54 +777,12 @@ class PersonalAgentService:
         recent_history: list[PersonalMessage] | None = None,
     ) -> str:
         """Generates dynamic contextual synthesis from memory and workspace state when no live provider is configured."""
-        p_lower = prompt.lower().strip()
-        is_italian = any(w in p_lower for w in ["chi", "cosa", "come", "perché", "perche", "dove", "dimmi", "puoi", "aiutami", "ciao", "buongiorno", "qual è", "quali", "grazie", "stai", "spiegami", "vorrei"])
-
-        evidence_items = []
-        if intel_context and getattr(intel_context, "evidence", None):
-            for ev in intel_context.evidence[:4]:
-                evidence_items.append(f"• **{ev.title}**: {ev.content.strip()}")
-
-        if evidence_items:
-            if is_italian:
-                header = f"In base alla memoria e conoscenza del tuo workspace `{workspace_id}`:\n\n"
-                footer = "\n\nPosso approfondire questi dettagli o avviare un'azione operativa se lo desideri."
-            else:
-                header = f"Based on organizational memory for `{workspace_id}`:\n\n"
-                footer = "\n\nI can expand on any of these points or launch operational actions upon request."
-            return header + "\n".join(evidence_items) + footer
-
-        # Identity or capability inquiry
-        if any(k in p_lower for k in ["who are you", "what can you do", "capabilities", "chi sei", "cosa puoi fare"]):
-            if is_italian:
-                return (
-                    f"Sono **Aether**, il tuo assistente operativo personale nel workspace `{workspace_id}`.\n\n"
-                    "Ecco cosa posso gestire direttamente per te:\n"
-                    "• **Azioni e File**: creare documenti, leggere file di progetto e gestire impegni in calendario.\n"
-                    "• **Digital Workforce**: coordinare team autonomi per ricerche competitive, audit di codice e report.\n"
-                    "• **Memoria Organizzativa**: consultare la knowledge base aziendale e applicare lezioni verificate."
-                )
-            else:
-                return (
-                    f"I am **Aether**, your personal operational AI companion for `{workspace_id}`.\n\n"
-                    "Here is what I can handle directly for you:\n"
-                    "• **Actions & Files**: create documents, inspect project files, and schedule calendar meetings.\n"
-                    "• **Digital Workforce**: orchestrate autonomous multi-agent teams for deep research, code audits, and strategic reports.\n"
-                    "• **Organizational Memory**: recall knowledge graph records, user preferences, and verified lessons across runs."
-                )
-
-        if is_italian:
-            return (
-                f"Nessun provider AI è attualmente configurato o raggiungibile nel workspace `{workspace_id}`.\n\n"
-                "Per abilitare le risposte intelligenti e la Digital Workforce, assicurati che Ollama sia attivo in locale "
-                "(es. `ollama serve`) con almeno un modello installato, oppure configura una chiave API (es. `OPENAI_API_KEY`, `ANTHROPIC_API_KEY`, `GEMINI_API_KEY`)."
-            )
-        else:
-            return (
-                f"No AI provider is currently configured or reachable in workspace `{workspace_id}`.\n\n"
-                "To enable intelligent responses and digital workforce orchestration, ensure Ollama is running locally "
-                "(e.g. `ollama serve`) with at least one model installed, or configure an API key (e.g. `OPENAI_API_KEY`, `ANTHROPIC_API_KEY`, `GEMINI_API_KEY`)."
-            )
+        return self.runtime._synthesize_contextual_response(
+            prompt=prompt,
+            workspace_id=workspace_id,
+            intel_context=intel_context,
+            recent_history=recent_history,
+        )
 
     def get_overview(self, workspace_id: str) -> dict[str, Any]:
         """Provides aggregated overview for the Home Companion hub."""

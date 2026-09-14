@@ -81,16 +81,37 @@ class ToolResult:
 
 
 
+class ExecutionMode(StrEnum):
+    """Execution mode handled by the unified Aether runtime."""
+    ANSWER = "answer"      # Read-only / conversational synthesis
+    DO = "do"              # Safe local mutation / document operations
+    ACT = "act"            # Sensitive / external mutation (requires safety approval)
+    DELEGATE = "delegate"  # Multi-agent workforce delegation
+    TOOL = "tool"          # Canonical tool invocation
+
+
 @dataclass(slots=True)
 class Task:
     """
-    Minimal work unit assigned to an agent.
+    Canonical work unit / execution request assigned to an agent or the Aether runtime.
     """
 
     instruction: str
     agent_name: str = "unknown"
     id: str = field(default_factory=lambda: uuid4().hex)
+    workspace_id: str | None = None
+    session_id: str | None = None
+    parent_id: str | None = None
+    mode: ExecutionMode | str | None = None
+    action_id: str | None = None
+    action_args: dict[str, Any] = field(default_factory=dict)
+    context_data: dict[str, Any] = field(default_factory=dict)
+    expected_output: str | None = None
     metadata: dict[str, Any] = field(default_factory=dict)
+
+
+# Canonical alias for unified execution requests
+ExecutionRequest = Task
 
 
 @dataclass(slots=True)
@@ -112,8 +133,13 @@ class ExecutionContext:
 
 
 class ExecutionStatus(StrEnum):
+    CREATED = "created"
+    PENDING = "pending"
+    RUNNING = "running"
+    WAITING_FOR_APPROVAL = "waiting_for_approval"
     COMPLETED = "completed"
     FAILED = "failed"
+    CANCELLED = "cancelled"
     INTERRUPTED = "interrupted"
 
 
@@ -130,6 +156,9 @@ class ExecutionResult:
     status: ExecutionStatus = ExecutionStatus.COMPLETED
     interrupt: AgentInterrupt | None = None
     artifacts: list[dict[str, Any]] = field(default_factory=list)
+    deliverables: list[dict[str, Any]] = field(default_factory=list)
+    child_execution_ids: list[str] = field(default_factory=list)
+    execution_id: str | None = None
 
     def __post_init__(self):
         # Backward compatibility: automatically set status if not provided explicitly

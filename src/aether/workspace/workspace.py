@@ -413,6 +413,30 @@ class Workspace:
         self._instances["personal"] = value
 
     @property
+    def runtime(self):
+        """Return the unified Aether Execution Runtime for this workspace."""
+        def _factory():
+            from aether.core.runtime import Runtime
+            from aether.personal.events import get_personal_event_hub
+            return Runtime(
+                workspace=self,
+                action_executor=self.actions,
+                intelligence_service=self.intelligence,
+                mission_store=self.missions,
+                activity_service=self.activity,
+                notification_service=self.notifications,
+                event_hub=get_personal_event_hub(),
+                provider=getattr(self, "_provider", None),
+            )
+        return self._get_or_create("runtime", _factory)
+
+    @runtime.setter
+    def runtime(self, value):
+        if not hasattr(self, "_instances"):
+            self._instances = {}
+        self._instances["runtime"] = value
+
+    @property
     def project_path(self) -> Path | None:
         """Return the resolved Path of the connected project root if configured and existing."""
         raw_path = self.config.get("workspace", {}).get("project", {}).get("path")

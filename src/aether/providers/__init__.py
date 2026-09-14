@@ -55,4 +55,8 @@ __all__ = [
     "MockProvider",
     "OllamaProvider",
     "ResilientProvider",
+    # Resolution
+    "resolve_provider",
 ]
+
+from aether.providers.resolution import resolve_provider
