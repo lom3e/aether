@@ -140,6 +140,51 @@ interface Mission {
   updated_at: string;
 }
 
+interface DryRunMilestonePreview {
+  milestone_id: string;
+  title: string;
+  description: string;
+  assigned_agent?: string | null;
+  agent_status: string;
+  required_tools: string[];
+  required_connectors: string[];
+  predicted_actions: string[];
+  predicted_deliverables: string[];
+  requires_approval: boolean;
+  risk_level: string;
+  estimated_duration_seconds: number;
+  notes: string[];
+}
+
+interface DryRunReport {
+  mission_id: string;
+  title: string;
+  ready: boolean;
+  readiness_score: number;
+  risk_tier: string;
+  total_milestones: number;
+  estimated_duration_seconds: number;
+  milestone_previews: DryRunMilestonePreview[];
+  required_connectors: Array<{
+    provider: string;
+    connected: boolean;
+    status: string;
+  }>;
+  safety_gates: Array<{
+    milestone_id: string;
+    milestone_title: string;
+    risk_level: string;
+    reasons: string[];
+  }>;
+  expected_deliverables: Array<{
+    path: string;
+    milestone_title: string;
+  }>;
+  recommendations: string[];
+  warnings: string[];
+  created_at: string;
+}
+
 interface GraphNode {
   id: string;
   type: string;
@@ -233,6 +278,11 @@ export function Missions({ navigate, initialMissionId }: MissionsProps) {
   const [executions, setExecutions] = useState<MissionExecution[]>([]);
   const [selectedExecutionId, setSelectedExecutionId] = useState<string | null>(null);
   const [actionLoading, setActionLoading] = useState<string | null>(null);
+
+  // Mission Pre-flight Dry Run State
+  const [dryRunReport, setDryRunReport] = useState<DryRunReport | null>(null);
+  const [isDryRunModalOpen, setIsDryRunModalOpen] = useState(false);
+  const [dryRunLoading, setDryRunLoading] = useState(false);
 
   // Inspector & Activities (Slice 2E, 7, 9, Phase B Slice 3)
   const [activeInspectorTab, setActiveInspectorTab] = useState<'graph' | 'replay' | 'health' | 'intelligence' | 'trace' | 'telemetry'>('graph');
@@ -591,6 +641,29 @@ export function Missions({ navigate, initialMissionId }: MissionsProps) {
       showToast?.(err.message, 'error');
     } finally {
       setActionLoading(null);
+    }
+  };
+
+  const handleRunDryRun = async (missionId?: string) => {
+    const targetId = missionId || selectedMission?.id;
+    if (!targetId) return;
+    setDryRunLoading(true);
+    try {
+      const res = await fetch(apiUrl(`/api/missions/${targetId}/dry-run`), {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+      });
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({}));
+        throw new Error(err.detail || 'Failed to execute mission dry-run');
+      }
+      const data = await res.json();
+      setDryRunReport(data);
+      setIsDryRunModalOpen(true);
+    } catch (err: any) {
+      showToast?.(err.message, 'error');
+    } finally {
+      setDryRunLoading(false);
     }
   };
 
@@ -1281,6 +1354,20 @@ export function Missions({ navigate, initialMissionId }: MissionsProps) {
 
                 {/* Context-Driven Action Buttons (Truthful Mission Runtime) */}
                 <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap' }}>
+                  {/* PRE-FLIGHT DRY RUN (Any non-running state) */}
+                  {selectedMission.status !== 'running' && selectedMission.status !== 'verifying' && (
+                    <button
+                      onClick={() => handleRunDryRun()}
+                      disabled={dryRunLoading}
+                      className="btn btn-secondary"
+                      style={{ display: 'flex', alignItems: 'center', gap: '6px', fontSize: '13px' }}
+                      title="Pre-flight verification & risk analysis without side-effects"
+                    >
+                      <ShieldAlert size={14} className="text-amber-500" />
+                      <span>{dryRunLoading ? 'Inspecting...' : 'Pre-flight Dry Run'}</span>
+                    </button>
+                  )}
+
                   {/* DRAFT STATE */}
                   {selectedMission.status === 'draft' && (
                     <button
@@ -3630,6 +3717,221 @@ export function Missions({ navigate, initialMissionId }: MissionsProps) {
                 <ExternalLink size={12} />
                 <span>{t('intelligenceOpenInGraph')}</span>
               </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* MISSION PRE-FLIGHT DRY RUN MODAL */}
+      {isDryRunModalOpen && dryRunReport && (
+        <div
+          style={{
+            position: 'fixed',
+            inset: 0,
+            backgroundColor: 'rgba(0,0,0,0.5)',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            zIndex: 1050,
+            padding: '20px',
+          }}
+          onClick={() => setIsDryRunModalOpen(false)}
+        >
+          <div
+            style={{
+              backgroundColor: 'hsl(var(--card))',
+              borderRadius: '14px',
+              border: '1px solid hsl(var(--border))',
+              maxWidth: '680px',
+              width: '100%',
+              maxHeight: '85vh',
+              overflowY: 'auto',
+              padding: '24px',
+              display: 'flex',
+              flexDirection: 'column',
+              gap: '16px',
+              boxShadow: '0 12px 36px rgba(0,0,0,0.25)',
+            }}
+            onClick={(e) => e.stopPropagation()}
+            data-testid="mission-dry-run-modal"
+          >
+            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+                <div style={{ width: '32px', height: '32px', borderRadius: '8px', backgroundColor: 'rgba(245, 158, 11, 0.14)', color: '#f59e0b', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                  <ShieldAlert size={18} />
+                </div>
+                <div>
+                  <h3 style={{ fontSize: '16px', fontWeight: 700, margin: 0, color: 'hsl(var(--fg))' }}>
+                    Pre-flight Inspection: {dryRunReport.title}
+                  </h3>
+                  <div style={{ fontSize: '11.5px', color: 'hsl(var(--muted-fg))', marginTop: '2px' }}>
+                    Static verification and risk assessment before runtime launch
+                  </div>
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={() => setIsDryRunModalOpen(false)}
+                className="btn btn-ghost"
+                style={{ padding: '6px' }}
+              >
+                <X size={16} />
+              </button>
+            </div>
+
+            {/* Badges Strip: Readiness Score & Risk Tier */}
+            <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap', alignItems: 'center' }}>
+              <span
+                style={{
+                  fontSize: '12px',
+                  fontWeight: 700,
+                  padding: '4px 10px',
+                  borderRadius: '6px',
+                  backgroundColor: dryRunReport.readiness_score >= 80 ? 'hsl(var(--success)/0.15)' : dryRunReport.readiness_score >= 60 ? 'rgba(245, 158, 11, 0.15)' : 'hsl(var(--error)/0.15)',
+                  color: dryRunReport.readiness_score >= 80 ? 'hsl(var(--success))' : dryRunReport.readiness_score >= 60 ? '#f59e0b' : 'hsl(var(--error))',
+                  display: 'inline-flex',
+                  alignItems: 'center',
+                  gap: '4px',
+                }}
+              >
+                Readiness: {dryRunReport.readiness_score}/100 ({dryRunReport.ready ? 'Ready' : 'Blocked'})
+              </span>
+              <span
+                style={{
+                  fontSize: '12px',
+                  fontWeight: 600,
+                  padding: '4px 10px',
+                  borderRadius: '6px',
+                  backgroundColor: 'hsl(var(--muted))',
+                  color: 'hsl(var(--fg))',
+                  textTransform: 'uppercase',
+                }}
+              >
+                Risk: {dryRunReport.risk_tier}
+              </span>
+              <span style={{ fontSize: '12px', color: 'hsl(var(--muted-fg))' }}>
+                · ~{dryRunReport.estimated_duration_seconds}s execution estimate · {dryRunReport.total_milestones} milestones
+              </span>
+            </div>
+
+            {/* External Connectors */}
+            {dryRunReport.required_connectors && dryRunReport.required_connectors.length > 0 && (
+              <div style={{ padding: '12px 14px', borderRadius: '8px', backgroundColor: 'hsl(var(--muted)/0.3)', border: '1px solid hsl(var(--border)/0.6)' }}>
+                <div style={{ fontSize: '11.5px', fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.05em', color: 'hsl(var(--muted-fg))', marginBottom: '8px' }}>
+                  Required External Connectors
+                </div>
+                <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap' }}>
+                  {dryRunReport.required_connectors.map((c, idx) => (
+                    <span
+                      key={idx}
+                      style={{
+                        fontSize: '11px',
+                        padding: '4px 8px',
+                        borderRadius: '6px',
+                        backgroundColor: c.connected ? 'hsl(var(--success)/0.12)' : 'rgba(245, 158, 11, 0.15)',
+                        color: c.connected ? 'hsl(var(--success))' : '#b45309',
+                        fontWeight: 600,
+                        display: 'inline-flex',
+                        alignItems: 'center',
+                        gap: '5px',
+                      }}
+                    >
+                      {c.connected ? <Check size={12} /> : <AlertCircle size={12} />}
+                      {c.provider.toUpperCase()}: {c.status}
+                    </span>
+                  ))}
+                </div>
+              </div>
+            )}
+
+            {/* Milestone Breakdown */}
+            <div>
+              <div style={{ fontSize: '11.5px', fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.05em', color: 'hsl(var(--muted-fg))', marginBottom: '8px' }}>
+                Milestone Execution Path ({dryRunReport.milestone_previews.length})
+              </div>
+              <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
+                {dryRunReport.milestone_previews.map((m, idx) => (
+                  <div
+                    key={m.milestone_id || idx}
+                    style={{
+                      padding: '10px 12px',
+                      borderRadius: '8px',
+                      backgroundColor: 'hsl(var(--card))',
+                      border: '1px solid hsl(var(--border))',
+                      display: 'flex',
+                      flexDirection: 'column',
+                      gap: '4px',
+                    }}
+                  >
+                    <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+                      <span style={{ fontSize: '13px', fontWeight: 600, color: 'hsl(var(--fg))' }}>
+                        {idx + 1}. {m.title}
+                      </span>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+                        {m.requires_approval && (
+                          <span style={{ fontSize: '10px', padding: '2px 6px', borderRadius: '4px', backgroundColor: 'rgba(245, 158, 11, 0.15)', color: '#f59e0b', fontWeight: 700 }}>
+                            Safety Gate
+                          </span>
+                        )}
+                        <span style={{ fontSize: '11px', color: 'hsl(var(--muted-fg))' }}>
+                          ~{m.estimated_duration_seconds}s
+                        </span>
+                      </div>
+                    </div>
+                    <div style={{ fontSize: '11.5px', color: 'hsl(var(--muted-fg))' }}>
+                      Assigned: <strong>{m.assigned_agent || 'Workforce Coordinator'}</strong> ({m.agent_status})
+                      {m.required_tools.length > 0 && ` · Tools: ${m.required_tools.join(', ')}`}
+                    </div>
+                    {m.predicted_deliverables.length > 0 && (
+                      <div style={{ fontSize: '11px', color: 'hsl(var(--primary))', marginTop: '2px' }}>
+                        Target: {m.predicted_deliverables.join(', ')}
+                      </div>
+                    )}
+                  </div>
+                ))}
+              </div>
+            </div>
+
+            {/* Recommendations & Warnings */}
+            {(dryRunReport.warnings.length > 0 || dryRunReport.recommendations.length > 0) && (
+              <div style={{ padding: '12px 14px', borderRadius: '8px', backgroundColor: 'hsl(var(--muted)/0.3)', border: '1px solid hsl(var(--border))' }}>
+                <div style={{ fontSize: '11.5px', fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.05em', color: 'hsl(var(--muted-fg))', marginBottom: '6px' }}>
+                  Safety Recommendations & Notes
+                </div>
+                <ul style={{ margin: 0, paddingLeft: '18px', fontSize: '12px', color: 'hsl(var(--muted-fg))' }}>
+                  {dryRunReport.warnings.map((w, idx) => (
+                    <li key={`w-${idx}`} style={{ color: '#f59e0b', marginBottom: '2px' }}>{w}</li>
+                  ))}
+                  {dryRunReport.recommendations.map((r, idx) => (
+                    <li key={`r-${idx}`} style={{ marginBottom: '2px' }}>{r}</li>
+                  ))}
+                </ul>
+              </div>
+            )}
+
+            {/* Footer Buttons */}
+            <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '10px', paddingTop: '10px', borderTop: '1px solid hsl(var(--border))' }}>
+              <button
+                type="button"
+                className="btn btn-secondary"
+                onClick={() => setIsDryRunModalOpen(false)}
+              >
+                Close
+              </button>
+              {selectedMission?.status === 'draft' && (
+                <button
+                  type="button"
+                  className="btn btn-primary"
+                  style={{ display: 'flex', alignItems: 'center', gap: '6px' }}
+                  onClick={() => {
+                    setIsDryRunModalOpen(false);
+                    handleMissionAction(t('startMission'), 'start');
+                  }}
+                >
+                  <Play size={14} fill="currentColor" />
+                  <span>Launch Mission</span>
+                </button>
+              )}
             </div>
           </div>
         </div>

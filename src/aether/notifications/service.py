@@ -43,6 +43,7 @@ class NotificationService:
         link_view: str | None = None,
         link_id: str | None = None,
         action_required: bool = False,
+        action_payload: dict[str, Any] | None = None,
         metadata: dict[str, Any] | None = None,
     ) -> Notification:
         """Emits and persists a real notification."""
@@ -55,6 +56,10 @@ class NotificationService:
             else NotificationPriority.from_str(str(priority))
         )
 
+        meta = dict(metadata or {})
+        if action_payload:
+            meta["action_payload"] = action_payload
+
         notification = Notification(
             id=f"notif-{uuid.uuid4().hex[:12]}",
             workspace_id=workspace_id,
@@ -66,7 +71,7 @@ class NotificationService:
             link_view=link_view,
             link_id=link_id,
             action_required=action_required,
-            metadata=metadata or {},
+            metadata=meta,
             created_at=datetime.now(timezone.utc).isoformat(),
         )
 
@@ -85,6 +90,53 @@ class NotificationService:
 
         logger.info(f"Notification emitted [{notif_type.value}]: {title} ({workspace_id})")
         return saved
+
+    def notify_approval(
+        self,
+        workspace_id: str,
+        title: str,
+        message: str,
+        action_id: str,
+        execution_id: str,
+        prompt: str,
+        risk_tier: str = "medium",
+        link_view: str = "activity",
+        link_id: str | None = None,
+        metadata: dict[str, Any] | None = None,
+    ) -> Notification:
+        """Convenience method to dispatch a safety approval notification with structured action payload."""
+        action_payload = {
+            "action_id": action_id,
+            "execution_id": execution_id,
+            "prompt": prompt,
+            "risk_tier": risk_tier,
+        }
+        return self.notify(
+            workspace_id=workspace_id,
+            type=NotificationType.APPROVAL_REQUIRED,
+            title=title,
+            message=message,
+            priority=NotificationPriority.HIGH,
+            link_view=link_view,
+            link_id=link_id or execution_id,
+            action_required=True,
+            action_payload=action_payload,
+            metadata=metadata,
+        )
+
+    def get_summary(self, workspace_id: str) -> dict[str, Any]:
+        """Returns aggregated notification summary including unread and pending approvals."""
+        all_notifs = self.store.list(workspace_id=workspace_id, limit=200)
+        unread = [n for n in all_notifs if n.status == NotificationStatus.UNREAD]
+        pending_approvals = [n for n in unread if n.action_required]
+        high_priority = [n for n in unread if n.priority == NotificationPriority.HIGH]
+        return {
+            "workspace_id": workspace_id,
+            "total_count": len(all_notifs),
+            "unread_count": len(unread),
+            "pending_approvals_count": len(pending_approvals),
+            "high_priority_count": len(high_priority),
+        }
 
     def list_notifications(
         self,

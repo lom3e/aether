@@ -391,6 +391,41 @@ class ActionExecutor:
                 raise ValueError(f"Automation '{auto_id}' not found")
             return {"automation_id": auto_id, "status": "active", "enabled": True}
 
+        # 9. Mission dry run action
+        elif action_id == "missions.dry_run":
+            from aether.missions.dry_run import MissionDryRunEngine
+            from aether.missions.models import Milestone, Mission
+            from aether.workspace.workspace import Workspace
+
+            ws = None
+            try:
+                ws = Workspace.get(ws_id) if hasattr(Workspace, "get") else None
+                if not ws and self.project_path:
+                    ws = Workspace.get_or_init(self.project_path)
+            except Exception:
+                pass
+
+            mid = inp.get("mission_id")
+            mission = None
+            if ws and mid and hasattr(ws, "missions"):
+                mission = ws.missions.get_mission(mid)
+
+            if not mission:
+                title = inp.get("title", "Proposed Mission")
+                obj = inp.get("objective", title)
+                raw_milestones = inp.get("milestones", [])
+                milestones = [Milestone.from_dict(m) if isinstance(m, dict) else m for m in raw_milestones]
+                mission = Mission(
+                    id=mid or f"msn-draft",
+                    workspace_id=ws_id,
+                    title=title,
+                    objective=obj,
+                    milestones=milestones,
+                )
+
+            report = MissionDryRunEngine.analyze_mission(mission, ws)
+            return report.to_dict()
+
         raise ValueError(
             f"Action '{action_id}' is not supported by built-in connectors and has no registered handler."
         )

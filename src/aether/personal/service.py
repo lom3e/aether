@@ -399,6 +399,22 @@ class PersonalAgentService:
                 action_args=action_args,
             )
 
+        # 3h. Mission Dry Run / Pre-flight check (DO tier)
+        dry_run_triggers = [
+            "dry run", "preflight", "pre-flight", "simula missione", "simula la missione",
+            "testa la missione", "verifica la missione prima", "ispeziona la missione",
+        ]
+        if any(k in p_lower for k in dry_run_triggers):
+            m_id_match = re.search(r"(?:missione|mission)\s+([a-zA-Z0-9_\-]+)", prompt, re.IGNORECASE)
+            mission_id = m_id_match.group(1).strip() if m_id_match else ""
+            return UserIntent(
+                raw_prompt=effective_prompt,
+                tier=IntentTier.DO,
+                summary=f"Pre-flight inspection for mission {mission_id or 'proposal'}",
+                action_id="missions.dry_run",
+                action_args={"mission_id": mission_id, "title": prompt},
+            )
+
         # 4. Multi-agent workforce delegation & deep research / report generation (DELEGATE tier)
         delegate_triggers = [
             "launch mission", "start mission", "deploy workforce", "delegate to team",
@@ -630,19 +646,62 @@ class PersonalAgentService:
 
             runtime_res = self.runtime.execute(exec_request)
             action_execution_id = runtime_res.metadata.get("action_execution_id")
-            target = intent.action_args.get("filename", "item")
-            response_text = runtime_res.output or f"I've taken care of it! **{target}** has been created in your workspace."
 
-            if self.notification_service and action_execution_id:
-                self.notification_service.notify(
-                    workspace_id=workspace_id,
-                    type=NotificationType.ACTION_COMPLETED,
-                    title=f"Document Created: {target}",
-                    message=f"Document {target} was created successfully.",
-                    priority=NotificationPriority.LOW,
-                    link_view="home",
-                    link_id=action_execution_id,
-                )
+            if intent.action_id == "missions.dry_run":
+                report_data = runtime_res.metadata.get("action_result") or {}
+                score = report_data.get("readiness_score", 100)
+                risk = str(report_data.get("risk_tier", "low")).upper()
+                ready_txt = "READY" if report_data.get("ready") else "NEEDS ATTENTION"
+                duration = report_data.get("estimated_duration_seconds", 0)
+
+                lines = [
+                    f"### 🛡️ Mission Pre-flight Inspection: {report_data.get('title', 'Proposed Mission')}",
+                    f"- **Status:** `{ready_txt}` (Readiness Score: **{score}/100**)",
+                    f"- **Risk Tier:** `{risk}` | **Estimated Execution:** ~{duration}s",
+                    f"- **Total Milestones:** {report_data.get('total_milestones', 0)}",
+                    "",
+                ]
+
+                previews = report_data.get("milestone_previews", [])
+                if previews:
+                    lines.append("#### Milestone Path & Required Workforce")
+                    for p in previews:
+                        agent_badge = p.get('assigned_agent') or 'Coordinator'
+                        tools_txt = ", ".join(p.get("required_tools", [])) or "none"
+                        lines.append(f"- **{p.get('title')}** (`{agent_badge}`) — Risk: `{p.get('risk_level')}` | Tools: `{tools_txt}`")
+                    lines.append("")
+
+                conns = report_data.get("required_connectors", [])
+                if conns:
+                    lines.append("#### External Connector Readiness")
+                    for c in conns:
+                        status_icon = "✓" if c.get("connected") else "⚠️"
+                        lines.append(f"- {status_icon} **{str(c.get('provider')).capitalize()}**: `{c.get('status')}`")
+                    lines.append("")
+
+                recs = report_data.get("recommendations", [])
+                if recs:
+                    lines.append("#### Recommendations & Safety Gates")
+                    for r in recs:
+                        lines.append(f"- {r}")
+                    lines.append("")
+
+                lines.append("Pre-flight analysis complete. Would you like to proceed with launching this mission?")
+                response_text = "\n".join(lines)
+            else:
+                target = intent.action_args.get("filename", "item")
+                response_text = runtime_res.output or f"I've taken care of it! **{target}** has been created in your workspace."
+
+                if self.notification_service and action_execution_id:
+                    self.notification_service.notify(
+                        workspace_id=workspace_id,
+                        type=NotificationType.ACTION_COMPLETED,
+                        title=f"Document Created: {target}",
+                        message=f"Document {target} was created successfully.",
+                        priority=NotificationPriority.LOW,
+                        link_view="home",
+                        link_id=action_execution_id,
+                    )
 
         elif intent.tier == IntentTier.DELEGATE:
             step_del = PersonalStep(

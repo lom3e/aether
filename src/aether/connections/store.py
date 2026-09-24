@@ -122,6 +122,8 @@ class ConnectionStore:
             )
         return conn
 
+    save = save_connection
+
     def get_connection(self, connection_id: str) -> Connection | None:
         """Retrieves connection by ID."""
         conn = self._get_connection()

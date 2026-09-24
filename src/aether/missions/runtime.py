@@ -144,8 +144,29 @@ class MissionRuntime:
         self._active_executions.clear()
 
     # ---------------------------------------------------------------------------
-    # Public Intent Endpoints
+    # Public Intent Endpoints & Pre-flight Inspection
     # ---------------------------------------------------------------------------
+
+    async def dry_run(self, mission_id: str):
+        """
+        Executes a pre-flight inspection and dry run static analysis of a mission.
+        Evaluates readiness, risks, required workforce, tools, connectors, and deliverables.
+        """
+        mission = self.store.get_mission(mission_id)
+        if not mission:
+            raise NotFoundError(f"Mission {mission_id} not found.")
+
+        from aether.missions.dry_run import MissionDryRunEngine
+        return MissionDryRunEngine.analyze_mission(mission, self.workspace)
+
+    def dry_run_sync(self, mission_id: str):
+        """Synchronous helper for dry-run analysis."""
+        mission = self.store.get_mission(mission_id)
+        if not mission:
+            raise NotFoundError(f"Mission {mission_id} not found.")
+
+        from aether.missions.dry_run import MissionDryRunEngine
+        return MissionDryRunEngine.analyze_mission(mission, self.workspace)
 
     async def start_mission(self, mission_id: str, team_name: str | None = None) -> MissionExecution:
         """
@@ -751,6 +772,21 @@ class MissionRuntime:
                         "execution_id": exec_id,
                         "approval": approval_req,
                     })
+                    if hasattr(self.workspace, "notifications") and self.workspace.notifications:
+                        try:
+                            self.workspace.notifications.notify(
+                                workspace_id=getattr(self.workspace, "id", "default"),
+                                type="approval_required",
+                                title=f"Approval Required: {tmpl_m.title}",
+                                message=approval_req["prompt"],
+                                priority="high",
+                                link_view="missions",
+                                link_id=mid,
+                                action_required=True,
+                                metadata={"mission_id": mid, "execution_id": exec_id, "approval_id": approval_req["id"]},
+                            )
+                        except Exception as e:
+                            logger.debug("Failed to dispatch notification: %s", e)
                     return
 
                 now_start = datetime.now(timezone.utc).isoformat()
@@ -1251,6 +1287,26 @@ class MissionRuntime:
                             "execution_id": exec_id,
                             "approval": override_approval,
                         })
+                        if hasattr(self.workspace, "notifications") and self.workspace.notifications:
+                            try:
+                                self.workspace.notifications.notify(
+                                    workspace_id=getattr(self.workspace, "id", "default"),
+                                    type="approval_required",
+                                    title=f"Quality Gate Signoff Required: {mission.title}",
+                                    message=override_prompt,
+                                    priority="high",
+                                    link_view="missions",
+                                    link_id=mid,
+                                    action_required=True,
+                                    metadata={
+                                        "mission_id": mid,
+                                        "execution_id": exec_id,
+                                        "approval_id": override_approval["id"],
+                                        "score": eval_result.score,
+                                    },
+                                )
+                            except Exception as e:
+                                logger.debug("Failed to dispatch notification: %s", e)
                         return
 
             now_finish = datetime.now(timezone.utc).isoformat()
@@ -1282,6 +1338,21 @@ class MissionRuntime:
                 "duration_seconds": total_duration,
             })
             self._broadcast_graph_update(mid, exec_id, "mission_completed")
+            if hasattr(self.workspace, "notifications") and self.workspace.notifications:
+                try:
+                    self.workspace.notifications.notify(
+                        workspace_id=getattr(self.workspace, "id", "default"),
+                        type="task_completed",
+                        title=f"Mission Completed: {mission.title}",
+                        message=f"All milestones completed and verified in {total_duration:.1f}s.",
+                        priority="normal",
+                        link_view="missions",
+                        link_id=mid,
+                        action_required=False,
+                        metadata={"mission_id": mid, "execution_id": exec_id, "duration": total_duration},
+                    )
+                except Exception as e:
+                    logger.debug("Failed to dispatch notification: %s", e)
 
         except Exception as exc:
             logger.exception("Unexpected error in mission execution loop: %s", exc)
@@ -1292,6 +1363,21 @@ class MissionRuntime:
             )
             self.store.update_mission(mid, status=MissionStatus.FAILED)
             self._broadcast_graph_update(mid, exec_id, "mission_failed")
+            if hasattr(self.workspace, "notifications") and self.workspace.notifications:
+                try:
+                    self.workspace.notifications.notify(
+                        workspace_id=getattr(self.workspace, "id", "default"),
+                        type="task_failed",
+                        title=f"Mission Failed: {mission.title}",
+                        message=str(exc),
+                        priority="high",
+                        link_view="missions",
+                        link_id=mid,
+                        action_required=False,
+                        metadata={"mission_id": mid, "execution_id": exec_id, "error": str(exc)},
+                    )
+                except Exception as e:
+                    logger.debug("Failed to dispatch notification: %s", e)
         finally:
             if team is not None and hasattr(team, "emitter") and team.emitter:
                 try:

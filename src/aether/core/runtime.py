@@ -283,7 +283,11 @@ class Runtime:
                 artifacts=artifacts,
                 deliverables=artifacts,
                 execution_id=request.id,
-                metadata={"action_execution_id": execution.id, "action_id": action_id},
+                metadata={
+                    "action_execution_id": execution.id,
+                    "action_id": action_id,
+                    "action_result": execution.output_data or {},
+                },
             )
 
         return ExecutionResult(
@@ -361,7 +365,11 @@ class Runtime:
             status=ExecutionStatus.COMPLETED,
             output=f"Done! I've successfully executed **{action_name}**.",
             execution_id=request.id,
-            metadata={"action_execution_id": execution.id, "action_id": action_id},
+            metadata={
+                "action_execution_id": execution.id,
+                "action_id": action_id,
+                "action_result": execution.output_data or {},
+            },
         )
 
     def _execute_delegate(self, request: Task, progress_callback: Callable[[int, str], None] | None = None) -> ExecutionResult:

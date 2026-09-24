@@ -153,6 +153,10 @@ class ConnectionService:
             return ["calendar.create_event", "calendar.list_events"]
         return [f"{p}.read", f"{p}.write"]
 
+    def save_connection(self, connection: Connection) -> Connection:
+        """Saves a connection directly to the persistent store."""
+        return self.store.save_connection(connection)
+
     def connect(
         self,
         workspace_id: str,

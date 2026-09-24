@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef } from 'react';
-import { Bell, Check, Trash2, Shield, CheckCircle2, AlertTriangle, Sparkles, ExternalLink } from 'lucide-react';
+import { Bell, Check, Trash2, Shield, CheckCircle2, AlertTriangle, Sparkles } from 'lucide-react';
 import { apiUrl } from './api';
 
 export interface NotificationItem {
@@ -132,6 +132,46 @@ export function NotificationCenter({ workspaceName, onNavigate }: NotificationCe
       }
     } catch (err) {
       console.error('Failed to mark all read', err);
+    }
+  };
+
+  const handleInlineApprove = async (notif: NotificationItem, e: React.MouseEvent) => {
+    e.stopPropagation();
+    try {
+      const endpoint = (notif.link_view === 'missions' && notif.link_id)
+        ? `/api/missions/${notif.link_id}/approve`
+        : `/api/actions/executions/${notif.metadata?.execution_id || notif.link_id}/approve`;
+      const res = await fetch(apiUrl(endpoint), {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ approver: 'User' }),
+      });
+      if (res.ok) {
+        await handleMarkAsRead(notif.id);
+        fetchNotifications();
+      }
+    } catch (err) {
+      console.error('Failed to approve from notification', err);
+    }
+  };
+
+  const handleInlineReject = async (notif: NotificationItem, e: React.MouseEvent) => {
+    e.stopPropagation();
+    try {
+      const endpoint = (notif.link_view === 'missions' && notif.link_id)
+        ? `/api/missions/${notif.link_id}/reject`
+        : `/api/actions/executions/${notif.metadata?.execution_id || notif.link_id}/reject`;
+      const res = await fetch(apiUrl(endpoint), {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ reason: 'Rejected from Notification Center' }),
+      });
+      if (res.ok) {
+        await handleMarkAsRead(notif.id);
+        fetchNotifications();
+      }
+    } catch (err) {
+      console.error('Failed to reject from notification', err);
     }
   };
 
@@ -311,10 +351,23 @@ export function NotificationCenter({ workspaceName, onNavigate }: NotificationCe
                       {item.message}
                     </div>
                     {item.action_required && (
-                      <div style={{ marginTop: '6px', display: 'flex', gap: '6px', alignItems: 'center' }}>
-                        <span style={{ fontSize: '11px', fontWeight: 600, color: '#f59e0b', display: 'flex', alignItems: 'center', gap: '4px' }}>
-                          <ExternalLink size={11} /> Requires Review
-                        </span>
+                      <div style={{ marginTop: '8px', display: 'flex', gap: '8px', alignItems: 'center' }}>
+                        <button
+                          type="button"
+                          className="btn btn-primary"
+                          style={{ padding: '3px 10px', fontSize: '11px', display: 'flex', alignItems: 'center', gap: '4px' }}
+                          onClick={(e) => handleInlineApprove(item, e)}
+                        >
+                          <Check size={11} /> Approve
+                        </button>
+                        <button
+                          type="button"
+                          className="btn btn-ghost text-rose-500 hover:bg-rose-500/10"
+                          style={{ padding: '3px 8px', fontSize: '11px' }}
+                          onClick={(e) => handleInlineReject(item, e)}
+                        >
+                          Reject
+                        </button>
                       </div>
                     )}
                   </div>

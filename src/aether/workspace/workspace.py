@@ -62,6 +62,8 @@ class Workspace:
     Manages filesystem boundaries, paths, and configuration.
     """
 
+    _active_workspaces: dict[str, "Workspace"] = {}
+
     def __init__(self, root: str | Path):
         self.root = Path(root).resolve()
 
@@ -83,6 +85,14 @@ class Workspace:
 
         # Cached instances (stores, services)
         self._instances: dict[str, Any] = {}
+
+        # Register in active workspaces registry
+        Workspace._active_workspaces[str(self.root)] = self
+        try:
+            Workspace._active_workspaces[self.name] = self
+            Workspace._active_workspaces[self.id] = self
+        except Exception:
+            pass
 
     @property
     def config(self) -> dict[str, Any]:
@@ -566,7 +576,43 @@ class Workspace:
             yaml.dump(manifest, f, sort_keys=False, default_flow_style=False)
 
         _save_last_workspace(ws.root)
+        cls._active_workspaces[str(ws.root)] = ws
+        try:
+            cls._active_workspaces[ws.name] = ws
+            cls._active_workspaces[ws.id] = ws
+        except Exception:
+            pass
         return ws
+
+    @classmethod
+    def get(cls, name_or_id: str | Path | None) -> "Workspace | None":
+        """Retrieve an active Workspace by ID, name, or path, or initialize from existing path."""
+        if not name_or_id:
+            return None
+        key = str(name_or_id).strip()
+        if not key:
+            return None
+        if key in cls._active_workspaces:
+            return cls._active_workspaces[key]
+        try:
+            resolved = str(Path(key).resolve())
+            if resolved in cls._active_workspaces:
+                return cls._active_workspaces[resolved]
+        except Exception:
+            pass
+        for ws in list(cls._active_workspaces.values()):
+            try:
+                if ws.id == key or ws.name == key or ws.root.name == key:
+                    return ws
+            except Exception:
+                pass
+        try:
+            p = Path(key).resolve()
+            if p.exists() and (p / "aether.yaml").exists():
+                return cls(p)
+        except Exception:
+            pass
+        return None
 
     @classmethod
     def get_or_init(cls, root: str | Path, name: str) -> "Workspace":
@@ -700,6 +746,11 @@ class Workspace:
                         except Exception:
                             pass
         instances.clear()
+
+        # 3. Unregister from active workspaces
+        for k, v in list(self._active_workspaces.items()):
+            if v is self:
+                self._active_workspaces.pop(k, None)
 
     def __enter__(self) -> "Workspace":
         return self

@@ -3680,6 +3680,40 @@ def _resolve_mission_runtime(request: Request):
     return runtime
 
 
+@router.post("/missions/{mission_id}/dry-run")
+async def dry_run_mission_route(request: Request, mission_id: str):
+    runtime = _resolve_mission_runtime(request)
+    from aether.missions.runtime import NotFoundError
+    try:
+        report = await runtime.dry_run(mission_id)
+        return report.to_dict()
+    except NotFoundError as e:
+        raise HTTPException(status_code=404, detail=str(e))
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.post("/missions/dry-run")
+async def dry_run_adhoc_mission_route(request: Request, payload: dict[str, Any]):
+    ws = getattr(request.app.state, "workspace", None)
+    if not ws:
+        raise HTTPException(status_code=500, detail="Workspace not initialized")
+    from aether.missions.dry_run import MissionDryRunEngine
+    from aether.missions.models import Milestone, Mission
+
+    raw_milestones = payload.get("milestones", [])
+    milestones = [Milestone.from_dict(m) if isinstance(m, dict) else m for m in raw_milestones]
+    mission = Mission(
+        id=payload.get("id") or "msn-adhoc-dryrun",
+        workspace_id=getattr(ws, "id", None) or ws.name,
+        title=payload.get("title", "Ad-hoc Mission"),
+        objective=payload.get("objective", ""),
+        milestones=milestones,
+    )
+    report = MissionDryRunEngine.analyze_mission(mission, ws)
+    return report.to_dict()
+
+
 @router.post("/missions/{mission_id}/start")
 async def start_mission_route(request: Request, mission_id: str, payload: MissionActionStartPayload | None = None):
     runtime = _resolve_mission_runtime(request)
@@ -4966,6 +5000,15 @@ async def dismiss_notification_route(request: Request, notification_id: str, wor
     ws_id = (workspace_id or ws.name).strip()
     success = ws.notifications.dismiss(ws_id, notification_id)
     return {"status": "ok" if success else "not_found", "id": notification_id}
+
+
+@router.get("/notifications/summary")
+async def get_notification_summary_route(request: Request, workspace_id: str | None = None):
+    ws = getattr(request.app.state, "workspace", None)
+    if not ws:
+        return {"unread_count": 0, "total_count": 0, "pending_approvals_count": 0, "high_priority_count": 0}
+    ws_id = (workspace_id or getattr(ws, "id", None) or ws.name).strip()
+    return ws.notifications.get_summary(ws_id)
 
 
 # ---------------------------------------------------------------------------

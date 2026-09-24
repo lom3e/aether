@@ -269,6 +269,32 @@ class MissionStore:
     # Mission CRUD Operations
     # ---------------------------------------------------------------------------
 
+    def save_mission(self, mission: Mission) -> Mission:
+        """Saves or updates a Mission model."""
+        existing = self.get_mission(mission.id)
+        if existing:
+            self.update_mission(
+                mission.id,
+                title=mission.title,
+                objective=mission.objective,
+                status=mission.status,
+                metadata=mission.metadata,
+            )
+            return self.get_mission(mission.id) or mission
+        raw_milestones = [m.to_dict() if hasattr(m, "to_dict") else m for m in mission.milestones]
+        return self.create_mission(
+            title=mission.title,
+            objective=mission.objective,
+            workspace_id=mission.workspace_id,
+            team_name=mission.team_name,
+            conversation_id=mission.conversation_id,
+            project_id=mission.project_id,
+            status=mission.status,
+            metadata=mission.metadata,
+            milestones=raw_milestones,
+            mission_id=mission.id,
+        )
+
     def create_mission(
         self,
         title: str,
@@ -1153,6 +1179,8 @@ class MissionStore:
                 return deliverables
 
         return self._list_deliverables_legacy(mission_id)
+
+    get_deliverables = list_deliverables
 
     def _list_deliverables_legacy(self, mission_id: str) -> list[Deliverable]:
         """Fallback for un-migrated missions or dynamic activity inspection."""

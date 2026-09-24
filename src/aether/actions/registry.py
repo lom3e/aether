@@ -498,3 +498,33 @@ class ActionRegistry:
                 },
             )
         )
+
+        # Mission Actions
+        self.register(
+            ActionDefinition(
+                id="missions.dry_run",
+                name="Mission Dry Run",
+                description="Performs pre-flight inspection and static analysis of a mission charter without side-effects.",
+                tier=ActionTier.DO,
+                permission_level=ActionPermissionLevel.READ_ONLY,
+                requires_confirmation=False,
+                provider="missions",
+                input_schema={
+                    "type": "object",
+                    "properties": {
+                        "mission_id": {"type": "string"},
+                        "title": {"type": "string"},
+                        "objective": {"type": "string"},
+                    },
+                },
+                output_schema={
+                    "type": "object",
+                    "properties": {
+                        "ready": {"type": "boolean"},
+                        "readiness_score": {"type": "integer"},
+                        "risk_tier": {"type": "string"},
+                        "milestone_previews": {"type": "array"},
+                    },
+                },
+            )
+        )

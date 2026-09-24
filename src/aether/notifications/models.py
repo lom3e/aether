@@ -69,6 +69,17 @@ class Notification:
     metadata: dict[str, Any] = field(default_factory=dict)
     created_at: str = field(default_factory=lambda: datetime.now(timezone.utc).isoformat())
 
+    @property
+    def action_payload(self) -> dict[str, Any] | None:
+        return self.metadata.get("action_payload")
+
+    @action_payload.setter
+    def action_payload(self, val: dict[str, Any] | None) -> None:
+        if val is None:
+            self.metadata.pop("action_payload", None)
+        else:
+            self.metadata["action_payload"] = val
+
     def to_dict(self) -> dict[str, Any]:
         return {
             "id": self.id,
@@ -81,12 +92,16 @@ class Notification:
             "link_view": self.link_view,
             "link_id": self.link_id,
             "action_required": self.action_required,
+            "action_payload": self.action_payload,
             "metadata": self.metadata,
             "created_at": self.created_at,
         }
 
     @classmethod
     def from_dict(cls, data: dict[str, Any]) -> Notification:
+        meta = dict(data.get("metadata") or {})
+        if "action_payload" in data and data["action_payload"] and "action_payload" not in meta:
+            meta["action_payload"] = data["action_payload"]
         return cls(
             id=data.get("id") or f"notif-{uuid.uuid4().hex[:12]}",
             workspace_id=data.get("workspace_id", "default"),
@@ -98,6 +113,6 @@ class Notification:
             link_view=data.get("link_view"),
             link_id=data.get("link_id"),
             action_required=bool(data.get("action_required", False)),
-            metadata=dict(data.get("metadata") or {}),
+            metadata=meta,
             created_at=data.get("created_at") or datetime.now(timezone.utc).isoformat(),
         )
