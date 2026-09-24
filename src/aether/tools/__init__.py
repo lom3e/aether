@@ -26,4 +26,14 @@ __all__ = [
     "BaseWebSearchBackend",
     "DuckDuckGoSearchBackend",
     "MockWebSearchBackend",
+    "MCPClient",
+    "MCPTool",
+    "create_mcp_tools",
+    "register_mcp_server",
 ]
+from aether.tools.mcp import (
+    MCPClient,
+    MCPTool,
+    create_mcp_tools,
+    register_mcp_server,
+)

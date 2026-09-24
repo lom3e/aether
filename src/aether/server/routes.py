@@ -1097,6 +1097,7 @@ async def get_agents(request: Request):
         agent_skills = [s.name for s in a.skills] if getattr(a, "skills", None) else (config.skills if config else [])
         agent_tools = a.available_tools() if hasattr(a, "available_tools") else (config.tools if config else [])
         instructions_text = (config.instructions if config and config.instructions else (a.metadata.get("system_prompt") if hasattr(a, "metadata") and isinstance(a.metadata, dict) else "")) or ""
+        is_ext = getattr(a, "is_external", False) or (getattr(config, "type", "local") == "external") or bool(getattr(config, "protocol", None))
         agents.append({
             "name": a.name,
             "role": a.role,
@@ -1110,6 +1111,11 @@ async def get_agents(request: Request):
             "model": config.model if config else None,
             "icon": getattr(a, "icon", None) or (config.icon if config else None),
             "color": getattr(a, "color", None) or (config.color if config else None),
+            "is_external": is_ext,
+            "type": getattr(config, "type", "local") if config else ("external" if is_ext else "local"),
+            "protocol": getattr(a, "protocol", None) or (getattr(config, "protocol", None) if config else None),
+            "endpoint_url": getattr(a, "endpoint_url", None) or (getattr(config, "endpoint_url", None) if config else None),
+            "capabilities": getattr(config, "capabilities", []) if config else [],
             "delegates_to": [r.target for r in config.relationships if r.type == "delegates_to"] if config else []
         })
     return agents
@@ -1122,6 +1128,13 @@ class AgentPayload(BaseModel):
     model: str | None = None
     icon: str | None = None
     color: str | None = None
+    type: str | None = "local"
+    protocol: str | None = None
+    endpoint_url: str | None = None
+    command: list[str] | str | None = None
+    timeout_seconds: float | None = 60.0
+    auth_token: str | None = None
+    capabilities: list[str] = Field(default_factory=list)
     skills: list[str] = Field(default_factory=list)
     tools: list[str] = Field(default_factory=list)
     delegates_to: list[str] = Field(default_factory=list)
@@ -1146,6 +1159,13 @@ async def create_agent(request: Request, data: AgentPayload):
             model=a.model,
             icon=a.icon,
             color=a.color,
+            type=getattr(a, "type", "local"),
+            protocol=getattr(a, "protocol", None),
+            endpoint_url=getattr(a, "endpoint_url", None),
+            command=getattr(a, "command", None),
+            timeout_seconds=getattr(a, "timeout_seconds", 60.0),
+            auth_token=getattr(a, "auth_token", None),
+            capabilities=getattr(a, "capabilities", []),
             skills=a.skills,
             tools=list(getattr(a, "tools", [])),
             delegates_to=a.delegates_to(),
@@ -1167,6 +1187,13 @@ async def create_agent(request: Request, data: AgentPayload):
         model=model_val,
         icon=data.icon,
         color=data.color,
+        type=data.type or "local",
+        protocol=data.protocol,
+        endpoint_url=data.endpoint_url,
+        command=data.command,
+        timeout_seconds=data.timeout_seconds or 60.0,
+        auth_token=data.auth_token,
+        capabilities=data.capabilities,
         skills=data.skills,
         tools=data.tools,
         relationships=rels
@@ -1236,6 +1263,13 @@ async def update_agent(request: Request, name: str, data: AgentPayload):
     agent_config.skills = data.skills
     agent_config.tools = data.tools
     agent_config.relationships = rels
+    agent_config.type = data.type or getattr(agent_config, "type", "local")
+    agent_config.protocol = data.protocol
+    agent_config.endpoint_url = data.endpoint_url
+    agent_config.command = data.command
+    agent_config.timeout_seconds = data.timeout_seconds or 60.0
+    agent_config.auth_token = data.auth_token
+    agent_config.capabilities = data.capabilities
 
     if data.name != name:
         for other in team.config.agents:
@@ -5153,6 +5187,144 @@ async def voice_transcribe(
         mime_type=mime_type,
     )
     return result
+
+
+# ---------------------------------------------------------------------------
+# External Agents & Worker Protocol Endpoints
+# ---------------------------------------------------------------------------
+
+class ExternalAgentInvokePayload(BaseModel):
+    agent_name: str = "external_worker"
+    instruction: str
+    protocol: str = "http"
+    endpoint_url: str | None = None
+    command: list[str] | str | None = None
+    timeout_seconds: float = 60.0
+    auth_token: str | None = None
+    context_data: dict[str, Any] = Field(default_factory=dict)
+
+
+@router.get("/agents/external")
+async def list_external_agents(request: Request):
+    """Lists all configured external agents and workers."""
+    team = getattr(request.app.state, "team", None)
+    if not team:
+        return []
+
+    external_agents = []
+    for a in team.config.agents:
+        is_ext = (
+            getattr(a, "type", "local") == "external"
+            or bool(getattr(a, "protocol", None))
+            or bool(getattr(a, "endpoint_url", None))
+        )
+        if is_ext:
+            external_agents.append(a.to_dict())
+    return external_agents
+
+
+@router.post("/agents/external/invoke")
+async def invoke_external_agent(request: Request, payload: ExternalAgentInvokePayload):
+    """Invokes an external agent directly via HTTP, CLI, or MCP."""
+    from aether.agents.external import ExternalAgentAdapter, ExternalAgentConfig
+    from aether.core.execution import Task
+
+    team = getattr(request.app.state, "team", None)
+    target_adapter = None
+    if team and hasattr(team, "_agents") and payload.agent_name in team._agents:
+        candidate = team._agents[payload.agent_name]
+        if isinstance(candidate, ExternalAgentAdapter):
+            target_adapter = candidate
+
+    if target_adapter is None:
+        cfg = ExternalAgentConfig(
+            name=payload.agent_name,
+            protocol=payload.protocol,
+            endpoint_url=payload.endpoint_url,
+            command=payload.command,
+            timeout_seconds=payload.timeout_seconds,
+            auth_token=payload.auth_token,
+        )
+        target_adapter = ExternalAgentAdapter(config=cfg)
+
+    task = Task(
+        instruction=payload.instruction,
+        agent_name=payload.agent_name,
+        context_data=payload.context_data,
+    )
+    res = target_adapter.execute(task)
+    return res.to_dict()
+
+
+# ---------------------------------------------------------------------------
+# Model Context Protocol (MCP) Endpoints
+# ---------------------------------------------------------------------------
+
+class MCPCallPayload(BaseModel):
+    tool_name: str
+    arguments: dict[str, Any] = Field(default_factory=dict)
+    endpoint_url: str | None = None
+    command: list[str] | str | None = None
+    auth_token: str | None = None
+
+
+@router.get("/tools/mcp")
+async def list_mcp_tools(
+    request: Request,
+    endpoint_url: str | None = None,
+    command: str | None = None,
+):
+    """Queries an MCP server for its advertised tools and capabilities."""
+    from aether.tools.mcp import MCPClient
+
+    if not endpoint_url and not command:
+        return {"tools": [], "server_info": {}, "connected": False}
+
+    client = MCPClient(
+        endpoint_url=endpoint_url,
+        command=command.split() if command else None,
+        timeout_seconds=10.0,
+    )
+    try:
+        server_info = client.connect()
+        tools = client.list_tools()
+        client.close()
+        return {
+            "tools": [
+                {
+                    "name": t.name,
+                    "description": t.description,
+                    "inputSchema": t.input_schema,
+                }
+                for t in tools
+            ],
+            "server_info": server_info,
+            "connected": True,
+        }
+    except Exception as exc:
+        client.close()
+        raise HTTPException(status_code=502, detail=f"Failed to query MCP server: {exc}")
+
+
+@router.post("/tools/mcp/call")
+async def call_mcp_tool(request: Request, payload: MCPCallPayload):
+    """Executes a tool on an MCP server."""
+    from aether.tools.mcp import MCPClient
+
+    client = MCPClient(
+        endpoint_url=payload.endpoint_url,
+        command=payload.command,
+        auth_token=payload.auth_token,
+        timeout_seconds=30.0,
+    )
+    try:
+        client.connect()
+        result = client.call_tool(payload.tool_name, payload.arguments)
+        client.close()
+        return result
+    except Exception as exc:
+        client.close()
+        raise HTTPException(status_code=502, detail=f"MCP call failed: {exc}")
 
 
 

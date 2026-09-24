@@ -555,3 +555,39 @@ class ActionRegistry:
                 },
             )
         )
+
+        # External Agent Actions
+        self.register(
+            ActionDefinition(
+                id="agents.delegate_external",
+                name="Delegate to External Agent",
+                description="Delegates a task or instruction to an external agent or worker over HTTP, CLI, or MCP.",
+                tier=ActionTier.ACT,
+                permission_level=ActionPermissionLevel.EXTERNAL_MUTATION,
+                requires_confirmation=False,
+                provider="external_agents",
+                input_schema={
+                    "type": "object",
+                    "properties": {
+                        "agent_name": {"type": "string"},
+                        "instruction": {"type": "string"},
+                        "protocol": {"type": "string", "enum": ["http", "command", "mcp"]},
+                        "endpoint_url": {"type": "string"},
+                        "command": {"type": ["array", "string"]},
+                        "context_data": {"type": "object"},
+                        "timeout_seconds": {"type": "number"},
+                        "auth_token": {"type": "string"},
+                    },
+                    "required": ["instruction"],
+                },
+                output_schema={
+                    "type": "object",
+                    "properties": {
+                        "success": {"type": "boolean"},
+                        "output": {"type": "string"},
+                        "artifacts": {"type": "array"},
+                        "status": {"type": "string"},
+                    },
+                },
+            )
+        )

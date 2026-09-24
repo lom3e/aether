@@ -447,19 +447,48 @@ class Team:
                     team_name=self.config.name,
                 )
 
-            agent = Agent(
-                agent_id=agent_id,
-                name=agent_config.name,
-                role=agent_config.role,
-                icon=agent_config.icon,
-                color=agent_config.color,
-                config=agent_config,
-                provider=provider,
-                memory_manager=memory_manager,
-                skill_registry=self.skill_registry,
-                events=self.emitter,
-                verbose=self.verbose,
+            is_external = (
+                getattr(agent_config, "type", "local") == "external"
+                or bool(getattr(agent_config, "protocol", None))
+                or bool(getattr(agent_config, "endpoint_url", None))
             )
+
+            if is_external:
+                from aether.agents.external import ExternalAgentAdapter, ExternalAgentConfig
+                proto = agent_config.protocol or ("http" if agent_config.endpoint_url else "command")
+                ext_cfg = ExternalAgentConfig(
+                    name=agent_config.name,
+                    role=agent_config.role,
+                    protocol=proto,
+                    endpoint_url=agent_config.endpoint_url,
+                    command=agent_config.command,
+                    timeout_seconds=getattr(agent_config, "timeout_seconds", 60.0),
+                    auth_token=getattr(agent_config, "auth_token", None),
+                    capabilities=getattr(agent_config, "capabilities", []),
+                    metadata=agent_config.metadata,
+                    icon=agent_config.icon or "Bot",
+                    color=agent_config.color or "cyan",
+                )
+                agent = ExternalAgentAdapter(
+                    config=ext_cfg,
+                    agent_id=agent_id,
+                    events=self.emitter,
+                    verbose=self.verbose,
+                )
+            else:
+                agent = Agent(
+                    agent_id=agent_id,
+                    name=agent_config.name,
+                    role=agent_config.role,
+                    icon=agent_config.icon,
+                    color=agent_config.color,
+                    config=agent_config,
+                    provider=provider,
+                    memory_manager=memory_manager,
+                    skill_registry=self.skill_registry,
+                    events=self.emitter,
+                    verbose=self.verbose,
+                )
 
             # Override the default system prompt if custom instructions given
             # We store in metadata so the agent can use it on _build_messages
@@ -537,7 +566,13 @@ class Team:
                             print(f"[Team] Warning: could not load skill {clean_ref!r}: {exc}")
 
             self._agents[agent_config.name] = agent
-            self.registry.register(agent, description=agent_config.role)
+            caps = list(getattr(agent_config, "capabilities", []))
+            self.registry.register(
+                agent,
+                capabilities=caps,
+                description=agent_config.role,
+                metadata={"type": getattr(agent_config, "type", "local"), "protocol": getattr(agent_config, "protocol", None)},
+            )
 
     def _wire_delegation(self) -> None:
         """

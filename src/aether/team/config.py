@@ -116,6 +116,13 @@ class AgentConfig:
     model: str | None = None
     icon: str | None = None
     color: str | None = None
+    type: str = "local"
+    protocol: str | None = None
+    endpoint_url: str | None = None
+    command: list[str] | str | None = None
+    timeout_seconds: float = 60.0
+    auth_token: str | None = None
+    capabilities: list[str] = field(default_factory=list)
     metadata: dict = field(default_factory=dict)
     delegates_to: list[str] | DelegationsList | None = None
 
@@ -148,9 +155,20 @@ class AgentConfig:
             "model": self.model,
             "icon": self.icon,
             "color": self.color,
+            "type": self.type,
             "relationships": [{"type": r.type, "target": r.target} for r in self.relationships],
             "delegates_to": self.delegates_to(),
         }
+        if self.protocol:
+            res["protocol"] = self.protocol
+        if self.endpoint_url:
+            res["endpoint_url"] = self.endpoint_url
+        if self.command:
+            res["command"] = self.command
+        if self.timeout_seconds != 60.0:
+            res["timeout_seconds"] = self.timeout_seconds
+        if self.capabilities:
+            res["capabilities"] = list(self.capabilities)
         if self.metadata:
             res["metadata"] = dict(self.metadata)
         return res

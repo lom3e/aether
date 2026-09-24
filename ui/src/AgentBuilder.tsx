@@ -44,6 +44,16 @@ export function AgentBuilder({
   const [availableAgents, setAvailableAgents] = useState<DelegationCandidate[]>([]);
   const [saving, setSaving] = useState(false);
   const [showAdvancedModel, setShowAdvancedModel] = useState(Boolean(initialData?.model || initialData?.provider));
+  const [agentType, setAgentType] = useState<'local' | 'external'>(
+    initialData?.type === 'external' || initialData?.is_external ? 'external' : 'local'
+  );
+  const [protocol, setProtocol] = useState<'http' | 'command' | 'mcp'>(
+    initialData?.protocol || 'http'
+  );
+  const [endpointUrl, setEndpointUrl] = useState<string>(initialData?.endpoint_url || '');
+  const [commandStr, setCommandStr] = useState<string>(
+    Array.isArray(initialData?.command) ? initialData.command.join(' ') : (initialData?.command || '')
+  );
   const [confirmDelete, setConfirmDelete] = useState(false);
   const showToast = useContext(ToastContext);
 
@@ -133,6 +143,10 @@ export function AgentBuilder({
           model: model ? model.trim() : null,
           skills: selectedSkills,
           delegates_to: delegatesList,
+          type: agentType,
+          protocol: agentType === 'external' ? protocol : null,
+          endpoint_url: agentType === 'external' && endpointUrl ? endpointUrl.trim() : null,
+          command: agentType === 'external' && commandStr ? commandStr.trim() : null,
         }),
       });
       if (!res.ok) {
@@ -337,6 +351,78 @@ export function AgentBuilder({
                   label="Colore Agente"
                   disabled={saving}
                 />
+              </div>
+
+              {/* Architecture Selector */}
+              <div style={{ marginTop: '4px', paddingTop: '14px', borderTop: '1px solid hsl(var(--border)/0.5)' }}>
+                <label className="form-label" style={{ marginBottom: '8px', display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+                  <span>Tipo Agente / Esecutore</span>
+                  <span style={{ fontSize: '11px', color: 'hsl(var(--muted-fg))', fontWeight: 'normal' }}>
+                    {agentType === 'local' ? 'Eseguito da provider IA' : 'Worker / bridge di terze parti'}
+                  </span>
+                </label>
+                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '8px', marginBottom: '12px' }}>
+                  <button
+                    type="button"
+                    className={`btn ${agentType === 'local' ? 'btn-primary' : 'btn-secondary'}`}
+                    onClick={() => setAgentType('local')}
+                    style={{ fontSize: '12px', padding: '8px 12px', justifyContent: 'center' }}
+                  >
+                    Standard (LLM Core)
+                  </button>
+                  <button
+                    type="button"
+                    className={`btn ${agentType === 'external' ? 'btn-primary' : 'btn-secondary'}`}
+                    onClick={() => setAgentType('external')}
+                    style={{ fontSize: '12px', padding: '8px 12px', justifyContent: 'center' }}
+                  >
+                    Worker Esterno (HTTP / CLI / MCP)
+                  </button>
+                </div>
+
+                {agentType === 'external' && (
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: '10px', padding: '12px', background: 'hsl(var(--muted)/0.3)', borderRadius: '8px', border: '1px solid hsl(var(--border)/0.5)' }}>
+                    <div className="form-group" style={{ marginBottom: 0 }}>
+                      <label className="form-label" style={{ fontSize: '11.5px' }}>Protocollo Worker</label>
+                      <select
+                        className="form-input"
+                        value={protocol}
+                        onChange={e => setProtocol(e.target.value as any)}
+                        style={{ fontSize: '12.5px' }}
+                      >
+                        <option value="http">HTTP / REST API (POST JSON)</option>
+                        <option value="command">CLI Subprocess (stdin/stdout)</option>
+                        <option value="mcp">Model Context Protocol (MCP)</option>
+                      </select>
+                    </div>
+
+                    {(protocol === 'http' || protocol === 'mcp') && (
+                      <div className="form-group" style={{ marginBottom: 0 }}>
+                        <label className="form-label" style={{ fontSize: '11.5px' }}>Endpoint URL</label>
+                        <input
+                          className="form-input"
+                          value={endpointUrl}
+                          onChange={e => setEndpointUrl(e.target.value)}
+                          placeholder="e.g. http://localhost:8080/execute"
+                          style={{ fontSize: '12.5px' }}
+                        />
+                      </div>
+                    )}
+
+                    {(protocol === 'command' || protocol === 'mcp') && (
+                      <div className="form-group" style={{ marginBottom: 0 }}>
+                        <label className="form-label" style={{ fontSize: '11.5px' }}>Comando Subprocess / Script</label>
+                        <input
+                          className="form-input"
+                          value={commandStr}
+                          onChange={e => setCommandStr(e.target.value)}
+                          placeholder="e.g. npx -y @modelcontextprotocol/server-everything"
+                          style={{ fontSize: '12.5px' }}
+                        />
+                      </div>
+                    )}
+                  </div>
+                )}
               </div>
             </div>
           </div>

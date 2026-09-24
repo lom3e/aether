@@ -76,13 +76,24 @@ export function Agents({ navigate }: { navigate: (view: string, params?: any) =>
                 {agent.description || agent.instructions || <em>{t('autonomousAgentDesc')}</em>}
               </div>
 
-              <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '14px', fontSize: '11.5px', color: 'hsl(var(--muted-fg))' }}>
-                <span className="badge" style={{ fontSize: '10.5px' }}>
-                  {agent.provider || 'default'}
-                </span>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '14px', fontSize: '11.5px', color: 'hsl(var(--muted-fg))', flexWrap: 'wrap' }}>
+                {agent.is_external ? (
+                  <span className="badge" style={{ fontSize: '10.5px', background: 'rgba(56, 189, 248, 0.15)', color: '#38bdf8', border: '1px solid rgba(56, 189, 248, 0.3)' }}>
+                    External · {(agent.protocol || 'HTTP').toUpperCase()}
+                  </span>
+                ) : (
+                  <span className="badge" style={{ fontSize: '10.5px' }}>
+                    {agent.provider || 'default'}
+                  </span>
+                )}
                 {agent.model && (
                   <span className="badge" style={{ fontSize: '10.5px' }}>
                     {agent.model}
+                  </span>
+                )}
+                {agent.endpoint_url && (
+                  <span className="badge" style={{ fontSize: '10.5px', maxWidth: '140px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }} title={agent.endpoint_url}>
+                    {agent.endpoint_url}
                   </span>
                 )}
               </div>

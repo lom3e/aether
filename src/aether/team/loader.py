@@ -196,9 +196,24 @@ class TeamLoader:
 
             icon = raw_agent.get("icon")
             color = raw_agent.get("color")
+            agent_type = str(raw_agent.get("type", "local")).lower()
+            protocol = raw_agent.get("protocol")
+            if protocol:
+                protocol = str(protocol).lower()
+            endpoint_url = raw_agent.get("endpoint_url")
+            command = raw_agent.get("command")
+            timeout_seconds = float(raw_agent.get("timeout_seconds", 60.0))
+            auth_token = raw_agent.get("auth_token")
+            capabilities = raw_agent.get("capabilities") or []
+            if isinstance(capabilities, str):
+                capabilities = [capabilities]
 
             # Known keys — everything else goes to metadata
-            known = {"name", "role", "instructions", "model", "provider", "skills", "tools", "relationships", "icon", "color"}
+            known = {
+                "name", "role", "instructions", "model", "provider", "skills", "tools",
+                "relationships", "icon", "color", "type", "protocol", "endpoint_url",
+                "command", "timeout_seconds", "auth_token", "capabilities", "delegates_to"
+            }
             agent_metadata = {k: v for k, v in raw_agent.items() if k not in known}
 
             agents.append(AgentConfig(
@@ -212,6 +227,13 @@ class TeamLoader:
                 model=model,
                 icon=icon if isinstance(icon, str) and icon.strip() else None,
                 color=color if isinstance(color, str) and color.strip() else None,
+                type=agent_type,
+                protocol=protocol,
+                endpoint_url=endpoint_url,
+                command=command,
+                timeout_seconds=timeout_seconds,
+                auth_token=auth_token,
+                capabilities=capabilities,
                 metadata=agent_metadata,
             ))
 
@@ -274,6 +296,16 @@ class TeamLoader:
                 raw["relationships"] = [
                     {r.type: r.target} for r in agent.relationships
                 ]
+            if agent.type and agent.type != "local":
+                raw["type"] = agent.type
+            if agent.protocol:
+                raw["protocol"] = agent.protocol
+            if agent.endpoint_url:
+                raw["endpoint_url"] = agent.endpoint_url
+            if agent.command:
+                raw["command"] = agent.command
+            if agent.capabilities:
+                raw["capabilities"] = agent.capabilities
             if agent.metadata:
                 raw.update(agent.metadata)
             data["agents"].append(raw)

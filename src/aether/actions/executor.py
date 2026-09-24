@@ -462,6 +462,69 @@ class ActionExecutor:
                     "status": "synced",
                 }
 
+        # 11. External agent delegation action
+        elif action_id == "agents.delegate_external":
+            import os
+            from aether.agents.external import ExternalAgentAdapter, ExternalAgentConfig
+            from aether.core.execution import Task
+
+            agent_name = inp.get("agent_name", "external_worker")
+            instruction = inp.get("instruction", "")
+            protocol = str(inp.get("protocol", "http")).lower()
+            endpoint_url = inp.get("endpoint_url")
+            command = inp.get("command")
+            timeout_seconds = float(inp.get("timeout_seconds", 60.0))
+            auth_token = inp.get("auth_token")
+            context_data = inp.get("context_data", {})
+
+            # Try to resolve configured agent from team if exists
+            target_adapter = None
+            from aether.workspace.workspace import Workspace
+            ws = None
+            try:
+                ws = Workspace.get(ws_id) if hasattr(Workspace, "get") else None
+                if not ws and self.project_path:
+                    ws = Workspace.get_or_init(self.project_path)
+            except Exception:
+                pass
+
+            if ws and hasattr(ws, "team") and ws.team:
+                team_agent = ws.team._agents.get(agent_name)
+                if isinstance(team_agent, ExternalAgentAdapter):
+                    target_adapter = team_agent
+
+            if target_adapter is None:
+                if not endpoint_url and not command and protocol != "mcp":
+                    endpoint_url = os.environ.get("AETHER_EXTERNAL_AGENT_URL")
+
+                cfg = ExternalAgentConfig(
+                    name=agent_name,
+                    role=inp.get("role", "external_worker"),
+                    protocol=protocol,
+                    endpoint_url=endpoint_url,
+                    command=command,
+                    timeout_seconds=timeout_seconds,
+                    auth_token=auth_token,
+                )
+                target_adapter = ExternalAgentAdapter(config=cfg)
+
+            task = Task(
+                instruction=instruction,
+                agent_name=agent_name,
+                context_data=context_data,
+                workspace_id=ws_id,
+            )
+            res = target_adapter.execute(task)
+            return {
+                "success": res.success,
+                "status": str(res.status.value) if res.status else ("completed" if res.success else "failed"),
+                "output": res.output,
+                "error": res.error,
+                "artifacts": res.artifacts,
+                "deliverables": res.deliverables,
+                "metadata": res.metadata,
+            }
+
         raise ValueError(
             f"Action '{action_id}' is not supported by built-in connectors and has no registered handler."
         )

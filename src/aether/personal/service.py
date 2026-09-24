@@ -442,6 +442,34 @@ class PersonalAgentService:
                 action_args=args,
             )
 
+        # 3h. External agent / remote worker delegation (ACT tier)
+        external_worker_triggers = [
+            "agente esterno", "worker esterno", "external agent", "external worker",
+            "remote worker", "agente remoto", "mcp worker", "mcp server",
+            "delega all'agente esterno", "chiedi all'agente esterno", "run external worker",
+            "esegui con worker esterno", "esegui worker", "invia al worker", "interroga worker",
+            "delegate to external worker", "delegate to external agent",
+        ]
+        if any(k in p_lower for k in external_worker_triggers) or (
+            ("worker" in p_lower or "agente" in p_lower or "agent" in p_lower)
+            and any(w in p_lower for w in ["esterno", "esterni", "external", "remote", "remoto", "mcp"])
+        ):
+            agent_name = "external_worker"
+            name_m = re.search(r"(?:worker|agente|agent)\s+['\"]?([a-zA-Z0-9_\-]+)['\"]?", prompt, re.IGNORECASE)
+            if name_m and name_m.group(1).lower() not in ["esterno", "esterni", "external", "remote", "remoto", "mcp"]:
+                agent_name = name_m.group(1).strip()
+
+            return UserIntent(
+                raw_prompt=effective_prompt,
+                tier=IntentTier.ACT,
+                summary=f"Delegate to external worker '{agent_name}'",
+                action_id="agents.delegate_external",
+                action_args={
+                    "agent_name": agent_name,
+                    "instruction": prompt,
+                },
+            )
+
         # 4. Multi-agent workforce delegation & deep research / report generation (DELEGATE tier)
         delegate_triggers = [
             "launch mission", "start mission", "deploy workforce", "delegate to team",
@@ -656,7 +684,20 @@ class PersonalAgentService:
                         category="action",
                     )
                 )
-                response_text = runtime_res.output or f"Done! I've successfully executed **{action_name}**."
+                if intent.action_id == "agents.delegate_external":
+                    res_data = runtime_res.metadata.get("action_result") or {}
+                    out = res_data.get("output") or runtime_res.output or "Task executed successfully."
+                    worker_name = intent.action_args.get("agent_name", "external_worker")
+                    status_badge = str(res_data.get("status", "completed")).upper()
+                    lines = [
+                        f"### 🤖 External Worker Execution: `{worker_name}`",
+                        f"- **Status:** `{status_badge}`",
+                        "",
+                        out,
+                    ]
+                    response_text = "\n".join(lines)
+                else:
+                    response_text = runtime_res.output or f"Done! I've successfully executed **{action_name}**."
 
         elif intent.tier == IntentTier.DO and intent.action_id:
             action_def = self.action_executor.registry.get(intent.action_id) if self.action_executor else None
@@ -1136,6 +1177,10 @@ class PersonalAgentService:
                 human = f"Create automation: {auto_name}" + (f" ({sched})" if sched else "")
             elif p.action_id == "automations.activate":
                 human = f"Activate automation: {inp.get('automation_id', '')}"
+            elif p.action_id == "agents.delegate_external":
+                agent_n = inp.get("agent_name", "external_worker")
+                instr = str(inp.get("instruction", "")).strip()[:50]
+                human = f"Delegate to external agent '{agent_n}': \"{instr}\""
             else:
                 title_item = inp.get("title") or inp.get("name") or inp.get("filename") or ""
                 human = f"{name}: {title_item}" if title_item else name
