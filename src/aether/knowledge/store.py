@@ -133,6 +133,63 @@ class KnowledgeStore:
                 """
             )
 
+            # Initialize Full-Text Search (FTS5) for sub-millisecond BM25 keyword retrieval
+            try:
+                self._conn.execute(
+                    """
+                    CREATE VIRTUAL TABLE IF NOT EXISTS knowledge_chunks_fts USING fts5(
+                        id UNINDEXED,
+                        content,
+                        source UNINDEXED,
+                        scope UNINDEXED,
+                        project_id UNINDEXED,
+                        tokenize='unicode61'
+                    )
+                    """
+                )
+                # Keep FTS5 index in sync via SQLite triggers
+                self._conn.execute(
+                    """
+                    CREATE TRIGGER IF NOT EXISTS trg_kc_ai AFTER INSERT ON knowledge_chunks
+                    BEGIN
+                        INSERT INTO knowledge_chunks_fts (id, content, source, scope, project_id)
+                        VALUES (new.id, new.content, new.source, new.scope, new.project_id);
+                    END;
+                    """
+                )
+                self._conn.execute(
+                    """
+                    CREATE TRIGGER IF NOT EXISTS trg_kc_ad AFTER DELETE ON knowledge_chunks
+                    BEGIN
+                        DELETE FROM knowledge_chunks_fts WHERE id = old.id;
+                    END;
+                    """
+                )
+                self._conn.execute(
+                    """
+                    CREATE TRIGGER IF NOT EXISTS trg_kc_au AFTER UPDATE ON knowledge_chunks
+                    BEGIN
+                        DELETE FROM knowledge_chunks_fts WHERE id = old.id;
+                        INSERT INTO knowledge_chunks_fts (id, content, source, scope, project_id)
+                        VALUES (new.id, new.content, new.source, new.scope, new.project_id);
+                    END;
+                    """
+                )
+                # Auto-populate FTS if chunks exist but FTS table is empty
+                count_fts = self._conn.execute("SELECT count(*) FROM knowledge_chunks_fts").fetchone()[0]
+                count_chunks = self._conn.execute("SELECT count(*) FROM knowledge_chunks").fetchone()[0]
+                if count_fts < count_chunks:
+                    self._conn.execute("DELETE FROM knowledge_chunks_fts")
+                    self._conn.execute(
+                        """
+                        INSERT INTO knowledge_chunks_fts (id, content, source, scope, project_id)
+                        SELECT id, content, source, scope, project_id FROM knowledge_chunks
+                        """
+                    )
+                self._fts_available = True
+            except Exception:
+                self._fts_available = False
+
             self._conn.commit()
 
     # ------------------------------------------------------------------
@@ -394,6 +451,62 @@ class KnowledgeStore:
         query_words = {w for w in tokens if len(w) > 2} or set(tokens)
         if not query_words:
             return []
+
+        # 1. High-Performance FTS5 BM25 Search
+        if getattr(self, "_fts_available", False):
+            try:
+                clean_terms = [re.sub(r"[^\w]", "", t) for t in query.split() if len(re.sub(r"[^\w]", "", t)) > 1]
+                if clean_terms:
+                    fts_query_str = " OR ".join(f'"{t}"*' for t in clean_terms)
+                    fts_conditions = ["knowledge_chunks_fts MATCH ?"]
+                    fts_params: list[Any] = [fts_query_str]
+
+                    if project_id:
+                        clean_pid = str(project_id).strip()
+                        if include_workspace_fallback:
+                            fts_conditions.append("((kc.project_id = ? AND kc.scope = 'project') OR kc.scope IN ('workspace', 'system'))")
+                            fts_params.append(clean_pid)
+                        else:
+                            fts_conditions.append("kc.project_id = ? AND kc.scope = 'project'")
+                            fts_params.append(clean_pid)
+                    elif scope:
+                        clean_scope = KnowledgeScope.normalize(scope)
+                        fts_conditions.append("kc.scope = ?")
+                        fts_params.append(clean_scope)
+                        if clean_scope == KnowledgeScope.WORKSPACE.value:
+                            fts_conditions.append("(kc.project_id IS NULL OR kc.project_id = '')")
+                    else:
+                        fts_conditions.append("(kc.project_id IS NULL OR kc.scope IN ('workspace', 'system'))")
+
+                    with self._lock:
+                        fts_sql = f"""
+                            SELECT kc.id, kc.content, kc.source, kc.chunk_index, kc.metadata, kc.created_at, kc.scope, kc.project_id, fts.rank
+                            FROM knowledge_chunks_fts fts
+                            JOIN knowledge_chunks kc ON fts.id = kc.id
+                            WHERE {' AND '.join(fts_conditions)}
+                            ORDER BY fts.rank
+                            LIMIT ?
+                        """
+                        fts_params.append(limit)
+                        cursor = self._conn.execute(fts_sql, tuple(fts_params))
+                        fts_rows = cursor.fetchall()
+
+                    if fts_rows:
+                        return [
+                            KnowledgeChunk(
+                                content=r[1],
+                                source=r[2],
+                                chunk_index=r[3],
+                                id=r[0],
+                                metadata=json.loads(r[4]) if r[4] else {},
+                                scope=r[6] or KnowledgeScope.WORKSPACE.value,
+                                project_id=r[7],
+                                created_at=datetime.fromisoformat(r[5]),
+                            )
+                            for r in fts_rows
+                        ]
+            except Exception:
+                pass  # Fallback to token-overlap matching
 
         with self._lock:
             conditions: list[str] = []

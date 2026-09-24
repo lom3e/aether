@@ -51,6 +51,11 @@ class ActionRegistry:
             actions = [a for a in actions if a.tier == tier]
         return actions
 
+    def list_actions(self) -> list[str]:
+        """Returns sorted list of all registered action IDs."""
+        return sorted(self._definitions.keys())
+
+
     def _register_default_actions(self) -> None:
         """Registers built-in default capabilities."""
         # Calendar actions
@@ -620,3 +625,93 @@ class ActionRegistry:
                 },
             )
         )
+
+        # Knowledge Base Actions
+        self.register(
+            ActionDefinition(
+                id="knowledge.search",
+                name="Search Knowledge Base",
+                description="Performs high-performance BM25 ranked search across workspace, project, or system documentation.",
+                tier=ActionTier.ANSWER,
+                permission_level=ActionPermissionLevel.READ_ONLY,
+                requires_confirmation=False,
+                provider="knowledge",
+                input_schema={
+                    "type": "object",
+                    "properties": {
+                        "query": {"type": "string", "description": "Keyword or natural language query"},
+                        "limit": {"type": "integer", "default": 5},
+                        "scope": {"type": "string", "default": "workspace"},
+                        "project_id": {"type": "string"},
+                    },
+                    "required": ["query"],
+                },
+                output_schema={
+                    "type": "object",
+                    "properties": {
+                        "chunks": {"type": "array"},
+                        "count": {"type": "integer"},
+                    },
+                },
+            )
+        )
+
+        self.register(
+            ActionDefinition(
+                id="knowledge.ingest_url",
+                name="Ingest URL into Knowledge",
+                description="Fetches web documentation or HTML pages via HTTP, extracts clean content, and indexes into knowledge store.",
+                tier=ActionTier.ACT,
+                permission_level=ActionPermissionLevel.EXTERNAL_MUTATION,
+                requires_confirmation=True,
+                provider="knowledge",
+                input_schema={
+                    "type": "object",
+                    "properties": {
+                        "url": {"type": "string", "description": "Web URL to fetch and ingest"},
+                        "source_name": {"type": "string"},
+                        "scope": {"type": "string", "default": "workspace"},
+                        "project_id": {"type": "string"},
+                    },
+                    "required": ["url"],
+                },
+                output_schema={
+                    "type": "object",
+                    "properties": {
+                        "chunks_added": {"type": "integer"},
+                        "source": {"type": "string"},
+                        "url": {"type": "string"},
+                    },
+                },
+            )
+        )
+
+        self.register(
+            ActionDefinition(
+                id="knowledge.ingest_file",
+                name="Ingest Local File into Knowledge",
+                description="Parses local document (PDF, CSV, Markdown, Code, DOCX) and indexes it into the workspace knowledge store.",
+                tier=ActionTier.ACT,
+                permission_level=ActionPermissionLevel.LOCAL_MUTATION,
+                requires_confirmation=True,
+                provider="knowledge",
+                input_schema={
+                    "type": "object",
+                    "properties": {
+                        "file_path": {"type": "string", "description": "Path to local file on disk"},
+                        "source_name": {"type": "string"},
+                        "scope": {"type": "string", "default": "workspace"},
+                        "project_id": {"type": "string"},
+                    },
+                    "required": ["file_path"],
+                },
+                output_schema={
+                    "type": "object",
+                    "properties": {
+                        "chunks_added": {"type": "integer"},
+                        "source": {"type": "string"},
+                    },
+                },
+            )
+        )
+

@@ -37,7 +37,12 @@ from aether.knowledge.store import KnowledgeStore
 # Supported extensions
 # ---------------------------------------------------------------------------
 
-_TEXT_EXTENSIONS = {".txt", ".md", ".markdown", ".rst", ".py", ".yaml", ".yml", ".json", ".csv"}
+_TEXT_EXTENSIONS = {
+    ".txt", ".md", ".markdown", ".rst", ".py", ".ts", ".tsx", ".js", ".jsx",
+    ".yaml", ".yml", ".json", ".toml", ".sql", ".sh", ".env", ".cfg", ".ini",
+}
+_TABULAR_EXTENSIONS = {".csv", ".tsv"}
+_HTML_EXTENSIONS = {".html", ".htm"}
 _PDF_EXTENSION = ".pdf"
 _DOCX_EXTENSION = ".docx"
 
@@ -111,47 +116,162 @@ def _split_into_chunks(
 # ---------------------------------------------------------------------------
 
 def _read_text_file(path: Path) -> str:
-    """Read a plain-text or Markdown file."""
+    """Read a plain-text, Markdown, code, or config file."""
     try:
         return path.read_text(encoding="utf-8", errors="replace")
     except OSError:
         return ""
 
 
+def _extract_text_from_pdf_stream(stream_bytes: bytes) -> str:
+    """Extracts text from decompressed PDF content stream bytes."""
+    parts: list[str] = []
+    # Tj operator: (string) Tj or (string)'
+    for m in re.finditer(rb"\((.*?)(?<!\\)\)\s*(?:Tj|\')", stream_bytes, re.DOTALL):
+        raw_str = m.group(1).decode("latin-1", errors="replace")
+        unescaped = raw_str.replace("\\(", "(").replace("\\)", ")").replace("\\\\", "\\")
+        cleaned = re.sub(r"\s+", " ", unescaped).strip()
+        if cleaned:
+            parts.append(cleaned)
+    # TJ operator: [(string) 20 (string)] TJ
+    for m in re.finditer(rb"\[(.*?)\]\s*TJ", stream_bytes, re.DOTALL):
+        inner = m.group(1)
+        sub_parts: list[str] = []
+        for sm in re.finditer(rb"\((.*?)(?<!\\)\)", inner, re.DOTALL):
+            sub_raw = sm.group(1).decode("latin-1", errors="replace")
+            sub_unescaped = sub_raw.replace("\\(", "(").replace("\\)", ")").replace("\\\\", "\\")
+            sub_parts.append(sub_unescaped)
+        joined = " ".join(sub_parts).strip()
+        if joined:
+            parts.append(joined)
+    return " ".join(parts)
+
+
 def _read_pdf(path: Path) -> str:
     """
-    Extract text from a PDF using Python's stdlib only.
-
-    This is a best-effort extraction: it reads raw bytes and strips
-    binary content, keeping printable ASCII/UTF-8 runs. For well-formed
-    PDFs this works well; for scanned/image PDFs the result is minimal.
-
-    No external dependencies required.
+    Extracts text from PDF documents using zlib decompression and PDF stream operator parsing.
+    Handles FlateDecode compression and raw streams with high fidelity.
     """
+    import zlib
     try:
         raw = path.read_bytes()
-        # Decode ignoring binary garbage
+        extracted_sections: list[str] = []
+
+        # Find all stream ... endstream blocks
+        for stream_match in re.finditer(rb"stream[\r\n]+(.*?)[\r\n]+endstream", raw, re.DOTALL):
+            stream_data = stream_match.group(1)
+            decompressed: bytes | None = None
+            try:
+                decompressed = zlib.decompress(stream_data)
+            except Exception:
+                try:
+                    decompressed = zlib.decompress(stream_data, -15)
+                except Exception:
+                    decompressed = None
+
+            target_bytes = decompressed if decompressed is not None else stream_data
+            text = _extract_text_from_pdf_stream(target_bytes)
+            if text:
+                extracted_sections.append(text)
+
+        if extracted_sections:
+            return "\n\n".join(extracted_sections)
+
+        # Fallback to ASCII printable runs if stream parsing did not yield text
         text_candidate = raw.decode("latin-1", errors="replace")
-        # Extract runs of text between stream delimiters
-        # PDF streams contain compressed binary; we find the text operators
-        # BT...ET blocks contain text. For simple PDFs this heuristic works.
-        streams = re.findall(r"stream(.*?)endstream", text_candidate, re.DOTALL)
-        parts: list[str] = []
-        for stream in streams:
-            # Keep printable ASCII runs of length >= 4
-            printable_runs = re.findall(r"[ -~]{4,}", stream)
-            parts.extend(printable_runs)
-        return "\n".join(parts)
-    except OSError:
+        printable_runs = re.findall(r"[A-Za-z0-9 .,:;!?()'-]{6,}", text_candidate)
+        return "\n".join(printable_runs[:500])
+    except Exception:
+        return ""
+
+
+def _read_csv(path: Path) -> str:
+    """Reads CSV or TSV file and transforms into structured readable text with headers."""
+    import csv
+    try:
+        text = path.read_text(encoding="utf-8", errors="replace")
+        delimiter = "\t" if path.suffix.lower() == ".tsv" else ","
+        reader = csv.reader(text.splitlines(), delimiter=delimiter)
+        rows = list(reader)
+        if not rows:
+            return ""
+
+        headers = [h.strip() for h in rows[0]]
+        output_lines: list[str] = [f"Table columns: {', '.join(headers)}", ""]
+
+        for idx, row in enumerate(rows[1:], start=1):
+            if not any(cell.strip() for cell in row):
+                continue
+            row_items = []
+            for h_idx, cell in enumerate(row):
+                header_name = headers[h_idx] if h_idx < len(headers) and headers[h_idx] else f"Col_{h_idx+1}"
+                val = cell.strip()
+                if val:
+                    row_items.append(f"{header_name}: {val}")
+            output_lines.append(f"[Row {idx}] " + " | ".join(row_items))
+
+        return "\n".join(output_lines)
+    except Exception:
+        return ""
+
+
+from html.parser import HTMLParser
+
+class CleanHTMLTextExtractor(HTMLParser):
+    def __init__(self) -> None:
+        super().__init__()
+        self.result: list[str] = []
+        self._ignore = False
+
+    def handle_starttag(self, tag: str, attrs: list[tuple[str, str | None]]) -> None:
+        t = tag.lower()
+        if t in ("script", "style", "noscript", "svg", "nav", "footer", "header"):
+            self._ignore = True
+        elif t in ("h1", "h2", "h3", "h4", "h5", "h6"):
+            level = int(t[1])
+            self.result.append(f"\n\n{'#' * level} ")
+        elif t in ("p", "div", "section", "article", "blockquote"):
+            self.result.append("\n\n")
+        elif t == "li":
+            self.result.append("\n- ")
+        elif t == "tr":
+            self.result.append("\n")
+
+    def handle_endtag(self, tag: str) -> None:
+        t = tag.lower()
+        if t in ("script", "style", "noscript", "svg", "nav", "footer", "header"):
+            self._ignore = False
+        elif t in ("p", "div", "h1", "h2", "h3", "h4", "h5", "h6"):
+            self.result.append("\n")
+
+    def handle_data(self, data: str) -> None:
+        if not self._ignore:
+            cleaned = data.strip()
+            if cleaned:
+                self.result.append(data)
+
+
+def _parse_html_to_text(raw_html: str) -> str:
+    """Extracts clean markdown-like readable text from HTML markup."""
+    extractor = CleanHTMLTextExtractor()
+    extractor.feed(raw_html)
+    text = "".join(extractor.result)
+    return re.sub(r"\n{3,}", "\n\n", text).strip()
+
+
+def _read_html_file(path: Path) -> str:
+    """Reads HTML file and strips formatting into structured markdown text."""
+    try:
+        raw_html = path.read_text(encoding="utf-8", errors="replace")
+        return _parse_html_to_text(raw_html)
+    except Exception:
         return ""
 
 
 def _read_docx(path: Path) -> str:
     """
     Extract text from a DOCX file.
-
-    Requires python-docx (optional dependency). Returns empty string if
-    not installed.
+    Requires python-docx (optional dependency). Falls back to stdlib zipfile XML reader.
     """
     try:
         import docx  # type: ignore[import]
@@ -159,7 +279,6 @@ def _read_docx(path: Path) -> str:
         doc = docx.Document(str(path))
         return "\n".join(p.text for p in doc.paragraphs if p.text.strip())
     except ImportError:
-        # python-docx not installed — try raw XML extraction as fallback
         return _read_docx_raw(path)
     except Exception:
         return ""
@@ -177,7 +296,6 @@ def _read_docx_raw(path: Path) -> str:
             xml_bytes = zf.read("word/document.xml")
 
         root = ET.fromstring(xml_bytes)
-        ns = {"w": "http://schemas.openxmlformats.org/wordprocessingml/2006/main"}
         texts: list[str] = []
         for elem in root.iter("{http://schemas.openxmlformats.org/wordprocessingml/2006/main}t"):
             if elem.text:
@@ -192,11 +310,16 @@ def _read_file(path: Path) -> str | None:
     ext = path.suffix.lower()
     if ext in _TEXT_EXTENSIONS:
         return _read_text_file(path)
+    if ext in _TABULAR_EXTENSIONS:
+        return _read_csv(path)
+    if ext in _HTML_EXTENSIONS:
+        return _read_html_file(path)
     if ext == _PDF_EXTENSION:
         return _read_pdf(path)
     if ext == _DOCX_EXTENSION:
         return _read_docx(path)
     return None  # unsupported extension
+
 
 
 # ---------------------------------------------------------------------------
@@ -288,6 +411,43 @@ class DocumentIngester:
         Returns the number of chunks added.
         """
         return self._ingest_text(text, source_name, scope=scope, project_id=project_id)
+
+    def ingest_url(
+        self,
+        url: str,
+        *,
+        source_name: str | None = None,
+        scope: str = "workspace",
+        project_id: str | None = None,
+        timeout: float = 15.0,
+    ) -> int:
+        """
+        Fetches web documentation or HTML pages via HTTP, extracts clean content,
+        and ingests into the KnowledgeStore.
+        """
+        import urllib.request
+        req = urllib.request.Request(
+            url,
+            headers={
+                "User-Agent": "Mozilla/5.0 (compatible; AetherBot/1.0; +https://github.com/lom3e/aether)",
+                "Accept": "text/html,application/xhtml+xml,text/plain,application/json,*/*",
+            },
+            method="GET",
+        )
+        with urllib.request.urlopen(req, timeout=timeout) as resp:
+            content_type = resp.headers.get("Content-Type", "").lower()
+            raw_bytes = resp.read()
+            encoding = resp.headers.get_content_charset() or "utf-8"
+            raw_text = raw_bytes.decode(encoding, errors="replace")
+
+        if "html" in content_type or "<html" in raw_text[:500].lower():
+            text = _parse_html_to_text(raw_text)
+        else:
+            text = raw_text
+
+        effective_name = source_name or url
+        return self._ingest_text(text, effective_name, scope=scope, project_id=project_id)
+
 
     # ------------------------------------------------------------------
     # Internal helpers

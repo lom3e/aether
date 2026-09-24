@@ -353,6 +353,40 @@ class PersonalAgentService:
                 action_args=args,
             )
 
+        # 3e0. Knowledge URL Ingestion (ACT tier - requires confirmation)
+        knowledge_url_triggers = [
+            "ingerisci url", "ingerisci da url", "impara da url", "impara da http", "leggi da http",
+            "leggi sito", "ingest url", "learn from url", "leggi documentazione da",
+        ]
+        url_match = re.search(r"https?://[^\s<>\"']+", prompt)
+        if (any(k in p_lower for k in knowledge_url_triggers) or ("http" in p_lower and any(v in p_lower for v in ["impara", "leggi", "ingerisci", "memorizza", "learn", "read", "ingest"]))) and url_match:
+            target_url = url_match.group(0).strip()
+            return UserIntent(
+                raw_prompt=effective_prompt,
+                tier=IntentTier.ACT,
+                summary=f"Ingest documentation from {target_url}",
+                action_id="knowledge.ingest_url",
+                action_args={"url": target_url},
+            )
+
+        # 3e1. Knowledge Search (ANSWER tier - immediate read-only)
+        knowledge_search_triggers = [
+            "cerca nella knowledge", "cerca tra i documenti", "cerca nella documentazione",
+            "search knowledge", "search docs", "trova nei documenti", "cerca nella base di conoscenza",
+        ]
+        if any(k in p_lower for k in knowledge_search_triggers):
+            q_clean = prompt
+            for trigger in knowledge_search_triggers:
+                q_clean = re.sub(re.escape(trigger), "", q_clean, flags=re.IGNORECASE)
+            query_text = q_clean.strip(" :-\"'") or prompt
+            return UserIntent(
+                raw_prompt=effective_prompt,
+                tier=IntentTier.ANSWER,
+                summary=f"Search knowledge base for '{query_text}'",
+                action_id="knowledge.search",
+                action_args={"query": query_text, "limit": 5},
+            )
+
         # 3e. GitHub issue creation (ACT tier - requires safety confirmation)
         github_issue_triggers = [
             "apri una issue", "apri issue", "crea una issue", "crea issue", "create an issue", "create issue",

@@ -1,5 +1,5 @@
 import { useState, useEffect, useContext, useRef } from 'react';
-import { Database, FileText, Upload, Trash2, ShieldCheck, Lock, FolderGit2, CheckCircle2, AlertCircle, FileUp, Network } from 'lucide-react';
+import { Database, FileText, Upload, Trash2, ShieldCheck, Lock, FolderGit2, CheckCircle2, AlertCircle, FileUp, Network, Globe, Link2, X } from 'lucide-react';
 import { ToastContext } from './toast';
 import { apiError, apiUrl } from './api';
 import { TopHeader } from './TopHeader';
@@ -24,6 +24,10 @@ export function Knowledge() {
   const [uploadScope, setUploadScope] = useState<'workspace' | 'project'>('workspace');
   const [projectInfo, setProjectInfo] = useState<any>(null);
   const [isDragging, setIsDragging] = useState(false);
+  const [isUrlModalOpen, setIsUrlModalOpen] = useState(false);
+  const [ingestUrlInput, setIngestUrlInput] = useState('');
+  const [ingestUrlTitle, setIngestUrlTitle] = useState('');
+  const [ingestingUrl, setIngestingUrl] = useState(false);
   const [progress, setProgress] = useState<IngestionProgress>({
     active: false,
     totalFiles: 0,
@@ -142,6 +146,37 @@ export function Knowledge() {
   const handleFileInputChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     if (e.target.files && e.target.files.length > 0) {
       executeUpload(e.target.files);
+    }
+  };
+
+  const handleIngestUrl = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!ingestUrlInput.trim()) return;
+    setIngestingUrl(true);
+    try {
+      const res = await fetch(apiUrl('/api/knowledge/url'), {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          url: ingestUrlInput.trim(),
+          title: ingestUrlTitle.trim() || undefined,
+          scope: uploadScope,
+          project_id: uploadScope === 'project' ? (projectInfo?.id || projectInfo?.name) : undefined,
+        }),
+      });
+      const data = await res.json();
+      if (!res.ok) {
+        throw new Error(data.detail || 'Failed to ingest URL');
+      }
+      showToast(`Indexed ${data.document.chunks} chunks from ${data.document.filename}`, 'success');
+      setIsUrlModalOpen(false);
+      setIngestUrlInput('');
+      setIngestUrlTitle('');
+      fetchStatus();
+    } catch (err: any) {
+      showToast(err.message || 'Could not ingest URL', 'error');
+    } finally {
+      setIngestingUrl(false);
     }
   };
 
@@ -315,6 +350,13 @@ export function Knowledge() {
                 <option value="project">{t('projectScope')} ({projectInfo.name})</option>
               </select>
             )}
+            <button
+              className="btn btn-secondary"
+              onClick={() => setIsUrlModalOpen(true)}
+              style={{ display: 'inline-flex', alignItems: 'center', gap: '6px' }}
+            >
+              <Globe size={15} /> Ingest URL
+            </button>
             <input
               type="file"
               ref={fileInputRef}
@@ -323,7 +365,7 @@ export function Knowledge() {
               style={{ display: 'none' }}
               onChange={handleFileInputChange}
               disabled={progress.active}
-              accept=".txt,.md,.markdown,.pdf,.csv,.docx,.py,.yaml,.yml,.json,.rst"
+              accept=".txt,.md,.markdown,.pdf,.csv,.tsv,.docx,.py,.ts,.tsx,.js,.jsx,.json,.yaml,.yml,.toml,.rst,.html,.htm,.sql,.sh"
             />
             <label htmlFor="file-upload" className="btn btn-primary" style={{ cursor: 'pointer' }}>
               <Upload size={16} /> {progress.active ? t('uploading') : t('uploadDocument')}
@@ -570,6 +612,134 @@ export function Knowledge() {
           </>
         )}
       </div>
+
+      {/* Ingest URL Modal */}
+      {isUrlModalOpen && (
+        <div
+          style={{
+            position: 'fixed',
+            inset: 0,
+            background: 'rgba(0, 0, 0, 0.65)',
+            backdropFilter: 'blur(4px)',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            zIndex: 9999,
+            padding: '20px',
+          }}
+          onClick={() => !ingestingUrl && setIsUrlModalOpen(false)}
+        >
+          <div
+            style={{
+              background: 'hsl(var(--card))',
+              border: '1px solid hsl(var(--border))',
+              borderRadius: '16px',
+              maxWidth: '520px',
+              width: '100%',
+              padding: '24px',
+              boxShadow: '0 20px 50px rgba(0,0,0,0.3)',
+            }}
+            onClick={e => e.stopPropagation()}
+          >
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '16px' }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                <div style={{ width: 36, height: 36, borderRadius: '8px', background: 'hsl(var(--primary)/0.15)', color: 'hsl(var(--primary))', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                  <Globe size={18} />
+                </div>
+                <div>
+                  <h3 style={{ margin: 0, fontSize: '16px', fontWeight: 600 }}>Ingest Web Documentation</h3>
+                  <div style={{ fontSize: '12px', color: 'hsl(var(--muted-fg))' }}>Extract and index web articles, API docs, or specs</div>
+                </div>
+              </div>
+              <button
+                className="btn btn-ghost btn-sm"
+                onClick={() => setIsUrlModalOpen(false)}
+                disabled={ingestingUrl}
+                style={{ padding: '6px' }}
+              >
+                <X size={16} />
+              </button>
+            </div>
+
+            <form onSubmit={handleIngestUrl}>
+              <div style={{ display: 'flex', flexDirection: 'column', gap: '14px' }}>
+                <div>
+                  <label style={{ fontSize: '12px', fontWeight: 600, display: 'block', marginBottom: '4px' }}>
+                    Web URL <span style={{ color: 'hsl(var(--destructive))' }}>*</span>
+                  </label>
+                  <input
+                    type="url"
+                    className="input"
+                    required
+                    placeholder="https://docs.example.com/api-reference"
+                    value={ingestUrlInput}
+                    onChange={e => setIngestUrlInput(e.target.value)}
+                    style={{ width: '100%' }}
+                    autoFocus
+                  />
+                </div>
+
+                <div>
+                  <label style={{ fontSize: '12px', fontWeight: 600, display: 'block', marginBottom: '4px' }}>
+                    Document Label (Optional)
+                  </label>
+                  <input
+                    type="text"
+                    className="input"
+                    placeholder="e.g. Acme API Documentation"
+                    value={ingestUrlTitle}
+                    onChange={e => setIngestUrlTitle(e.target.value)}
+                    style={{ width: '100%' }}
+                  />
+                </div>
+
+                {projectInfo && (
+                  <div>
+                    <label style={{ fontSize: '12px', fontWeight: 600, display: 'block', marginBottom: '4px' }}>
+                      Scope Destination
+                    </label>
+                    <select
+                      className="input"
+                      value={uploadScope}
+                      onChange={e => setUploadScope(e.target.value as 'workspace' | 'project')}
+                      style={{ width: '100%' }}
+                    >
+                      <option value="workspace">Workspace Knowledge (Global)</option>
+                      <option value="project">Project Knowledge ({projectInfo.name})</option>
+                    </select>
+                  </div>
+                )}
+
+                <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '10px', marginTop: '8px' }}>
+                  <button
+                    type="button"
+                    className="btn btn-ghost"
+                    onClick={() => setIsUrlModalOpen(false)}
+                    disabled={ingestingUrl}
+                  >
+                    Cancel
+                  </button>
+                  <button
+                    type="submit"
+                    className="btn btn-primary"
+                    disabled={ingestingUrl || !ingestUrlInput.trim()}
+                    style={{ display: 'inline-flex', alignItems: 'center', gap: '6px' }}
+                  >
+                    {ingestingUrl ? (
+                      <>Fetching & Indexing...</>
+                    ) : (
+                      <>
+                        <Link2 size={15} /> Ingest Web Page
+                      </>
+                    )}
+                  </button>
+                </div>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
+

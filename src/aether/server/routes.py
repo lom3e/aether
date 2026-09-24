@@ -514,6 +514,129 @@ async def delete_knowledge_file(request: Request, doc_id: str):
                 candidate.unlink(missing_ok=True)
     return {"status": "ok", "deleted_id": doc_id}
 
+
+class IngestUrlRequest(BaseModel):
+    url: str
+    title: str | None = None
+    scope: str = "workspace"
+    project_id: str | None = None
+
+
+@router.post("/knowledge/url")
+async def ingest_knowledge_url(request: Request, payload: IngestUrlRequest):
+    """
+    Ingests web documentation or HTML pages from a remote URL directly into the knowledge store.
+    """
+    ws = getattr(request.app.state, "workspace", None)
+    if not ws:
+        raise HTTPException(status_code=500, detail="Workspace not initialized.")
+    team = getattr(request.app.state, "team", None) or getattr(ws, "default_team", None)
+    if not team or not getattr(team, "knowledge", None):
+        raise HTTPException(status_code=500, detail="Knowledge store not initialized.")
+
+    import uuid
+    import hashlib
+    from urllib.parse import urlparse
+    from aether.knowledge.ingestion import DocumentIngester
+
+    url = payload.url.strip()
+    if not url.startswith("http://") and not url.startswith("https://"):
+        raise HTTPException(status_code=400, detail="Invalid URL scheme. Must start with http:// or https://")
+
+    parsed = urlparse(url)
+    filename = payload.title or (parsed.netloc + parsed.path.rstrip("/")).replace("/", "_") or "webpage"
+    if not filename.endswith((".html", ".htm")):
+        filename = f"{filename}.html"
+
+    doc_id = f"doc_{uuid.uuid4().hex[:12]}"
+    content_hash = hashlib.sha256(url.encode("utf-8")).hexdigest()
+
+    clean_scope = str(payload.scope or "workspace").strip().lower()
+    clean_pid = str(payload.project_id).strip() if payload.project_id else None
+
+    team.knowledge.register_document(
+        doc_id=doc_id,
+        filename=filename,
+        size_bytes=0,
+        content_hash=content_hash,
+        scope=clean_scope,
+        project_id=clean_pid,
+    )
+
+    ingester = DocumentIngester(team.knowledge)
+    try:
+        chunks_added = ingester.ingest_url(
+            url=url,
+            source_name=doc_id,
+            scope=clean_scope,
+            project_id=clean_pid,
+        )
+        if chunks_added > 0:
+            team.knowledge.update_document(doc_id, "Ready", chunks_added)
+            return {
+                "status": "ok",
+                "document": {
+                    "id": doc_id,
+                    "filename": filename,
+                    "url": url,
+                    "chunks": chunks_added,
+                    "scope": clean_scope,
+                    "project_id": clean_pid,
+                    "status": "Ready",
+                }
+            }
+        else:
+            team.knowledge.update_document(doc_id, "Error: No readable content extracted", 0)
+            raise HTTPException(status_code=422, detail="No readable text extracted from web page.")
+    except HTTPException:
+        raise
+    except Exception as exc:
+        team.knowledge.update_document(doc_id, f"Error: {exc}", 0)
+        raise HTTPException(status_code=400, detail=f"Failed to ingest URL: {exc}")
+
+
+class KnowledgeSearchPayload(BaseModel):
+    query: str
+    limit: int = 5
+    scope: str | None = None
+    project_id: str | None = None
+
+
+@router.post("/knowledge/query")
+async def query_knowledge_route(request: Request, payload: KnowledgeSearchPayload):
+    """
+    Searches knowledge chunks using BM25-ranked FTS5 full-text search with fallback.
+    """
+    ws = getattr(request.app.state, "workspace", None)
+    if not ws:
+        raise HTTPException(status_code=500, detail="Workspace not initialized.")
+    team = getattr(request.app.state, "team", None) or getattr(ws, "default_team", None)
+    if not team or not getattr(team, "knowledge", None):
+        return {"results": [], "count": 0}
+
+    results = team.knowledge.search(
+        query=payload.query,
+        limit=payload.limit,
+        scope=payload.scope,
+        project_id=payload.project_id,
+    )
+    return {
+        "results": [
+            {
+                "id": c.id,
+                "content": c.content,
+                "source": c.source,
+                "chunk_index": c.chunk_index,
+                "scope": c.scope,
+                "project_id": c.project_id,
+                "created_at": c.created_at.isoformat() if hasattr(c.created_at, "isoformat") else str(c.created_at),
+            }
+            for c in results
+        ],
+        "count": len(results),
+    }
+
+
 # ---------------------------------------------------------------------------
 # Presets Endpoints
 # ---------------------------------------------------------------------------

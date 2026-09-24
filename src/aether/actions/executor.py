@@ -536,6 +536,102 @@ class ActionExecutor:
                 "metadata": res.metadata,
             }
 
+        # 12. Knowledge Base actions
+        elif action_id == "knowledge.search":
+            from aether.workspace.workspace import Workspace
+            ws = None
+            try:
+                ws = Workspace.get(ws_id) if hasattr(Workspace, "get") else None
+                if not ws and self.project_path:
+                    ws = Workspace.get_or_init(self.project_path)
+            except Exception:
+                pass
+
+            team = getattr(ws, "default_team", None) or (ws.load_team() if ws else None)
+            knowledge_store = getattr(team, "knowledge", None) if team else None
+            if not knowledge_store and ws:
+                from aether.knowledge.store import KnowledgeStore
+                knowledge_store = KnowledgeStore(str(ws.knowledge_db_path))
+
+            if not knowledge_store:
+                return {"chunks": [], "count": 0}
+
+            query = inp.get("query", "")
+            limit = int(inp.get("limit", 5))
+            scope = inp.get("scope", "workspace")
+            project_id = inp.get("project_id")
+            results = knowledge_store.search(query=query, limit=limit, scope=scope, project_id=project_id)
+            return {
+                "chunks": [c.to_dict() if hasattr(c, "to_dict") else {"content": c.content, "source": c.source} for c in results],
+                "count": len(results),
+            }
+
+        elif action_id == "knowledge.ingest_url":
+            from aether.workspace.workspace import Workspace
+            from aether.knowledge.ingestion import DocumentIngester
+            ws = None
+            try:
+                ws = Workspace.get(ws_id) if hasattr(Workspace, "get") else None
+                if not ws and self.project_path:
+                    ws = Workspace.get_or_init(self.project_path)
+            except Exception:
+                pass
+
+            team = getattr(ws, "default_team", None) or (ws.load_team() if ws else None)
+            knowledge_store = getattr(team, "knowledge", None) if team else None
+            if not knowledge_store and ws:
+                from aether.knowledge.store import KnowledgeStore
+                knowledge_store = KnowledgeStore(str(ws.knowledge_db_path))
+
+            if not knowledge_store:
+                raise ValueError("Knowledge store is not initialized in workspace.")
+
+            url = inp.get("url", "")
+            source_name = inp.get("source_name") or url
+            scope = inp.get("scope", "workspace")
+            project_id = inp.get("project_id")
+
+            ingester = DocumentIngester(knowledge_store)
+            chunks_added = ingester.ingest_url(url=url, source_name=source_name, scope=scope, project_id=project_id)
+            return {
+                "chunks_added": chunks_added,
+                "source": source_name,
+                "url": url,
+            }
+
+        elif action_id == "knowledge.ingest_file":
+            from aether.workspace.workspace import Workspace
+            from aether.knowledge.ingestion import DocumentIngester
+            ws = None
+            try:
+                ws = Workspace.get(ws_id) if hasattr(Workspace, "get") else None
+                if not ws and self.project_path:
+                    ws = Workspace.get_or_init(self.project_path)
+            except Exception:
+                pass
+
+            team = getattr(ws, "default_team", None) or (ws.load_team() if ws else None)
+            knowledge_store = getattr(team, "knowledge", None) if team else None
+            if not knowledge_store and ws:
+                from aether.knowledge.store import KnowledgeStore
+                knowledge_store = KnowledgeStore(str(ws.knowledge_db_path))
+
+            if not knowledge_store:
+                raise ValueError("Knowledge store is not initialized in workspace.")
+
+            file_path = inp.get("file_path", "")
+            source_name = inp.get("source_name")
+            scope = inp.get("scope", "workspace")
+            project_id = inp.get("project_id")
+
+            ingester = DocumentIngester(knowledge_store)
+            chunks_added = ingester.ingest(file_path, source_name=source_name, scope=scope, project_id=project_id)
+            return {
+                "chunks_added": chunks_added,
+                "source": source_name or file_path,
+                "file_path": file_path,
+            }
+
         raise ValueError(
             f"Action '{action_id}' is not supported by built-in connectors and has no registered handler."
         )
