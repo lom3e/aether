@@ -394,11 +394,12 @@ class ReplayCompiler:
             score = meta.get("quality_score") or meta.get("score")
             passed = meta.get("passed", True) if "failed" not in act_type else False
             reviewer = meta.get("reviewer_agent") or agent or "Reviewer"
+            title_score = f" ({score}/100)" if score is not None else ""
             return {
                 "timestamp": created_at,
                 "event_type": "quality_gate_evaluated",
-                "title": f"Quality Gate Passed ({score}/100)" if passed else "Quality Gate Rejected",
-                "description": f"Reviewer '{reviewer}' evaluated deliverables with score {score}/100.",
+                "title": f"Quality Gate Passed{title_score}" if passed else f"Quality Gate Rejected{title_score}",
+                "description": f"Reviewer '{reviewer}': {msg}" if msg else f"Reviewer '{reviewer}' evaluated deliverables{title_score}.",
                 "status": "success" if passed else "warning",
                 "agent": reviewer,
                 "milestone_id": milestone_id,
@@ -485,3 +486,55 @@ class ReplayCompiler:
             "graph_node_id": f"agent_{agent}" if agent else None,
             "details": meta,
         }
+
+    def export_timeline_markdown(self, timeline: ReplayTimeline) -> str:
+        """Renders a comprehensive, sanitized markdown flight recorder audit report."""
+        lines = [
+            f"# Mission Flight Recorder — {timeline.mission_title}",
+            f"**Execution ID**: `{timeline.execution_id}` | **Run**: #{timeline.run_number} | **Status**: `{timeline.status.upper()}`",
+            f"**Duration**: {timeline.duration_seconds:.2f}s | **Total Events**: {timeline.total_events}",
+            f"**Started**: {timeline.started_at or 'N/A'} | **Completed**: {timeline.completed_at or 'N/A'}",
+            "",
+            "---",
+            "",
+            "## Chronological Execution Trace",
+            "",
+        ]
+        status_icons = {
+            "success": "✅",
+            "info": "ℹ️",
+            "warning": "⚠️",
+            "error": "❌",
+        }
+        for ev in timeline.events:
+            icon = status_icons.get(ev.status.lower(), "🔹")
+            stage_str = f" `[{ev.stage_name}]`" if ev.stage_name else ""
+            agent_str = f" **({ev.agent})**" if ev.agent else ""
+            lines.append(f"### {ev.seq}. {icon} {ev.title}{stage_str}{agent_str}")
+            lines.append(f"*{ev.timestamp}* — `{ev.event_type}`")
+            lines.append("")
+            lines.append(ev.description)
+            if ev.tool_name:
+                lines.append(f"- **Tool invoked**: `{ev.tool_name}`")
+            if ev.deliverable_id:
+                lines.append(f"- **Deliverable ID**: `{ev.deliverable_id}`")
+            lines.append("")
+
+        return "\n".join(lines)
+
+    def export_timeline_json(self, timeline: ReplayTimeline) -> dict[str, Any]:
+        """Returns the timeline as a dictionary."""
+        return timeline.to_dict()
+
+    def export_timeline(
+        self,
+        mission_id: str,
+        execution_id: str | None = None,
+        export_format: str = "markdown",
+    ) -> str | dict[str, Any]:
+        """Compiles and exports the timeline in the requested format ('markdown' or 'json')."""
+        timeline = self.compile(mission_id, execution_id)
+        if export_format.lower() == "json":
+            return self.export_timeline_json(timeline)
+        return self.export_timeline_markdown(timeline)
+

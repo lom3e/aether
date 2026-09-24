@@ -387,6 +387,66 @@ class PersonalAgentService:
                 action_args={"query": query_text, "limit": 5},
             )
 
+        # 3e2. Mission Playbooks List (ANSWER tier - immediate read-only)
+        playbook_list_triggers = [
+            "mostra i playbook", "mostra playbook", "elenca i playbook", "elenca playbook",
+            "quali playbook", "list playbooks", "show playbooks", "available playbooks", "get playbooks",
+        ]
+        if any(k in p_lower for k in playbook_list_triggers):
+            return UserIntent(
+                raw_prompt=effective_prompt,
+                tier=IntentTier.ANSWER,
+                summary="List available mission playbooks",
+                action_id="mission.list_playbooks",
+                action_args={},
+            )
+
+        # 3e3. Mission Playbook Instantiation (ACT tier - requires confirmation)
+        playbook_instantiate_triggers = [
+            "avvia playbook", "avvia il playbook", "esegui playbook", "esegui il playbook",
+            "lancia playbook", "lancia il playbook", "crea missione da playbook",
+            "run playbook", "launch playbook", "instantiate playbook", "execute playbook",
+        ]
+        if any(k in p_lower for k in playbook_instantiate_triggers):
+            pb_id = "code-security-audit"
+            if any(s in p_lower for s in ["release", "versione", "changelog"]):
+                pb_id = "automated-release"
+            elif any(s in p_lower for s in ["knowledge", "documentazione", "ingestion", "docs"]):
+                pb_id = "knowledge-ingestion-pipeline"
+            elif any(s in p_lower for s in ["market", "mercato", "competitor", "concorrenza", "intelligence"]):
+                pb_id = "competitive-intelligence"
+            elif any(s in p_lower for s in ["security", "sicurezza", "audit", "secrets"]):
+                pb_id = "code-security-audit"
+
+            # Check if explicit target was provided
+            target_match = re.search(r"(?:su|per|for|on|target)\s+[\"']?([^\"'\n,]+)[\"']?", prompt, re.IGNORECASE)
+            target = target_match.group(1).strip() if target_match else "src/"
+            return UserIntent(
+                raw_prompt=effective_prompt,
+                tier=IntentTier.ACT,
+                summary=f"Instantiate mission playbook '{pb_id}' for target '{target}'",
+                action_id="mission.instantiate_playbook",
+                action_args={"playbook_id": pb_id, "params": {"target": target}},
+            )
+
+        # 3e4. Mission Flight Recorder Timeline Export (ANSWER tier - immediate read-only)
+        timeline_export_triggers = [
+            "esporta timeline", "esporta la timeline", "esporta flight recorder", "export timeline",
+            "export flight recorder", "scarica timeline", "download timeline",
+        ]
+        if any(k in p_lower for k in timeline_export_triggers):
+            # Extract mission id if present
+            m_match = re.search(r"(?:missione|mission|id)\s+([a-zA-Z0-9_-]+)", prompt, re.IGNORECASE)
+            mission_id = m_match.group(1).strip() if m_match else "default-mission"
+            return UserIntent(
+                raw_prompt=effective_prompt,
+                tier=IntentTier.ANSWER,
+                summary=f"Export flight recorder timeline for mission '{mission_id}'",
+                action_id="mission.export_timeline",
+                action_args={"mission_id": mission_id, "format": "markdown"},
+            )
+
+
         # 3e. GitHub issue creation (ACT tier - requires safety confirmation)
         github_issue_triggers = [
             "apri una issue", "apri issue", "crea una issue", "crea issue", "create an issue", "create issue",

@@ -1,7 +1,7 @@
 import asyncio
 import json
 from fastapi import APIRouter, Request, HTTPException, UploadFile, File, Form, status, Query
-from fastapi.responses import FileResponse, StreamingResponse
+from fastapi.responses import FileResponse, StreamingResponse, PlainTextResponse
 from pydantic import BaseModel, Field
 from typing import Any
 import hashlib
@@ -3046,6 +3046,86 @@ class UpdateMilestonePayload(BaseModel):
     dependencies: list[str] | None = None
 
 
+class InstantiatePlaybookPayload(BaseModel):
+    objective: str | None = None
+    team_name: str | None = None
+    params: dict[str, Any] = Field(default_factory=dict)
+
+
+class SavePlaybookPayload(BaseModel):
+    id: str | None = None
+    title: str
+    description: str
+    category: str = "engineering"
+    icon: str = "Target"
+    team_name: str | None = None
+    default_objective: str = ""
+    parameter_schema: list[dict[str, Any]] = Field(default_factory=list)
+    milestones: list[dict[str, Any]] = Field(default_factory=list)
+    tags: list[str] = Field(default_factory=list)
+    version: str = "1.0.0"
+    author: str = "Aether Core"
+    metadata: dict[str, Any] = Field(default_factory=dict)
+
+
+@router.get("/missions/playbooks")
+async def list_mission_playbooks_route(request: Request, category: str | None = None):
+    ws = getattr(request.app.state, "workspace", None)
+    mstore = getattr(ws, "missions", None) if ws else None
+    from aether.missions.playbooks import get_playbook_registry
+    registry = get_playbook_registry(store=mstore)
+    playbooks = registry.list_playbooks(category=category)
+    return [p.to_dict() for p in playbooks]
+
+
+@router.get("/missions/playbooks/{playbook_id}")
+async def get_mission_playbook_route(request: Request, playbook_id: str):
+    ws = getattr(request.app.state, "workspace", None)
+    mstore = getattr(ws, "missions", None) if ws else None
+    from aether.missions.playbooks import get_playbook_registry
+    registry = get_playbook_registry(store=mstore)
+    pb = registry.get_playbook(playbook_id)
+    if not pb:
+        raise HTTPException(status_code=404, detail=f"Playbook '{playbook_id}' not found")
+    return pb.to_dict()
+
+
+@router.post("/missions/playbooks/{playbook_id}/instantiate")
+async def instantiate_mission_playbook_route(
+    request: Request,
+    playbook_id: str,
+    payload: InstantiatePlaybookPayload,
+):
+    ws = getattr(request.app.state, "workspace", None)
+    if not ws or not hasattr(ws, "missions"):
+        raise HTTPException(status_code=500, detail="Workspace missions store is unavailable")
+    from aether.missions.playbooks import get_playbook_registry
+    registry = get_playbook_registry(store=ws.missions)
+    try:
+        mission = registry.instantiate(
+            playbook_id=playbook_id,
+            store=ws.missions,
+            workspace_id=ws.id,
+            custom_objective=payload.objective,
+            team_name=payload.team_name,
+            params=payload.params,
+        )
+        return mission.to_dict()
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+
+@router.post("/missions/playbooks")
+async def save_mission_playbook_route(request: Request, payload: SavePlaybookPayload):
+    ws = getattr(request.app.state, "workspace", None)
+    if not ws or not hasattr(ws, "missions"):
+        raise HTTPException(status_code=500, detail="Workspace missions store is unavailable")
+    from aether.missions.playbooks import MissionPlaybook
+    pb = MissionPlaybook.from_dict(payload.model_dump())
+    saved = ws.missions.save_playbook(pb)
+    return saved.to_dict()
+
+
 @router.get("/missions")
 async def list_missions(
     request: Request,
@@ -3678,6 +3758,31 @@ async def get_mission_replay(
 
     timeline = ws.missions.get_mission_replay(mission_id, execution_id=execution_id)
     return timeline.to_dict()
+
+
+@router.get("/missions/{mission_id}/timeline/export")
+async def export_mission_timeline_route(
+    request: Request,
+    mission_id: str,
+    execution_id: str | None = None,
+    format: str = "markdown",
+):
+    """
+    Compiles and exports the sanitized flight recorder timeline of a mission in Markdown or JSON.
+    """
+    ws = getattr(request.app.state, "workspace", None)
+    if not ws:
+        raise HTTPException(status_code=503, detail="Workspace not initialized.")
+    from aether.missions.replay import ReplayCompiler
+    compiler = ReplayCompiler(store=ws.missions)
+    try:
+        result = compiler.export_timeline(mission_id=mission_id, execution_id=execution_id, export_format=format)
+        if format.lower() == "markdown":
+            return PlainTextResponse(content=str(result), media_type="text/markdown")
+        return {"timeline": result, "format": "json", "mission_id": mission_id}
+    except ValueError as e:
+        raise HTTPException(status_code=404, detail=str(e))
+
 
 
 @router.get("/missions/{mission_id}/health")

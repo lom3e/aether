@@ -632,6 +632,80 @@ class ActionExecutor:
                 "file_path": file_path,
             }
 
+        elif action_id == "mission.list_playbooks":
+            from aether.missions.playbooks import get_playbook_registry
+            from aether.workspace.workspace import Workspace
+            ws = None
+            try:
+                ws = Workspace.get(ws_id) if hasattr(Workspace, "get") else None
+                if not ws and self.project_path:
+                    ws = Workspace.get_or_init(self.project_path)
+            except Exception:
+                pass
+            mstore = getattr(ws, "missions", None) if ws else None
+            registry = get_playbook_registry(store=mstore)
+            cat = inp.get("category")
+            playbooks = registry.list_playbooks(category=cat)
+            return {
+                "playbooks": [p.to_dict() for p in playbooks],
+                "count": len(playbooks),
+            }
+
+        elif action_id == "mission.instantiate_playbook":
+            from aether.missions.playbooks import get_playbook_registry
+            from aether.workspace.workspace import Workspace
+            ws = None
+            try:
+                ws = Workspace.get(ws_id) if hasattr(Workspace, "get") else None
+                if not ws and self.project_path:
+                    ws = Workspace.get_or_init(self.project_path)
+            except Exception:
+                pass
+            mstore = getattr(ws, "missions", None) if ws else None
+            if not mstore:
+                raise ValueError("Mission store is not available in current workspace.")
+            registry = get_playbook_registry(store=mstore)
+            pb_id = inp.get("playbook_id", "")
+            mission = registry.instantiate(
+                playbook_id=pb_id,
+                store=mstore,
+                workspace_id=ws_id,
+                custom_objective=inp.get("custom_objective"),
+                team_name=inp.get("team_name"),
+                params=inp.get("params"),
+            )
+            return {
+                "mission_id": mission.id,
+                "title": mission.title,
+                "milestones_count": len(mission.milestones),
+                "objective": mission.objective,
+                "team_name": mission.team_name,
+            }
+
+        elif action_id == "mission.export_timeline":
+            from aether.missions.replay import ReplayCompiler
+            from aether.workspace.workspace import Workspace
+            ws = None
+            try:
+                ws = Workspace.get(ws_id) if hasattr(Workspace, "get") else None
+                if not ws and self.project_path:
+                    ws = Workspace.get_or_init(self.project_path)
+            except Exception:
+                pass
+            mstore = getattr(ws, "missions", None) if ws else None
+            if not mstore:
+                raise ValueError("Mission store is not available in current workspace.")
+            compiler = ReplayCompiler(store=mstore)
+            mission_id = inp.get("mission_id", "")
+            execution_id = inp.get("execution_id")
+            fmt = inp.get("format", "markdown")
+            result = compiler.export_timeline(mission_id=mission_id, execution_id=execution_id, export_format=fmt)
+            return {
+                "timeline": result,
+                "format": fmt,
+                "mission_id": mission_id,
+            }
+
         raise ValueError(
             f"Action '{action_id}' is not supported by built-in connectors and has no registered handler."
         )

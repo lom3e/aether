@@ -58,6 +58,20 @@ interface Deliverable {
   updated_at?: string;
 }
 
+interface PlaybookItem {
+  id: string;
+  title: string;
+  description: string;
+  category: string;
+  icon?: string;
+  team_name?: string;
+  default_objective: string;
+  parameter_schema: Array<{ key: string; label: string; default?: string; required?: boolean }>;
+  milestones: Array<{ title: string; description: string; assigned_agent?: string }>;
+  tags: string[];
+  version: string;
+}
+
 interface ExecutionMilestoneState {
   milestone_id: string;
   status: 'pending' | 'running' | 'completed' | 'failed' | 'skipped';
@@ -243,6 +257,15 @@ export function Missions({ navigate, initialMissionId }: MissionsProps) {
     { title: '', description: '' }
   ]);
   const [creating, setCreating] = useState(false);
+
+  // Playbooks Modal State
+  const [isPlaybooksOpen, setIsPlaybooksOpen] = useState(false);
+  const [playbooks, setPlaybooks] = useState<PlaybookItem[]>([]);
+  const [loadingPlaybooks, setLoadingPlaybooks] = useState(false);
+  const [selectedPlaybook, setSelectedPlaybook] = useState<PlaybookItem | null>(null);
+  const [playbookParams, setPlaybookParams] = useState<Record<string, string>>({});
+  const [playbookCategoryFilter, setPlaybookCategoryFilter] = useState<string>('all');
+  const [instantiatingPlaybook, setInstantiatingPlaybook] = useState(false);
 
   // Add Milestone inline in Detail view
   const [isAddingMilestone, setIsAddingMilestone] = useState(false);
@@ -721,6 +744,66 @@ export function Missions({ navigate, initialMissionId }: MissionsProps) {
     }
   };
 
+  const fetchPlaybooks = useCallback(async () => {
+    try {
+      setLoadingPlaybooks(true);
+      const res = await fetch(apiUrl('/api/missions/playbooks'));
+      if (res.ok) {
+        const data = await res.json();
+        setPlaybooks(data);
+      }
+    } catch (err) {
+      console.error('Failed to load playbooks:', err);
+    } finally {
+      setLoadingPlaybooks(false);
+    }
+  }, []);
+
+  const handleOpenPlaybooks = () => {
+    setIsPlaybooksOpen(true);
+    fetchPlaybooks();
+  };
+
+  const handleSelectPlaybook = (pb: PlaybookItem) => {
+    setSelectedPlaybook(pb);
+    const defaults: Record<string, string> = {};
+    if (pb.parameter_schema) {
+      pb.parameter_schema.forEach(p => {
+        defaults[p.key] = p.default || '';
+      });
+    }
+    setPlaybookParams(defaults);
+  };
+
+  const handleInstantiatePlaybook = async () => {
+    if (!selectedPlaybook) return;
+    try {
+      setInstantiatingPlaybook(true);
+      const res = await fetch(apiUrl(`/api/missions/playbooks/${selectedPlaybook.id}/instantiate`), {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          params: playbookParams,
+          team_name: selectedPlaybook.team_name,
+        }),
+      });
+      if (!res.ok) {
+        const errData = await res.json().catch(() => ({}));
+        throw new Error(errData.detail || 'Failed to instantiate playbook');
+      }
+      const newMission = await res.json();
+      showToast?.(`Playbook instantiated into mission "${newMission.title}"`, 'success');
+      setIsPlaybooksOpen(false);
+      setSelectedPlaybook(null);
+      await fetchMissions();
+      setSelectedMission(newMission);
+    } catch (err: any) {
+      showToast?.(err.message || 'Error instantiating playbook', 'error');
+    } finally {
+      setInstantiatingPlaybook(false);
+    }
+  };
+
   const handleUpdateTeam = async (teamName: string) => {
     if (!selectedMission) return;
     try {
@@ -1065,6 +1148,14 @@ export function Missions({ navigate, initialMissionId }: MissionsProps) {
         </div>
 
         <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+          <button
+            className="btn btn-secondary"
+            style={{ display: 'flex', alignItems: 'center', gap: '6px', fontSize: '13px' }}
+            onClick={handleOpenPlaybooks}
+          >
+            <Sparkles size={15} color="hsl(var(--primary))" />
+            <span>Playbooks & Templates</span>
+          </button>
           <button
             className="btn btn-primary"
             style={{ display: 'flex', alignItems: 'center', gap: '6px', fontSize: '13px' }}
@@ -3454,6 +3545,265 @@ export function Missions({ navigate, initialMissionId }: MissionsProps) {
               >
                 Delete Step
               </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Mission Playbooks & Templates Modal */}
+      {isPlaybooksOpen && (
+        <div style={{
+          position: 'fixed',
+          inset: 0,
+          backgroundColor: 'rgba(0,0,0,0.7)',
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'center',
+          zIndex: 60,
+          padding: '20px',
+        }}>
+          <div style={{
+            width: '100%',
+            maxWidth: '840px',
+            maxHeight: '85vh',
+            backgroundColor: 'hsl(var(--card))',
+            borderRadius: '14px',
+            border: '1px solid hsl(var(--border))',
+            boxShadow: '0 25px 50px -12px rgba(0, 0, 0, 0.4)',
+            display: 'flex',
+            flexDirection: 'column',
+            overflow: 'hidden',
+          }}>
+            {/* Modal Header */}
+            <div style={{
+              padding: '18px 24px',
+              borderBottom: '1px solid hsl(var(--border))',
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'space-between',
+              backgroundColor: 'hsl(var(--card))',
+            }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+                <div style={{
+                  width: '32px',
+                  height: '32px',
+                  borderRadius: '8px',
+                  background: 'hsl(var(--primary) / 0.12)',
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  color: 'hsl(var(--primary))'
+                }}>
+                  <Sparkles size={18} />
+                </div>
+                <div>
+                  <h3 style={{ fontSize: '16px', fontWeight: 600, margin: 0, color: 'hsl(var(--fg))' }}>
+                    Mission Playbooks & Reusable Templates
+                  </h3>
+                  <p style={{ fontSize: '12px', color: 'hsl(var(--muted-fg))', margin: '2px 0 0' }}>
+                    Select an operational archetype with battle-tested milestone sequences and quality gates.
+                  </p>
+                </div>
+              </div>
+              <button onClick={() => { setIsPlaybooksOpen(false); setSelectedPlaybook(null); }} className="btn btn-ghost" style={{ padding: '6px' }}>
+                <X size={18} />
+              </button>
+            </div>
+
+            {/* Modal Content */}
+            <div style={{ flex: 1, overflowY: 'auto', padding: '20px 24px', display: 'flex', flexDirection: 'column', gap: '18px' }}>
+              {/* Category Filter Pills */}
+              <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap' }}>
+                {['all', 'security', 'engineering', 'documentation', 'intelligence'].map((cat) => (
+                  <button
+                    key={cat}
+                    onClick={() => setPlaybookCategoryFilter(cat)}
+                    style={{
+                      padding: '4px 12px',
+                      borderRadius: '16px',
+                      fontSize: '12px',
+                      fontWeight: 500,
+                      textTransform: 'capitalize',
+                      border: '1px solid',
+                      borderColor: playbookCategoryFilter === cat ? 'hsl(var(--primary))' : 'hsl(var(--border))',
+                      backgroundColor: playbookCategoryFilter === cat ? 'hsl(var(--primary) / 0.15)' : 'hsl(var(--card))',
+                      color: playbookCategoryFilter === cat ? 'hsl(var(--primary))' : 'hsl(var(--muted-fg))',
+                      cursor: 'pointer',
+                    }}
+                  >
+                    {cat}
+                  </button>
+                ))}
+              </div>
+
+              {loadingPlaybooks ? (
+                <div style={{ padding: '40px', textAlign: 'center', color: 'hsl(var(--muted-fg))' }}>
+                  <RefreshCw size={24} className="animate-spin" style={{ margin: '0 auto 10px' }} />
+                  <div>Loading Playbooks...</div>
+                </div>
+              ) : selectedPlaybook ? (
+                /* Instantiation Form for Selected Playbook */
+                <div style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
+                  <div style={{
+                    padding: '16px',
+                    borderRadius: '10px',
+                    backgroundColor: 'hsl(var(--primary) / 0.05)',
+                    border: '1px solid hsl(var(--primary) / 0.2)',
+                  }}>
+                    <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '6px' }}>
+                      <span style={{ fontSize: '15px', fontWeight: 600, color: 'hsl(var(--foreground))' }}>{selectedPlaybook.title}</span>
+                      <span style={{ fontSize: '11px', padding: '2px 8px', borderRadius: '10px', backgroundColor: 'hsl(var(--primary) / 0.15)', color: 'hsl(var(--primary))', fontWeight: 600 }}>
+                        {selectedPlaybook.category.toUpperCase()}
+                      </span>
+                    </div>
+                    <p style={{ fontSize: '13px', color: 'hsl(var(--muted-fg))', margin: 0, lineHeight: 1.5 }}>{selectedPlaybook.description}</p>
+                  </div>
+
+                  {/* Milestones Preview */}
+                  <div>
+                    <label style={{ display: 'block', fontSize: '12px', fontWeight: 600, marginBottom: '8px', color: 'hsl(var(--foreground))' }}>
+                      Milestone Blueprint ({selectedPlaybook.milestones.length} Stages)
+                    </label>
+                    <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
+                      {selectedPlaybook.milestones.map((m, idx) => (
+                        <div key={idx} style={{
+                          padding: '10px 14px',
+                          borderRadius: '8px',
+                          backgroundColor: 'hsl(var(--card))',
+                          border: '1px solid hsl(var(--border))',
+                          display: 'flex',
+                          alignItems: 'center',
+                          justifyContent: 'space-between',
+                        }}>
+                          <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+                            <span style={{ fontSize: '11px', fontWeight: 700, color: 'hsl(var(--primary))', width: '20px' }}>#{idx + 1}</span>
+                            <div>
+                              <div style={{ fontSize: '13px', fontWeight: 500, color: 'hsl(var(--foreground))' }}>{m.title}</div>
+                              <div style={{ fontSize: '11px', color: 'hsl(var(--muted-fg))' }}>{m.description}</div>
+                            </div>
+                          </div>
+                          {m.assigned_agent && (
+                            <span style={{ fontSize: '11px', color: 'hsl(var(--muted-fg))', padding: '2px 8px', borderRadius: '6px', backgroundColor: 'hsl(var(--muted) / 0.5)' }}>
+                              {m.assigned_agent}
+                            </span>
+                          )}
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+
+                  {/* Parameter Customization */}
+                  {selectedPlaybook.parameter_schema && selectedPlaybook.parameter_schema.length > 0 && (
+                    <div>
+                      <label style={{ display: 'block', fontSize: '12px', fontWeight: 600, marginBottom: '8px', color: 'hsl(var(--foreground))' }}>
+                        Parameters & Target Scope
+                      </label>
+                      <div style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
+                        {selectedPlaybook.parameter_schema.map((p) => (
+                          <div key={p.key}>
+                            <label style={{ display: 'block', fontSize: '11px', color: 'hsl(var(--muted-fg))', marginBottom: '4px' }}>
+                              {p.label} {p.required && <span style={{ color: '#ef4444' }}>*</span>}
+                            </label>
+                            <input
+                              type="text"
+                              value={playbookParams[p.key] || ''}
+                              onChange={(e) => setPlaybookParams({ ...playbookParams, [p.key]: e.target.value })}
+                              placeholder={p.default || ''}
+                              className="input"
+                              style={{ width: '100%', fontSize: '13px' }}
+                            />
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+
+                  <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '10px', marginTop: '10px' }}>
+                    <button
+                      onClick={() => setSelectedPlaybook(null)}
+                      className="btn btn-ghost"
+                      style={{ fontSize: '13px' }}
+                    >
+                      Back to Gallery
+                    </button>
+                    <button
+                      onClick={handleInstantiatePlaybook}
+                      disabled={instantiatingPlaybook}
+                      className="btn btn-primary"
+                      style={{ display: 'flex', alignItems: 'center', gap: '6px', fontSize: '13px' }}
+                    >
+                      {instantiatingPlaybook ? (
+                        <>
+                          <RefreshCw size={14} className="animate-spin" />
+                          <span>Instantiating...</span>
+                        </>
+                      ) : (
+                        <>
+                          <Play size={14} />
+                          <span>Instantiate Mission</span>
+                        </>
+                      )}
+                    </button>
+                  </div>
+                </div>
+              ) : (
+                /* Playbook Gallery Cards */
+                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(360px, 1fr))', gap: '14px' }}>
+                  {playbooks
+                    .filter(p => playbookCategoryFilter === 'all' || p.category.toLowerCase() === playbookCategoryFilter.toLowerCase())
+                    .map((pb) => (
+                      <div
+                        key={pb.id}
+                        onClick={() => handleSelectPlaybook(pb)}
+                        style={{
+                          padding: '16px',
+                          borderRadius: '10px',
+                          backgroundColor: 'hsl(var(--card))',
+                          border: '1px solid hsl(var(--border))',
+                          cursor: 'pointer',
+                          display: 'flex',
+                          flexDirection: 'column',
+                          gap: '10px',
+                          transition: 'all 0.15s ease',
+                        }}
+                        onMouseEnter={(e) => {
+                          e.currentTarget.style.borderColor = 'hsl(var(--primary))';
+                          e.currentTarget.style.transform = 'translateY(-1px)';
+                        }}
+                        onMouseLeave={(e) => {
+                          e.currentTarget.style.borderColor = 'hsl(var(--border))';
+                          e.currentTarget.style.transform = 'none';
+                        }}
+                      >
+                        <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', gap: '8px' }}>
+                          <span style={{ fontSize: '14px', fontWeight: 600, color: 'hsl(var(--foreground))' }}>{pb.title}</span>
+                          <span style={{
+                            fontSize: '10px',
+                            fontWeight: 600,
+                            padding: '2px 7px',
+                            borderRadius: '10px',
+                            backgroundColor: 'hsl(var(--primary) / 0.12)',
+                            color: 'hsl(var(--primary))',
+                            textTransform: 'uppercase',
+                          }}>
+                            {pb.category}
+                          </span>
+                        </div>
+                        <p style={{ fontSize: '12px', color: 'hsl(var(--muted-fg))', margin: 0, lineHeight: 1.4, flex: 1 }}>
+                          {pb.description}
+                        </p>
+                        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', paddingTop: '6px', borderTop: '1px solid hsl(var(--border) / 0.5)' }}>
+                          <span style={{ fontSize: '11px', color: 'hsl(var(--muted-fg))' }}>
+                            {pb.milestones.length} Milestones
+                          </span>
+                          <span style={{ fontSize: '11px', fontWeight: 600, color: 'hsl(var(--primary))', display: 'flex', alignItems: 'center', gap: '3px' }}>
+                            Use Template →
+                          </span>
+                        </div>
+                      </div>
+                    ))}
+                </div>
+              )}
             </div>
           </div>
         </div>

@@ -715,3 +715,88 @@ class ActionRegistry:
             )
         )
 
+        # Mission Playbooks & Flight Recorder Timeline Actions
+        self.register(
+            ActionDefinition(
+                id="mission.list_playbooks",
+                name="List Mission Playbooks",
+                description="Lists available mission playbook templates across categories.",
+                tier=ActionTier.ANSWER,
+                permission_level=ActionPermissionLevel.READ_ONLY,
+                requires_confirmation=False,
+                provider="missions",
+                input_schema={
+                    "type": "object",
+                    "properties": {
+                        "category": {"type": "string"},
+                    },
+                },
+                output_schema={
+                    "type": "object",
+                    "properties": {
+                        "playbooks": {"type": "array"},
+                        "count": {"type": "integer"},
+                    },
+                },
+            )
+        )
+
+        self.register(
+            ActionDefinition(
+                id="mission.instantiate_playbook",
+                name="Instantiate Mission Playbook",
+                description="Instantiates a reusable playbook blueprint into a real executable mission with durable milestones.",
+                tier=ActionTier.ACT,
+                permission_level=ActionPermissionLevel.LOCAL_MUTATION,
+                requires_confirmation=True,
+                provider="missions",
+                input_schema={
+                    "type": "object",
+                    "properties": {
+                        "playbook_id": {"type": "string", "description": "ID of the playbook to instantiate"},
+                        "custom_objective": {"type": "string"},
+                        "team_name": {"type": "string"},
+                        "params": {"type": "object"},
+                    },
+                    "required": ["playbook_id"],
+                },
+                output_schema={
+                    "type": "object",
+                    "properties": {
+                        "mission_id": {"type": "string"},
+                        "title": {"type": "string"},
+                        "milestones_count": {"type": "integer"},
+                    },
+                },
+            )
+        )
+
+        self.register(
+            ActionDefinition(
+                id="mission.export_timeline",
+                name="Export Mission Flight Recorder Timeline",
+                description="Compiles and exports the sanitized flight recorder timeline of a mission in Markdown or JSON.",
+                tier=ActionTier.ANSWER,
+                permission_level=ActionPermissionLevel.READ_ONLY,
+                requires_confirmation=False,
+                provider="missions",
+                input_schema={
+                    "type": "object",
+                    "properties": {
+                        "mission_id": {"type": "string"},
+                        "execution_id": {"type": "string"},
+                        "format": {"type": "string", "default": "markdown"},
+                    },
+                    "required": ["mission_id"],
+                },
+                output_schema={
+                    "type": "object",
+                    "properties": {
+                        "timeline": {"type": ["string", "object"]},
+                        "format": {"type": "string"},
+                    },
+                },
+            )
+        )
+
+

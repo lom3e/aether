@@ -484,6 +484,22 @@ class Deliverable:
             "updated_at": self.updated_at,
         }
 
+    @property
+    def author_agent(self) -> str | None:
+        return self.metadata.get("author_agent")
+
+    @property
+    def parent_deliverable_id(self) -> str | None:
+        return self.metadata.get("parent_deliverable_id")
+
+    @property
+    def version(self) -> int:
+        return int(self.metadata.get("version", 1))
+
+    @property
+    def verification(self) -> dict[str, Any] | None:
+        return self.metadata.get("verification")
+
     @classmethod
     def from_dict(cls, data: dict[str, Any]) -> Deliverable:
         return cls(

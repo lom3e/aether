@@ -205,7 +205,31 @@ class MissionStore:
                 """
             )
 
+            # 7. Mission Playbooks table (Reusable Mission Templates)
+            conn.execute(
+                """
+                CREATE TABLE IF NOT EXISTS mission_playbooks (
+                    id TEXT PRIMARY KEY,
+                    title TEXT NOT NULL,
+                    description TEXT NOT NULL,
+                    category TEXT NOT NULL DEFAULT 'engineering',
+                    icon TEXT NOT NULL DEFAULT 'Target',
+                    team_name TEXT DEFAULT NULL,
+                    default_objective TEXT DEFAULT '',
+                    parameter_schema TEXT DEFAULT '[]',
+                    milestones TEXT DEFAULT '[]',
+                    tags TEXT DEFAULT '[]',
+                    version TEXT NOT NULL DEFAULT '1.0.0',
+                    author TEXT NOT NULL DEFAULT 'Aether Core',
+                    metadata TEXT DEFAULT '{}',
+                    created_at TEXT NOT NULL,
+                    updated_at TEXT NOT NULL
+                )
+                """
+            )
+
             # Performance Indexes
+            conn.execute("CREATE INDEX IF NOT EXISTS idx_playbooks_cat ON mission_playbooks(category)")
             conn.execute("CREATE INDEX IF NOT EXISTS idx_missions_status ON missions(status)")
             conn.execute("CREATE INDEX IF NOT EXISTS idx_missions_updated ON missions(updated_at DESC)")
             conn.execute("CREATE INDEX IF NOT EXISTS idx_missions_conv ON missions(conversation_id)")
@@ -2071,3 +2095,124 @@ class MissionStore:
                 (act_id, conv_id, agent, activity_type, message, json.dumps(meta), ts),
             )
         return act_id
+
+    # ---------------------------------------------------------------------------
+    # Mission Playbooks CRUD Operations
+    # ---------------------------------------------------------------------------
+
+    def save_playbook(self, playbook: Any) -> Any:
+        """Persists or updates a custom MissionPlaybook in SQLite."""
+        p_dict = playbook.to_dict() if hasattr(playbook, "to_dict") else dict(playbook)
+        now = datetime.now(timezone.utc).isoformat()
+        with self._get_connection() as conn:
+            conn.execute(
+                """
+                INSERT INTO mission_playbooks (
+                    id, title, description, category, icon, team_name,
+                    default_objective, parameter_schema, milestones, tags,
+                    version, author, metadata, created_at, updated_at
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                ON CONFLICT(id) DO UPDATE SET
+                    title = excluded.title,
+                    description = excluded.description,
+                    category = excluded.category,
+                    icon = excluded.icon,
+                    team_name = excluded.team_name,
+                    default_objective = excluded.default_objective,
+                    parameter_schema = excluded.parameter_schema,
+                    milestones = excluded.milestones,
+                    tags = excluded.tags,
+                    version = excluded.version,
+                    author = excluded.author,
+                    metadata = excluded.metadata,
+                    updated_at = excluded.updated_at
+                """,
+                (
+                    p_dict["id"],
+                    p_dict["title"],
+                    p_dict["description"],
+                    p_dict.get("category", "engineering"),
+                    p_dict.get("icon", "Target"),
+                    p_dict.get("team_name"),
+                    p_dict.get("default_objective", ""),
+                    json.dumps(p_dict.get("parameter_schema") or []),
+                    json.dumps(p_dict.get("milestones") or []),
+                    json.dumps(p_dict.get("tags") or []),
+                    p_dict.get("version", "1.0.0"),
+                    p_dict.get("author", "Aether Core"),
+                    json.dumps(p_dict.get("metadata") or {}),
+                    p_dict.get("created_at") or now,
+                    now,
+                ),
+            )
+        return self.get_playbook(p_dict["id"]) or playbook
+
+    def get_playbook(self, playbook_id: str) -> Any | None:
+        """Retrieves a MissionPlaybook from SQLite by ID."""
+        with self._get_connection() as conn:
+            row = conn.execute(
+                "SELECT * FROM mission_playbooks WHERE id = ?", (playbook_id,)
+            ).fetchone()
+            if not row:
+                return None
+            from aether.missions.playbooks import MissionPlaybook
+            return MissionPlaybook.from_dict({
+                "id": row["id"],
+                "title": row["title"],
+                "description": row["description"],
+                "category": row["category"],
+                "icon": row["icon"],
+                "team_name": row["team_name"],
+                "default_objective": row["default_objective"],
+                "parameter_schema": json.loads(row["parameter_schema"] or "[]"),
+                "milestones": json.loads(row["milestones"] or "[]"),
+                "tags": json.loads(row["tags"] or "[]"),
+                "version": row["version"],
+                "author": row["author"],
+                "metadata": json.loads(row["metadata"] or "{}"),
+                "created_at": row["created_at"],
+                "updated_at": row["updated_at"],
+            })
+
+    def list_playbooks(self, category: str | None = None) -> list[Any]:
+        """Lists all custom MissionPlaybooks from SQLite, optionally filtered by category."""
+        from aether.missions.playbooks import MissionPlaybook
+        with self._get_connection() as conn:
+            if category:
+                rows = conn.execute(
+                    "SELECT * FROM mission_playbooks WHERE LOWER(category) = LOWER(?) ORDER BY created_at DESC",
+                    (category,),
+                ).fetchall()
+            else:
+                rows = conn.execute(
+                    "SELECT * FROM mission_playbooks ORDER BY created_at DESC"
+                ).fetchall()
+
+            results: list[MissionPlaybook] = []
+            for row in rows:
+                results.append(MissionPlaybook.from_dict({
+                    "id": row["id"],
+                    "title": row["title"],
+                    "description": row["description"],
+                    "category": row["category"],
+                    "icon": row["icon"],
+                    "team_name": row["team_name"],
+                    "default_objective": row["default_objective"],
+                    "parameter_schema": json.loads(row["parameter_schema"] or "[]"),
+                    "milestones": json.loads(row["milestones"] or "[]"),
+                    "tags": json.loads(row["tags"] or "[]"),
+                    "version": row["version"],
+                    "author": row["author"],
+                    "metadata": json.loads(row["metadata"] or "{}"),
+                    "created_at": row["created_at"],
+                    "updated_at": row["updated_at"],
+                }))
+            return results
+
+    def delete_playbook(self, playbook_id: str) -> bool:
+        """Deletes a custom MissionPlaybook from SQLite."""
+        with self._get_connection() as conn:
+            cursor = conn.execute(
+                "DELETE FROM mission_playbooks WHERE id = ?", (playbook_id,)
+            )
+            return cursor.rowcount > 0

@@ -2,7 +2,7 @@ import React, { useState, useEffect, useRef, useMemo, useCallback } from 'react'
 import {
   Play, Pause, SkipBack, SkipForward, Rewind, FastForward,
   Clock, Target, Bot, Wrench, FileText, AlertTriangle,
-  Award, ShieldCheck, UserCheck, RefreshCw, Activity
+  Award, ShieldCheck, UserCheck, RefreshCw, Activity, Download
 } from 'lucide-react';
 import { useTranslation } from './i18n';
 import { Tooltip } from './Tooltip';
@@ -165,6 +165,35 @@ export const FlightRecorderReplay: React.FC<FlightRecorderReplayProps> = ({
     setCurrentIndex(Math.min(Math.max(0, index), Math.max(0, events.length - 1)));
   };
 
+  const handleExportTimeline = async (format: 'markdown' | 'json') => {
+    try {
+      const q = executionId ? `?execution_id=${encodeURIComponent(executionId)}&format=${format}` : `?format=${format}`;
+      const res = await fetch(apiUrl(`/api/missions/${missionId}/timeline/export${q}`));
+      if (!res.ok) throw new Error('Failed to export timeline');
+      if (format === 'markdown') {
+        const text = await res.text();
+        const blob = new Blob([text], { type: 'text/markdown;charset=utf-8;' });
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = `mission_${missionId}_flight_recorder.md`;
+        a.click();
+        URL.revokeObjectURL(url);
+      } else {
+        const json = await res.json();
+        const blob = new Blob([JSON.stringify(json, null, 2)], { type: 'application/json;charset=utf-8;' });
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = `mission_${missionId}_flight_recorder.json`;
+        a.click();
+        URL.revokeObjectURL(url);
+      }
+    } catch (err) {
+      console.error('Export failed:', err);
+    }
+  };
+
   // Helper Icon Resolver
   const getEventIcon = (eventType: string, status: string) => {
     if (status === 'error') return <AlertTriangle size={15} color="#ef4444" />;
@@ -282,7 +311,7 @@ export const FlightRecorderReplay: React.FC<FlightRecorderReplayProps> = ({
             </span>
           </div>
 
-          <div style={{ display: 'flex', alignItems: 'center', gap: '12px', fontSize: '12px', color: 'hsl(var(--muted-fg))' }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '10px', fontSize: '12px', color: 'hsl(var(--muted-fg))' }}>
             <span>
               Event <strong style={{ color: 'hsl(var(--foreground))' }}>{currentIndex + 1}</strong> of {events.length}
             </span>
@@ -290,6 +319,27 @@ export const FlightRecorderReplay: React.FC<FlightRecorderReplayProps> = ({
             <span style={{ fontFamily: 'monospace', fontWeight: 600, color: 'hsl(var(--foreground))' }}>
               {formatTimestamp(currentEvent?.timestamp)}
             </span>
+            <button
+              onClick={() => handleExportTimeline('markdown')}
+              title="Export flight recorder timeline report as Markdown"
+              style={{
+                display: 'flex',
+                alignItems: 'center',
+                gap: '5px',
+                padding: '4px 10px',
+                borderRadius: '6px',
+                border: '1px solid hsl(var(--border))',
+                backgroundColor: 'hsl(var(--card))',
+                color: 'hsl(var(--foreground))',
+                fontSize: '11px',
+                fontWeight: 500,
+                cursor: 'pointer',
+                marginLeft: '6px',
+              }}
+            >
+              <Download size={13} color="hsl(var(--primary))" />
+              <span>Export Report</span>
+            </button>
           </div>
         </div>
 
