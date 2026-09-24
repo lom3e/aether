@@ -1,7 +1,7 @@
 import { useState, useEffect, useContext } from 'react';
 import {
   Calendar, Mail, GitBranch, MessageSquare, FileText, CheckCircle2,
-  AlertCircle, ShieldCheck, Settings, Plus, RefreshCw, Clock, Zap
+  AlertCircle, ShieldCheck, Settings, Plus, RefreshCw, Clock, Zap, Globe
 } from 'lucide-react';
 import { apiUrl } from './api';
 import { ToastContext } from './toast';
@@ -56,9 +56,11 @@ export function Connections({ navigate: _navigate }: { navigate?: (view: string,
     name: string;
     icon: any;
     description: string;
+    capabilitiesText: string;
     color: string;
     builtIn: boolean;
   } | null>(null);
+  const [isConfigured, setIsConfigured] = useState(false);
   const [credAccountName, setCredAccountName] = useState('');
   const [githubToken, setGithubToken] = useState('');
   const [slackToken, setSlackToken] = useState('');
@@ -67,6 +69,9 @@ export function Connections({ navigate: _navigate }: { navigate?: (view: string,
   const [emailPass, setEmailPass] = useState('');
   const [emailHost, setEmailHost] = useState('smtp.gmail.com');
   const [emailPort, setEmailPort] = useState('587');
+  const [httpBaseUrl, setHttpBaseUrl] = useState('');
+  const [httpAuthType, setHttpAuthType] = useState('none');
+  const [httpToken, setHttpToken] = useState('');
   const [notionToken, setNotionToken] = useState('');
   const [testingCreds, setTestingCreds] = useState(false);
   const [savingCreds, setSavingCreds] = useState(false);
@@ -80,6 +85,7 @@ export function Connections({ navigate: _navigate }: { navigate?: (view: string,
       name: 'Google Calendar / Sync',
       icon: Calendar,
       description: 'Sync schedule, check availability, and book appointments with approval.',
+      capabilitiesText: 'Can view availability, list events, and schedule meetings with confirmation',
       color: '#4285F4',
       builtIn: true,
     },
@@ -88,6 +94,7 @@ export function Connections({ navigate: _navigate }: { navigate?: (view: string,
       name: 'GitHub',
       icon: GitBranch,
       description: 'Access repositories, codebases, commits, and pull requests.',
+      capabilitiesText: 'Can read repositories, create issues, and open pull requests',
       color: '#2dba4e',
       builtIn: false,
     },
@@ -96,6 +103,7 @@ export function Connections({ navigate: _navigate }: { navigate?: (view: string,
       name: 'Email / Gmail',
       icon: Mail,
       description: 'Read incoming briefs, prepare summaries, and draft outbound messages.',
+      capabilitiesText: 'Can draft and dispatch emails via SMTP with explicit user approval',
       color: '#EA4335',
       builtIn: false,
     },
@@ -104,7 +112,17 @@ export function Connections({ navigate: _navigate }: { navigate?: (view: string,
       name: 'Slack',
       icon: MessageSquare,
       description: 'Receive notifications and post status reports in team channels.',
+      capabilitiesText: 'Can post messages and status updates to Slack channels with confirmation',
       color: '#4A154B',
+      builtIn: false,
+    },
+    {
+      id: 'http',
+      name: 'Generic HTTP / API',
+      icon: Globe,
+      description: 'Interact with external REST endpoints and Web APIs with security policies.',
+      capabilitiesText: 'Can perform authenticated HTTP operations (GET, POST, PUT, DELETE)',
+      color: '#6366f1',
       builtIn: false,
     },
     {
@@ -112,6 +130,7 @@ export function Connections({ navigate: _navigate }: { navigate?: (view: string,
       name: 'Notion',
       icon: FileText,
       description: 'Read and sync project documentation and database tables.',
+      capabilitiesText: 'Can read and synchronize workspace pages and databases',
       color: '#000000',
       builtIn: false,
     },
@@ -142,6 +161,7 @@ export function Connections({ navigate: _navigate }: { navigate?: (view: string,
   const openConfigModal = (provider: (typeof availableProviders)[0], existingConn?: ConnectionItem) => {
     setConfigModalProvider(provider);
     setCredAccountName(existingConn?.account_name || `Personal ${provider.name}`);
+    setIsConfigured(Boolean(existingConn && existingConn.status === 'connected'));
     setTestResult(null);
     setGithubToken('');
     setSlackToken('');
@@ -150,47 +170,93 @@ export function Connections({ navigate: _navigate }: { navigate?: (view: string,
     setEmailPass('');
     setEmailHost('smtp.gmail.com');
     setEmailPort('587');
+    setHttpBaseUrl('');
+    setHttpAuthType('none');
+    setHttpToken('');
     setNotionToken('');
 
     if (existingConn?.auth_metadata) {
       const meta = existingConn.auth_metadata;
-      if (provider.id === 'github' && meta.token) setGithubToken(meta.token);
-      if (provider.id === 'slack') {
-        if (meta.bot_token) setSlackToken(meta.bot_token);
-        if (meta.webhook_url) setSlackWebhook(meta.webhook_url);
-      }
+      // Populate non-secret configuration parameters
       if (provider.id === 'email') {
         if (meta.username) setEmailUser(meta.username);
-        if (meta.password) setEmailPass(meta.password);
         if (meta.smtp_host) setEmailHost(meta.smtp_host);
         if (meta.smtp_port) setEmailPort(String(meta.smtp_port));
       }
-      if (provider.id === 'notion' && meta.token) setNotionToken(meta.token);
+      if (provider.id === 'http') {
+        if (meta.base_url) setHttpBaseUrl(meta.base_url);
+        if (meta.auth_type) setHttpAuthType(meta.auth_type);
+      }
+      // Sensitive fields (token, password, secret) remain blank to prevent leakage
     }
   };
 
+  const getActionSummary = (exec: ActionExecutionItem) => {
+    const input = exec.input_data || {};
+    switch (exec.action_id) {
+      case 'email.send':
+        return `Send email to ${input.to || 'recipient'} — "${input.subject || '(no subject)'}"`;
+      case 'github.create_issue':
+        return `Create issue in ${input.owner ? `${input.owner}/${input.repository}` : (input.repository || 'repo')}: "${input.title || ''}"`;
+      case 'github.inspect_repo':
+        return `Inspect repository ${input.owner ? `${input.owner}/${input.repository}` : (input.repository || 'repo')}`;
+      case 'github.list_branches':
+        return `List branches in ${input.owner ? `${input.owner}/${input.repository}` : (input.repository || 'repo')}`;
+      case 'github.list_issues':
+        return `List issues in ${input.owner ? `${input.owner}/${input.repository}` : (input.repository || 'repo')}`;
+      case 'github.create_pull_request':
+        return `Open PR in ${input.owner ? `${input.owner}/${input.repository}` : (input.repository || 'repo')}: "${input.title || ''}"`;
+      case 'slack.send_message':
+        return `Post message to ${input.channel || 'channel'}: "${(input.text || '').slice(0, 60)}${(input.text || '').length > 60 ? '...' : ''}"`;
+      case 'calendar.create_event':
+        return `Create event "${input.title || 'Event'}"${input.start_time ? ` at ${input.start_time}` : ''}`;
+      case 'http.request':
+        return `${(input.method || 'GET').toUpperCase()} ${input.url || input.endpoint || ''}`;
+      default:
+        if (input.title) return String(input.title);
+        if (input.name) return String(input.name);
+        return exec.action_id;
+    }
+  };
+
+  const getActionDetail = (exec: ActionExecutionItem) => {
+    const input = exec.input_data || {};
+    if (exec.action_id === 'email.send' && input.body) {
+      return input.body.length > 80 ? input.body.slice(0, 80) + '...' : input.body;
+    }
+    if (exec.action_id === 'github.create_issue' && input.body) {
+      return input.body.length > 80 ? input.body.slice(0, 80) + '...' : input.body;
+    }
+    if (exec.action_id === 'slack.send_message' && input.text) {
+      return input.text.length > 80 ? input.text.slice(0, 80) + '...' : input.text;
+    }
+    return null;
+  };
+
   const buildAuthMetadata = (providerId: string) => {
+    const meta: Record<string, any> = {};
     if (providerId === 'github') {
-      return { token: githubToken.trim() };
+      if (githubToken.trim()) meta.token = githubToken.trim();
     }
     if (providerId === 'slack') {
-      const meta: Record<string, string> = {};
       if (slackToken.trim()) meta.bot_token = slackToken.trim();
       if (slackWebhook.trim()) meta.webhook_url = slackWebhook.trim();
-      return meta;
     }
     if (providerId === 'email') {
-      return {
-        username: emailUser.trim(),
-        password: emailPass.trim(),
-        smtp_host: emailHost.trim() || 'smtp.gmail.com',
-        smtp_port: parseInt(emailPort.trim(), 10) || 587,
-      };
+      if (emailUser.trim()) meta.username = emailUser.trim();
+      if (emailPass.trim()) meta.password = emailPass.trim();
+      if (emailHost.trim()) meta.smtp_host = emailHost.trim();
+      if (emailPort.trim()) meta.smtp_port = parseInt(emailPort.trim(), 10) || 587;
+    }
+    if (providerId === 'http') {
+      if (httpBaseUrl.trim()) meta.base_url = httpBaseUrl.trim();
+      if (httpAuthType.trim()) meta.auth_type = httpAuthType.trim();
+      if (httpToken.trim()) meta.token = httpToken.trim();
     }
     if (providerId === 'notion') {
-      return { token: notionToken.trim() };
+      if (notionToken.trim()) meta.token = notionToken.trim();
     }
-    return {};
+    return meta;
   };
 
   const handleTestCreds = async () => {
@@ -575,41 +641,93 @@ export function Connections({ navigate: _navigate }: { navigate?: (view: string,
               <div style={{ fontSize: '13px' }}>Actions executed by Aether or requiring approval will be audited here.</div>
             </div>
           ) : (
-            executions.map(exec => (
-              <div
-                key={exec.id}
-                className="card"
-                style={{
-                  padding: '14px 18px',
-                  borderRadius: '10px',
-                  display: 'flex',
-                  justifyContent: 'space-between',
-                  alignItems: 'center',
-                }}
-              >
-                <div>
-                  <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-                    <span style={{ fontWeight: 600, fontSize: '14px' }}>{exec.action_id}</span>
-                    <span style={{
-                      fontSize: '11px',
-                      fontWeight: 600,
-                      padding: '2px 8px',
-                      borderRadius: '10px',
-                      backgroundColor: exec.status === 'success' ? '#10b98115' : exec.status === 'pending_approval' ? '#f59e0b15' : '#ef444415',
-                      color: exec.status === 'success' ? '#10b981' : exec.status === 'pending_approval' ? '#f59e0b' : '#ef4444',
+            executions.map(exec => {
+              const summary = getActionSummary(exec);
+              const detail = getActionDetail(exec);
+              return (
+                <div
+                  key={exec.id}
+                  className="card"
+                  style={{
+                    padding: '16px 20px',
+                    borderRadius: '10px',
+                    display: 'flex',
+                    flexDirection: 'column',
+                    gap: '8px',
+                  }}
+                >
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
+                    <div>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                        <span style={{
+                          fontSize: '11px',
+                          fontWeight: 700,
+                          padding: '2px 8px',
+                          borderRadius: '4px',
+                          backgroundColor: 'hsl(var(--muted)/0.4)',
+                          color: 'hsl(var(--fg))',
+                        }}>
+                          {exec.action_id}
+                        </span>
+                        <span style={{ fontWeight: 600, fontSize: '14px', color: 'hsl(var(--fg))' }}>
+                          {summary}
+                        </span>
+                      </div>
+                      {detail && (
+                        <div style={{ fontSize: '12px', color: 'hsl(var(--muted-fg))', marginTop: '4px', paddingLeft: '4px', fontStyle: 'italic' }}>
+                          "{detail}"
+                        </div>
+                      )}
+                      <div style={{ fontSize: '11px', color: 'hsl(var(--muted-fg))', marginTop: '6px' }}>
+                        ID: {exec.id} • {exec.created_at ? new Date(exec.created_at).toLocaleString() : ''}
+                      </div>
+                    </div>
+                    <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: '4px' }}>
+                      <span style={{
+                        fontSize: '11px',
+                        fontWeight: 600,
+                        padding: '3px 10px',
+                        borderRadius: '10px',
+                        backgroundColor: exec.status === 'success' ? '#10b98115' : exec.status === 'pending_approval' ? '#f59e0b15' : '#ef444415',
+                        color: exec.status === 'success' ? '#10b981' : exec.status === 'pending_approval' ? '#f59e0b' : '#ef4444',
+                      }}>
+                        {exec.status.toUpperCase()}
+                      </span>
+                    </div>
+                  </div>
+
+                  {exec.error_message && (
+                    <div style={{
+                      fontSize: '12px',
+                      color: '#ef4444',
+                      backgroundColor: '#ef444410',
+                      border: '1px solid #ef444420',
+                      padding: '8px 12px',
+                      borderRadius: '6px',
+                      marginTop: '4px',
                     }}>
-                      {exec.status.toUpperCase()}
-                    </span>
-                  </div>
-                  <div style={{ fontSize: '12px', color: 'hsl(var(--muted-fg))', marginTop: '4px' }}>
-                    ID: {exec.id} • {exec.created_at ? new Date(exec.created_at).toLocaleString() : ''}
-                  </div>
+                      <strong>Error:</strong> {exec.error_message}
+                    </div>
+                  )}
+
+                  {exec.status === 'success' && exec.output_data && (
+                    <div style={{
+                      fontSize: '12px',
+                      color: 'hsl(var(--muted-fg))',
+                      backgroundColor: 'hsl(var(--muted)/0.2)',
+                      padding: '6px 10px',
+                      borderRadius: '6px',
+                      fontFamily: 'monospace',
+                      overflow: 'hidden',
+                      textOverflow: 'ellipsis',
+                      whiteSpace: 'nowrap',
+                    }}>
+                      Result: {typeof exec.output_data === 'string' ? exec.output_data : JSON.stringify(exec.output_data).slice(0, 160)}
+                    </div>
+                  )}
                 </div>
-                <div style={{ fontSize: '12px', color: 'hsl(var(--muted-fg))', maxWidth: '300px', textAlign: 'right', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                  {JSON.stringify(exec.input_data)}
-                </div>
-              </div>
-            ))
+              );
+            })
           )}
         </div>
       )}
@@ -712,7 +830,7 @@ export function Connections({ navigate: _navigate }: { navigate?: (view: string,
               <div>
                 <h3 style={{ margin: 0, fontSize: '18px', fontWeight: 600 }}>Configure {configModalProvider.name}</h3>
                 <div style={{ fontSize: '12px', color: 'hsl(var(--muted-fg))' }}>
-                  Provide authentic credentials to enable real agentic actions
+                  {isConfigured ? 'Update credentials (leave secrets blank to keep existing)' : 'Provide authentic credentials to enable real agentic actions'}
                 </div>
               </div>
             </div>
@@ -850,6 +968,52 @@ export function Connections({ navigate: _navigate }: { navigate?: (view: string,
                 </>
               )}
 
+              {configModalProvider.id === 'http' && (
+                <>
+                  <div>
+                    <label style={{ fontSize: '12px', fontWeight: 600, display: 'block', marginBottom: '4px' }}>Base URL (Optional)</label>
+                    <input
+                      type="url"
+                      className="input"
+                      placeholder="https://api.example.com"
+                      value={httpBaseUrl}
+                      onChange={e => { setHttpBaseUrl(e.target.value); setTestResult(null); }}
+                      style={{ width: '100%' }}
+                    />
+                    <div style={{ fontSize: '11px', color: 'hsl(var(--muted-fg))', marginTop: '4px' }}>
+                      Default base URL for relative endpoints.
+                    </div>
+                  </div>
+                  <div>
+                    <label style={{ fontSize: '12px', fontWeight: 600, display: 'block', marginBottom: '4px' }}>Authentication Type</label>
+                    <select
+                      className="input"
+                      value={httpAuthType}
+                      onChange={e => { setHttpAuthType(e.target.value); setTestResult(null); }}
+                      style={{ width: '100%' }}
+                    >
+                      <option value="none">No Auth (Public)</option>
+                      <option value="bearer">Bearer Token</option>
+                      <option value="api_key">API Key (X-API-Key header)</option>
+                      <option value="basic">Basic Auth (Username:Password or Base64)</option>
+                    </select>
+                  </div>
+                  {httpAuthType !== 'none' && (
+                    <div>
+                      <label style={{ fontSize: '12px', fontWeight: 600, display: 'block', marginBottom: '4px' }}>Token / API Key</label>
+                      <input
+                        type="password"
+                        className="input"
+                        placeholder="Secret token, key, or credentials"
+                        value={httpToken}
+                        onChange={e => { setHttpToken(e.target.value); setTestResult(null); }}
+                        style={{ width: '100%' }}
+                      />
+                    </div>
+                  )}
+                </>
+              )}
+
               {configModalProvider.id === 'notion' && (
                 <div>
                   <label style={{ fontSize: '12px', fontWeight: 600, display: 'block', marginBottom: '4px' }}>Integration Token</label>
@@ -894,7 +1058,7 @@ export function Connections({ navigate: _navigate }: { navigate?: (view: string,
                     className="btn btn-primary"
                     disabled={savingCreds}
                   >
-                    {savingCreds ? 'Saving...' : 'Save & Connect'}
+                    {savingCreds ? 'Saving...' : isConfigured ? 'Update & Save' : 'Save & Connect'}
                   </button>
                 </div>
               </div>

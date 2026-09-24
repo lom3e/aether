@@ -159,3 +159,303 @@ class ActionRegistry:
                 output_schema={"type": "object", "properties": {"results": {"type": "array"}}},
             )
         )
+
+        # GitHub Read Actions
+        self.register(
+            ActionDefinition(
+                id="github.inspect_repo",
+                name="Inspect GitHub Repository",
+                description="Inspects metadata, default branch, stars, and open issues of a repository.",
+                tier=ActionTier.ANSWER,
+                permission_level=ActionPermissionLevel.READ_ONLY,
+                requires_confirmation=False,
+                provider="github",
+                input_schema={
+                    "type": "object",
+                    "properties": {
+                        "owner": {"type": "string"},
+                        "repository": {"type": "string"},
+                        "full_name": {"type": "string"},
+                    },
+                },
+            )
+        )
+        self.register(
+            ActionDefinition(
+                id="github.list_branches",
+                name="List GitHub Branches",
+                description="Lists all branches in a GitHub repository.",
+                tier=ActionTier.ANSWER,
+                permission_level=ActionPermissionLevel.READ_ONLY,
+                requires_confirmation=False,
+                provider="github",
+                input_schema={
+                    "type": "object",
+                    "properties": {
+                        "owner": {"type": "string"},
+                        "repository": {"type": "string"},
+                    },
+                },
+            )
+        )
+        self.register(
+            ActionDefinition(
+                id="github.list_issues",
+                name="List GitHub Issues",
+                description="Queries open or closed issues in a repository.",
+                tier=ActionTier.ANSWER,
+                permission_level=ActionPermissionLevel.READ_ONLY,
+                requires_confirmation=False,
+                provider="github",
+                input_schema={
+                    "type": "object",
+                    "properties": {
+                        "owner": {"type": "string"},
+                        "repository": {"type": "string"},
+                        "state": {"type": "string", "enum": ["open", "closed", "all"]},
+                        "limit": {"type": "integer"},
+                    },
+                },
+            )
+        )
+        self.register(
+            ActionDefinition(
+                id="github.get_issue",
+                name="Get GitHub Issue",
+                description="Retrieves a specific issue by number.",
+                tier=ActionTier.ANSWER,
+                permission_level=ActionPermissionLevel.READ_ONLY,
+                requires_confirmation=False,
+                provider="github",
+                input_schema={
+                    "type": "object",
+                    "properties": {
+                        "owner": {"type": "string"},
+                        "repository": {"type": "string"},
+                        "issue_number": {"type": "integer"},
+                    },
+                    "required": ["issue_number"],
+                },
+            )
+        )
+        self.register(
+            ActionDefinition(
+                id="github.list_pull_requests",
+                name="List GitHub Pull Requests",
+                description="Lists pull requests in a repository.",
+                tier=ActionTier.ANSWER,
+                permission_level=ActionPermissionLevel.READ_ONLY,
+                requires_confirmation=False,
+                provider="github",
+                input_schema={
+                    "type": "object",
+                    "properties": {
+                        "owner": {"type": "string"},
+                        "repository": {"type": "string"},
+                        "state": {"type": "string", "enum": ["open", "closed", "all"]},
+                    },
+                },
+            )
+        )
+        self.register(
+            ActionDefinition(
+                id="github.get_file",
+                name="Get GitHub File Contents",
+                description="Reads file contents from a GitHub repository.",
+                tier=ActionTier.ANSWER,
+                permission_level=ActionPermissionLevel.READ_ONLY,
+                requires_confirmation=False,
+                provider="github",
+                input_schema={
+                    "type": "object",
+                    "properties": {
+                        "owner": {"type": "string"},
+                        "repository": {"type": "string"},
+                        "path": {"type": "string"},
+                        "ref": {"type": "string"},
+                    },
+                    "required": ["path"],
+                },
+            )
+        )
+
+        # GitHub Mutation Actions (requires confirmation)
+        self.register(
+            ActionDefinition(
+                id="github.create_branch",
+                name="Create GitHub Branch",
+                description="Creates a new git branch on the remote repository.",
+                tier=ActionTier.ACT,
+                permission_level=ActionPermissionLevel.EXTERNAL_MUTATION,
+                requires_confirmation=True,
+                provider="github",
+                input_schema={
+                    "type": "object",
+                    "properties": {
+                        "owner": {"type": "string"},
+                        "repository": {"type": "string"},
+                        "branch_name": {"type": "string"},
+                        "from_branch": {"type": "string"},
+                    },
+                    "required": ["branch_name"],
+                },
+            )
+        )
+        self.register(
+            ActionDefinition(
+                id="github.create_issue",
+                name="Create GitHub Issue",
+                description="Opens a new issue in a GitHub repository.",
+                tier=ActionTier.ACT,
+                permission_level=ActionPermissionLevel.EXTERNAL_MUTATION,
+                requires_confirmation=True,
+                provider="github",
+                input_schema={
+                    "type": "object",
+                    "properties": {
+                        "owner": {"type": "string"},
+                        "repository": {"type": "string"},
+                        "title": {"type": "string"},
+                        "body": {"type": "string"},
+                        "labels": {"type": "array", "items": {"type": "string"}},
+                    },
+                    "required": ["title"],
+                },
+            )
+        )
+        self.register(
+            ActionDefinition(
+                id="github.update_issue",
+                name="Update GitHub Issue",
+                description="Updates an existing issue (title, body, status, labels).",
+                tier=ActionTier.ACT,
+                permission_level=ActionPermissionLevel.EXTERNAL_MUTATION,
+                requires_confirmation=True,
+                provider="github",
+                input_schema={
+                    "type": "object",
+                    "properties": {
+                        "owner": {"type": "string"},
+                        "repository": {"type": "string"},
+                        "issue_number": {"type": "integer"},
+                        "title": {"type": "string"},
+                        "body": {"type": "string"},
+                        "state": {"type": "string", "enum": ["open", "closed"]},
+                    },
+                    "required": ["issue_number"],
+                },
+            )
+        )
+        self.register(
+            ActionDefinition(
+                id="github.create_pull_request",
+                name="Create GitHub Pull Request",
+                description="Opens a pull request between branches on GitHub.",
+                tier=ActionTier.ACT,
+                permission_level=ActionPermissionLevel.EXTERNAL_MUTATION,
+                requires_confirmation=True,
+                provider="github",
+                input_schema={
+                    "type": "object",
+                    "properties": {
+                        "owner": {"type": "string"},
+                        "repository": {"type": "string"},
+                        "title": {"type": "string"},
+                        "head": {"type": "string"},
+                        "base": {"type": "string"},
+                        "body": {"type": "string"},
+                    },
+                    "required": ["title", "head"],
+                },
+            )
+        )
+        self.register(
+            ActionDefinition(
+                id="github.add_comment",
+                name="Add GitHub Comment",
+                description="Adds a comment to an issue or pull request.",
+                tier=ActionTier.ACT,
+                permission_level=ActionPermissionLevel.EXTERNAL_MUTATION,
+                requires_confirmation=True,
+                provider="github",
+                input_schema={
+                    "type": "object",
+                    "properties": {
+                        "owner": {"type": "string"},
+                        "repository": {"type": "string"},
+                        "issue_or_pr_number": {"type": "integer"},
+                        "body": {"type": "string"},
+                    },
+                    "required": ["issue_or_pr_number", "body"],
+                },
+            )
+        )
+
+        # Email Actions (external mutation requiring confirmation)
+        self.register(
+            ActionDefinition(
+                id="email.send",
+                name="Send Email",
+                description="Sends an email message via connected SMTP account.",
+                tier=ActionTier.ACT,
+                permission_level=ActionPermissionLevel.EXTERNAL_MUTATION,
+                requires_confirmation=True,
+                provider="email",
+                input_schema={
+                    "type": "object",
+                    "properties": {
+                        "to": {"type": "string"},
+                        "subject": {"type": "string"},
+                        "body": {"type": "string"},
+                        "cc": {"type": "string"},
+                        "bcc": {"type": "string"},
+                    },
+                    "required": ["to", "subject", "body"],
+                },
+            )
+        )
+
+        # Slack Actions (external mutation requiring confirmation)
+        self.register(
+            ActionDefinition(
+                id="slack.send_message",
+                name="Send Slack Message",
+                description="Posts a message to a Slack channel or webhook.",
+                tier=ActionTier.ACT,
+                permission_level=ActionPermissionLevel.EXTERNAL_MUTATION,
+                requires_confirmation=True,
+                provider="slack",
+                input_schema={
+                    "type": "object",
+                    "properties": {
+                        "channel": {"type": "string"},
+                        "text": {"type": "string"},
+                    },
+                    "required": ["text"],
+                },
+            )
+        )
+
+        # Generic HTTP Request Action
+        self.register(
+            ActionDefinition(
+                id="http.request",
+                name="HTTP Request",
+                description="Executes an HTTP request to an external service or API.",
+                tier=ActionTier.ACT,
+                permission_level=ActionPermissionLevel.EXTERNAL_MUTATION,
+                requires_confirmation=True,
+                provider="http",
+                input_schema={
+                    "type": "object",
+                    "properties": {
+                        "method": {"type": "string", "enum": ["GET", "POST", "PUT", "PATCH", "DELETE", "HEAD"]},
+                        "url": {"type": "string"},
+                        "params": {"type": "object"},
+                        "json": {"type": "object"},
+                        "headers": {"type": "object"},
+                    },
+                    "required": ["url"],
+                },
+            )
+        )

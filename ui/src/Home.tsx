@@ -723,11 +723,38 @@ export function Home({
                     alignItems: 'center',
                   }}
                 >
-                  <div>
-                    <div style={{ fontWeight: 600, fontSize: '15px' }}>{appr.action_name}</div>
-                    <div style={{ fontSize: '13px', color: 'hsl(var(--muted-fg))', marginTop: '2px' }}>
-                      {appr.description} • {JSON.stringify(appr.input_data)}
+                  <div style={{ flex: 1, marginRight: '16px' }}>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                      <span style={{ fontSize: '11px', fontWeight: 700, padding: '2px 8px', borderRadius: '4px', backgroundColor: '#f59e0b20', color: '#f59e0b', textTransform: 'uppercase' }}>
+                        Action Requires Approval
+                      </span>
+                      <span style={{ fontWeight: 600, fontSize: '15px' }}>{appr.human_summary || appr.action_name}</span>
                     </div>
+                    {appr.action_id === 'email.send' && (
+                      <div style={{ fontSize: '13px', color: 'hsl(var(--fg)/0.85)', marginTop: '6px', padding: '8px 12px', backgroundColor: 'hsl(var(--muted)/0.3)', borderRadius: '6px' }}>
+                        <div><strong>To:</strong> {appr.input_data?.to}</div>
+                        <div><strong>Subject:</strong> {appr.input_data?.subject}</div>
+                        {appr.input_data?.body && <div style={{ marginTop: '4px', whiteSpace: 'pre-wrap', color: 'hsl(var(--muted-fg))' }}>{appr.input_data.body}</div>}
+                      </div>
+                    )}
+                    {appr.action_id === 'github.create_issue' && (
+                      <div style={{ fontSize: '13px', color: 'hsl(var(--fg)/0.85)', marginTop: '6px', padding: '8px 12px', backgroundColor: 'hsl(var(--muted)/0.3)', borderRadius: '6px' }}>
+                        <div><strong>Repo:</strong> {appr.input_data?.owner ? `${appr.input_data.owner}/${appr.input_data.repository}` : (appr.input_data?.repository || 'repository')}</div>
+                        <div><strong>Title:</strong> {appr.input_data?.title}</div>
+                        {appr.input_data?.body && <div style={{ marginTop: '4px', whiteSpace: 'pre-wrap', color: 'hsl(var(--muted-fg))' }}>{appr.input_data.body}</div>}
+                      </div>
+                    )}
+                    {appr.action_id === 'slack.send_message' && (
+                      <div style={{ fontSize: '13px', color: 'hsl(var(--fg)/0.85)', marginTop: '6px', padding: '8px 12px', backgroundColor: 'hsl(var(--muted)/0.3)', borderRadius: '6px' }}>
+                        <div><strong>Channel:</strong> {appr.input_data?.channel || '#general'}</div>
+                        {appr.input_data?.text && <div style={{ marginTop: '4px', whiteSpace: 'pre-wrap', color: 'hsl(var(--muted-fg))' }}>{appr.input_data.text}</div>}
+                      </div>
+                    )}
+                    {appr.action_id === 'calendar.create_event' && (
+                      <div style={{ fontSize: '13px', color: 'hsl(var(--muted-fg))', marginTop: '4px' }}>
+                        {appr.input_data?.start_time ? `Time: ${appr.input_data.start_time}` : ''} {appr.input_data?.location ? `• Location: ${appr.input_data.location}` : ''}
+                      </div>
+                    )}
                   </div>
                   <div style={{ display: 'flex', gap: '8px' }}>
                     <button

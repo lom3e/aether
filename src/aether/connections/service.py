@@ -1,5 +1,6 @@
 """
 Service layer for Aether Connections and external integrations (Phase C).
+Orchestrates connections, credentials, and real connectors (GitHub, Email, Slack, HTTP, Calendar).
 """
 from __future__ import annotations
 
@@ -10,13 +11,23 @@ import uuid
 
 from aether.activity.models import ActivityCategory, ActivityStatus
 from aether.activity.service import ActivityService
+from aether.connections.base import (
+    BaseConnector,
+    ConnectorHealth,
+    ConnectorResult,
+    CredentialRequirement,
+)
+from aether.connections.email import EmailConnector
+from aether.connections.github import GitHubConnector
+from aether.connections.http import HttpConnector
 from aether.connections.models import CalendarEvent, Connection, ConnectionStatus
+from aether.connections.slack import SlackConnector
 from aether.connections.store import ConnectionStore
 
 logger = logging.getLogger(__name__)
 
 
-class CalendarConnector:
+class CalendarConnector(BaseConnector):
     """Real calendar connector backed by ConnectionStore."""
 
     def __init__(
@@ -28,6 +39,28 @@ class CalendarConnector:
         self.store = store
         self.workspace_id = workspace_id
         self.connection_id = connection_id
+
+    @property
+    def provider(self) -> str:
+        return "calendar"
+
+    @property
+    def capabilities(self) -> list[str]:
+        return ["calendar.create_event", "calendar.list_events"]
+
+    @property
+    def credential_requirements(self) -> list[CredentialRequirement]:
+        return []
+
+    def verify(self, auth_metadata: dict[str, Any] | None = None) -> tuple[bool, str]:
+        return True, "Built-in calendar connection ready."
+
+    def get_health(self) -> ConnectorHealth:
+        return ConnectorHealth(
+            healthy=True,
+            status=ConnectionStatus.CONNECTED,
+            message="Built-in calendar connection active.",
+        )
 
     def create_event(
         self,
@@ -64,6 +97,22 @@ class CalendarConnector:
         events = self.store.list_calendar_events(self.workspace_id, limit=limit)
         return [e.to_dict() for e in events]
 
+    def execute(self, operation: str, params: dict[str, Any]) -> ConnectorResult:
+        clean_op = operation.lower().strip()
+        if clean_op in ("calendar.create_event", "create_event"):
+            res = self.create_event(
+                title=params.get("title", "Untitled Event"),
+                start_time=params.get("start_time", datetime.now(timezone.utc).isoformat()),
+                end_time=params.get("end_time"),
+                description=params.get("description", ""),
+                location=params.get("location", ""),
+            )
+            return ConnectorResult(success=True, operation=operation, provider=self.provider, data=res)
+        elif clean_op in ("calendar.list_events", "list_events"):
+            res = self.list_events(limit=int(params.get("limit", 50)))
+            return ConnectorResult(success=True, operation=operation, provider=self.provider, data={"events": res})
+        raise ValueError(f"Unsupported calendar operation: '{operation}'")
+
 
 class ConnectionService:
     """Orchestrates integrations, OAuth states, and tool connectors."""
@@ -75,6 +124,34 @@ class ConnectionService:
     ) -> None:
         self.store = store
         self.activity_service = activity_service
+
+    def get_default_capabilities(self, provider: str) -> list[str]:
+        p = provider.lower().strip()
+        if p == "github":
+            return [
+                "github.inspect_repo",
+                "github.list_branches",
+                "github.get_branch",
+                "github.create_branch",
+                "github.list_pull_requests",
+                "github.get_pull_request",
+                "github.create_pull_request",
+                "github.list_issues",
+                "github.get_issue",
+                "github.create_issue",
+                "github.update_issue",
+                "github.add_comment",
+                "github.get_file",
+            ]
+        elif p == "email":
+            return ["email.send", "email.verify"]
+        elif p == "slack":
+            return ["slack.send_message", "slack.verify"]
+        elif p == "http":
+            return ["http.request", "http.get", "http.post", "http.put", "http.patch", "http.delete"]
+        elif p == "calendar":
+            return ["calendar.create_event", "calendar.list_events"]
+        return [f"{p}.read", f"{p}.write"]
 
     def connect(
         self,
@@ -97,7 +174,7 @@ class ConnectionService:
             account_name=account_name,
             status=ConnectionStatus.CONNECTED,
             scopes=scopes or ["read", "write"],
-            capabilities=capabilities or [f"{provider}.read", f"{provider}.write"],
+            capabilities=capabilities or self.get_default_capabilities(provider),
             auth_metadata=dict(auth_metadata or {}),
             created_at=existing.created_at if existing else now_iso,
             updated_at=now_iso,
@@ -136,6 +213,20 @@ class ConnectionService:
                     link_view="connections",
                     link_id=conn.id,
                 )
+        else:
+            conn = Connection(
+                id=f"conn-{uuid.uuid4().hex[:10]}",
+                workspace_id=workspace_id,
+                provider=provider,
+                account_name=f"{provider.capitalize()} (Disconnected)",
+                status=ConnectionStatus.DISCONNECTED,
+                scopes=[],
+                capabilities=[],
+                auth_metadata={},
+                created_at=datetime.now(timezone.utc).isoformat(),
+                updated_at=datetime.now(timezone.utc).isoformat(),
+            )
+            self.store.save_connection(conn)
 
     def list_connections(self, workspace_id: str) -> list[Connection]:
         """Lists all connections for a workspace."""
@@ -158,13 +249,54 @@ class ConnectionService:
                 provider="calendar",
                 account_name="Primary Calendar",
                 scopes=["calendar.events.read", "calendar.events.write"],
-                capabilities=["calendar.create_event", "calendar.list_events"],
+                capabilities=self.get_default_capabilities("calendar"),
             )
+        elif conn.status == ConnectionStatus.DISCONNECTED:
+            raise RuntimeError("Calendar connection is disconnected in this workspace.")
         return CalendarConnector(self.store, workspace_id, conn.id)
+
+    def get_github_connector(self, workspace_id: str) -> GitHubConnector:
+        """Returns GitHubConnector configured with the workspace's credentials."""
+        conn = self.store.get_connection_by_provider(workspace_id, "github")
+        meta = conn.auth_metadata if conn else {}
+        return GitHubConnector(auth_metadata=meta)
+
+    def get_email_connector(self, workspace_id: str) -> EmailConnector:
+        """Returns EmailConnector configured with the workspace's credentials."""
+        conn = self.store.get_connection_by_provider(workspace_id, "email")
+        meta = conn.auth_metadata if conn else {}
+        return EmailConnector(auth_metadata=meta)
+
+    def get_slack_connector(self, workspace_id: str) -> SlackConnector:
+        """Returns SlackConnector configured with the workspace's credentials."""
+        conn = self.store.get_connection_by_provider(workspace_id, "slack")
+        meta = conn.auth_metadata if conn else {}
+        return SlackConnector(auth_metadata=meta)
+
+    def get_http_connector(self, workspace_id: str) -> HttpConnector:
+        """Returns HttpConnector configured with the workspace's credentials."""
+        conn = self.store.get_connection_by_provider(workspace_id, "http")
+        meta = conn.auth_metadata if conn else {}
+        return HttpConnector(auth_metadata=meta)
+
+    def get_connector(self, workspace_id: str, provider: str) -> BaseConnector | None:
+        """Generic connector resolver."""
+        p = provider.lower().strip()
+        if p == "github":
+            return self.get_github_connector(workspace_id)
+        elif p == "email":
+            return self.get_email_connector(workspace_id)
+        elif p == "slack":
+            return self.get_slack_connector(workspace_id)
+        elif p == "http":
+            return self.get_http_connector(workspace_id)
+        elif p == "calendar":
+            return self.get_calendar_connector(workspace_id)
+        return None
 
 
 def verify_credentials(provider: str, auth_metadata: dict[str, Any] | None) -> tuple[bool, str]:
-    """Validates presence and format of connection credentials."""
+    """Validates presence and format of connection credentials using connector implementations."""
     prov = (provider or "").lower().strip()
     meta = auth_metadata or {}
 
@@ -172,35 +304,16 @@ def verify_credentials(provider: str, auth_metadata: dict[str, Any] | None) -> t
         return True, "Built-in calendar connection ready."
 
     elif prov == "github":
-        token = str(meta.get("token") or meta.get("pat") or meta.get("api_key") or "").strip()
-        if not token:
-            return False, "GitHub Personal Access Token (PAT) is required."
-        if not (token.startswith("ghp_") or token.startswith("github_pat_") or len(token) >= 20):
-            return False, "Invalid GitHub token format. Must be a Personal Access Token (e.g. starting with 'ghp_' or 'github_pat_')."
-        return True, "GitHub Personal Access Token format verified."
-
-    elif prov == "slack":
-        bot_token = str(meta.get("bot_token") or meta.get("token") or "").strip()
-        webhook_url = str(meta.get("webhook_url") or "").strip()
-        if not bot_token and not webhook_url:
-            return False, "Slack Bot User OAuth Token (xoxb-...) or Incoming Webhook URL is required."
-        if bot_token and not (bot_token.startswith("xoxb-") or bot_token.startswith("xoxp-")):
-            return False, "Invalid Slack Bot Token format. Must start with 'xoxb-' or 'xoxp-'."
-        if webhook_url and not webhook_url.startswith("https://hooks.slack.com/"):
-            return False, "Invalid Slack Webhook URL. Must start with 'https://hooks.slack.com/'."
-        return True, "Slack credentials format verified."
+        return GitHubConnector(auth_metadata=meta).verify(meta)
 
     elif prov == "email":
-        username = str(meta.get("username") or meta.get("email") or "").strip()
-        password = str(meta.get("password") or meta.get("app_password") or meta.get("token") or "").strip()
-        smtp_host = str(meta.get("smtp_host") or "").strip()
-        if not username:
-            return False, "Email address or username is required."
-        if not password:
-            return False, "App password or token is required."
-        if not smtp_host:
-            return False, "SMTP Host is required (e.g. smtp.gmail.com)."
-        return True, "Email SMTP credentials format verified."
+        return EmailConnector(auth_metadata=meta).verify(meta)
+
+    elif prov == "slack":
+        return SlackConnector(auth_metadata=meta).verify(meta)
+
+    elif prov == "http":
+        return HttpConnector(auth_metadata=meta).verify(meta)
 
     elif prov == "notion":
         token = str(meta.get("token") or meta.get("api_key") or "").strip()
@@ -214,4 +327,3 @@ def verify_credentials(provider: str, auth_metadata: dict[str, Any] | None) -> t
         if not meta or not any(str(v).strip() for v in meta.values()):
             return False, f"Credentials required for {provider}."
         return True, f"{provider} credentials verified."
-

@@ -235,6 +235,141 @@ class PersonalAgentService:
                 action_args={"filename": filename},
             )
 
+        # 3c. Email send (ACT tier - requires safety confirmation)
+        email_triggers = [
+            "scrivi una mail", "scrivi una email", "scrivi un'email", "manda una mail", "manda una email",
+            "invia una mail", "invia una email", "send an email", "send email", "send a mail", "send mail",
+            "draft an email", "scrivi email", "invia email", "manda email",
+        ]
+        if any(k in p_lower for k in email_triggers) or (("mail" in p_lower or "email" in p_lower) and any(v in p_lower for v in ["invia", "manda", "send", "scrivi", "write"])):
+            # First check for explicit email address
+            email_addr_match = re.search(r"([a-zA-Z0-9_.+-]+@[a-zA-Z0-9-]+\.[a-zA-Z0-9-.]+)", prompt)
+            if email_addr_match:
+                recipient = email_addr_match.group(1).strip()
+            else:
+                to_match = re.search(r"\b(?:to|a|per|destinatario|recipient)\b\s+([a-zA-Z0-9_.+-]+@[a-zA-Z0-9-]+\.[a-zA-Z0-9-.]+|[a-zA-Z0-9_-]+)", prompt, re.IGNORECASE)
+                recipient = to_match.group(1).strip() if to_match else "client@example.com"
+                if "@" not in recipient and not recipient.endswith(".com"):
+                    recipient = f"{recipient.lower()}@example.com"
+
+            subject_match = re.search(r"(?:subject|oggetto|con oggetto|con titolo|titled|about)\s+['\"]?([^'\"\n,\.]+)['\"]?", prompt, re.IGNORECASE)
+            subject = subject_match.group(1).strip().strip("'\"") if subject_match else "Project update"
+
+            body_match = re.search(r"(?:corpo|body|testo|text)\s+['\"]([^'\"]+)['\"]", prompt, re.IGNORECASE)
+            body = body_match.group(1).strip() if body_match else f"Prepared by Aether: {prompt}"
+
+            return UserIntent(
+                raw_prompt=effective_prompt,
+                tier=IntentTier.ACT,
+                summary=f"Send email to {recipient}",
+                action_id="email.send",
+                action_args={
+                    "to": recipient,
+                    "subject": subject,
+                    "body": body,
+                },
+            )
+
+        # 3d. Slack send (ACT tier - requires safety confirmation)
+        slack_triggers = [
+            "su slack", "on slack", "send to slack", "manda su slack", "invia su slack",
+            "posta su slack", "messaggio su slack", "post to slack", "slack message",
+        ]
+        if any(k in p_lower for k in slack_triggers) or ("slack" in p_lower and any(v in p_lower for v in ["manda", "invia", "scrivi", "send", "post", "posta"])):
+            # Look for explicit #channel first
+            hash_chan = re.search(r"(#[a-zA-Z0-9_-]+)", prompt)
+            if hash_chan:
+                chan = hash_chan.group(1).strip()
+            else:
+                chan_match = re.search(r"\b(?:nel canale|in channel|channel|canale|in|su|to|a)\b\s+(#[a-zA-Z0-9_-]+|[a-zA-Z0-9_-]+)", prompt, re.IGNORECASE)
+                chan = chan_match.group(1).strip() if chan_match else "#general"
+                if chan.lower() == "slack":
+                    chan = "#general"
+                elif not chan.startswith("#") and chan not in ("general", "random", "updates"):
+                    chan = f"#{chan}"
+
+            msg_match = re.search(r"['\"]([^'\"]+)['\"]", prompt)
+            text = msg_match.group(1).strip() if msg_match else f"Status update from Aether: {prompt}"
+
+            return UserIntent(
+                raw_prompt=effective_prompt,
+                tier=IntentTier.ACT,
+                summary=f"Send Slack message to {chan}",
+                action_id="slack.send_message",
+                action_args={
+                    "channel": chan,
+                    "text": text,
+                },
+            )
+
+        # 3e. GitHub issue creation (ACT tier - requires safety confirmation)
+        github_issue_triggers = [
+            "apri una issue", "apri issue", "crea una issue", "crea issue", "create an issue", "create issue",
+            "open an issue", "open issue", "new issue", "nuova issue", "segnala una issue",
+        ]
+        if any(k in p_lower for k in github_issue_triggers) or ("issue" in p_lower and any(v in p_lower for v in ["apri", "crea", "open", "create"])):
+            title_match = re.search(r"(?:chiamata|intitolata|denominata|called|named|titled|with title)\s+[\"']?([^\"'\n,]+)[\"']?", prompt, re.IGNORECASE)
+            title = title_match.group(1).strip() if title_match else "New Issue"
+            repo_match = re.search(r"(?:in|su|for|nel repository|nel repo|repository|repo)\s+([a-zA-Z0-9_.-]+(?:/[a-zA-Z0-9_.-]+)?)", prompt, re.IGNORECASE)
+            repo = repo_match.group(1).strip() if repo_match else "default-repo"
+            owner = None
+            if "/" in repo:
+                owner, repo = repo.split("/", 1)
+            action_args: dict[str, Any] = {"title": title, "body": f"Created by Aether from prompt: {prompt}"}
+            if repo != "default-repo":
+                action_args["repository"] = repo
+                if owner:
+                    action_args["owner"] = owner
+            return UserIntent(
+                raw_prompt=effective_prompt,
+                tier=IntentTier.ACT,
+                summary=f"Create issue '{title}' in {repo}",
+                action_id="github.create_issue",
+                action_args=action_args,
+            )
+
+        # 3f. GitHub pull request creation (ACT tier)
+        github_pr_triggers = [
+            "apri una pull request", "crea una pull request", "apri una pr", "crea una pr",
+            "create a pull request", "create pull request", "open a pull request", "open pull request", "create a pr",
+        ]
+        if any(k in p_lower for k in github_pr_triggers):
+            head_match = re.search(r"(?:from|da|branch)\s+([a-zA-Z0-9_.-]+)", prompt, re.IGNORECASE)
+            head = head_match.group(1).strip() if head_match else "feature-branch"
+            title_match = re.search(r"(?:chiamata|intitolata|called|named|titled)\s+[\"']?([^\"'\n,]+)[\"']?", prompt, re.IGNORECASE)
+            title = title_match.group(1).strip() if title_match else f"Merge {head}"
+            return UserIntent(
+                raw_prompt=effective_prompt,
+                tier=IntentTier.ACT,
+                summary=f"Create PR '{title}' from {head}",
+                action_id="github.create_pull_request",
+                action_args={"title": title, "head": head, "base": "main"},
+            )
+
+        # 3g. GitHub repository inspect / check (ANSWER tier)
+        github_check_triggers = [
+            "controlla il repository", "controlla il repo", "ispeziona il repository", "ispeziona repo",
+            "check repository", "check repo", "inspect repository", "inspect repo", "view repository",
+        ]
+        if any(k in p_lower for k in github_check_triggers):
+            repo_match = re.search(r"(?:repository|repo)\s+([a-zA-Z0-9_.-]+(?:/[a-zA-Z0-9_.-]+)?)", prompt, re.IGNORECASE)
+            repo = repo_match.group(1).strip() if repo_match else ""
+            action_args = {}
+            if repo:
+                if "/" in repo:
+                    o, r = repo.split("/", 1)
+                    action_args["owner"] = o
+                    action_args["repository"] = r
+                else:
+                    action_args["repository"] = repo
+            return UserIntent(
+                raw_prompt=effective_prompt,
+                tier=IntentTier.ANSWER,
+                summary=f"Inspect GitHub repository {repo}",
+                action_id="github.inspect_repo",
+                action_args=action_args,
+            )
+
         # 4. Multi-agent workforce delegation & deep research / report generation (DELEGATE tier)
         delegate_triggers = [
             "launch mission", "start mission", "deploy workforce", "delegate to team",
@@ -835,16 +970,36 @@ class PersonalAgentService:
         for p in pending_executions:
             action_def = self.action_executor.registry.get(p.action_id)
             name = action_def.name if action_def else p.action_id
-            desc = action_def.description if action_def else "External action"
+            inp = p.input_data or {}
+            if p.action_id == "email.send":
+                human = f"Send email to {inp.get('to', '')}: \"{inp.get('subject', '')}\""
+            elif p.action_id == "slack.send_message":
+                msg_preview = str(inp.get('text', '') or '')[:50]
+                human = f"Send message to {inp.get('channel', '#general')}: \"{msg_preview}\""
+            elif p.action_id == "github.create_issue":
+                repo = inp.get("repository") or inp.get("repo") or "repository"
+                human = f"Create issue in {repo}: \"{inp.get('title', '')}\""
+            elif p.action_id == "github.create_pull_request":
+                repo = inp.get("repository") or inp.get("repo") or "repository"
+                human = f"Create pull request in {repo}: \"{inp.get('title', '')}\""
+            elif p.action_id == "github.create_branch":
+                human = f"Create branch: \"{inp.get('branch_name', '')}\""
+            elif p.action_id == "calendar.create_event":
+                human = f"Schedule meeting: \"{inp.get('title', '')}\""
+            else:
+                title_item = inp.get("title") or inp.get("name") or inp.get("filename") or ""
+                human = f"{name}: {title_item}" if title_item else name
+
             pending_approvals.append(
                 PendingApproval(
                     execution_id=p.id,
                     action_id=p.action_id,
                     action_name=name,
-                    description=desc,
+                    description=action_def.description if action_def else human,
                     tier=action_def.tier.value if action_def else "act",
                     input_data=p.input_data,
                     created_at=p.created_at,
+                    human_summary=human,
                 ).to_dict()
             )
 

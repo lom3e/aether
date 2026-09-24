@@ -137,7 +137,7 @@ class Workspace:
     def _get_or_create(self, key: str, factory):
         if not hasattr(self, "_instances"):
             self._instances = {}
-        if key not in self._instances or self._instances[key] is None:
+        if key not in self._instances:
             self._instances[key] = factory()
         return self._instances[key]
 

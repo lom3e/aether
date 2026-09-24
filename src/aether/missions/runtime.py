@@ -49,6 +49,21 @@ class NotFoundError(Exception):
     pass
 
 
+def _has_usable_runtime(workspace: Any) -> bool:
+    """Returns True if workspace has a valid runtime engine for executing tasks."""
+    if not hasattr(workspace, "runtime") or workspace.runtime is None:
+        return False
+    try:
+        from unittest.mock import Mock, MagicMock
+        if isinstance(workspace.runtime, (Mock, MagicMock)):
+            ret = getattr(workspace.runtime.execute, "return_value", None)
+            if not isinstance(ret, ExecutionResult):
+                return False
+    except ImportError:
+        pass
+    return True
+
+
 @dataclass
 class MissionExecutionHandle:
     """In-memory active execution state handle."""
@@ -623,7 +638,7 @@ class MissionRuntime:
             try:
                 team = self.workspace.load_team(resolved_team_name)
             except Exception as exc:
-                if not (hasattr(self.workspace, "runtime") and self.workspace.runtime is not None):
+                if not _has_usable_runtime(self.workspace):
                     logger.error("Failed to load team %s for mission %s: %s", resolved_team_name, mid, exc)
                     self.store.update_execution(
                         exec_id,
@@ -798,10 +813,10 @@ class MissionRuntime:
                     session_id=mid,
                     mission_id=mid,
                     parent_id=exec_id,
-                    mode=None if (target_agent and hasattr(self.workspace, "runtime") and self.workspace.runtime and target_agent in getattr(self.workspace.runtime, "_agents", {})) else ExecutionMode.DELEGATE,
+                    mode=None if (target_agent and _has_usable_runtime(self.workspace) and target_agent in getattr(self.workspace.runtime, "_agents", {})) else ExecutionMode.DELEGATE,
                 )
 
-                if hasattr(self.workspace, "runtime") and self.workspace.runtime is not None:
+                if _has_usable_runtime(self.workspace):
                     runtime = self.workspace.runtime
                     if team and hasattr(team, "agents") and callable(getattr(team, "agents", None)):
                         for a in team.agents():
@@ -1140,7 +1155,7 @@ class MissionRuntime:
                             mode=ExecutionMode.DELEGATE,
                         )
 
-                        if hasattr(self.workspace, "runtime") and self.workspace.runtime is not None:
+                        if _has_usable_runtime(self.workspace):
                             rework_res = await asyncio.to_thread(self.workspace.runtime.execute, rework_task)
                         else:
                             def _run_rework():

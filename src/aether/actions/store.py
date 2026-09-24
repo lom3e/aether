@@ -75,10 +75,16 @@ class ActionStore:
                     rejection_reason TEXT,
                     created_at TEXT NOT NULL,
                     completed_at TEXT,
-                    metadata TEXT
+                    metadata TEXT,
+                    provider TEXT DEFAULT ''
                 );
                 """
             )
+            # Ensure provider column exists in pre-existing tables
+            try:
+                cursor.execute("ALTER TABLE action_executions ADD COLUMN provider TEXT DEFAULT '';")
+            except sqlite3.OperationalError:
+                pass
             cursor.execute("CREATE INDEX IF NOT EXISTS idx_ax_ws ON action_executions(workspace_id);")
             cursor.execute("CREATE INDEX IF NOT EXISTS idx_ax_status ON action_executions(workspace_id, status);")
             cursor.execute("CREATE INDEX IF NOT EXISTS idx_ax_created ON action_executions(workspace_id, created_at DESC);")
@@ -91,8 +97,8 @@ class ActionStore:
                 INSERT OR REPLACE INTO action_executions (
                     id, action_id, workspace_id, status, input_data, output_data,
                     error_message, approved_by, rejection_reason, created_at,
-                    completed_at, metadata
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    completed_at, metadata, provider
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 (
                     execution.id,
@@ -107,6 +113,7 @@ class ActionStore:
                     execution.created_at,
                     execution.completed_at,
                     json.dumps(execution.metadata),
+                    execution.provider or "",
                 ),
             )
         return execution
@@ -143,6 +150,8 @@ class ActionStore:
         return [self._row_to_execution(r) for r in rows]
 
     def _row_to_execution(self, row: sqlite3.Row) -> ActionExecution:
+        keys = row.keys()
+        provider_val = row["provider"] if "provider" in keys and row["provider"] else ""
         return ActionExecution(
             id=row["id"],
             action_id=row["action_id"],
@@ -156,6 +165,7 @@ class ActionStore:
             created_at=row["created_at"],
             completed_at=row["completed_at"],
             metadata=json.loads(row["metadata"]) if row["metadata"] else {},
+            provider=provider_val,
         )
 
     def close(self) -> None:

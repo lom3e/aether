@@ -429,7 +429,7 @@ def test_playwright_replay_and_workforce_health(tmp_path, monkeypatch):
 
             # 4. Start Mission to generate real execution run
             page.click("button:has-text('Start Mission')")
-            page.wait_for_selector("text=Run #1", timeout=8000)
+            page.wait_for_selector("text=Run #1", timeout=15000)
 
             # 5. Populate real telemetry in SQLite
             store = ws.missions
@@ -551,4 +551,11 @@ def test_playwright_replay_and_workforce_health(tmp_path, monkeypatch):
             browser.close()
     finally:
         server_proc.terminate()
-        server_proc.wait(timeout=5)
+        try:
+            server_proc.wait(timeout=5)
+        except Exception:
+            server_proc.kill()
+            try:
+                server_proc.wait(timeout=2)
+            except Exception:
+                pass

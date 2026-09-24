@@ -26,7 +26,9 @@ def temp_dir():
 def workspace(temp_dir):
     ws_dir = temp_dir / "workspace"
     ws_dir.mkdir(parents=True, exist_ok=True)
-    return Workspace(root=str(ws_dir))
+    ws = Workspace(root=str(ws_dir))
+    ws.runtime = None
+    return ws
 
 
 class MockTeamConfig:

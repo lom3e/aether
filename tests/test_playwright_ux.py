@@ -125,4 +125,11 @@ def test_playwright_workspace_and_conversation_flow(tmp_path, monkeypatch):
             browser.close()
     finally:
         server_proc.terminate()
-        server_proc.wait(timeout=5)
+        try:
+            server_proc.wait(timeout=5)
+        except Exception:
+            server_proc.kill()
+            try:
+                server_proc.wait(timeout=2)
+            except Exception:
+                pass

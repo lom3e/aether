@@ -4618,13 +4618,20 @@ async def connect_service_route(request: Request, payload: ConnectPayload):
     if not ws:
         raise HTTPException(status_code=503, detail="Workspace not initialized.")
     ws_id = (payload.workspace_id or ws.name).strip()
+    existing = ws.connections.get_connection(ws_id, payload.provider)
+    auth_meta = dict(payload.auth_metadata or {})
+    if existing and existing.auth_metadata:
+        for k, v in existing.auth_metadata.items():
+            current_val = auth_meta.get(k)
+            if current_val is None or current_val == "" or (isinstance(current_val, str) and (current_val.startswith("••") or "..." in current_val)):
+                auth_meta[k] = v
     conn = ws.connections.connect(
         workspace_id=ws_id,
         provider=payload.provider,
         account_name=payload.account_name,
         scopes=payload.scopes,
         capabilities=payload.capabilities,
-        auth_metadata=payload.auth_metadata,
+        auth_metadata=auth_meta,
     )
     return conn.to_dict(mask_secrets=True)
 

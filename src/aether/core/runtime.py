@@ -319,16 +319,41 @@ class Runtime:
 
         from aether.actions.models import ActionExecutionStatus
         if execution.status == ActionExecutionStatus.PENDING_APPROVAL:
+            if action_id == "email.send":
+                target_desc = f"Send email to **{action_args.get('to', '')}**\n\nSubject: {action_args.get('subject', '')}\n\n{action_args.get('body', '')}"
+            elif action_id == "slack.send_message":
+                target_desc = f"Send message to **{action_args.get('channel', '#general')}**\n\n{action_args.get('text', '')}"
+            elif action_id == "github.create_issue":
+                repo_str = action_args.get('repository') or 'repository'
+                if action_args.get('owner'):
+                    repo_str = f"{action_args['owner']}/{repo_str}"
+                target_desc = f"Create issue in **{repo_str}**\n\nTitle: {action_args.get('title', '')}\n\n{action_args.get('body', '')}"
+            elif action_id == "github.create_pull_request":
+                target_desc = f"Create pull request: **{action_args.get('title', '')}** ({action_args.get('head', '')} -> {action_args.get('base', 'main')})"
+            elif action_id == "github.create_branch":
+                target_desc = f"Create branch: **{action_args.get('branch_name', '')}**"
+            elif action_id == "calendar.create_event":
+                target_desc = f"Create calendar event: **{action_args.get('title', '')}**"
+            else:
+                title_item = action_args.get('title') or action_args.get('name') or action_args.get('filename') or ''
+                target_desc = f"**{action_name}** ({title_item})" if title_item else f"**{action_name}**"
+
             msg = (
-                f"I've prepared to **{action_name}** ({action_args.get('title', '')}).\n\n"
-                f"Because this changes your external calendar or service, please confirm or decline below."
+                f"ACTION REQUIRES APPROVAL\n\n"
+                f"{target_desc}\n\n"
+                f"Because this changes an external system or service, please confirm or decline."
             )
             return ExecutionResult(
                 success=True,
                 status=ExecutionStatus.WAITING_FOR_APPROVAL,
                 output=msg,
                 execution_id=request.id,
-                metadata={"action_execution_id": execution.id, "action_id": action_id, "action_name": action_name},
+                metadata={
+                    "action_execution_id": execution.id,
+                    "action_id": action_id,
+                    "action_name": action_name,
+                    "approval_description": target_desc,
+                },
             )
 
         return ExecutionResult(

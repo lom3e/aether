@@ -68,7 +68,7 @@ from aether.server.routes import (
 
 @pytest.fixture
 def temp_dir():
-    with tempfile.TemporaryDirectory() as td:
+    with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as td:
         yield Path(td)
 
 

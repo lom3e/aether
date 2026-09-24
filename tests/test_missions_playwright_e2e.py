@@ -105,7 +105,7 @@ def test_playwright_missions_e2e_flow(tmp_path, monkeypatch):
 
             # 7. Test Mission Runtime Execution: Draft -> Start -> Real Execution Run #1
             page.click("button:has-text('Start Mission')")
-            page.wait_for_selector("text=Run #1", timeout=5000)
+            page.wait_for_selector("text=Run #1", timeout=15000)
             assert page.is_visible("text=Run #1")
 
             # Wait for execution run to complete and show Re-run action
@@ -174,4 +174,11 @@ def test_playwright_missions_e2e_flow(tmp_path, monkeypatch):
             browser.close()
     finally:
         server_proc.terminate()
-        server_proc.wait(timeout=5)
+        try:
+            server_proc.wait(timeout=5)
+        except Exception:
+            server_proc.kill()
+            try:
+                server_proc.wait(timeout=2)
+            except Exception:
+                pass

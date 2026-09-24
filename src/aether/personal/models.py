@@ -155,6 +155,7 @@ class PendingApproval:
     tier: str
     input_data: dict[str, Any]
     created_at: str
+    human_summary: str = ""
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -162,6 +163,7 @@ class PendingApproval:
             "action_id": self.action_id,
             "action_name": self.action_name,
             "description": self.description,
+            "human_summary": self.human_summary or self.description,
             "tier": self.tier,
             "input_data": self.input_data,
             "created_at": self.created_at,

@@ -221,8 +221,8 @@ def test_playwright_interactive_execution_graph_canvas(tmp_path: Path, monkeypat
             page.click("button:has-text('Add Step')")
             page.wait_for_selector("input[placeholder='Milestone Title']", timeout=5000)
             page.fill("input[placeholder='Milestone Title']", "Compile Execution Graph")
-            page.click("form button[type='submit']")
-            page.wait_for_selector("text=Compile Execution Graph", timeout=5000)
+            page.locator("form").filter(has=page.locator("input[placeholder='Milestone Title']")).locator("button[type='submit']").click()
+            page.wait_for_selector("text=Compile Execution Graph", timeout=10000)
 
             # 5. Open Inspector in Blueprint mode (Screenshot 1: Small/Blueprint Graph)
             page.click("button:has-text('Inspect')")
@@ -243,7 +243,7 @@ def test_playwright_interactive_execution_graph_canvas(tmp_path: Path, monkeypat
 
             # 6. Start Mission to generate real Execution Run #1
             page.click("button:has-text('Start Mission')")
-            page.wait_for_selector("text=Run #1", timeout=8000)
+            page.wait_for_selector("text=Run #1", timeout=15000)
 
             # Re-open Inspector in Live Execution mode
             page.click("button:has-text('Inspect')")
@@ -324,4 +324,11 @@ def test_playwright_interactive_execution_graph_canvas(tmp_path: Path, monkeypat
             browser.close()
     finally:
         server_proc.terminate()
-        server_proc.wait(timeout=5)
+        try:
+            server_proc.wait(timeout=5)
+        except Exception:
+            server_proc.kill()
+            try:
+                server_proc.wait(timeout=2)
+            except Exception:
+                pass

@@ -48,6 +48,7 @@ def workspace_with_runtime(tmp_path: Path):
     ws.missions = store
     ws.conversations = MagicMock()
     ws.conversations_db_path = str(db_file)
+    ws.runtime = None
 
     events_received = []
     def broadcaster(payload):
