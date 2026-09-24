@@ -97,6 +97,12 @@ class ConnectionStore:
             cursor.execute("CREATE INDEX IF NOT EXISTS idx_cal_ws ON calendar_events(workspace_id);")
             cursor.execute("CREATE INDEX IF NOT EXISTS idx_cal_time ON calendar_events(workspace_id, start_time DESC);")
 
+            # Safe column migration
+            try:
+                cursor.execute("ALTER TABLE connections ADD COLUMN last_synced_at TEXT DEFAULT NULL;")
+            except Exception:
+                pass
+
     def save_connection(self, conn: Connection) -> Connection:
         """Saves or updates a connection."""
         with self._transaction() as cursor:
@@ -104,8 +110,8 @@ class ConnectionStore:
                 """
                 INSERT OR REPLACE INTO connections (
                     id, workspace_id, provider, account_name, status,
-                    scopes, capabilities, auth_metadata, created_at, updated_at
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    scopes, capabilities, auth_metadata, last_synced_at, created_at, updated_at
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 (
                     conn.id,
@@ -113,9 +119,10 @@ class ConnectionStore:
                     conn.provider,
                     conn.account_name,
                     conn.status.value if isinstance(conn.status, ConnectionStatus) else str(conn.status),
-                    json.dumps(conn.scopes),
-                    json.dumps(conn.capabilities),
-                    json.dumps(conn.auth_metadata),
+                    json.dumps(conn.scopes or []),
+                    json.dumps(conn.capabilities or []),
+                    json.dumps(conn.auth_metadata or {}),
+                    conn.last_synced_at,
                     conn.created_at,
                     conn.updated_at,
                 ),
@@ -208,6 +215,7 @@ class ConnectionStore:
         ]
 
     def _row_to_connection(self, row: sqlite3.Row) -> Connection:
+        keys = row.keys()
         return Connection(
             id=row["id"],
             workspace_id=row["workspace_id"],
@@ -217,6 +225,7 @@ class ConnectionStore:
             scopes=json.loads(row["scopes"]) if row["scopes"] else [],
             capabilities=json.loads(row["capabilities"]) if row["capabilities"] else [],
             auth_metadata=json.loads(row["auth_metadata"]) if row["auth_metadata"] else {},
+            last_synced_at=row["last_synced_at"] if "last_synced_at" in keys else None,
             created_at=row["created_at"],
             updated_at=row["updated_at"],
         )

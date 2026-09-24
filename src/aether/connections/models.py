@@ -36,6 +36,7 @@ class Connection:
     scopes: list[str] = field(default_factory=list)
     capabilities: list[str] = field(default_factory=list)
     auth_metadata: dict[str, Any] = field(default_factory=dict)
+    last_synced_at: str | None = None
     created_at: str = field(default_factory=lambda: datetime.now(timezone.utc).isoformat())
     updated_at: str = field(default_factory=lambda: datetime.now(timezone.utc).isoformat())
 
@@ -64,6 +65,7 @@ class Connection:
             "scopes": self.scopes,
             "capabilities": self.capabilities,
             "auth_metadata": meta,
+            "last_synced_at": self.last_synced_at,
             "created_at": self.created_at,
             "updated_at": self.updated_at,
         }
@@ -79,6 +81,7 @@ class Connection:
             scopes=list(data.get("scopes") or []),
             capabilities=list(data.get("capabilities") or []),
             auth_metadata=dict(data.get("auth_metadata") or {}),
+            last_synced_at=data.get("last_synced_at"),
             created_at=data.get("created_at") or datetime.now(timezone.utc).isoformat(),
             updated_at=data.get("updated_at") or datetime.now(timezone.utc).isoformat(),
         )

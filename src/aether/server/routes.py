@@ -4879,6 +4879,33 @@ async def disconnect_service_route(request: Request, provider: str, workspace_id
     return {"status": "disconnected", "provider": provider}
 
 
+@router.post("/connections/{provider}/sync")
+async def sync_connection_route(request: Request, provider: str, payload: dict | None = None):
+    ws = getattr(request.app.state, "workspace", None)
+    if not ws:
+        raise HTTPException(status_code=503, detail="Workspace not initialized.")
+    from aether.connections.sync import ConnectorSyncEngine
+    options = payload or {}
+    result = ConnectorSyncEngine.sync_provider(ws, provider, options)
+    return result.to_dict()
+
+
+@router.post("/connections/sync")
+async def sync_all_connections_route(request: Request, payload: dict | None = None):
+    ws = getattr(request.app.state, "workspace", None)
+    if not ws:
+        raise HTTPException(status_code=503, detail="Workspace not initialized.")
+    from aether.connections.sync import ConnectorSyncEngine
+    options = payload or {}
+    results = ConnectorSyncEngine.sync_all(ws, options)
+    total = sum(r.items_synced for r in results)
+    return {
+        "results": [r.to_dict() for r in results],
+        "total_items_synced": total,
+        "status": "synced",
+    }
+
+
 @router.get("/connections/calendar/events")
 async def list_calendar_events_route(request: Request, workspace_id: str | None = None, limit: int = 50):
     ws = getattr(request.app.state, "workspace", None)

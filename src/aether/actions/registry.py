@@ -528,3 +528,30 @@ class ActionRegistry:
                 },
             )
         )
+
+        # Connection Actions
+        self.register(
+            ActionDefinition(
+                id="connections.sync",
+                name="Synchronize Connections",
+                description="Synchronizes external tool data (calendar events, repository issues, messages) into workspace memory and knowledge.",
+                tier=ActionTier.DO,
+                permission_level=ActionPermissionLevel.LOCAL_MUTATION,
+                requires_confirmation=False,
+                provider="connections",
+                input_schema={
+                    "type": "object",
+                    "properties": {
+                        "provider": {"type": "string"},
+                        "options": {"type": "object"},
+                    },
+                },
+                output_schema={
+                    "type": "object",
+                    "properties": {
+                        "synced": {"type": "array"},
+                        "total_items_synced": {"type": "integer"},
+                    },
+                },
+            )
+        )

@@ -14,6 +14,7 @@ interface ConnectionItem {
   scopes: string[];
   capabilities: string[];
   auth_metadata?: Record<string, any>;
+  last_synced_at?: string;
   updated_at?: string;
 }
 
@@ -42,6 +43,8 @@ export function Connections({ navigate: _navigate }: { navigate?: (view: string,
   const [calendarEvents, setCalendarEvents] = useState<CalendarEventItem[]>([]);
   const [executions, setExecutions] = useState<ActionExecutionItem[]>([]);
   const [loading, setLoading] = useState(false);
+  const [syncingProvider, setSyncingProvider] = useState<string | null>(null);
+  const [syncingAll, setSyncingAll] = useState(false);
 
   // New Event Form State
   const [isEventModalOpen, setIsEventModalOpen] = useState(false);
@@ -367,6 +370,46 @@ export function Connections({ navigate: _navigate }: { navigate?: (view: string,
     }
   };
 
+  const handleSync = async (providerId: string) => {
+    try {
+      setSyncingProvider(providerId);
+      const res = await fetch(apiUrl(`/api/connections/${providerId}/sync`), {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+      });
+      const data = await res.json();
+      if (!res.ok) {
+        throw new Error(data.detail || data.summary || 'Sync failed');
+      }
+      showToast(`Synced ${data.items_synced || 0} items into workspace memory and knowledge!`, 'success');
+      await fetchAll();
+    } catch (err: any) {
+      showToast(err.message || 'Failed to sync connection', 'error');
+    } finally {
+      setSyncingProvider(null);
+    }
+  };
+
+  const handleSyncAll = async () => {
+    try {
+      setSyncingAll(true);
+      const res = await fetch(apiUrl('/api/connections/sync'), {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+      });
+      const data = await res.json();
+      if (!res.ok) {
+        throw new Error(data.detail || 'Sync all failed');
+      }
+      showToast(`Synced ${data.total_items_synced || 0} external items into workspace intelligence!`, 'success');
+      await fetchAll();
+    } catch (err: any) {
+      showToast(err.message || 'Failed to sync connections', 'error');
+    } finally {
+      setSyncingAll(false);
+    }
+  };
+
   const handleCreateEvent = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!newTitle.trim()) return;
@@ -443,6 +486,18 @@ export function Connections({ navigate: _navigate }: { navigate?: (view: string,
         >
           Action Log ({executions.length})
         </button>
+        <div style={{ marginLeft: 'auto', display: 'flex', alignItems: 'center' }}>
+          <button
+            className="btn btn-secondary"
+            onClick={handleSyncAll}
+            disabled={syncingAll}
+            style={{ display: 'flex', alignItems: 'center', gap: '6px', fontSize: '12px', padding: '6px 12px' }}
+            title="Sync all connected external tools into workspace memory and knowledge"
+          >
+            <RefreshCw size={12} className={syncingAll ? 'animate-spin' : ''} />
+            {syncingAll ? 'Syncing...' : 'Sync All'}
+          </button>
+        </div>
       </div>
 
       {/* Tab 1: Apps Grid */}
@@ -509,11 +564,26 @@ export function Connections({ navigate: _navigate }: { navigate?: (view: string,
                   <p style={{ fontSize: '13px', color: 'hsl(var(--muted-fg))', margin: 0, lineHeight: 1.4 }}>
                     {p.description}
                   </p>
+                  {conn?.last_synced_at && (
+                    <div style={{ fontSize: '11px', color: 'hsl(var(--muted-fg))', display: 'flex', alignItems: 'center', gap: '4px', marginTop: '6px' }}>
+                      <Clock size={11} /> Last synced: {new Date(conn.last_synced_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', month: 'short', day: 'numeric' })}
+                    </div>
+                  )}
                 </div>
 
                 <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '8px', borderTop: '1px solid hsl(var(--border)/0.5)', paddingTop: '14px' }}>
                   {isConnected ? (
                     <>
+                      <button
+                        className="btn btn-secondary"
+                        onClick={() => handleSync(p.id)}
+                        disabled={syncingProvider === p.id}
+                        style={{ fontSize: '12px', padding: '6px 12px', display: 'flex', alignItems: 'center', gap: '4px' }}
+                        title="Sync external entities into persistent memory and knowledge"
+                      >
+                        <RefreshCw size={12} className={syncingProvider === p.id ? 'animate-spin' : ''} />
+                        {syncingProvider === p.id ? 'Syncing...' : 'Sync Now'}
+                      </button>
                       {p.id === 'calendar' ? (
                         <button
                           className="btn btn-secondary"

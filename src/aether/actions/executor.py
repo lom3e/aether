@@ -426,6 +426,42 @@ class ActionExecutor:
             report = MissionDryRunEngine.analyze_mission(mission, ws)
             return report.to_dict()
 
+        # 10. Connection sync action
+        elif action_id == "connections.sync":
+            from aether.connections.sync import ConnectorSyncEngine
+            from aether.workspace.workspace import Workspace
+
+            ws = None
+            try:
+                ws = Workspace.get(ws_id) if hasattr(Workspace, "get") else None
+                if not ws and self.project_path:
+                    ws = Workspace.get_or_init(self.project_path)
+            except Exception:
+                pass
+
+            if not ws:
+                raise ValueError(f"Workspace '{ws_id}' not found for connection sync.")
+
+            provider_req = inp.get("provider")
+            options = inp.get("options") or {}
+
+            if provider_req:
+                res = ConnectorSyncEngine.sync_provider(ws, provider_req, options)
+                return {
+                    "synced": [res.to_dict()],
+                    "total_items_synced": res.items_synced,
+                    "provider": provider_req,
+                    "status": res.status,
+                }
+            else:
+                results = ConnectorSyncEngine.sync_all(ws, options)
+                total = sum(r.items_synced for r in results)
+                return {
+                    "synced": [r.to_dict() for r in results],
+                    "total_items_synced": total,
+                    "status": "synced",
+                }
+
         raise ValueError(
             f"Action '{action_id}' is not supported by built-in connectors and has no registered handler."
         )

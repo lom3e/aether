@@ -415,6 +415,33 @@ class PersonalAgentService:
                 action_args={"mission_id": mission_id, "title": prompt},
             )
 
+        # 3i. Connection / Knowledge Sync (DO tier)
+        sync_triggers = [
+            "sincronizza i connettori", "sincronizza connettori", "sync connectors", "sync connettori",
+            "sincronizza il calendario", "sincronizza calendario", "sync calendar", "aggiorna calendario",
+            "sync github", "sincronizza github", "aggiorna github", "aggiorna la memoria con",
+            "aggiorna memoria e connettori", "sync all connections", "sync external",
+        ]
+        if any(k in p_lower for k in sync_triggers):
+            prov = None
+            if "calendar" in p_lower or "calendario" in p_lower:
+                prov = "calendar"
+            elif "github" in p_lower:
+                prov = "github"
+            elif "slack" in p_lower:
+                prov = "slack"
+            elif "email" in p_lower:
+                prov = "email"
+
+            args = {"provider": prov} if prov else {}
+            return UserIntent(
+                raw_prompt=effective_prompt,
+                tier=IntentTier.DO,
+                summary=f"Synchronize {prov or 'all'} external connections into memory and knowledge",
+                action_id="connections.sync",
+                action_args=args,
+            )
+
         # 4. Multi-agent workforce delegation & deep research / report generation (DELEGATE tier)
         delegate_triggers = [
             "launch mission", "start mission", "deploy workforce", "delegate to team",
@@ -687,6 +714,27 @@ class PersonalAgentService:
                     lines.append("")
 
                 lines.append("Pre-flight analysis complete. Would you like to proceed with launching this mission?")
+                response_text = "\n".join(lines)
+            elif intent.action_id == "connections.sync":
+                res_data = runtime_res.metadata.get("action_result") or {}
+                total_synced = res_data.get("total_items_synced", 0)
+                synced_list = res_data.get("synced", [])
+
+                lines = [
+                    "### 🔄 External Connections Synchronized",
+                    f"- **Total Items Ingested:** {total_synced}",
+                    "",
+                    "#### Synchronized Services",
+                ]
+                for item in synced_list:
+                    prov = str(item.get("provider", "")).capitalize()
+                    status = item.get("status", "synced")
+                    count = item.get("items_synced", 0)
+                    summary = item.get("summary", "")
+                    lines.append(f"- **{prov}:** `{status.upper()}` ({count} items) — {summary}")
+
+                lines.append("")
+                lines.append("All external entities have been merged into persistent workforce memory and knowledge.")
                 response_text = "\n".join(lines)
             else:
                 target = intent.action_args.get("filename", "item")
