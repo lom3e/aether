@@ -47,6 +47,29 @@ class ActivityService:
         )
         return self.store.record_activity(event)
 
+    def record_activity(
+        self,
+        workspace_id: str,
+        title: str,
+        description: str = "",
+        category: ActivityCategory | str = ActivityCategory.WORK,
+        status: ActivityStatus | str = ActivityStatus.COMPLETED,
+        link_view: str | None = None,
+        link_id: str | None = None,
+        metadata: dict[str, Any] | None = None,
+    ) -> ActivityEvent:
+        """Alias for log()."""
+        return self.log(
+            workspace_id=workspace_id,
+            title=title,
+            description=description,
+            category=category,
+            status=status,
+            link_view=link_view,
+            link_id=link_id,
+            metadata=metadata,
+        )
+
     def list(
         self,
         workspace_id: str,

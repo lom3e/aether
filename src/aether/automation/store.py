@@ -14,9 +14,11 @@ from typing import Any, Generator
 from aether.automation.models import (
     AutomationDefinition,
     AutomationRunRecord,
+    AutomationSuggestion,
     OutputDestination,
     PipelineStep,
     RunStatus,
+    SuggestionStatus,
     TriggerConfig,
 )
 from aether.core.sqlite import get_sqlite_connection, sqlite_connection
@@ -59,10 +61,26 @@ class AutomationStore:
                     updated_at TEXT NOT NULL,
                     last_run_at TEXT,
                     last_run_status TEXT,
-                    next_run_at TEXT
+                    next_run_at TEXT,
+                    is_draft INTEGER NOT NULL DEFAULT 0,
+                    requires_approval INTEGER NOT NULL DEFAULT 0,
+                    human_schedule TEXT,
+                    metadata_json TEXT DEFAULT '{}'
                 );
                 """
             )
+            # Check existing columns in automations for forward migration
+            cursor = conn.execute("PRAGMA table_info(automations);")
+            columns = {row[1] for row in cursor.fetchall()}
+            if "is_draft" not in columns:
+                conn.execute("ALTER TABLE automations ADD COLUMN is_draft INTEGER NOT NULL DEFAULT 0;")
+            if "requires_approval" not in columns:
+                conn.execute("ALTER TABLE automations ADD COLUMN requires_approval INTEGER NOT NULL DEFAULT 0;")
+            if "human_schedule" not in columns:
+                conn.execute("ALTER TABLE automations ADD COLUMN human_schedule TEXT;")
+            if "metadata_json" not in columns:
+                conn.execute("ALTER TABLE automations ADD COLUMN metadata_json TEXT DEFAULT '{}';")
+
             # 2. Automation Runs History Table
             conn.execute(
                 """
@@ -91,11 +109,35 @@ class AutomationStore:
                 "CREATE INDEX IF NOT EXISTS idx_automation_runs_started ON automation_runs(started_at DESC);"
             )
 
+            # 3. Automation Suggestions Table
+            conn.execute(
+                """
+                CREATE TABLE IF NOT EXISTS automation_suggestions (
+                    id TEXT PRIMARY KEY,
+                    title TEXT NOT NULL,
+                    description TEXT NOT NULL DEFAULT '',
+                    rationale TEXT NOT NULL DEFAULT '',
+                    evidence_count INTEGER NOT NULL DEFAULT 1,
+                    evidence_summary TEXT NOT NULL DEFAULT '',
+                    trigger_json TEXT NOT NULL,
+                    steps_json TEXT NOT NULL DEFAULT '[]',
+                    output_destination_json TEXT,
+                    status TEXT NOT NULL DEFAULT 'pending',
+                    created_at TEXT NOT NULL,
+                    automation_id TEXT
+                );
+                """
+            )
+            conn.execute(
+                "CREATE INDEX IF NOT EXISTS idx_suggestions_status ON automation_suggestions(status);"
+            )
+
     def list_automations(self) -> list[AutomationDefinition]:
         with self._get_connection() as conn:
             cursor = conn.execute(
                 "SELECT id, name, description, enabled, team_name, trigger_json, steps_json, "
-                "output_destination_json, created_at, updated_at, last_run_at, last_run_status, next_run_at "
+                "output_destination_json, created_at, updated_at, last_run_at, last_run_status, next_run_at, "
+                "is_draft, requires_approval, human_schedule, metadata_json "
                 "FROM automations ORDER BY created_at ASC;"
             )
             rows = cursor.fetchall()
@@ -105,6 +147,7 @@ class AutomationStore:
             trigger_data = json.loads(r[5]) if r[5] else {}
             steps_data = json.loads(r[6]) if r[6] else []
             out_data = json.loads(r[7]) if r[7] else None
+            meta_data = json.loads(r[16]) if len(r) > 16 and r[16] else {}
 
             res.append(
                 AutomationDefinition(
@@ -121,6 +164,10 @@ class AutomationStore:
                     last_run_at=r[10],
                     last_run_status=r[11],
                     next_run_at=r[12],
+                    is_draft=bool(r[13]) if len(r) > 13 else False,
+                    requires_approval=bool(r[14]) if len(r) > 14 else False,
+                    human_schedule=r[15] if len(r) > 15 else None,
+                    metadata=meta_data,
                 )
             )
         return res
@@ -129,7 +176,8 @@ class AutomationStore:
         with self._get_connection() as conn:
             cursor = conn.execute(
                 "SELECT id, name, description, enabled, team_name, trigger_json, steps_json, "
-                "output_destination_json, created_at, updated_at, last_run_at, last_run_status, next_run_at "
+                "output_destination_json, created_at, updated_at, last_run_at, last_run_status, next_run_at, "
+                "is_draft, requires_approval, human_schedule, metadata_json "
                 "FROM automations WHERE id = ?;",
                 (automation_id,),
             )
@@ -141,6 +189,7 @@ class AutomationStore:
         trigger_data = json.loads(row[5]) if row[5] else {}
         steps_data = json.loads(row[6]) if row[6] else []
         out_data = json.loads(row[7]) if row[7] else None
+        meta_data = json.loads(row[16]) if len(row) > 16 and row[16] else {}
 
         return AutomationDefinition(
             id=row[0],
@@ -156,6 +205,10 @@ class AutomationStore:
             last_run_at=row[10],
             last_run_status=row[11],
             next_run_at=row[12],
+            is_draft=bool(row[13]) if len(row) > 13 else False,
+            requires_approval=bool(row[14]) if len(row) > 14 else False,
+            human_schedule=row[15] if len(row) > 15 else None,
+            metadata=meta_data,
         )
 
     def save_automation(self, auto: AutomationDefinition) -> AutomationDefinition:
@@ -169,8 +222,9 @@ class AutomationStore:
                 """
                 INSERT INTO automations (
                     id, name, description, enabled, team_name, trigger_json, steps_json,
-                    output_destination_json, created_at, updated_at, last_run_at, last_run_status, next_run_at
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    output_destination_json, created_at, updated_at, last_run_at, last_run_status, next_run_at,
+                    is_draft, requires_approval, human_schedule, metadata_json
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 ON CONFLICT(id) DO UPDATE SET
                     name = excluded.name,
                     description = excluded.description,
@@ -182,7 +236,11 @@ class AutomationStore:
                     updated_at = excluded.updated_at,
                     last_run_at = excluded.last_run_at,
                     last_run_status = excluded.last_run_status,
-                    next_run_at = excluded.next_run_at;
+                    next_run_at = excluded.next_run_at,
+                    is_draft = excluded.is_draft,
+                    requires_approval = excluded.requires_approval,
+                    human_schedule = excluded.human_schedule,
+                    metadata_json = excluded.metadata_json;
                 """,
                 (
                     auto.id,
@@ -198,6 +256,10 @@ class AutomationStore:
                     auto.last_run_at,
                     auto.last_run_status,
                     auto.next_run_at,
+                    1 if auto.is_draft else 0,
+                    1 if auto.requires_approval else 0,
+                    auto.human_schedule,
+                    json.dumps(auto.metadata or {}),
                 ),
             )
         return auto
@@ -212,6 +274,8 @@ class AutomationStore:
         if not auto:
             return None
         auto.enabled = enabled
+        if enabled:
+            auto.is_draft = False
         return self.save_automation(auto)
 
     def record_run_started(self, run: AutomationRunRecord) -> None:
@@ -336,3 +400,153 @@ class AutomationStore:
             error=row[10],
             step_runs=json.loads(row[11]) if row[11] else [],
         )
+
+    # ---------------------------------------------------------------------------
+    # Automation Suggestions
+    # ---------------------------------------------------------------------------
+
+    def list_suggestions(self, status: str | None = "pending") -> list[AutomationSuggestion]:
+        query = (
+            "SELECT id, title, description, rationale, evidence_count, evidence_summary, "
+            "trigger_json, steps_json, output_destination_json, status, created_at, automation_id "
+            "FROM automation_suggestions "
+        )
+        params: list[Any] = []
+        if status:
+            query += "WHERE status = ? "
+            params.append(status)
+        query += "ORDER BY created_at DESC;"
+
+        with self._get_connection() as conn:
+            cursor = conn.execute(query, tuple(params))
+            rows = cursor.fetchall()
+
+        suggestions: list[AutomationSuggestion] = []
+        for r in rows:
+            trig_data = json.loads(r[6]) if r[6] else {}
+            steps_data = json.loads(r[7]) if r[7] else []
+            out_data = json.loads(r[8]) if r[8] else None
+
+            suggestions.append(
+                AutomationSuggestion(
+                    id=r[0],
+                    title=r[1],
+                    description=r[2],
+                    rationale=r[3],
+                    evidence_count=r[4],
+                    evidence_summary=r[5],
+                    suggested_trigger=TriggerConfig.from_dict(trig_data),
+                    suggested_steps=[PipelineStep.from_dict(s) for s in steps_data],
+                    suggested_output=OutputDestination.from_dict(out_data) if out_data else None,
+                    status=SuggestionStatus(r[9]) if r[9] in [s.value for s in SuggestionStatus] else SuggestionStatus.PENDING,
+                    created_at=r[10],
+                    automation_id=r[11],
+                )
+            )
+        return suggestions
+
+    def get_suggestion(self, suggestion_id: str) -> AutomationSuggestion | None:
+        with self._get_connection() as conn:
+            cursor = conn.execute(
+                "SELECT id, title, description, rationale, evidence_count, evidence_summary, "
+                "trigger_json, steps_json, output_destination_json, status, created_at, automation_id "
+                "FROM automation_suggestions WHERE id = ?;",
+                (suggestion_id,),
+            )
+            row = cursor.fetchone()
+
+        if not row:
+            return None
+
+        trig_data = json.loads(row[6]) if row[6] else {}
+        steps_data = json.loads(row[7]) if row[7] else []
+        out_data = json.loads(row[8]) if row[8] else None
+
+        return AutomationSuggestion(
+            id=row[0],
+            title=row[1],
+            description=row[2],
+            rationale=row[3],
+            evidence_count=row[4],
+            evidence_summary=row[5],
+            suggested_trigger=TriggerConfig.from_dict(trig_data),
+            suggested_steps=[PipelineStep.from_dict(s) for s in steps_data],
+            suggested_output=OutputDestination.from_dict(out_data) if out_data else None,
+            status=SuggestionStatus(row[9]) if row[9] in [s.value for s in SuggestionStatus] else SuggestionStatus.PENDING,
+            created_at=row[10],
+            automation_id=row[11],
+        )
+
+    def save_suggestion(self, suggestion: AutomationSuggestion) -> AutomationSuggestion:
+        now = datetime.now(timezone.utc).isoformat()
+        if not suggestion.created_at:
+            suggestion.created_at = now
+
+        with self._get_connection() as conn:
+            conn.execute(
+                """
+                INSERT INTO automation_suggestions (
+                    id, title, description, rationale, evidence_count, evidence_summary,
+                    trigger_json, steps_json, output_destination_json, status, created_at, automation_id
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                ON CONFLICT(id) DO UPDATE SET
+                    title = excluded.title,
+                    description = excluded.description,
+                    rationale = excluded.rationale,
+                    evidence_count = excluded.evidence_count,
+                    evidence_summary = excluded.evidence_summary,
+                    trigger_json = excluded.trigger_json,
+                    steps_json = excluded.steps_json,
+                    output_destination_json = excluded.output_destination_json,
+                    status = excluded.status,
+                    automation_id = excluded.automation_id;
+                """,
+                (
+                    suggestion.id,
+                    suggestion.title,
+                    suggestion.description,
+                    suggestion.rationale,
+                    suggestion.evidence_count,
+                    suggestion.evidence_summary,
+                    json.dumps(suggestion.suggested_trigger.to_dict()),
+                    json.dumps([s.to_dict() for s in suggestion.suggested_steps]),
+                    json.dumps(suggestion.suggested_output.to_dict()) if suggestion.suggested_output else None,
+                    suggestion.status.value if isinstance(suggestion.status, SuggestionStatus) else suggestion.status,
+                    suggestion.created_at,
+                    suggestion.automation_id,
+                ),
+            )
+        return suggestion
+
+    def dismiss_suggestion(self, suggestion_id: str) -> bool:
+        with self._get_connection() as conn:
+            cursor = conn.execute(
+                "UPDATE automation_suggestions SET status = ? WHERE id = ?;",
+                (SuggestionStatus.DISMISSED.value, suggestion_id),
+            )
+            return cursor.rowcount > 0
+
+    def accept_suggestion(self, suggestion_id: str) -> AutomationDefinition | None:
+        suggestion = self.get_suggestion(suggestion_id)
+        if not suggestion:
+            return None
+
+        # Create active automation from suggestion
+        auto = AutomationDefinition(
+            name=suggestion.title,
+            description=suggestion.description,
+            enabled=True,
+            trigger=suggestion.suggested_trigger,
+            steps=suggestion.suggested_steps,
+            output_destination=suggestion.suggested_output,
+            is_draft=False,
+            requires_approval=False,
+        )
+        saved_auto = self.save_automation(auto)
+
+        # Update suggestion status
+        suggestion.status = SuggestionStatus.ACCEPTED
+        suggestion.automation_id = saved_auto.id
+        self.save_suggestion(suggestion)
+
+        return saved_auto

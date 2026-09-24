@@ -147,6 +147,10 @@ class AutomationDefinition:
     trigger: TriggerConfig = field(default_factory=TriggerConfig)
     steps: list[PipelineStep] = field(default_factory=list)
     output_destination: OutputDestination | None = None
+    is_draft: bool = False
+    requires_approval: bool = False
+    human_schedule: str | None = None
+    metadata: dict[str, Any] = field(default_factory=dict)
     created_at: str = field(default_factory=lambda: datetime.now(timezone.utc).isoformat())
     updated_at: str = field(default_factory=lambda: datetime.now(timezone.utc).isoformat())
     last_run_at: str | None = None
@@ -163,6 +167,10 @@ class AutomationDefinition:
             "trigger": self.trigger.to_dict(),
             "steps": [s.to_dict() for s in self.steps],
             "output_destination": self.output_destination.to_dict() if self.output_destination else None,
+            "is_draft": self.is_draft,
+            "requires_approval": self.requires_approval,
+            "human_schedule": self.human_schedule,
+            "metadata": self.metadata,
             "created_at": self.created_at,
             "updated_at": self.updated_at,
             "last_run_at": self.last_run_at,
@@ -190,6 +198,10 @@ class AutomationDefinition:
             trigger=trigger,
             steps=steps,
             output_destination=output_dest,
+            is_draft=bool(data.get("is_draft", False)),
+            requires_approval=bool(data.get("requires_approval", False)),
+            human_schedule=data.get("human_schedule"),
+            metadata=data.get("metadata", {}) if isinstance(data.get("metadata"), dict) else {},
             created_at=data.get("created_at") or datetime.now(timezone.utc).isoformat(),
             updated_at=data.get("updated_at") or datetime.now(timezone.utc).isoformat(),
             last_run_at=data.get("last_run_at"),
@@ -278,4 +290,75 @@ class AutomationRunRecord:
             output_result=data.get("output_result"),
             error=data.get("error"),
             step_runs=data.get("step_runs", []),
+        )
+
+
+class SuggestionStatus(str, Enum):
+    PENDING = "pending"
+    ACCEPTED = "accepted"
+    DISMISSED = "dismissed"
+    SNOOZED = "snoozed"
+
+
+@dataclass
+class AutomationSuggestion:
+    id: str = field(default_factory=lambda: f"sug_{uuid.uuid4().hex[:8]}")
+    title: str = ""
+    description: str = ""
+    rationale: str = ""
+    evidence_count: int = 1
+    evidence_summary: str = ""
+    suggested_trigger: TriggerConfig = field(default_factory=TriggerConfig)
+    suggested_steps: list[PipelineStep] = field(default_factory=list)
+    suggested_output: OutputDestination | None = None
+    status: SuggestionStatus = SuggestionStatus.PENDING
+    created_at: str = field(default_factory=lambda: datetime.now(timezone.utc).isoformat())
+    automation_id: str | None = None
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "id": self.id,
+            "title": self.title,
+            "description": self.description,
+            "rationale": self.rationale,
+            "evidence_count": self.evidence_count,
+            "evidence_summary": self.evidence_summary,
+            "suggested_trigger": self.suggested_trigger.to_dict(),
+            "suggested_steps": [s.to_dict() for s in self.suggested_steps],
+            "suggested_output": self.suggested_output.to_dict() if self.suggested_output else None,
+            "status": self.status.value if isinstance(self.status, SuggestionStatus) else self.status,
+            "created_at": self.created_at,
+            "automation_id": self.automation_id,
+        }
+
+    @classmethod
+    def from_dict(cls, data: dict[str, Any]) -> AutomationSuggestion:
+        raw_status = data.get("status", "pending")
+        try:
+            status = SuggestionStatus(raw_status)
+        except ValueError:
+            status = SuggestionStatus.PENDING
+
+        trig_data = data.get("suggested_trigger", {})
+        trigger = TriggerConfig.from_dict(trig_data) if isinstance(trig_data, dict) else TriggerConfig()
+
+        steps_data = data.get("suggested_steps", [])
+        steps = [PipelineStep.from_dict(s) for s in steps_data if isinstance(s, dict)]
+
+        out_data = data.get("suggested_output")
+        out_dest = OutputDestination.from_dict(out_data) if isinstance(out_data, dict) else None
+
+        return cls(
+            id=data.get("id") or f"sug_{uuid.uuid4().hex[:8]}",
+            title=data.get("title", ""),
+            description=data.get("description", ""),
+            rationale=data.get("rationale", ""),
+            evidence_count=int(data.get("evidence_count", 1)),
+            evidence_summary=data.get("evidence_summary", ""),
+            suggested_trigger=trigger,
+            suggested_steps=steps,
+            suggested_output=out_dest,
+            status=status,
+            created_at=data.get("created_at") or datetime.now(timezone.utc).isoformat(),
+            automation_id=data.get("automation_id"),
         )

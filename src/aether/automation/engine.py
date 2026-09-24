@@ -122,15 +122,36 @@ class AutomationEngine:
                 step_status = "completed"
 
                 try:
-                    # Run via team or agent
-                    if hasattr(team, "run"):
+                    # 1. Run via team if available
+                    if team and hasattr(team, "run"):
                         result = await asyncio.to_thread(team.run, prompt, target_agent=step.agent_name)
                         step_output = result.output if hasattr(result, "output") else str(result)
                         if hasattr(result, "success") and not result.success:
                             step_status = "failed"
                             step_err = getattr(result, "error", "Step execution failed")
+                    # 2. Run via workspace canonical runtime
+                    elif hasattr(self.workspace, "runtime") and self.workspace.runtime:
+                        from aether.core.execution import ExecutionMode, ExecutionStatus, Task
+                        runtime_task = Task(
+                            instruction=prompt,
+                            workspace_id=getattr(self.workspace, "id", "default"),
+                            agent_name=step.agent_name,
+                            mode=ExecutionMode.DELEGATE,
+                        )
+                        result = await asyncio.to_thread(self.workspace.runtime.execute, runtime_task)
+                        if result.status == ExecutionStatus.WAITING_FOR_APPROVAL:
+                            step_status = "failed"
+                            step_output = result.output or "Action paused awaiting safety approval."
+                            step_err = "Action requires safety approval."
+                        elif result.success:
+                            step_status = "completed"
+                            step_output = result.output or f"Executed step {step.name} successfully."
+                        else:
+                            step_status = "failed"
+                            step_err = result.error or "Runtime execution failed"
                     else:
-                        step_output = f"[Simulated execution for {step.name}]: Completed."
+                        step_status = "failed"
+                        step_err = f"No execution runtime or team available for step '{step.name}'"
                 except Exception as exc:
                     step_status = "failed"
                     step_err = str(exc)
@@ -233,6 +254,48 @@ class AutomationEngine:
             self.workspace.automations.save_automation(automation)
         except Exception as exc:
             logger.warning("Failed to record automation run completion: %s", exc)
+
+        # Dispatch notification
+        if hasattr(self.workspace, "notifications") and self.workspace.notifications:
+            try:
+                from aether.notifications.models import NotificationPriority, NotificationType
+                notif_type = (
+                    NotificationType.ACTION_COMPLETED
+                    if run_status == RunStatus.COMPLETED
+                    else NotificationType.SYSTEM_ALERT
+                )
+                notif_priority = (
+                    NotificationPriority.HIGH
+                    if run_status == RunStatus.FAILED
+                    else NotificationPriority.NORMAL
+                )
+                self.workspace.notifications.notify(
+                    workspace_id=getattr(self.workspace, "id", "default"),
+                    type=notif_type,
+                    title=f"Automation {'completed' if run_status == RunStatus.COMPLETED else 'failed'}: {automation.name}",
+                    message=f"Run {run.run_id} {'completed in ' + str(total_duration) + 's' if run_status == RunStatus.COMPLETED else ('failed: ' + str(run_error))}",
+                    priority=notif_priority,
+                    link_view="automations",
+                    link_id=automation.id,
+                )
+            except Exception as notif_err:
+                logger.debug("Could not dispatch automation notification: %s", notif_err)
+
+        # Log activity
+        if hasattr(self.workspace, "activity") and self.workspace.activity:
+            try:
+                from aether.activity.models import ActivityCategory, ActivityStatus
+                category_val = getattr(ActivityCategory, "AUTOMATION", ActivityCategory.SYSTEM)
+                self.workspace.activity.record_activity(
+                    workspace_id=getattr(self.workspace, "id", "default"),
+                    category=category_val,
+                    title=f"Automation: {automation.name}",
+                    description=f"Status: {run_status.value}. Duration: {total_duration}s",
+                    status=ActivityStatus.COMPLETED if run_status == RunStatus.COMPLETED else ActivityStatus.FAILED,
+                    metadata={"automation_id": automation.id, "run_id": run.run_id, "trigger_type": trigger_type},
+                )
+            except Exception as act_err:
+                logger.debug("Could not record automation activity: %s", act_err)
 
         # Dispatch completion event
         if self.event_bus:

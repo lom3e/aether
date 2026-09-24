@@ -109,6 +109,11 @@ class Workspace:
         return self._config_cache
 
     @property
+    def id(self) -> str:
+        """Return the unique identifier or slug of the workspace."""
+        return self.config.get("workspace", {}).get("id") or self.name or self.root.name
+
+    @property
     def name(self) -> str:
         """Return the display name of the workspace."""
         return self.config.get("workspace", {}).get("name") or self.root.name

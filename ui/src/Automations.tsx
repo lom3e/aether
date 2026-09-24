@@ -2,7 +2,7 @@ import { useState, useEffect, useCallback, useContext } from 'react';
 import {
   Zap, Plus, Play, Edit2, Trash2, Clock, Folder, Globe,
   CheckCircle2, AlertCircle, RefreshCw, X, ArrowRight,
-  Layers, Bell, FileText, Database, ShieldAlert
+  Layers, Bell, FileText, Database, ShieldAlert, Sparkles, Copy, Check
 } from 'lucide-react';
 import { TopHeader } from './TopHeader';
 import { useTranslation } from './i18n';
@@ -46,11 +46,30 @@ interface Automation {
   trigger: TriggerConfig;
   steps: PipelineStep[];
   output_destination?: OutputDestination;
+  is_draft?: boolean;
+  requires_approval?: boolean;
+  human_schedule?: string;
+  metadata?: Record<string, any>;
   created_at: string;
   updated_at: string;
   last_run_at?: string;
   last_run_status?: string;
   next_run_at?: string;
+}
+
+interface AutomationSuggestion {
+  id: string;
+  title: string;
+  description: string;
+  rationale: string;
+  evidence_count: number;
+  evidence_summary: string;
+  suggested_trigger: TriggerConfig;
+  suggested_steps: PipelineStep[];
+  suggested_output?: OutputDestination;
+  status: string;
+  created_at: string;
+  automation_id?: string;
 }
 
 interface AutomationRun {
@@ -99,6 +118,15 @@ export function Automations() {
   // Run Details Modal
   const [selectedRun, setSelectedRun] = useState<AutomationRun | null>(null);
 
+  // Suggestions State
+  const [suggestions, setSuggestions] = useState<AutomationSuggestion[]>([]);
+
+  // AI Builder Modal State
+  const [isAiBuilderOpen, setIsAiBuilderOpen] = useState(false);
+  const [aiPrompt, setAiPrompt] = useState('');
+  const [aiLoading, setAiLoading] = useState(false);
+  const [aiProposal, setAiProposal] = useState<{ proposal: string; automation: any; recurrence_text?: string } | null>(null);
+
   const fetchAutomations = useCallback(() => {
     setLoading(true);
     fetch(apiUrl('/api/automations'))
@@ -111,6 +139,13 @@ export function Automations() {
         console.error('Failed to load automations', err);
         setLoading(false);
       });
+  }, []);
+
+  const fetchSuggestions = useCallback(() => {
+    fetch(apiUrl('/api/automations/suggestions?status=pending'))
+      .then((res) => res.json())
+      .then((data) => setSuggestions(Array.isArray(data) ? data : []))
+      .catch((err) => console.error('Failed to load suggestions', err));
   }, []);
 
   const fetchRuns = useCallback(() => {
@@ -138,9 +173,76 @@ export function Automations() {
 
   useEffect(() => {
     fetchAutomations();
+    fetchSuggestions();
     fetchRuns();
     fetchTeamsAndAgents();
-  }, [fetchAutomations, fetchRuns, fetchTeamsAndAgents]);
+  }, [fetchAutomations, fetchSuggestions, fetchRuns, fetchTeamsAndAgents]);
+
+  const handleAcceptSuggestion = async (sugId: string) => {
+    try {
+      const res = await fetch(apiUrl(`/api/automations/suggestions/${sugId}/accept`), {
+        method: 'POST',
+      });
+      if (!res.ok) throw await apiError(res, 'Failed to accept suggestion');
+      showToast('Automation activated!', 'success');
+      fetchSuggestions();
+      fetchAutomations();
+    } catch (err: any) {
+      showToast(err.message || 'Failed to accept suggestion', 'error');
+    }
+  };
+
+  const handleDismissSuggestion = async (sugId: string) => {
+    try {
+      const res = await fetch(apiUrl(`/api/automations/suggestions/${sugId}/dismiss`), {
+        method: 'POST',
+      });
+      if (!res.ok) throw await apiError(res, 'Failed to dismiss suggestion');
+      showToast('Suggestion dismissed', 'info');
+      fetchSuggestions();
+    } catch (err: any) {
+      showToast(err.message || 'Failed to dismiss suggestion', 'error');
+    }
+  };
+
+  const handleGenerateAiProposal = async () => {
+    if (!aiPrompt.trim()) return;
+    setAiLoading(true);
+    try {
+      const res = await fetch(apiUrl('/api/automations/build-nl'), {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ prompt: aiPrompt.trim(), save: false }),
+      });
+      if (!res.ok) throw await apiError(res, 'Failed to generate automation');
+      const data = await res.json();
+      setAiProposal(data);
+    } catch (err: any) {
+      showToast(err.message || 'Failed to generate automation', 'error');
+    } finally {
+      setAiLoading(false);
+    }
+  };
+
+  const handleSaveAiAutomation = async (activate: boolean) => {
+    if (!aiProposal?.automation) return;
+    try {
+      const autoToSave = { ...aiProposal.automation, enabled: activate, is_draft: !activate };
+      const res = await fetch(apiUrl('/api/automations'), {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(autoToSave),
+      });
+      if (!res.ok) throw await apiError(res, 'Failed to save automation');
+      showToast(activate ? 'Automation created and activated!' : 'Draft automation created!', 'success');
+      setIsAiBuilderOpen(false);
+      setAiPrompt('');
+      setAiProposal(null);
+      fetchAutomations();
+    } catch (err: any) {
+      showToast(err.message || 'Failed to save automation', 'error');
+    }
+  };
 
   const handleToggle = async (auto: Automation) => {
     const nextEnabled = !auto.enabled;
@@ -229,12 +331,24 @@ export function Automations() {
                 className="btn btn-ghost"
                 onClick={() => {
                   fetchAutomations();
+                  fetchSuggestions();
                   fetchRuns();
                 }}
               >
                 <RefreshCw size={15} />
               </button>
             </Tooltip>
+            <button
+              className="btn btn-secondary"
+              style={{ display: 'flex', alignItems: 'center', gap: '6px' }}
+              onClick={() => {
+                setIsAiBuilderOpen(true);
+                setAiPrompt('');
+                setAiProposal(null);
+              }}
+            >
+              <Sparkles size={15} className="text-primary" /> Create with AI
+            </button>
             <button
               className="btn btn-primary"
               onClick={() => {
@@ -311,6 +425,86 @@ export function Automations() {
         {/* WORKFLOWS TAB */}
         {activeTab === 'workflows' && (
           <div>
+            {/* AI WORKFLOW SUGGESTIONS */}
+            {suggestions.length > 0 && (
+              <div style={{ marginBottom: '24px', padding: '16px 20px', borderRadius: '12px', background: 'linear-gradient(135deg, hsl(var(--primary)/0.08) 0%, hsl(var(--secondary)/0.04) 100%)', border: '1px solid hsl(var(--primary)/0.25)' }}>
+                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '14px' }}>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+                    <div style={{ width: '32px', height: '32px', borderRadius: '8px', background: 'hsl(var(--primary)/0.15)', color: 'hsl(var(--primary))', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                      <Sparkles size={18} />
+                    </div>
+                    <div>
+                      <h4 style={{ margin: 0, fontSize: '14px', fontWeight: 600, color: 'hsl(var(--fg))' }}>
+                        Automations Discovered ({suggestions.length})
+                      </h4>
+                      <p style={{ margin: '2px 0 0', fontSize: '12px', color: 'hsl(var(--muted-fg))' }}>
+                        Aether detected repeated action patterns in your workspace and synthesized these workflow opportunities.
+                      </p>
+                    </div>
+                  </div>
+                </div>
+
+                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(320px, 1fr))', gap: '14px' }}>
+                  {suggestions.map((sug) => (
+                    <div
+                      key={sug.id}
+                      style={{
+                        padding: '14px',
+                        borderRadius: '10px',
+                        background: 'hsl(var(--card))',
+                        border: '1px solid hsl(var(--border))',
+                        display: 'flex',
+                        flexDirection: 'column',
+                        justifyContent: 'space-between',
+                        gap: '10px',
+                      }}
+                    >
+                      <div>
+                        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '6px' }}>
+                          <span style={{ fontSize: '13px', fontWeight: 600, color: 'hsl(var(--fg))' }}>{sug.title}</span>
+                          <span className="badge badge-primary" style={{ fontSize: '10.5px' }}>
+                            {sug.evidence_count} evidence
+                          </span>
+                        </div>
+                        <p style={{ fontSize: '11.5px', color: 'hsl(var(--muted-fg))', margin: '0 0 8px', lineHeight: 1.4 }}>
+                          {sug.description}
+                        </p>
+                        {sug.suggested_trigger?.cron && (
+                          <div style={{ fontSize: '11px', color: 'hsl(var(--primary))', fontWeight: 500, display: 'flex', alignItems: 'center', gap: '5px', marginBottom: '8px' }}>
+                            <Clock size={12} /> Schedule: {sug.suggested_trigger.cron}
+                          </div>
+                        )}
+                        {sug.suggested_steps && sug.suggested_steps.length > 0 && (
+                          <div style={{ fontSize: '10.5px', color: 'hsl(var(--muted-fg))', background: 'hsl(var(--muted)/0.3)', padding: '6px 8px', borderRadius: '6px' }}>
+                            <strong>Pipeline:</strong> {sug.suggested_steps.map((st) => `${st.agent_name || 'Agent'}: ${st.name}`).join(' → ')}
+                          </div>
+                        )}
+                      </div>
+
+                      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'flex-end', gap: '8px', paddingTop: '8px', borderTop: '1px solid hsl(var(--border)/0.5)' }}>
+                        <button
+                          type="button"
+                          className="btn btn-ghost"
+                          style={{ padding: '4px 10px', fontSize: '11px' }}
+                          onClick={() => handleDismissSuggestion(sug.id)}
+                        >
+                          Dismiss
+                        </button>
+                        <button
+                          type="button"
+                          className="btn btn-primary"
+                          style={{ padding: '4px 12px', fontSize: '11px', display: 'flex', alignItems: 'center', gap: '5px' }}
+                          onClick={() => handleAcceptSuggestion(sug.id)}
+                        >
+                          <Check size={12} /> Accept & Create
+                        </button>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+
             {automations.length > 0 ? (
               <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(340px, 1fr))', gap: '20px' }}>
                 {automations.map((auto) => {
@@ -330,7 +524,14 @@ export function Automations() {
                       {/* Top row: Name + Toggle Switch */}
                       <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', marginBottom: '10px' }}>
                         <div>
-                          <h3 style={{ fontSize: '15px', fontWeight: 600, margin: 0, color: 'hsl(var(--fg))' }}>{auto.name}</h3>
+                          <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+                            <h3 style={{ fontSize: '15px', fontWeight: 600, margin: 0, color: 'hsl(var(--fg))' }}>{auto.name}</h3>
+                            {auto.is_draft && (
+                              <span className="badge" style={{ background: 'hsl(var(--warning)/0.15)', color: 'hsl(var(--warning))', fontSize: '10.5px', fontWeight: 600 }}>
+                                Draft
+                              </span>
+                            )}
+                          </div>
                           {auto.description && (
                             <p style={{ fontSize: '12px', color: 'hsl(var(--muted-fg))', margin: '4px 0 0', lineHeight: 1.4 }}>
                               {auto.description}
@@ -352,7 +553,7 @@ export function Automations() {
                       <div style={{ display: 'flex', gap: '6px', flexWrap: 'wrap', marginBottom: '14px' }}>
                         {auto.trigger.type === 'schedule' && (
                           <span className="badge badge-primary" style={{ fontSize: '11px' }}>
-                            <Clock size={11} /> {auto.trigger.cron ? `Cron: ${auto.trigger.cron}` : `Interval: ${auto.trigger.interval_seconds}s`}
+                            <Clock size={11} /> {auto.human_schedule || (auto.trigger.cron ? `Cron: ${auto.trigger.cron}` : `Interval: ${auto.trigger.interval_seconds}s`)}
                           </span>
                         )}
                         {auto.trigger.type === 'file_watcher' && (
@@ -361,8 +562,17 @@ export function Automations() {
                           </span>
                         )}
                         {auto.trigger.type === 'webhook' && (
-                          <span className="badge" style={{ fontSize: '11px', background: 'hsl(var(--muted))' }}>
-                            <Globe size={11} /> Webhook
+                          <span
+                            className="badge"
+                            style={{ fontSize: '11px', background: 'hsl(var(--muted))', cursor: 'pointer', display: 'inline-flex', alignItems: 'center', gap: '4px' }}
+                            title="Click to copy webhook endpoint path"
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              navigator.clipboard.writeText(`/api/automations/webhooks/${auto.trigger.webhook_slug || auto.id}`);
+                              showToast('Webhook path copied to clipboard', 'info');
+                            }}
+                          >
+                            <Globe size={11} /> Webhook <Copy size={10} />
                           </span>
                         )}
                         {auto.trigger.type === 'manual' && (
@@ -663,6 +873,129 @@ export function Automations() {
                 <pre style={{ padding: '12px', borderRadius: '8px', backgroundColor: 'hsl(var(--card))', border: '1px solid hsl(var(--border))', fontSize: '12px', whiteSpace: 'pre-wrap', maxHeight: '200px', overflowY: 'auto' }}>
                   {selectedRun.output_result}
                 </pre>
+              </div>
+            )}
+          </div>
+        </div>
+      )}
+
+      {/* AI AUTOMATION BUILDER MODAL */}
+      {isAiBuilderOpen && (
+        <div className="modal-overlay" onClick={() => setIsAiBuilderOpen(false)}>
+          <div
+            className="modal-content"
+            onClick={(e) => e.stopPropagation()}
+            style={{ maxWidth: '640px', maxHeight: '85vh', overflowY: 'auto', padding: '24px' }}
+          >
+            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '16px' }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+                <div style={{ width: '32px', height: '32px', borderRadius: '8px', background: 'hsl(var(--primary)/0.15)', color: 'hsl(var(--primary))', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                  <Sparkles size={18} />
+                </div>
+                <div>
+                  <h3 style={{ margin: 0, fontSize: '16px', fontWeight: 600 }}>Create Automation with Natural Language</h3>
+                  <p style={{ margin: '2px 0 0', fontSize: '12px', color: 'hsl(var(--muted-fg))' }}>
+                    Describe your desired schedule, assigned agents, and tasks in Italian or English.
+                  </p>
+                </div>
+              </div>
+              <button className="btn btn-ghost" onClick={() => setIsAiBuilderOpen(false)}>
+                <X size={16} />
+              </button>
+            </div>
+
+            <div className="form-group" style={{ marginBottom: '16px' }}>
+              <label className="form-label" style={{ fontWeight: 500, fontSize: '12.5px' }}>
+                Your Request
+              </label>
+              <textarea
+                className="form-input"
+                rows={4}
+                value={aiPrompt}
+                onChange={(e) => setAiPrompt(e.target.value)}
+                placeholder="e.g., Ogni lunedì alle 9:00 fai fare una ricerca di mercato sui competitor AI al Researcher e poi fai preparare un report sintetico al Writer salvando su reports/competitors_weekly.md"
+                style={{ resize: 'vertical' }}
+              />
+            </div>
+
+            <div style={{ display: 'flex', justifyContent: 'flex-end', marginBottom: '18px' }}>
+              <button
+                type="button"
+                className="btn btn-primary"
+                onClick={handleGenerateAiProposal}
+                disabled={aiLoading || !aiPrompt.trim()}
+                style={{ display: 'flex', alignItems: 'center', gap: '6px' }}
+              >
+                {aiLoading ? (
+                  <>
+                    <RefreshCw size={14} className="animate-spin" />
+                    Analyzing & Designing...
+                  </>
+                ) : (
+                  <>
+                    <Sparkles size={14} />
+                    Analyze & Propose
+                  </>
+                )}
+              </button>
+            </div>
+
+            {aiProposal && (
+              <div style={{ padding: '16px', borderRadius: '10px', background: 'hsl(var(--muted)/0.3)', border: '1px solid hsl(var(--border))' }}>
+                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '12px' }}>
+                  <h4 style={{ margin: 0, fontSize: '14px', fontWeight: 600, color: 'hsl(var(--fg))' }}>
+                    Proposed Workflow: {aiProposal.automation?.name}
+                  </h4>
+                  {aiProposal.automation?.human_schedule && (
+                    <span className="badge badge-primary" style={{ fontSize: '11px' }}>
+                      <Clock size={11} /> {aiProposal.automation.human_schedule}
+                    </span>
+                  )}
+                </div>
+
+                <p style={{ fontSize: '12.5px', color: 'hsl(var(--muted-fg))', margin: '0 0 12px', lineHeight: 1.4 }}>
+                  {aiProposal.automation?.description}
+                </p>
+
+                {aiProposal.automation?.steps && (
+                  <div style={{ marginBottom: '14px' }}>
+                    <div style={{ fontSize: '11px', fontWeight: 600, color: 'hsl(var(--muted-fg))', textTransform: 'uppercase', marginBottom: '6px' }}>
+                      Pipeline Steps ({aiProposal.automation.steps.length})
+                    </div>
+                    <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
+                      {aiProposal.automation.steps.map((st: any, idx: number) => (
+                        <div key={idx} style={{ padding: '8px 10px', borderRadius: '6px', background: 'hsl(var(--card))', border: '1px solid hsl(var(--border))', fontSize: '12px' }}>
+                          <span style={{ fontWeight: 600, color: 'hsl(var(--primary))' }}>{st.agent_name || 'Agent'}</span>: {st.name}
+                          <div style={{ fontSize: '11px', color: 'hsl(var(--muted-fg))', marginTop: '2px' }}>{st.prompt}</div>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                )}
+
+                {aiProposal.automation?.output_destination && (
+                  <div style={{ fontSize: '11.5px', color: 'hsl(var(--muted-fg))', marginBottom: '14px', display: 'flex', alignItems: 'center', gap: '6px' }}>
+                    <FileText size={12} className="text-primary" />
+                    Deliverable target: <code>{aiProposal.automation.output_destination.target_path || 'default location'}</code>
+                  </div>
+                )}
+
+                <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '8px', paddingTop: '12px', borderTop: '1px solid hsl(var(--border))' }}>
+                  <button
+                    type="button"
+                    className="btn btn-secondary"
+                    onClick={() => handleSaveAiAutomation(false)}
+                  >
+                    Save as Draft
+                  </button>
+                  <button
+                    type="button"
+                    className="btn btn-primary"
+                    onClick={() => handleSaveAiAutomation(true)}
+                  >
+                    Save & Activate
+                  </button>
+                </div>
               </div>
             )}
           </div>

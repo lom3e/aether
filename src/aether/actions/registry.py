@@ -459,3 +459,42 @@ class ActionRegistry:
                 },
             )
         )
+
+        # Automation Actions
+        self.register(
+            ActionDefinition(
+                id="automations.create_draft",
+                name="Create Automation Proposal",
+                description="Creates a new scheduled, watcher, or webhook automation workflow proposal.",
+                tier=ActionTier.ACT,
+                permission_level=ActionPermissionLevel.EXTERNAL_MUTATION,
+                requires_confirmation=True,
+                provider="automations",
+                input_schema={
+                    "type": "object",
+                    "properties": {
+                        "prompt": {"type": "string"},
+                        "automation": {"type": "object"},
+                    },
+                    "required": ["prompt"],
+                },
+            )
+        )
+        self.register(
+            ActionDefinition(
+                id="automations.activate",
+                name="Activate Automation",
+                description="Activates a draft or paused automation workflow.",
+                tier=ActionTier.ACT,
+                permission_level=ActionPermissionLevel.EXTERNAL_MUTATION,
+                requires_confirmation=True,
+                provider="automations",
+                input_schema={
+                    "type": "object",
+                    "properties": {
+                        "automation_id": {"type": "string"},
+                    },
+                    "required": ["automation_id"],
+                },
+            )
+        )

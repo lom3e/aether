@@ -354,6 +354,43 @@ class ActionExecutor:
                 ],
             }
 
+        # 8. Automations actions
+        elif action_id == "automations.create_draft":
+            from aether.automation.builder import AutomationBuilder
+            from aether.automation.models import AutomationDefinition
+            from aether.workspace.workspace import Workspace
+            prompt_text = inp.get("prompt", "")
+            raw_auto = inp.get("automation")
+            auto_def = AutomationDefinition.from_dict(raw_auto) if raw_auto else AutomationBuilder.build_from_natural_language(prompt_text)
+            ws = None
+            try:
+                ws = Workspace.get(ws_id) if hasattr(Workspace, "get") else None
+                if not ws and self.project_path:
+                    ws = Workspace.get_or_init(self.project_path)
+            except Exception:
+                pass
+            if ws and hasattr(ws, "automations"):
+                saved = ws.automations.save_automation(auto_def)
+                return {"automation_id": saved.id, "name": saved.name, "status": "draft", "human_schedule": saved.human_schedule}
+            return {"automation_id": auto_def.id, "name": auto_def.name, "status": "draft", "human_schedule": auto_def.human_schedule}
+
+        elif action_id == "automations.activate":
+            from aether.workspace.workspace import Workspace
+            auto_id = inp.get("automation_id", "")
+            ws = None
+            try:
+                ws = Workspace.get(ws_id) if hasattr(Workspace, "get") else None
+                if not ws and self.project_path:
+                    ws = Workspace.get_or_init(self.project_path)
+            except Exception:
+                pass
+            if ws and hasattr(ws, "automations"):
+                activated = ws.automations.toggle_automation(auto_id, True)
+                if activated:
+                    return {"automation_id": activated.id, "name": activated.name, "status": "active", "enabled": True}
+                raise ValueError(f"Automation '{auto_id}' not found")
+            return {"automation_id": auto_id, "status": "active", "enabled": True}
+
         raise ValueError(
             f"Action '{action_id}' is not supported by built-in connectors and has no registered handler."
         )

@@ -12,6 +12,7 @@ from typing import Any
 from aether.automation.engine import AutomationEngine
 from aether.automation.models import AutomationDefinition, AutomationRunRecord, TriggerType
 from aether.automation.triggers import TriggerEvaluator
+from aether.automation.watchers import WatcherManager
 
 logger = logging.getLogger(__name__)
 
@@ -32,6 +33,7 @@ class AutomationScheduler:
         self.max_concurrent_runs = max_concurrent_runs
 
         self.engine = AutomationEngine(workspace=workspace, event_bus=event_bus)
+        self.watcher_manager = WatcherManager(workspace=workspace)
         self._running_task: asyncio.Task | None = None
         self._stop_event = asyncio.Event()
         self._active_runs: set[str] = set()  # Set of automation IDs currently running
@@ -146,6 +148,25 @@ class AutomationScheduler:
                         trigger_type=trigger_type_str,
                     )
                 )
+
+        # Synchronize and evaluate active watchers (HTTP poll, GitHub, filesystem)
+        try:
+            self.watcher_manager.sync_automations(automations)
+            auto_map = {a.id: a for a in automations}
+            watcher_events = await self.watcher_manager.check_all(auto_map)
+            for w_auto, w_type, w_payload in watcher_events:
+                if w_auto.id not in self._active_runs and len(self._active_runs) < self.max_concurrent_runs:
+                    self._active_runs.add(w_auto.id)
+                    asyncio.create_task(self._run_wrapper(w_auto, w_type, w_payload))
+                    triggered_runs.append(
+                        AutomationRunRecord(
+                            automation_id=w_auto.id,
+                            automation_name=w_auto.name,
+                            trigger_type=w_type,
+                        )
+                    )
+        except Exception as w_err:
+            logger.debug("Watcher check pass error: %s", w_err)
 
         self._last_file_check = now
         return triggered_runs

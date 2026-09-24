@@ -154,6 +154,35 @@ class PersonalAgentService:
                     effective_prompt = f"{context_hint} (Confirmed by user: {prompt})"
                     p_lower = effective_prompt.lower()
 
+        # 0. Automations creation (ACT tier - creates draft workflow requiring confirmation)
+        automation_triggers = [
+            "crea un'automazione", "crea automazione", "programma un'automazione", "schedula un controllo", "automatizza",
+            "create an automation", "create automation", "schedule an automation", "schedule automation", "automate",
+            "ogni lunedì", "ogni lunedi", "ogni martedì", "ogni martedi", "ogni mercoledì", "ogni mercoledi",
+            "ogni giovedì", "ogni giovedi", "ogni venerdì", "ogni venerdi", "ogni sabato", "ogni domenica",
+            "ogni giorno", "ogni mattina", "ogni settimana", "ogni ora",
+            "every monday", "every tuesday", "every wednesday", "every thursday", "every friday",
+            "every saturday", "every sunday", "every day", "every morning", "every week", "every hour",
+        ]
+        is_calendar = any(k in p_lower for k in ["meeting", "riunione", "appuntamento", "call", "calendario"])
+        if (any(k in p_lower for k in automation_triggers) or (
+            ("ogni" in p_lower or "every" in p_lower) and any(w in p_lower for w in ["report", "controlla", "check", "monitor", "esegui", "run", "invia", "send"])
+        )) and not is_calendar:
+            from aether.automation.builder import AutomationBuilder
+            proposal = AutomationBuilder.build_proposal(effective_prompt, self.workspace)
+            return UserIntent(
+                raw_prompt=effective_prompt,
+                tier=IntentTier.ACT,
+                summary=f"Create draft automation: {proposal.automation.name}",
+                action_id="automations.create_draft",
+                action_args={
+                    "prompt": effective_prompt,
+                    "automation": proposal.automation.to_dict(),
+                    "proposal_summary": proposal.human_summary,
+                    "human_schedule": proposal.recurrence_text,
+                },
+            )
+
         # 1. Calendar event creation / booking (ACT tier - requires safety confirmation)
         calendar_act_triggers = [
             "schedule a meeting", "schedule meeting", "book a meeting", "create calendar event",
@@ -550,19 +579,27 @@ class PersonalAgentService:
                     details={"execution_id": action_execution_id},
                 )
                 steps.append(step_appr)
-                response_text = runtime_res.output or (
-                    f"I've prepared to **{action_name}** ({intent.action_args.get('title', '')}).\n\n"
-                    f"Because this changes your external calendar or service, please confirm or decline below."
-                )
+                if intent.action_id == "automations.create_draft" and intent.action_args.get("proposal_summary"):
+                    response_text = intent.action_args.get("proposal_summary", "")
+                else:
+                    response_text = runtime_res.output or (
+                        f"I've prepared to **{action_name}** ({intent.action_args.get('title', '')}).\n\n"
+                        f"Because this changes your external calendar or service, please confirm or decline below."
+                    )
 
                 if self.notification_service and action_execution_id:
+                    notif_msg = (
+                        f"Aether drafted automation '{intent.action_args.get('automation', {}).get('name', 'New Automation')}'. Review and confirm to schedule."
+                        if intent.action_id == "automations.create_draft"
+                        else f"Aether is ready to {action_name.lower()} '{intent.action_args.get('title', '')}'. Review and confirm to execute."
+                    )
                     self.notification_service.notify(
                         workspace_id=workspace_id,
                         type=NotificationType.APPROVAL_REQUIRED,
                         title=f"Approval needed: {action_name}",
-                        message=f"Aether is ready to {action_name.lower()} '{intent.action_args.get('title', '')}'. Review and confirm to execute.",
+                        message=notif_msg,
                         priority=NotificationPriority.HIGH,
-                        link_view="home",
+                        link_view="automations" if intent.action_id == "automations.create_draft" else "home",
                         link_id=action_execution_id,
                         action_required=True,
                         metadata={"execution_id": action_execution_id, "action_id": intent.action_id},
@@ -986,6 +1023,12 @@ class PersonalAgentService:
                 human = f"Create branch: \"{inp.get('branch_name', '')}\""
             elif p.action_id == "calendar.create_event":
                 human = f"Schedule meeting: \"{inp.get('title', '')}\""
+            elif p.action_id == "automations.create_draft":
+                auto_name = inp.get("automation", {}).get("name") or "New Automation"
+                sched = inp.get("human_schedule") or ""
+                human = f"Create automation: {auto_name}" + (f" ({sched})" if sched else "")
+            elif p.action_id == "automations.activate":
+                human = f"Activate automation: {inp.get('automation_id', '')}"
             else:
                 title_item = inp.get("title") or inp.get("name") or inp.get("filename") or ""
                 human = f"{name}: {title_item}" if title_item else name

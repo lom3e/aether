@@ -2363,6 +2363,11 @@ class TriggerAutomationPayload(BaseModel):
     payload: dict[str, Any] = Field(default_factory=dict)
 
 
+class BuildNlAutomationPayload(BaseModel):
+    prompt: str
+    save: bool = False
+
+
 @router.get("/automations")
 async def list_automations(request: Request):
     """List all configured automations with trigger and status info."""
@@ -2476,6 +2481,172 @@ async def list_automation_history(request: Request, automation_id: str, limit: i
         return []
     runs = ws.automations.list_runs(automation_id=automation_id, limit=limit)
     return [r.to_dict() for r in runs]
+
+
+# -----------------------------------------------------------------------------
+# Webhook, NL Builder & Suggestions Endpoints for Automations
+# -----------------------------------------------------------------------------
+
+@router.post("/automations/webhooks/{slug_or_id}")
+async def webhook_automation_endpoint(request: Request, slug_or_id: str):
+    """Executes an automation via authenticated incoming webhook."""
+    import time
+    ws = request.app.state.workspace
+    if not ws:
+        raise HTTPException(status_code=500, detail="Workspace not initialized")
+
+    automations = ws.automations.list_automations()
+    target_auto = None
+    for a in automations:
+        if a.id == slug_or_id or (a.trigger.webhook_slug and a.trigger.webhook_slug == slug_or_id):
+            target_auto = a
+            break
+
+    if not target_auto:
+        raise HTTPException(status_code=404, detail="Automation not found")
+
+    if not target_auto.enabled:
+        raise HTTPException(status_code=400, detail="Automation is disabled")
+
+    # Validate secret if configured
+    expected_secret = target_auto.trigger.webhook_secret
+    if expected_secret:
+        header_secret = request.headers.get("x-aether-webhook-secret")
+        auth_header = request.headers.get("authorization", "")
+        query_secret = request.query_params.get("secret")
+
+        provided_secret = None
+        if header_secret:
+            provided_secret = header_secret
+        elif auth_header.startswith("Bearer "):
+            provided_secret = auth_header[7:].strip()
+        elif query_secret:
+            provided_secret = query_secret
+
+        if not provided_secret or provided_secret != expected_secret:
+            raise HTTPException(status_code=401, detail="Invalid or missing webhook secret")
+
+    # Replay protection / timestamp check if provided
+    ts_header = request.headers.get("x-aether-timestamp")
+    if ts_header:
+        try:
+            req_ts = float(ts_header)
+            current_ts = time.time()
+            if abs(current_ts - req_ts) > 300:  # 5 minutes window
+                raise HTTPException(status_code=400, detail="Webhook timestamp expired")
+        except ValueError:
+            pass
+
+    # Parse body payload
+    try:
+        body = await request.json()
+        payload = body if isinstance(body, dict) else {"data": body}
+    except Exception:
+        raw_body = (await request.body()).decode("utf-8", errors="replace")
+        payload = {"raw_body": raw_body} if raw_body else {}
+
+    # Record activity
+    if hasattr(ws, "activity") and ws.activity:
+        try:
+            from aether.activity.models import ActivityCategory, ActivityStatus
+            category_val = getattr(ActivityCategory, "SYSTEM", None)
+            ws.activity.record_activity(
+                workspace_id=getattr(ws, "id", "default"),
+                category=category_val,
+                title=f"Webhook Received: {target_auto.name}",
+                description=f"Received webhook trigger for automation '{target_auto.name}'",
+                status=ActivityStatus.COMPLETED,
+                metadata={"automation_id": target_auto.id, "slug_or_id": slug_or_id},
+            )
+        except Exception:
+            pass
+
+    from aether.automation.engine import AutomationEngine
+    engine = AutomationEngine(workspace=ws, event_bus=getattr(request.app.state, "event_bus", None))
+    run_record = await engine.execute_automation(target_auto, trigger_type="webhook", trigger_payload=payload)
+
+    return {
+        "status": "ok",
+        "run_id": run_record.run_id,
+        "run_status": run_record.status.value if hasattr(run_record.status, "value") else str(run_record.status),
+        "output": run_record.output_result,
+        "error": run_record.error,
+    }
+
+
+@router.post("/automations/build-nl")
+async def build_automation_from_nl(request: Request, data: BuildNlAutomationPayload):
+    """Generates an automation workflow proposal from a natural language prompt."""
+    ws = request.app.state.workspace
+    if not ws:
+        raise HTTPException(status_code=500, detail="Workspace not initialized")
+
+    from aether.automation.builder import AutomationBuilder
+    proposal = AutomationBuilder.build_proposal(data.prompt, workspace=ws)
+    saved_auto = None
+    if data.save:
+        saved_auto = ws.automations.save_automation(proposal.automation)
+
+    return {
+        "proposal": proposal.human_summary,
+        "automation": (saved_auto or proposal.automation).to_dict(),
+        "recurrence_text": proposal.recurrence_text,
+    }
+
+
+@router.get("/automations/suggestions")
+async def list_automation_suggestions(request: Request, status: str = "pending"):
+    """Lists automation suggestions discovered from workspace activity logs."""
+    ws = request.app.state.workspace
+    if not ws:
+        return []
+
+    # If pending requested and none exist yet, perform an initial passive analysis
+    existing = ws.automations.list_suggestions(status=status if status != "all" else None)
+    if not existing and status == "pending":
+        from aether.automation.suggestions import SuggestionEngine
+        SuggestionEngine.analyze_workspace(ws)
+        existing = ws.automations.list_suggestions(status="pending")
+
+    return [s.to_dict() for s in existing]
+
+
+@router.post("/automations/suggestions/analyze")
+async def analyze_automation_suggestions(request: Request):
+    """Triggers an on-demand analysis of workspace logs to find automation suggestions."""
+    ws = request.app.state.workspace
+    if not ws:
+        raise HTTPException(status_code=500, detail="Workspace not initialized")
+
+    from aether.automation.suggestions import SuggestionEngine
+    new_suggestions = SuggestionEngine.analyze_workspace(ws)
+    return {"status": "ok", "generated_count": len(new_suggestions), "suggestions": [s.to_dict() for s in new_suggestions]}
+
+
+@router.post("/automations/suggestions/{suggestion_id}/accept")
+async def accept_automation_suggestion(request: Request, suggestion_id: str):
+    """Accepts an automation suggestion and creates an active workflow."""
+    ws = request.app.state.workspace
+    if not ws:
+        raise HTTPException(status_code=500, detail="Workspace not initialized")
+
+    auto = ws.automations.accept_suggestion(suggestion_id)
+    if not auto:
+        raise HTTPException(status_code=404, detail="Suggestion not found")
+    return {"status": "ok", "automation": auto.to_dict()}
+
+
+@router.post("/automations/suggestions/{suggestion_id}/dismiss")
+async def dismiss_automation_suggestion(request: Request, suggestion_id: str):
+    """Dismisses an automation suggestion."""
+    ws = request.app.state.workspace
+    if not ws:
+        raise HTTPException(status_code=500, detail="Workspace not initialized")
+
+    success = ws.automations.dismiss_suggestion(suggestion_id)
+    if not success:
+        raise HTTPException(status_code=404, detail="Suggestion not found")
+    return {"status": "ok", "dismissed_id": suggestion_id}
 
 
 # -----------------------------------------------------------------------------
