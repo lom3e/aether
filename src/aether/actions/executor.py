@@ -277,6 +277,17 @@ class ActionExecutor:
             res = connector.execute(action_id, inp)
             return res.data
 
+        # 3b. Telegram connector actions
+        elif action_id.startswith("telegram."):
+            if not self.connection_service:
+                raise RuntimeError("Telegram connection is not configured in this workspace.")
+            conn = self.connection_service.get_connection(ws_id, "telegram")
+            if not conn or conn.status != ConnectionStatus.CONNECTED:
+                raise RuntimeError("Telegram connection is not configured in this workspace.")
+            connector = self.connection_service.get_telegram_connector(ws_id)
+            res = connector.execute(action_id, inp)
+            return res.data
+
         # 4. HTTP connector actions
         elif action_id.startswith("http."):
             if not self.connection_service:

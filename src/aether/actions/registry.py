@@ -591,3 +591,32 @@ class ActionRegistry:
                 },
             )
         )
+
+        # Telegram Actions
+        self.register(
+            ActionDefinition(
+                id="telegram.send_message",
+                name="Send Telegram Message",
+                description="Sends a direct message or alert to an authorized Telegram chat via the bot.",
+                tier=ActionTier.ACT,
+                permission_level=ActionPermissionLevel.EXTERNAL_MUTATION,
+                requires_confirmation=False,
+                provider="telegram",
+                input_schema={
+                    "type": "object",
+                    "properties": {
+                        "chat_id": {"type": ["string", "integer"]},
+                        "text": {"type": "string"},
+                        "parse_mode": {"type": "string", "default": "Markdown"},
+                    },
+                    "required": ["text"],
+                },
+                output_schema={
+                    "type": "object",
+                    "properties": {
+                        "message_id": {"type": "integer"},
+                        "chat_id": {"type": ["string", "integer"]},
+                    },
+                },
+            )
+        )

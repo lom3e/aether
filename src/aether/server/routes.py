@@ -4967,6 +4967,76 @@ async def create_calendar_event_route(request: Request, payload: CreateCalendarE
     return event
 
 
+class TelegramSendPayload(BaseModel):
+    chat_id: str | int | None = None
+    text: str
+    parse_mode: str = "Markdown"
+
+
+@router.post("/connections/telegram/webhook")
+async def telegram_webhook_route(request: Request):
+    """
+    Public or protected webhook endpoint receiving updates from Telegram Bot API.
+    Routes incoming text prompts to the Personal Companion and inline button clicks
+    to the Action Approval lifecycle.
+    """
+    ws = getattr(request.app.state, "workspace", None)
+    if not ws:
+        raise HTTPException(status_code=503, detail="Workspace not initialized.")
+    try:
+        update_data = await request.json()
+    except Exception:
+        raise HTTPException(status_code=400, detail="Invalid JSON payload.")
+
+    from aether.connections.telegram_bridge import TelegramBridge
+    result = TelegramBridge.handle_update(update_data, ws)
+    return result
+
+
+@router.get("/connections/telegram/status")
+async def telegram_status_route(request: Request, workspace_id: str | None = None):
+    """
+    Returns the real connection status and bot details of the workspace's Telegram bot.
+    """
+    ws = getattr(request.app.state, "workspace", None)
+    if not ws:
+        raise HTTPException(status_code=503, detail="Workspace not initialized.")
+    ws_id = (workspace_id or ws.name).strip()
+    conn = ws.connections.get_connection(ws_id, "telegram")
+    if not conn or conn.status.value != "connected":
+        return {"configured": False, "status": "disconnected"}
+
+    connector = ws.connections.get_telegram_connector(ws_id)
+    valid, msg = connector.verify(live_check=True)
+    return {
+        "configured": True,
+        "status": "connected" if valid else "error",
+        "message": msg,
+        "default_chat_id": connector._get_default_chat_id(),
+        "allowed_chat_ids": connector._get_allowed_chat_ids(),
+    }
+
+
+@router.post("/connections/telegram/send")
+async def telegram_send_route(request: Request, payload: TelegramSendPayload):
+    """
+    Directly sends an alert or message through the workspace's Telegram Bot.
+    """
+    ws = getattr(request.app.state, "workspace", None)
+    if not ws:
+        raise HTTPException(status_code=503, detail="Workspace not initialized.")
+    connector = ws.connections.get_telegram_connector(ws.name)
+    try:
+        result = connector.send_message(
+            chat_id=payload.chat_id,
+            text=payload.text,
+            parse_mode=payload.parse_mode,
+        )
+        return {"status": "sent", "result": result}
+    except Exception as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+
+
 # ---------------------------------------------------------------------------
 # Activity Feed Endpoints
 # ---------------------------------------------------------------------------

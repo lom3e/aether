@@ -78,3 +78,21 @@ export async function quitAether(): Promise<void> {
     }
   }
 }
+
+export async function notifyDesktop(title: string, options?: NotificationOptions): Promise<void> {
+  if (typeof window === 'undefined') return;
+  try {
+    if ('Notification' in window) {
+      if (Notification.permission === 'granted') {
+        new Notification(title, options);
+      } else if (Notification.permission !== 'denied') {
+        const permission = await Notification.requestPermission();
+        if (permission === 'granted') {
+          new Notification(title, options);
+        }
+      }
+    }
+  } catch (e) {
+    console.debug('Desktop notification error:', e);
+  }
+}

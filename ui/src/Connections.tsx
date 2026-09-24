@@ -1,7 +1,7 @@
 import { useState, useEffect, useContext } from 'react';
 import {
   Calendar, Mail, GitBranch, MessageSquare, FileText, CheckCircle2,
-  AlertCircle, ShieldCheck, Settings, Plus, RefreshCw, Clock, Zap, Globe
+  AlertCircle, ShieldCheck, Settings, Plus, RefreshCw, Clock, Zap, Globe, Send
 } from 'lucide-react';
 import { apiUrl } from './api';
 import { ToastContext } from './toast';
@@ -76,6 +76,9 @@ export function Connections({ navigate: _navigate }: { navigate?: (view: string,
   const [httpAuthType, setHttpAuthType] = useState('none');
   const [httpToken, setHttpToken] = useState('');
   const [notionToken, setNotionToken] = useState('');
+  const [telegramBotToken, setTelegramBotToken] = useState('');
+  const [telegramDefaultChatId, setTelegramDefaultChatId] = useState('');
+  const [telegramAllowedChats, setTelegramAllowedChats] = useState('');
   const [testingCreds, setTestingCreds] = useState(false);
   const [savingCreds, setSavingCreds] = useState(false);
   const [testResult, setTestResult] = useState<{ valid: boolean; message: string } | null>(null);
@@ -117,6 +120,15 @@ export function Connections({ navigate: _navigate }: { navigate?: (view: string,
       description: 'Receive notifications and post status reports in team channels.',
       capabilitiesText: 'Can post messages and status updates to Slack channels with confirmation',
       color: '#4A154B',
+      builtIn: false,
+    },
+    {
+      id: 'telegram',
+      name: 'Telegram Bot',
+      icon: Send,
+      description: 'Mobile companion, real-time alerts, remote task delegation, and inline approvals.',
+      capabilitiesText: 'Can receive mobile commands, dispatch notifications, and handle interactive approvals',
+      color: '#229ED9',
       builtIn: false,
     },
     {
@@ -177,6 +189,9 @@ export function Connections({ navigate: _navigate }: { navigate?: (view: string,
     setHttpAuthType('none');
     setHttpToken('');
     setNotionToken('');
+    setTelegramBotToken('');
+    setTelegramDefaultChatId('');
+    setTelegramAllowedChats('');
 
     if (existingConn?.auth_metadata) {
       const meta = existingConn.auth_metadata;
@@ -189,6 +204,12 @@ export function Connections({ navigate: _navigate }: { navigate?: (view: string,
       if (provider.id === 'http') {
         if (meta.base_url) setHttpBaseUrl(meta.base_url);
         if (meta.auth_type) setHttpAuthType(meta.auth_type);
+      }
+      if (provider.id === 'telegram') {
+        if (meta.default_chat_id) setTelegramDefaultChatId(String(meta.default_chat_id));
+        if (meta.allowed_chat_ids) {
+          setTelegramAllowedChats(Array.isArray(meta.allowed_chat_ids) ? meta.allowed_chat_ids.join(', ') : String(meta.allowed_chat_ids));
+        }
       }
       // Sensitive fields (token, password, secret) remain blank to prevent leakage
     }
@@ -211,6 +232,8 @@ export function Connections({ navigate: _navigate }: { navigate?: (view: string,
         return `Open PR in ${input.owner ? `${input.owner}/${input.repository}` : (input.repository || 'repo')}: "${input.title || ''}"`;
       case 'slack.send_message':
         return `Post message to ${input.channel || 'channel'}: "${(input.text || '').slice(0, 60)}${(input.text || '').length > 60 ? '...' : ''}"`;
+      case 'telegram.send_message':
+        return `Send Telegram message to ${input.chat_id || 'authorized chat'}: "${(input.text || '').slice(0, 60)}${(input.text || '').length > 60 ? '...' : ''}"`;
       case 'calendar.create_event':
         return `Create event "${input.title || 'Event'}"${input.start_time ? ` at ${input.start_time}` : ''}`;
       case 'http.request':
@@ -233,6 +256,9 @@ export function Connections({ navigate: _navigate }: { navigate?: (view: string,
     if (exec.action_id === 'slack.send_message' && input.text) {
       return input.text.length > 80 ? input.text.slice(0, 80) + '...' : input.text;
     }
+    if (exec.action_id === 'telegram.send_message' && input.text) {
+      return input.text.length > 80 ? input.text.slice(0, 80) + '...' : input.text;
+    }
     return null;
   };
 
@@ -250,6 +276,11 @@ export function Connections({ navigate: _navigate }: { navigate?: (view: string,
       if (emailPass.trim()) meta.password = emailPass.trim();
       if (emailHost.trim()) meta.smtp_host = emailHost.trim();
       if (emailPort.trim()) meta.smtp_port = parseInt(emailPort.trim(), 10) || 587;
+    }
+    if (providerId === 'telegram') {
+      if (telegramBotToken.trim()) meta.bot_token = telegramBotToken.trim();
+      if (telegramDefaultChatId.trim()) meta.default_chat_id = telegramDefaultChatId.trim();
+      if (telegramAllowedChats.trim()) meta.allowed_chat_ids = telegramAllowedChats.trim();
     }
     if (providerId === 'http') {
       if (httpBaseUrl.trim()) meta.base_url = httpBaseUrl.trim();
@@ -1033,6 +1064,54 @@ export function Connections({ navigate: _navigate }: { navigate?: (view: string,
                         onChange={e => { setEmailPort(e.target.value); setTestResult(null); }}
                         style={{ width: '100%' }}
                       />
+                    </div>
+                  </div>
+                </>
+              )}
+
+              {configModalProvider.id === 'telegram' && (
+                <>
+                  <div>
+                    <label style={{ fontSize: '12px', fontWeight: 600, display: 'block', marginBottom: '4px' }}>Telegram Bot Token</label>
+                    <input
+                      type="password"
+                      className="input"
+                      required
+                      placeholder="123456789:ABCdefGhIJKlmNoPQRsTUVwxyZ"
+                      value={telegramBotToken}
+                      onChange={e => { setTelegramBotToken(e.target.value); setTestResult(null); }}
+                      style={{ width: '100%' }}
+                    />
+                    <div style={{ fontSize: '11px', color: 'hsl(var(--muted-fg))', marginTop: '4px' }}>
+                      Obtained from @BotFather on Telegram.
+                    </div>
+                  </div>
+                  <div>
+                    <label style={{ fontSize: '12px', fontWeight: 600, display: 'block', marginBottom: '4px' }}>Default Chat ID (Optional)</label>
+                    <input
+                      type="text"
+                      className="input"
+                      placeholder="e.g. 987654321"
+                      value={telegramDefaultChatId}
+                      onChange={e => { setTelegramDefaultChatId(e.target.value); setTestResult(null); }}
+                      style={{ width: '100%' }}
+                    />
+                    <div style={{ fontSize: '11px', color: 'hsl(var(--muted-fg))', marginTop: '4px' }}>
+                      Your Telegram user ID or group chat ID for direct alerts and approvals.
+                    </div>
+                  </div>
+                  <div>
+                    <label style={{ fontSize: '12px', fontWeight: 600, display: 'block', marginBottom: '4px' }}>Authorized Chat IDs (Optional)</label>
+                    <input
+                      type="text"
+                      className="input"
+                      placeholder="Comma-separated IDs (e.g. 987654321, 123456789)"
+                      value={telegramAllowedChats}
+                      onChange={e => { setTelegramAllowedChats(e.target.value); setTestResult(null); }}
+                      style={{ width: '100%' }}
+                    />
+                    <div style={{ fontSize: '11px', color: 'hsl(var(--muted-fg))', marginTop: '4px' }}>
+                      Restrict companion access to specific authorized Telegram accounts.
                     </div>
                   </div>
                 </>

@@ -28,10 +28,12 @@ class NotificationService:
         store: NotificationStore,
         activity_service: Any = None,
         event_hub: Any = None,
+        connection_service: Any = None,
     ) -> None:
         self.store = store
         self.activity_service = activity_service
         self.event_hub = event_hub
+        self.connection_service = connection_service
 
     def notify(
         self,
@@ -76,6 +78,31 @@ class NotificationService:
         )
 
         saved = self.store.save(notification)
+
+        # Forward critical alerts or approvals to Telegram if connector is active
+        if self.connection_service:
+            try:
+                conn = self.connection_service.get_connection(workspace_id, "telegram")
+                if conn and conn.status.value == "connected":
+                    telegram_connector = self.connection_service.get_telegram_connector(workspace_id)
+                    chat_id = telegram_connector._get_default_chat_id()
+                    if chat_id:
+                        if action_required and action_payload and "execution_id" in action_payload:
+                            telegram_connector.send_approval_request(
+                                chat_id=chat_id,
+                                action_id=action_payload.get("action_id", "action"),
+                                execution_id=action_payload.get("execution_id", ""),
+                                title=title,
+                                description=message,
+                            )
+                        elif notif_priority == NotificationPriority.HIGH:
+                            telegram_connector.send_message(
+                                chat_id=chat_id,
+                                text=f"🚨 *{title}*\n\n{message}",
+                                parse_mode="Markdown",
+                            )
+            except Exception as e:
+                logger.debug(f"Could not forward notification to Telegram: {e}")
 
         # Broadcast via Event Hub if available
         if self.event_hub:

@@ -19,7 +19,7 @@ import {
   Info,
 } from "lucide-react";
 import { apiUrl, getSessionToken } from "./api";
-import { hideCompanion, showMainWindow } from "./desktop";
+import { hideCompanion, showMainWindow, notifyDesktop } from "./desktop";
 import { ToastContext } from "./toast";
 
 interface AmbientCompanionProps {
@@ -272,7 +272,17 @@ export function AmbientCompanion({
         fetchOverview();
       });
 
-      eventSource.addEventListener("notification", () => {
+      eventSource.addEventListener("notification", (e: MessageEvent) => {
+        try {
+          const data = JSON.parse(e.data);
+          if (data && data.title) {
+            notifyDesktop(data.title, {
+              body: data.message || "Aether Notification",
+            });
+          }
+        } catch {
+          // ignore
+        }
         fetchOverview();
         fetchUnreadNotifications();
       });

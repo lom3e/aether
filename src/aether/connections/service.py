@@ -22,6 +22,7 @@ from aether.connections.github import GitHubConnector
 from aether.connections.http import HttpConnector
 from aether.connections.models import CalendarEvent, Connection, ConnectionStatus
 from aether.connections.slack import SlackConnector
+from aether.connections.telegram import TelegramConnector
 from aether.connections.store import ConnectionStore
 
 logger = logging.getLogger(__name__)
@@ -151,6 +152,8 @@ class ConnectionService:
             return ["http.request", "http.get", "http.post", "http.put", "http.patch", "http.delete"]
         elif p == "calendar":
             return ["calendar.create_event", "calendar.list_events"]
+        elif p == "telegram":
+            return ["telegram.send_message", "telegram.send_approval", "telegram.verify"]
         return [f"{p}.read", f"{p}.write"]
 
     def save_connection(self, connection: Connection) -> Connection:
@@ -283,6 +286,12 @@ class ConnectionService:
         meta = conn.auth_metadata if conn else {}
         return HttpConnector(auth_metadata=meta)
 
+    def get_telegram_connector(self, workspace_id: str) -> TelegramConnector:
+        """Returns TelegramConnector configured with the workspace's credentials."""
+        conn = self.store.get_connection_by_provider(workspace_id, "telegram")
+        meta = conn.auth_metadata if conn else {}
+        return TelegramConnector(auth_metadata=meta)
+
     def get_connector(self, workspace_id: str, provider: str) -> BaseConnector | None:
         """Generic connector resolver."""
         p = provider.lower().strip()
@@ -294,6 +303,8 @@ class ConnectionService:
             return self.get_slack_connector(workspace_id)
         elif p == "http":
             return self.get_http_connector(workspace_id)
+        elif p == "telegram":
+            return self.get_telegram_connector(workspace_id)
         elif p == "calendar":
             return self.get_calendar_connector(workspace_id)
         return None
@@ -318,6 +329,9 @@ def verify_credentials(provider: str, auth_metadata: dict[str, Any] | None) -> t
 
     elif prov == "http":
         return HttpConnector(auth_metadata=meta).verify(meta)
+
+    elif prov == "telegram":
+        return TelegramConnector(auth_metadata=meta).verify(meta, live_check=bool(meta.get("live_check")))
 
     elif prov == "notion":
         token = str(meta.get("token") or meta.get("api_key") or "").strip()

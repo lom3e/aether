@@ -399,6 +399,7 @@ class Workspace:
                 store=self.notification_store,
                 activity_service=self.activity,
                 event_hub=get_personal_event_hub(),
+                connection_service=self.connections,
             )
         return self._get_or_create("notifications", _factory)
 

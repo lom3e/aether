@@ -331,6 +331,28 @@ class PersonalAgentService:
                 },
             )
 
+        # 3d2. Telegram send (ACT tier - requires safety confirmation)
+        telegram_triggers = [
+            "su telegram", "on telegram", "send to telegram", "manda su telegram", "invia su telegram",
+            "messaggio su telegram", "post to telegram", "telegram message", "notifica su telegram",
+        ]
+        if any(k in p_lower for k in telegram_triggers) or ("telegram" in p_lower and any(v in p_lower for v in ["manda", "invia", "scrivi", "send", "post", "posta", "notifica"])):
+            msg_match = re.search(r"['\"]([^'\"]+)['\"]", prompt)
+            text = msg_match.group(1).strip() if msg_match else f"Update from Aether: {prompt}"
+            chat_id_match = re.search(r"\b(?:chat|id|to|a|user)\b\s+([0-9_-]+)", prompt, re.IGNORECASE)
+            chat_id = chat_id_match.group(1).strip() if chat_id_match else None
+            args: dict[str, Any] = {"text": text}
+            if chat_id:
+                args["chat_id"] = chat_id
+
+            return UserIntent(
+                raw_prompt=effective_prompt,
+                tier=IntentTier.ACT,
+                summary=f"Send Telegram message" + (f" to {chat_id}" if chat_id else ""),
+                action_id="telegram.send_message",
+                action_args=args,
+            )
+
         # 3e. GitHub issue creation (ACT tier - requires safety confirmation)
         github_issue_triggers = [
             "apri una issue", "apri issue", "crea una issue", "crea issue", "create an issue", "create issue",
