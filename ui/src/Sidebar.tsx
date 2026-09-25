@@ -4,7 +4,7 @@ import {
   Plus, ChevronLeft, Moon, Sun, Globe, Trash2, Search,
   ChevronDown, MoreVertical, Archive, Copy, Edit2, Check,
   Pin, Folder, GitBranch, ExternalLink, RefreshCw, X, Target,
-  Link2, Activity as ActivityIcon, Share2
+  Link2, Activity as ActivityIcon, Share2, Eye
 } from 'lucide-react';
 import { useTranslation } from './i18n';
 import { useTheme } from './theme';
@@ -779,6 +779,18 @@ export function Sidebar({
               >
                 <Share2 size={15} />
                 {!collapsed && <span>Content & Social</span>}
+              </button>
+            </Tooltip>
+
+            <Tooltip content="Proactive & Watchers" position={collapsed ? 'right' : 'top'} disabled={!collapsed}>
+              <button
+                data-testid="nav-proactive"
+                className={`btn btn-ghost ${currentView === 'proactive' ? 'active' : ''}`}
+                style={{ width: '100%', justifyContent: collapsed ? 'center' : 'flex-start', padding: '7px 8px', fontSize: '13px', marginTop: '2px' }}
+                onClick={() => onNavigate('proactive')}
+              >
+                <Eye size={15} />
+                {!collapsed && <span>Proactive & Watchers</span>}
               </button>
             </Tooltip>
 

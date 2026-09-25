@@ -5568,6 +5568,154 @@ async def resolve_regression_alert_route(request: Request, alert_id: str):
 
 
 # ===========================================================================
+# PROACTIVE INTELLIGENCE, SUGGESTIONS & AMBIENT WATCHERS API
+# ===========================================================================
+
+class CreateWatcherPayload(BaseModel):
+    name: str
+    description: str = ""
+    watcher_type: str = "file_change"
+    target: str
+    condition_expression: str = "modified"
+    action_id: str = ""
+    action_args: dict[str, Any] = Field(default_factory=dict)
+    auto_trigger: bool = False
+    interval_seconds: int = 60
+
+
+@router.get("/proactive/suggestions")
+async def list_proactive_suggestions_route(
+    request: Request, status: str | None = None, category: str | None = None
+):
+    ws = getattr(request.app.state, "workspace", None)
+    if not ws:
+        raise HTTPException(status_code=503, detail="Workspace not initialized.")
+    suggestions = ws.proactive_store.list_suggestions(status=status, category=category)
+    return [s.to_dict() for s in suggestions]
+
+
+@router.post("/proactive/suggestions/generate")
+async def generate_proactive_suggestions_route(request: Request):
+    ws = getattr(request.app.state, "workspace", None)
+    if not ws:
+        raise HTTPException(status_code=503, detail="Workspace not initialized.")
+    suggestions = ws.proactive_engine.scan_workspace_opportunities(ws)
+    return {"suggestions": [s.to_dict() for s in suggestions]}
+
+
+@router.post("/proactive/suggestions/{suggestion_id}/accept")
+async def accept_proactive_suggestion_route(request: Request, suggestion_id: str):
+    ws = getattr(request.app.state, "workspace", None)
+    if not ws:
+        raise HTTPException(status_code=503, detail="Workspace not initialized.")
+    sug = ws.proactive_store.get_suggestion(suggestion_id)
+    if not sug:
+        raise HTTPException(status_code=404, detail="Suggestion not found.")
+
+    from aether.proactive.models import SuggestionStatus
+    executed_action = {}
+    if sug.proposed_action_id and hasattr(ws, "actions"):
+        try:
+            exec_res = ws.actions.execute(
+                action_id=sug.proposed_action_id,
+                workspace_id=ws.id,
+                input_data=sug.proposed_action_args,
+                auto_approve=True,
+            )
+            executed_action = exec_res.output_data
+        except Exception as exc:
+            executed_action = {"error": str(exc)}
+
+    updated = ws.proactive_store.update_suggestion_status(suggestion_id, SuggestionStatus.APPLIED)
+    return {
+        "suggestion": updated.to_dict() if updated else sug.to_dict(),
+        "executed_action": executed_action,
+    }
+
+
+@router.post("/proactive/suggestions/{suggestion_id}/dismiss")
+async def dismiss_proactive_suggestion_route(request: Request, suggestion_id: str):
+    ws = getattr(request.app.state, "workspace", None)
+    if not ws:
+        raise HTTPException(status_code=503, detail="Workspace not initialized.")
+    from aether.proactive.models import SuggestionStatus
+    updated = ws.proactive_store.update_suggestion_status(suggestion_id, SuggestionStatus.DISMISSED)
+    if not updated:
+        raise HTTPException(status_code=404, detail="Suggestion not found.")
+    return updated.to_dict()
+
+
+@router.get("/proactive/watchers")
+async def list_ambient_watchers_route(
+    request: Request, status: str | None = None, watcher_type: str | None = None
+):
+    ws = getattr(request.app.state, "workspace", None)
+    if not ws:
+        raise HTTPException(status_code=503, detail="Workspace not initialized.")
+    watchers = ws.proactive_store.list_watchers(status=status, watcher_type=watcher_type)
+    return [w.to_dict() for w in watchers]
+
+
+@router.post("/proactive/watchers")
+async def create_ambient_watcher_route(request: Request, payload: CreateWatcherPayload):
+    ws = getattr(request.app.state, "workspace", None)
+    if not ws:
+        raise HTTPException(status_code=503, detail="Workspace not initialized.")
+    from aether.proactive.models import Watcher, WatcherType
+    watcher = Watcher(
+        name=payload.name,
+        description=payload.description,
+        watcher_type=WatcherType(payload.watcher_type) if payload.watcher_type in [t.value for t in WatcherType] else WatcherType.FILE_CHANGE,
+        target=payload.target,
+        condition_expression=payload.condition_expression,
+        action_id=payload.action_id,
+        action_args=payload.action_args,
+        auto_trigger=payload.auto_trigger,
+        interval_seconds=payload.interval_seconds,
+    )
+    saved = ws.proactive_store.save_watcher(watcher)
+    return saved.to_dict()
+
+
+@router.post("/proactive/watchers/{watcher_id}/check")
+async def check_ambient_watcher_route(request: Request, watcher_id: str):
+    ws = getattr(request.app.state, "workspace", None)
+    if not ws:
+        raise HTTPException(status_code=503, detail="Workspace not initialized.")
+    trig, event, sug = ws.proactive_engine.check_watcher(watcher_id, workspace=ws)
+    return {
+        "triggered": trig,
+        "event": event.to_dict(),
+        "suggestion": sug.to_dict() if sug else None,
+    }
+
+
+@router.post("/proactive/watchers/check-all")
+async def check_all_ambient_watchers_route(request: Request):
+    ws = getattr(request.app.state, "workspace", None)
+    if not ws:
+        raise HTTPException(status_code=503, detail="Workspace not initialized.")
+    results = ws.proactive_engine.check_all_watchers(workspace=ws)
+    return {
+        "results": [
+            {"watcher": w.to_dict(), "triggered": trig, "event": ev.to_dict()}
+            for w, trig, ev in results
+        ]
+    }
+
+
+@router.delete("/proactive/watchers/{watcher_id}")
+async def delete_ambient_watcher_route(request: Request, watcher_id: str):
+    ws = getattr(request.app.state, "workspace", None)
+    if not ws:
+        raise HTTPException(status_code=503, detail="Workspace not initialized.")
+    deleted = ws.proactive_store.delete_watcher(watcher_id)
+    if not deleted:
+        raise HTTPException(status_code=404, detail="Watcher not found.")
+    return {"deleted": True}
+
+
+# ===========================================================================
 # PHASE C — PERSONAL AGENT, ACTIONS, CONNECTIONS, AND ACTIVITY API
 # ===========================================================================
 

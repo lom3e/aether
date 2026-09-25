@@ -1499,6 +1499,173 @@ class ActionExecutor:
             alerts = bm_store.list_alerts(target_id=target_id, unresolved_only=unresolved)
             return {"alerts": [a.to_dict() for a in alerts]}
 
+        elif action_id == "proactive.list_suggestions":
+            from aether.workspace.workspace import Workspace
+            ws = None
+            try:
+                ws = Workspace.get(ws_id) if hasattr(Workspace, "get") else None
+                if not ws and self.project_path:
+                    ws = Workspace.get_or_init(self.project_path)
+            except Exception:
+                pass
+            if not ws:
+                raise ValueError("Active workspace required to list proactive suggestions.")
+            pro_store = getattr(ws, "proactive_store", None)
+            if not pro_store:
+                return {"suggestions": []}
+
+            suggestions = pro_store.list_suggestions(status=inp.get("status"), category=inp.get("category"))
+            return {"suggestions": [s.to_dict() for s in suggestions]}
+
+        elif action_id == "proactive.generate_suggestions":
+            from aether.workspace.workspace import Workspace
+            ws = None
+            try:
+                ws = Workspace.get(ws_id) if hasattr(Workspace, "get") else None
+                if not ws and self.project_path:
+                    ws = Workspace.get_or_init(self.project_path)
+            except Exception:
+                pass
+            if not ws:
+                raise ValueError("Active workspace required to generate proactive suggestions.")
+            pro_engine = getattr(ws, "proactive_engine", None)
+            if not pro_engine:
+                return {"suggestions": []}
+
+            suggestions = pro_engine.scan_workspace_opportunities(ws)
+            return {"suggestions": [s.to_dict() for s in suggestions]}
+
+        elif action_id == "proactive.accept_suggestion":
+            from aether.workspace.workspace import Workspace
+            from aether.proactive.models import SuggestionStatus
+            ws = None
+            try:
+                ws = Workspace.get(ws_id) if hasattr(Workspace, "get") else None
+                if not ws and self.project_path:
+                    ws = Workspace.get_or_init(self.project_path)
+            except Exception:
+                pass
+            if not ws:
+                raise ValueError("Active workspace required to accept suggestion.")
+            pro_store = getattr(ws, "proactive_store", None)
+            if not pro_store:
+                raise ValueError("Proactive store not available in workspace.")
+
+            sug_id = inp.get("suggestion_id", "")
+            sug = pro_store.get_suggestion(sug_id)
+            if not sug:
+                raise ValueError(f"Suggestion '{sug_id}' not found.")
+
+            executed_action = {}
+            if sug.proposed_action_id:
+                exec_res = self.execute(
+                    action_id=sug.proposed_action_id,
+                    workspace_id=ws_id,
+                    input_data=sug.proposed_action_args,
+                    auto_approve=True,
+                )
+                executed_action = exec_res.output_data
+
+            updated = pro_store.update_suggestion_status(sug_id, SuggestionStatus.APPLIED)
+            return {
+                "suggestion": updated.to_dict() if updated else sug.to_dict(),
+                "executed_action": executed_action,
+            }
+
+        elif action_id == "proactive.dismiss_suggestion":
+            from aether.workspace.workspace import Workspace
+            from aether.proactive.models import SuggestionStatus
+            ws = None
+            try:
+                ws = Workspace.get(ws_id) if hasattr(Workspace, "get") else None
+                if not ws and self.project_path:
+                    ws = Workspace.get_or_init(self.project_path)
+            except Exception:
+                pass
+            if not ws:
+                raise ValueError("Active workspace required to dismiss suggestion.")
+            pro_store = getattr(ws, "proactive_store", None)
+            if not pro_store:
+                raise ValueError("Proactive store not available in workspace.")
+
+            sug_id = inp.get("suggestion_id", "")
+            updated = pro_store.update_suggestion_status(sug_id, SuggestionStatus.DISMISSED)
+            return {"suggestion": updated.to_dict() if updated else {}}
+
+        elif action_id == "proactive.list_watchers":
+            from aether.workspace.workspace import Workspace
+            ws = None
+            try:
+                ws = Workspace.get(ws_id) if hasattr(Workspace, "get") else None
+                if not ws and self.project_path:
+                    ws = Workspace.get_or_init(self.project_path)
+            except Exception:
+                pass
+            if not ws:
+                raise ValueError("Active workspace required to list ambient watchers.")
+            pro_store = getattr(ws, "proactive_store", None)
+            if not pro_store:
+                return {"watchers": []}
+
+            watchers = pro_store.list_watchers(status=inp.get("status"), watcher_type=inp.get("watcher_type"))
+            return {"watchers": [w.to_dict() for w in watchers]}
+
+        elif action_id == "proactive.create_watcher":
+            from aether.workspace.workspace import Workspace
+            from aether.proactive.models import Watcher, WatcherType
+            ws = None
+            try:
+                ws = Workspace.get(ws_id) if hasattr(Workspace, "get") else None
+                if not ws and self.project_path:
+                    ws = Workspace.get_or_init(self.project_path)
+            except Exception:
+                pass
+            if not ws:
+                raise ValueError("Active workspace required to create ambient watcher.")
+            pro_store = getattr(ws, "proactive_store", None)
+            if not pro_store:
+                raise ValueError("Proactive store not available in workspace.")
+
+            watcher_type_str = inp.get("watcher_type", "file_change")
+            watcher_type = WatcherType(watcher_type_str) if watcher_type_str in [t.value for t in WatcherType] else WatcherType.FILE_CHANGE
+
+            watcher = Watcher(
+                name=inp.get("name", "Ambient Watcher"),
+                description=inp.get("description", ""),
+                watcher_type=watcher_type,
+                target=inp.get("target", ""),
+                condition_expression=inp.get("condition_expression", "modified"),
+                action_id=inp.get("action_id", ""),
+                action_args=inp.get("action_args", {}),
+                auto_trigger=bool(inp.get("auto_trigger", False)),
+                interval_seconds=int(inp.get("interval_seconds", 60)),
+            )
+            saved = pro_store.save_watcher(watcher)
+            return {"watcher": saved.to_dict()}
+
+        elif action_id == "proactive.check_watchers":
+            from aether.workspace.workspace import Workspace
+            ws = None
+            try:
+                ws = Workspace.get(ws_id) if hasattr(Workspace, "get") else None
+                if not ws and self.project_path:
+                    ws = Workspace.get_or_init(self.project_path)
+            except Exception:
+                pass
+            if not ws:
+                raise ValueError("Active workspace required to check ambient watchers.")
+            pro_engine = getattr(ws, "proactive_engine", None)
+            if not pro_engine:
+                return {"results": []}
+
+            results = pro_engine.check_all_watchers(workspace=ws)
+            return {
+                "results": [
+                    {"watcher": w.to_dict(), "triggered": trig, "event": ev.to_dict()}
+                    for w, trig, ev in results
+                ]
+            }
+
         raise ValueError(
             f"Action '{action_id}' is not supported by built-in connectors and has no registered handler."
         )

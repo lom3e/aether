@@ -22,6 +22,8 @@ import { isCompanionSurface } from './desktop';
 import { AmbientCompanion } from './AmbientCompanion';
 import { WorkflowBuilder } from './WorkflowBuilder';
 import { ContentRepurposing } from './ContentRepurposing';
+import { ProactiveWatchersView } from './ProactiveWatchersView';
+
 
 function MainApp() {
   const [currentView, setCurrentView] = useState('home');
@@ -308,6 +310,7 @@ function MainApp() {
         {currentView === 'workflows' && <WorkflowBuilder navigate={navigate} />}
         {currentView === 'skills' && <WorkforceHub initialTab="skills" navigate={navigate} />}
         {currentView === 'content' && <ContentRepurposing navigate={navigate} />}
+        {currentView === 'proactive' && <ProactiveWatchersView />}
         {currentView === 'settings' && <Settings onWorkspaceSwitched={handleWorkspaceSwitched} />}
         {currentView === 'marketplace' && <Marketplace />}
       </div>

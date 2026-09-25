@@ -854,6 +854,86 @@ class PersonalAgentService:
                 action_args={},
             )
 
+        # 3e29. Proactive Suggestions Listing (ANSWER tier)
+        proactive_suggestions_triggers = [
+            "suggerimenti proattivi", "cosa mi consigli", "proactive suggestions",
+            "consigli aether", "mostra suggerimenti", "suggerimenti automazione",
+        ]
+        if any(k in p_lower for k in proactive_suggestions_triggers):
+            return UserIntent(
+                raw_prompt=effective_prompt,
+                tier=IntentTier.ANSWER,
+                summary="Retrieve proactive workflow and optimization recommendations",
+                action_id="proactive.list_suggestions",
+                action_args={},
+            )
+
+        # 3e30. Proactive Opportunities Scan (DO tier)
+        proactive_scan_triggers = [
+            "scansiona opportunita", "trova ottimizzazioni", "cerca opportunita",
+            "scan workspace opportunities", "analizza pattern", "scansiona workspace",
+        ]
+        if any(k in p_lower for k in proactive_scan_triggers) or (
+            any(v in p_lower for v in ["scansiona", "scan", "trova", "cerca", "scopri"])
+            and any(o in p_lower for o in ["opportunit", "ottimizzazion", "opportunity", "opportunities"])
+        ):
+            return UserIntent(
+                raw_prompt=effective_prompt,
+                tier=IntentTier.DO,
+                summary="Scan workspace activity and resources to discover automation opportunities",
+                action_id="proactive.generate_suggestions",
+                action_args={},
+            )
+
+        # 3e31. Accept Proactive Suggestion (ACT tier)
+        proactive_accept_triggers = [
+            "accetta suggerimento", "accetta consiglio", "accept suggestion", "applica suggerimento",
+        ]
+        if any(k in p_lower for k in proactive_accept_triggers):
+            sug_match = re.search(r"(?:suggerimento|suggestion|id)\s+([a-zA-Z0-9_-]+)", prompt, re.IGNORECASE)
+            sug_id = sug_match.group(1).strip() if sug_match else "sug-default"
+            return UserIntent(
+                raw_prompt=effective_prompt,
+                tier=IntentTier.ACT,
+                summary=f"Accept proactive recommendation '{sug_id}' and execute action",
+                action_id="proactive.accept_suggestion",
+                action_args={"suggestion_id": sug_id},
+            )
+
+        # 3e32. Ambient Watchers List / Create
+        watchers_list_triggers = [
+            "mostra watcher", "elenco watcher", "list watchers", "quali watcher", "ambient watchers",
+        ]
+        if any(k in p_lower for k in watchers_list_triggers):
+            return UserIntent(
+                raw_prompt=effective_prompt,
+                tier=IntentTier.ANSWER,
+                summary="List configured ambient monitors and watchers",
+                action_id="proactive.list_watchers",
+                action_args={},
+            )
+
+        watchers_create_triggers = [
+            "crea watcher", "monitora file", "monitora directory", "watch file", "watch directory",
+        ]
+        if any(k in p_lower for k in watchers_create_triggers):
+            target_match = re.search(r"(?:file|directory|target|su|on|per)\s+[\"']?([^\"'\n,]+)[\"']?", prompt, re.IGNORECASE)
+            target = target_match.group(1).strip() if target_match else "src/"
+            is_dir = "directory" in p_lower or target.endswith("/")
+            return UserIntent(
+                raw_prompt=effective_prompt,
+                tier=IntentTier.DO,
+                summary=f"Create ambient watcher for target '{target}'",
+                action_id="proactive.create_watcher",
+                action_args={
+                    "name": f"Monitor {target}",
+                    "target": target,
+                    "watcher_type": "directory_watch" if is_dir else "file_change",
+                    "action_id": "knowledge.search",
+                },
+            )
+
+
         # 3e. GitHub issue creation (ACT tier - requires safety confirmation)
         github_issue_triggers = [
             "apri una issue", "apri issue", "crea una issue", "crea issue", "create an issue", "create issue",

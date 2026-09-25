@@ -1617,7 +1617,172 @@ class ActionRegistry:
             )
         )
 
+        # Proactive Intelligence & Ambient Watchers actions
+        self.register(
+            ActionDefinition(
+                id="proactive.list_suggestions",
+                name="List Proactive Suggestions",
+                description="Retrieves synthesized proactive workflow and optimization recommendations.",
+                tier=ActionTier.ANSWER,
+                permission_level=ActionPermissionLevel.READ_ONLY,
+                requires_confirmation=False,
+                provider="proactive",
+                input_schema={
+                    "type": "object",
+                    "properties": {
+                        "status": {"type": "string"},
+                        "category": {"type": "string"},
+                    },
+                },
+                output_schema={
+                    "type": "object",
+                    "properties": {
+                        "suggestions": {"type": "array"},
+                    },
+                },
+            )
+        )
 
+        self.register(
+            ActionDefinition(
+                id="proactive.generate_suggestions",
+                name="Generate Proactive Suggestions",
+                description="Scans the workspace for repeatable patterns and generates actionable suggestions.",
+                tier=ActionTier.DO,
+                permission_level=ActionPermissionLevel.LOCAL_MUTATION,
+                requires_confirmation=False,
+                provider="proactive",
+                input_schema={"type": "object"},
+                output_schema={
+                    "type": "object",
+                    "properties": {
+                        "suggestions": {"type": "array"},
+                    },
+                },
+            )
+        )
 
+        self.register(
+            ActionDefinition(
+                id="proactive.accept_suggestion",
+                name="Accept Proactive Suggestion",
+                description="Accepts a proactive suggestion and executes its proposed action.",
+                tier=ActionTier.ACT,
+                permission_level=ActionPermissionLevel.LOCAL_MUTATION,
+                requires_confirmation=True,
+                provider="proactive",
+                input_schema={
+                    "type": "object",
+                    "properties": {
+                        "suggestion_id": {"type": "string"},
+                    },
+                    "required": ["suggestion_id"],
+                },
+                output_schema={
+                    "type": "object",
+                    "properties": {
+                        "suggestion": {"type": "object"},
+                        "executed_action": {"type": "object"},
+                    },
+                },
+            )
+        )
 
+        self.register(
+            ActionDefinition(
+                id="proactive.dismiss_suggestion",
+                name="Dismiss Proactive Suggestion",
+                description="Dismisses a proactive suggestion without executing.",
+                tier=ActionTier.DO,
+                permission_level=ActionPermissionLevel.LOCAL_MUTATION,
+                requires_confirmation=False,
+                provider="proactive",
+                input_schema={
+                    "type": "object",
+                    "properties": {
+                        "suggestion_id": {"type": "string"},
+                    },
+                    "required": ["suggestion_id"],
+                },
+                output_schema={
+                    "type": "object",
+                    "properties": {
+                        "suggestion": {"type": "object"},
+                    },
+                },
+            )
+        )
 
+        self.register(
+            ActionDefinition(
+                id="proactive.list_watchers",
+                name="List Ambient Watchers",
+                description="Lists configured ambient monitors tracking files, metrics, and directories.",
+                tier=ActionTier.ANSWER,
+                permission_level=ActionPermissionLevel.READ_ONLY,
+                requires_confirmation=False,
+                provider="proactive",
+                input_schema={
+                    "type": "object",
+                    "properties": {
+                        "status": {"type": "string"},
+                        "watcher_type": {"type": "string"},
+                    },
+                },
+                output_schema={
+                    "type": "object",
+                    "properties": {
+                        "watchers": {"type": "array"},
+                    },
+                },
+            )
+        )
+
+        self.register(
+            ActionDefinition(
+                id="proactive.create_watcher",
+                name="Create Ambient Watcher",
+                description="Creates a new ambient monitor that watches a file, directory, or metric and triggers actions.",
+                tier=ActionTier.DO,
+                permission_level=ActionPermissionLevel.LOCAL_MUTATION,
+                requires_confirmation=False,
+                provider="proactive",
+                input_schema={
+                    "type": "object",
+                    "properties": {
+                        "name": {"type": "string"},
+                        "watcher_type": {"type": "string"},
+                        "target": {"type": "string"},
+                        "action_id": {"type": "string"},
+                        "action_args": {"type": "object"},
+                        "auto_trigger": {"type": "boolean"},
+                    },
+                    "required": ["name", "target", "action_id"],
+                },
+                output_schema={
+                    "type": "object",
+                    "properties": {
+                        "watcher": {"type": "object"},
+                    },
+                },
+            )
+        )
+
+        self.register(
+            ActionDefinition(
+                id="proactive.check_watchers",
+                name="Check Ambient Watchers",
+                description="Evaluates all active ambient watchers against their targets.",
+                tier=ActionTier.DO,
+                permission_level=ActionPermissionLevel.LOCAL_MUTATION,
+                requires_confirmation=False,
+                provider="proactive",
+                input_schema={"type": "object"},
+                output_schema={
+                    "type": "object",
+                    "properties": {
+                        "results": {"type": "array"},
+                    },
+                },
+            )
+        )

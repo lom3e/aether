@@ -483,6 +483,31 @@ class Workspace:
             return WorkforceEvolutionEngine(store=self.benchmarking_store)
         return self._get_or_create("benchmarking_engine", _factory)
 
+    @property
+    def proactive_db_path(self) -> str:
+        """Path to the persistent proactive intelligence & watchers database."""
+        if self.data_dir.exists() or self.config_path.exists():
+            return str(self.data_dir / "proactive.db")
+        return str(self.legacy_aether_dir / "proactive.db")
+
+    @property
+    def proactive_store(self):
+        """Return the ProactiveStore for this workspace."""
+        def _factory():
+            from aether.proactive.store import ProactiveStore
+            Path(self.proactive_db_path).parent.mkdir(parents=True, exist_ok=True)
+            return ProactiveStore(self.proactive_db_path)
+        return self._get_or_create("proactive_store", _factory)
+
+    @property
+    def proactive_engine(self):
+        """Return the ProactiveIntelligenceEngine for this workspace."""
+        def _factory():
+            from aether.proactive.engine import ProactiveIntelligenceEngine
+            return ProactiveIntelligenceEngine(store=self.proactive_store)
+        return self._get_or_create("proactive_engine", _factory)
+
+
 
     @property
     def intelligence(self):
