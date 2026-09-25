@@ -397,6 +397,59 @@ class ActionExecutor:
                 self.connection_service.record_operation_success(ws_id, "calendar", action_id)
             return {"events": events}
 
+        # 5b. Google Calendar actions (Macro-pass P0.2)
+        elif action_id.startswith("google_calendar."):
+            if not self.connection_service:
+                raise RuntimeError("Connection service not available.")
+            conn = self.connection_service.get_connection(ws_id, "google_calendar")
+            if not conn or conn.status == ConnectionStatus.NOT_CONFIGURED:
+                raise RuntimeError("Google Calendar is not configured in this workspace.")
+            if conn.status == ConnectionStatus.DISCONNECTED:
+                raise RuntimeError("Google Calendar connection is disconnected in this workspace.")
+            if conn.status == ConnectionStatus.VERIFICATION_FAILED:
+                raise RuntimeError(f"Google Calendar authorization is invalid: {conn.last_verification_error}")
+
+            connector = self.connection_service.get_google_calendar_connector(ws_id)
+            try:
+                if action_id == "google_calendar.create_event":
+                    res = connector.create_event(
+                        title=inp.get("title", "Untitled Event"),
+                        start_time=inp.get("start_time", datetime.now(timezone.utc).isoformat()),
+                        end_time=inp.get("end_time"),
+                        description=inp.get("description", ""),
+                        location=inp.get("location", ""),
+                        calendar_id=inp.get("calendar_id"),
+                    )
+                elif action_id == "google_calendar.list_events":
+                    res = {"events": connector.list_events(calendar_id=inp.get("calendar_id"), limit=int(inp.get("limit", 50)))}
+                elif action_id == "google_calendar.get_event":
+                    res = connector.get_event(event_id=inp.get("event_id", ""), calendar_id=inp.get("calendar_id"))
+                elif action_id == "google_calendar.update_event":
+                    res = connector.update_event(
+                        event_id=inp.get("event_id", ""),
+                        title=inp.get("title"),
+                        start_time=inp.get("start_time"),
+                        end_time=inp.get("end_time"),
+                        description=inp.get("description"),
+                        location=inp.get("location"),
+                        calendar_id=inp.get("calendar_id"),
+                    )
+                elif action_id == "google_calendar.delete_event":
+                    res = {"deleted": connector.delete_event(event_id=inp.get("event_id", ""), calendar_id=inp.get("calendar_id"))}
+                elif action_id == "google_calendar.list_calendars":
+                    res = {"calendars": connector.list_calendars()}
+                else:
+                    raise ValueError(f"Unknown Google Calendar action: {action_id}")
+
+                if hasattr(self.connection_service, "record_operation_success"):
+                    self.connection_service.record_operation_success(ws_id, "google_calendar", action_id)
+                return res
+            except Exception as exc:
+                is_auth = "auth" in str(exc).lower() or "401" in str(exc) or "403" in str(exc)
+                if hasattr(self.connection_service, "record_operation_failure"):
+                    self.connection_service.record_operation_failure(ws_id, "google_calendar", action_id, str(exc), is_auth_error=is_auth)
+                raise
+
         # 6. Local file actions
         elif action_id == "files.create_document":
             filename = inp.get("filename", "untitled.txt")

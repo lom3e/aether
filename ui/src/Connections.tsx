@@ -51,6 +51,18 @@ export function Connections({ navigate: _navigate }: { navigate?: (view: string,
   const [verifyingProvider, setVerifyingProvider] = useState<string | null>(null);
   const [syncingAll, setSyncingAll] = useState(false);
 
+  // Google Calendar States (Macro-pass P0.2)
+  const [googleCalendarEvents, setGoogleCalendarEvents] = useState<CalendarEventItem[]>([]);
+  const [selectedScheduleSource, setSelectedScheduleSource] = useState<'local' | 'google'>('local');
+  const [isGoogleModalOpen, setIsGoogleModalOpen] = useState(false);
+  const [googleClientId, setGoogleClientId] = useState('');
+  const [googleClientSecret, setGoogleClientSecret] = useState('');
+  const [googleAuthPending, setGoogleAuthPending] = useState(false);
+  const [googleManualCode, setGoogleManualCode] = useState('');
+  const [googleState, setGoogleState] = useState('');
+  const [isCalendarPickerOpen, setIsCalendarPickerOpen] = useState(false);
+  const [googleCalendars, setGoogleCalendars] = useState<{ id: string; summary: string; primary: boolean; description?: string }[]>([]);
+
   // New Event Form State
   const [isEventModalOpen, setIsEventModalOpen] = useState(false);
   const [newTitle, setNewTitle] = useState('');
@@ -99,6 +111,17 @@ export function Connections({ navigate: _navigate }: { navigate?: (view: string,
       capabilitiesText: 'Can view schedule, list local events, and record meetings directly in workspace storage',
       color: '#06b6d4',
       builtIn: true,
+      isOAuth: false,
+    },
+    {
+      id: 'google_calendar',
+      name: 'Google Calendar',
+      icon: Calendar,
+      description: 'Real Google Calendar integration via OAuth 2.0 PKCE. Reads calendars, syncs meetings, and schedules events.',
+      capabilitiesText: 'Can read Google calendars and create or update events via official Google Calendar APIs',
+      color: '#4285F4',
+      builtIn: false,
+      isOAuth: true,
     },
     {
       id: 'github',
@@ -108,6 +131,7 @@ export function Connections({ navigate: _navigate }: { navigate?: (view: string,
       capabilitiesText: 'Can read repositories, create issues, and open pull requests',
       color: '#2dba4e',
       builtIn: false,
+      isOAuth: false,
     },
     {
       id: 'email',
@@ -117,6 +141,7 @@ export function Connections({ navigate: _navigate }: { navigate?: (view: string,
       capabilitiesText: 'Can draft and dispatch emails via SMTP with explicit user approval',
       color: '#EA4335',
       builtIn: false,
+      isOAuth: false,
     },
     {
       id: 'slack',
@@ -126,6 +151,7 @@ export function Connections({ navigate: _navigate }: { navigate?: (view: string,
       capabilitiesText: 'Can post messages and status updates to Slack channels with confirmation',
       color: '#4A154B',
       builtIn: false,
+      isOAuth: false,
     },
     {
       id: 'telegram',
@@ -135,6 +161,7 @@ export function Connections({ navigate: _navigate }: { navigate?: (view: string,
       capabilitiesText: 'Can receive mobile commands, dispatch notifications, and handle interactive approvals',
       color: '#229ED9',
       builtIn: false,
+      isOAuth: false,
     },
     {
       id: 'http',
@@ -144,6 +171,7 @@ export function Connections({ navigate: _navigate }: { navigate?: (view: string,
       capabilitiesText: 'Can perform authenticated HTTP operations (GET, POST, PUT, DELETE)',
       color: '#6366f1',
       builtIn: false,
+      isOAuth: false,
     },
     {
       id: 'notion',
@@ -153,6 +181,7 @@ export function Connections({ navigate: _navigate }: { navigate?: (view: string,
       capabilitiesText: 'Can read and synchronize workspace pages and databases',
       color: '#000000',
       builtIn: false,
+      isOAuth: false,
     },
   ];
 
@@ -161,11 +190,13 @@ export function Connections({ navigate: _navigate }: { navigate?: (view: string,
     Promise.all([
       fetch(apiUrl('/api/connections')).then(r => r.json()),
       fetch(apiUrl('/api/connections/calendar/events')).then(r => r.json()),
+      fetch(apiUrl('/api/connections/google_calendar/events')).then(r => r.ok ? r.json() : []).catch(() => []),
       fetch(apiUrl('/api/actions/executions')).then(r => r.json()),
     ])
-      .then(([conns, evts, execs]) => {
+      .then(([conns, evts, gEvts, execs]) => {
         if (Array.isArray(conns)) setConnections(conns);
         if (Array.isArray(evts)) setCalendarEvents(evts);
+        if (Array.isArray(gEvts)) setGoogleCalendarEvents(gEvts);
         if (Array.isArray(execs)) setExecutions(execs);
       })
       .catch(err => {
@@ -455,12 +486,146 @@ export function Connections({ navigate: _navigate }: { navigate?: (view: string,
     }
   };
 
+  const handleStartGoogleOAuth = async (e?: React.FormEvent) => {
+    if (e) e.preventDefault();
+    setGoogleAuthPending(true);
+    try {
+      const res = await fetch(apiUrl('/api/connections/google_calendar/oauth/start'), {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          client_id: googleClientId.trim() || undefined,
+          client_secret: googleClientSecret.trim() || undefined,
+        }),
+      });
+      const data = await res.json();
+      if (!res.ok) {
+        throw new Error(data.detail || 'Could not start Google authorization.');
+      }
+      setGoogleState(data.state || '');
+
+      // Open popup
+      const width = 600;
+      const height = 720;
+      const left = window.screenX + (window.outerWidth - width) / 2;
+      const top = window.screenY + (window.outerHeight - height) / 2;
+      const popup = window.open(
+        data.auth_url,
+        'aether_google_oauth',
+        `width=${width},height=${height},left=${left},top=${top},status=0,toolbar=0,menubar=0`
+      );
+
+      const messageHandler = (event: MessageEvent) => {
+        if (event.data?.type === 'aether_oauth_success' && event.data?.provider === 'google_calendar') {
+          window.removeEventListener('message', messageHandler);
+          showToast(`Google Calendar connected & verified (${event.data.email || 'account'})!`, 'success');
+          setIsGoogleModalOpen(false);
+          setGoogleAuthPending(false);
+          fetchAll();
+        } else if (event.data?.type === 'aether_oauth_error' && event.data?.provider === 'google_calendar') {
+          window.removeEventListener('message', messageHandler);
+          showToast(`Google Calendar authorization failed: ${event.data.error || 'error'}`, 'error');
+          setGoogleAuthPending(false);
+          fetchAll();
+        }
+      };
+      window.addEventListener('message', messageHandler);
+
+      // Poll for popup closure
+      const pollTimer = setInterval(() => {
+        if (!popup || popup.closed) {
+          clearInterval(pollTimer);
+          window.removeEventListener('message', messageHandler);
+          setGoogleAuthPending(false);
+          fetchAll();
+        }
+      }, 1000);
+    } catch (err: any) {
+      showToast(err.message || 'Failed to start Google OAuth', 'error');
+      setGoogleAuthPending(false);
+    }
+  };
+
+  const handleManualExchangeCode = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!googleManualCode.trim() || !googleState.trim()) {
+      showToast('Both authorization code and state are required.', 'error');
+      return;
+    }
+    setGoogleAuthPending(true);
+    try {
+      const res = await fetch(apiUrl('/api/connections/google_calendar/oauth/exchange'), {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          code: googleManualCode.trim(),
+          state: googleState.trim(),
+        }),
+      });
+      const data = await res.json();
+      if (!res.ok) {
+        throw new Error(data.detail || 'Code exchange failed.');
+      }
+      if (data.valid) {
+        showToast('Google Calendar authorized and verified successfully!', 'success');
+        setIsGoogleModalOpen(false);
+        setGoogleManualCode('');
+        fetchAll();
+      } else {
+        showToast(`Verification failed: ${data.message}`, 'error');
+      }
+    } catch (err: any) {
+      showToast(err.message || 'Failed to exchange Google OAuth code', 'error');
+    } finally {
+      setGoogleAuthPending(false);
+    }
+  };
+
+  const handleOpenCalendarPicker = async () => {
+    try {
+      const res = await fetch(apiUrl('/api/connections/google_calendar/calendars'));
+      const data = await res.json();
+      if (data.calendars && Array.isArray(data.calendars)) {
+        setGoogleCalendars(data.calendars);
+        setIsCalendarPickerOpen(true);
+      } else {
+        showToast('No Google calendars found or error loading calendars.', 'error');
+      }
+    } catch (err) {
+      showToast('Failed to load Google calendars.', 'error');
+    }
+  };
+
+  const handleSelectCalendar = async (calId: string, summary: string) => {
+    try {
+      const res = await fetch(apiUrl('/api/connections/google_calendar/select-calendar'), {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          calendar_id: calId,
+          calendar_summary: summary,
+        }),
+      });
+      if (res.ok) {
+        showToast(`Active Google Calendar set to: ${summary}`, 'success');
+        setIsCalendarPickerOpen(false);
+        fetchAll();
+      }
+    } catch (err) {
+      showToast('Failed to select calendar.', 'error');
+    }
+  };
+
   const handleCreateEvent = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!newTitle.trim()) return;
     setCreatingEvent(true);
     try {
-      const res = await fetch(apiUrl('/api/connections/calendar/events'), {
+      const endpoint = selectedScheduleSource === 'google'
+        ? '/api/connections/google_calendar/events'
+        : '/api/connections/calendar/events';
+
+      const res = await fetch(apiUrl(endpoint), {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -470,7 +635,7 @@ export function Connections({ navigate: _navigate }: { navigate?: (view: string,
         }),
       });
       if (res.ok) {
-        showToast('Calendar event created.', 'success');
+        showToast(selectedScheduleSource === 'google' ? 'Google Calendar event created.' : 'Aether Calendar event created.', 'success');
         setIsEventModalOpen(false);
         setNewTitle('');
         setNewStartTime('');
@@ -600,9 +765,17 @@ export function Connections({ navigate: _navigate }: { navigate?: (view: string,
                         </div>
                       </div>
                     </div>
-                    {isVerified ? (
+                    {p.id === 'google_calendar' && (googleAuthPending || verifyingProvider === 'google_calendar') ? (
+                      <span style={{ display: 'flex', alignItems: 'center', gap: '4px', fontSize: '12px', color: '#f59e0b', fontWeight: 600 }}>
+                        <RefreshCw size={14} className="animate-spin" /> Verifica in corso
+                      </span>
+                    ) : p.id === 'google_calendar' && isVerificationFailed ? (
+                      <span style={{ display: 'flex', alignItems: 'center', gap: '4px', fontSize: '12px', color: '#ef4444', fontWeight: 600 }}>
+                        <AlertCircle size={14} /> Authorization Failed
+                      </span>
+                    ) : isVerified ? (
                       <span style={{ display: 'flex', alignItems: 'center', gap: '4px', fontSize: '12px', color: '#10b981', fontWeight: 600 }}>
-                        <CheckCircle2 size={14} /> Verified
+                        <CheckCircle2 size={14} /> {p.id === 'google_calendar' ? 'Connected & Verified' : 'Verified'}
                       </span>
                     ) : isConfiguredStatus ? (
                       <span style={{ display: 'flex', alignItems: 'center', gap: '4px', fontSize: '12px', color: '#38bdf8', fontWeight: 600 }}>
@@ -629,6 +802,11 @@ export function Connections({ navigate: _navigate }: { navigate?: (view: string,
                   <p style={{ fontSize: '13px', color: 'hsl(var(--muted-fg))', margin: 0, lineHeight: 1.4 }}>
                     {p.description}
                   </p>
+                  {p.id === 'google_calendar' && conn && isVerified && (
+                    <div style={{ fontSize: '11px', color: '#4285F4', display: 'flex', alignItems: 'center', gap: '4px', marginTop: '6px', fontWeight: 500 }}>
+                      <Calendar size={11} /> Calendar: {conn.auth_metadata?.selected_calendar_summary || conn.auth_metadata?.selected_calendar_id || 'Primary'}
+                    </div>
+                  )}
                   {conn?.last_verified_at && (
                     <div style={{ fontSize: '11px', color: '#10b981', display: 'flex', alignItems: 'center', gap: '4px', marginTop: '6px' }}>
                       <CheckCircle2 size={11} /> Verified: {new Date(conn.last_verified_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', month: 'short', day: 'numeric' })}
@@ -664,7 +842,10 @@ export function Connections({ navigate: _navigate }: { navigate?: (view: string,
                         <>
                           <button
                             className="btn btn-secondary"
-                            onClick={() => setActiveTab('calendar')}
+                            onClick={() => {
+                              setSelectedScheduleSource('local');
+                              setActiveTab('calendar');
+                            }}
                             style={{ fontSize: '12px', padding: '6px 12px' }}
                           >
                             View Schedule
@@ -684,6 +865,77 @@ export function Connections({ navigate: _navigate }: { navigate?: (view: string,
                           style={{ fontSize: '12px', padding: '6px 14px' }}
                         >
                           Initialize Calendar
+                        </button>
+                      )}
+                    </>
+                  ) : p.id === 'google_calendar' ? (
+                    <>
+                      {isVerified ? (
+                        <>
+                          <button
+                            className="btn btn-secondary"
+                            onClick={() => {
+                              setSelectedScheduleSource('google');
+                              setActiveTab('calendar');
+                            }}
+                            style={{ fontSize: '12px', padding: '6px 12px' }}
+                          >
+                            View Schedule
+                          </button>
+                          <button
+                            className="btn btn-secondary"
+                            onClick={() => handleSync(p.id)}
+                            disabled={syncingProvider === p.id}
+                            style={{ fontSize: '12px', padding: '6px 12px', display: 'flex', alignItems: 'center', gap: '4px' }}
+                            title="Sync external entities into persistent memory and knowledge"
+                          >
+                            <RefreshCw size={12} className={syncingProvider === p.id ? 'animate-spin' : ''} />
+                            {syncingProvider === p.id ? 'Syncing...' : 'Sync Now'}
+                          </button>
+                          <button
+                            className="btn btn-secondary"
+                            onClick={handleOpenCalendarPicker}
+                            style={{ fontSize: '12px', padding: '6px 12px', display: 'flex', alignItems: 'center', gap: '4px' }}
+                          >
+                            <Settings size={12} /> Select Calendar
+                          </button>
+                          <button
+                            className="btn btn-ghost"
+                            onClick={() => handleDisconnect(p.id)}
+                            style={{ fontSize: '12px', padding: '6px 12px', color: 'hsl(var(--destructive))' }}
+                          >
+                            Disconnect / Revoke
+                          </button>
+                        </>
+                      ) : (googleAuthPending || verifyingProvider === 'google_calendar') ? (
+                        <button
+                          className="btn btn-secondary"
+                          disabled
+                          style={{ fontSize: '12px', padding: '6px 14px', display: 'flex', alignItems: 'center', gap: '4px' }}
+                        >
+                          <RefreshCw size={12} className="animate-spin" /> Verifica in corso...
+                        </button>
+                      ) : isVerificationFailed ? (
+                        <button
+                          className="btn btn-primary"
+                          onClick={() => {
+                            if (conn?.auth_metadata?.client_id) setGoogleClientId(conn.auth_metadata.client_id);
+                            setIsGoogleModalOpen(true);
+                          }}
+                          style={{ fontSize: '12px', padding: '6px 14px' }}
+                        >
+                          Retry Authorization
+                        </button>
+                      ) : (
+                        <button
+                          className="btn btn-primary"
+                          onClick={() => {
+                            if (conn?.auth_metadata?.client_id) setGoogleClientId(conn.auth_metadata.client_id);
+                            setIsGoogleModalOpen(true);
+                          }}
+                          style={{ fontSize: '12px', padding: '6px 14px' }}
+                        >
+                          Connect Google Calendar
                         </button>
                       )}
                     </>
@@ -751,28 +1003,63 @@ export function Connections({ navigate: _navigate }: { navigate?: (view: string,
       {/* Tab 2: Calendar Schedule */}
       {activeTab === 'calendar' && (
         <div>
-          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '16px' }}>
-            <div style={{ fontSize: '14px', color: 'hsl(var(--muted-fg))' }}>
-              Real scheduled events managed via Aether Calendar connection:
+          {/* Calendar Source Switcher */}
+          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '16px' }}>
+            <div style={{ display: 'flex', gap: '8px' }}>
+              <button
+                className={`btn ${selectedScheduleSource === 'local' ? 'btn-primary' : 'btn-secondary'}`}
+                onClick={() => setSelectedScheduleSource('local')}
+                style={{ fontSize: '12px', padding: '6px 14px' }}
+              >
+                Aether Calendar (Local) ({calendarEvents.length})
+              </button>
+              {connections.some(c => c.provider === 'google_calendar' && (c.status === 'verified' || c.status === 'connected')) && (
+                <button
+                  className={`btn ${selectedScheduleSource === 'google' ? 'btn-primary' : 'btn-secondary'}`}
+                  onClick={() => setSelectedScheduleSource('google')}
+                  style={{
+                    fontSize: '12px',
+                    padding: '6px 14px',
+                    backgroundColor: selectedScheduleSource === 'google' ? '#4285F4' : undefined,
+                    borderColor: selectedScheduleSource === 'google' ? '#4285F4' : undefined,
+                    color: selectedScheduleSource === 'google' ? '#fff' : undefined,
+                  }}
+                >
+                  Google Calendar ({googleCalendarEvents.length})
+                </button>
+              )}
             </div>
+
             <button
               className="btn btn-primary"
               onClick={() => setIsEventModalOpen(true)}
               style={{ display: 'flex', alignItems: 'center', gap: '6px', fontSize: '13px' }}
             >
-              <Plus size={14} /> New Event
+              <Plus size={14} /> New Event ({selectedScheduleSource === 'google' ? 'Google' : 'Local'})
             </button>
           </div>
 
-          {calendarEvents.length === 0 ? (
+          <div style={{ fontSize: '13px', color: 'hsl(var(--muted-fg))', marginBottom: '12px' }}>
+            {selectedScheduleSource === 'google'
+              ? 'Real Google Calendar events synchronized via official Google Calendar API:'
+              : 'Real scheduled events managed via Aether Local Calendar (SQLite storage):'}
+          </div>
+
+          {((selectedScheduleSource === 'google' ? googleCalendarEvents : calendarEvents).length === 0) ? (
             <div className="card" style={{ padding: '40px', textAlign: 'center', color: 'hsl(var(--muted-fg))' }}>
-              <Calendar size={32} style={{ margin: '0 auto 12px', opacity: 0.5 }} />
-              <div style={{ fontWeight: 600, marginBottom: '4px' }}>No calendar events found</div>
-              <div style={{ fontSize: '13px' }}>Ask Personal Aether to schedule an appointment or click "New Event".</div>
+              <Calendar size={32} style={{ margin: '0 auto 12px', opacity: 0.5, color: selectedScheduleSource === 'google' ? '#4285F4' : undefined }} />
+              <div style={{ fontWeight: 600, marginBottom: '4px' }}>
+                {selectedScheduleSource === 'google' ? 'No Google Calendar events found' : 'No local calendar events found'}
+              </div>
+              <div style={{ fontSize: '13px' }}>
+                {selectedScheduleSource === 'google'
+                  ? 'Click "New Event" to create an event on Google Calendar, or click "Sync Now" on the Google Calendar card.'
+                  : 'Ask Personal Aether to schedule an appointment or click "New Event".'}
+              </div>
             </div>
           ) : (
             <div style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
-              {calendarEvents.map(evt => (
+              {(selectedScheduleSource === 'google' ? googleCalendarEvents : calendarEvents).map(evt => (
                 <div
                   key={evt.id}
                   className="card"
@@ -782,6 +1069,7 @@ export function Connections({ navigate: _navigate }: { navigate?: (view: string,
                     alignItems: 'center',
                     justifyContent: 'space-between',
                     borderRadius: '10px',
+                    borderLeft: selectedScheduleSource === 'google' ? '3px solid #4285F4' : '3px solid #06b6d4',
                   }}
                 >
                   <div style={{ display: 'flex', alignItems: 'center', gap: '14px' }}>
@@ -789,8 +1077,8 @@ export function Connections({ navigate: _navigate }: { navigate?: (view: string,
                       width: '42px',
                       height: '42px',
                       borderRadius: '8px',
-                      backgroundColor: 'hsl(var(--primary)/0.1)',
-                      color: 'hsl(var(--primary))',
+                      backgroundColor: selectedScheduleSource === 'google' ? '#4285F415' : 'hsl(var(--primary)/0.1)',
+                      color: selectedScheduleSource === 'google' ? '#4285F4' : 'hsl(var(--primary))',
                       display: 'flex',
                       flexDirection: 'column',
                       alignItems: 'center',
@@ -808,9 +1096,21 @@ export function Connections({ navigate: _navigate }: { navigate?: (view: string,
                       </div>
                     </div>
                   </div>
-                  <span style={{ fontSize: '12px', color: '#10b981', fontWeight: 600, backgroundColor: '#10b98115', padding: '3px 10px', borderRadius: '12px' }}>
-                    Confirmed
-                  </span>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                    <span style={{
+                      fontSize: '11px',
+                      color: selectedScheduleSource === 'google' ? '#4285F4' : '#06b6d4',
+                      backgroundColor: selectedScheduleSource === 'google' ? '#4285F415' : '#06b6d415',
+                      padding: '2px 8px',
+                      borderRadius: '4px',
+                      fontWeight: 600,
+                    }}>
+                      {selectedScheduleSource === 'google' ? 'Google Calendar' : 'Local Workspace'}
+                    </span>
+                    <span style={{ fontSize: '12px', color: '#10b981', fontWeight: 600, backgroundColor: '#10b98115', padding: '3px 10px', borderRadius: '12px' }}>
+                      Confirmed
+                    </span>
+                  </div>
                 </div>
               ))}
             </div>
@@ -1298,6 +1598,208 @@ export function Connections({ navigate: _navigate }: { navigate?: (view: string,
                 </div>
               </div>
             </form>
+          </div>
+        </div>
+      )}
+
+      {/* Google Calendar OAuth Flow Modal */}
+      {isGoogleModalOpen && (
+        <div style={{
+          position: 'fixed',
+          inset: 0,
+          backgroundColor: 'rgba(0, 0, 0, 0.65)',
+          backdropFilter: 'blur(4px)',
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'center',
+          zIndex: 1000,
+        }}>
+          <div className="card" style={{ width: '500px', maxHeight: '90vh', overflowY: 'auto', padding: '24px', borderRadius: '12px' }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '12px', marginBottom: '16px' }}>
+              <div style={{
+                width: '40px',
+                height: '40px',
+                borderRadius: '10px',
+                backgroundColor: '#4285F415',
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                color: '#4285F4',
+              }}>
+                <Calendar size={22} />
+              </div>
+              <div>
+                <h3 style={{ margin: 0, fontSize: '18px', fontWeight: 600 }}>Connect Google Calendar</h3>
+                <div style={{ fontSize: '12px', color: 'hsl(var(--muted-fg))' }}>
+                  Real OAuth 2.0 Authorization with PKCE & Live Verification
+                </div>
+              </div>
+            </div>
+
+            <p style={{ fontSize: '13px', color: 'hsl(var(--muted-fg))', lineHeight: 1.5, margin: '0 0 16px' }}>
+              Aether connects directly to official Google APIs without third-party proxying.
+              Clicking <strong>Authorize with Google</strong> will open Google's consent screen.
+            </p>
+
+            <form onSubmit={handleStartGoogleOAuth} style={{ display: 'flex', flexDirection: 'column', gap: '14px' }}>
+              <div>
+                <label style={{ fontSize: '12px', fontWeight: 600, display: 'block', marginBottom: '4px' }}>
+                  Google Client ID (Optional)
+                </label>
+                <input
+                  type="text"
+                  className="input"
+                  placeholder="Leave blank to use default desktop client or env setting"
+                  value={googleClientId}
+                  onChange={e => setGoogleClientId(e.target.value)}
+                  style={{ width: '100%', fontSize: '13px' }}
+                />
+                <div style={{ fontSize: '11px', color: 'hsl(var(--muted-fg))', marginTop: '4px' }}>
+                  If using your own Google Cloud project credentials.
+                </div>
+              </div>
+
+              <div>
+                <label style={{ fontSize: '12px', fontWeight: 600, display: 'block', marginBottom: '4px' }}>
+                  Google Client Secret (Optional)
+                </label>
+                <input
+                  type="password"
+                  className="input"
+                  placeholder="Optional for desktop PKCE flows"
+                  value={googleClientSecret}
+                  onChange={e => setGoogleClientSecret(e.target.value)}
+                  style={{ width: '100%', fontSize: '13px' }}
+                />
+              </div>
+
+              <div style={{
+                backgroundColor: 'hsl(var(--muted)/0.2)',
+                border: '1px solid hsl(var(--border))',
+                borderRadius: '8px',
+                padding: '10px 14px',
+                fontSize: '11px',
+                color: 'hsl(var(--muted-fg))',
+                lineHeight: 1.4,
+              }}>
+                <strong>Authorized Redirect URI:</strong><br />
+                <code style={{ fontSize: '10px', color: 'hsl(var(--fg))' }}>
+                  http://127.0.0.1:8000/api/connections/google_calendar/oauth/callback
+                </code>
+              </div>
+
+              <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '8px', marginTop: '6px' }}>
+                <button
+                  type="button"
+                  className="btn btn-ghost"
+                  onClick={() => setIsGoogleModalOpen(false)}
+                  disabled={googleAuthPending}
+                >
+                  Cancel
+                </button>
+                <button
+                  type="submit"
+                  className="btn btn-primary"
+                  disabled={googleAuthPending}
+                  style={{ backgroundColor: '#4285F4', borderColor: '#4285F4', color: '#fff' }}
+                >
+                  {googleAuthPending ? 'Verifica in corso...' : 'Authorize with Google'}
+                </button>
+              </div>
+            </form>
+
+            {/* Manual fallback exchange for headless or popup blocked */}
+            <div style={{ marginTop: '20px', paddingTop: '16px', borderTop: '1px solid hsl(var(--border))' }}>
+              <div style={{ fontSize: '12px', fontWeight: 600, marginBottom: '6px' }}>
+                Manual Authorization Code Entry (Fallback)
+              </div>
+              <p style={{ fontSize: '11px', color: 'hsl(var(--muted-fg))', margin: '0 0 10px' }}>
+                If your browser did not redirect automatically, paste the authorization code returned by Google below:
+              </p>
+              <form onSubmit={handleManualExchangeCode} style={{ display: 'flex', gap: '8px' }}>
+                <input
+                  type="text"
+                  className="input"
+                  placeholder="4/0A..."
+                  value={googleManualCode}
+                  onChange={e => setGoogleManualCode(e.target.value)}
+                  style={{ flex: 1, fontSize: '12px' }}
+                />
+                <button
+                  type="submit"
+                  className="btn btn-secondary"
+                  disabled={googleAuthPending || !googleManualCode.trim()}
+                  style={{ fontSize: '12px' }}
+                >
+                  Submit & Verify
+                </button>
+              </form>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Google Calendar Selector Modal */}
+      {isCalendarPickerOpen && (
+        <div style={{
+          position: 'fixed',
+          inset: 0,
+          backgroundColor: 'rgba(0, 0, 0, 0.65)',
+          backdropFilter: 'blur(4px)',
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'center',
+          zIndex: 1000,
+        }}>
+          <div className="card" style={{ width: '440px', maxHeight: '80vh', overflowY: 'auto', padding: '24px', borderRadius: '12px' }}>
+            <h3 style={{ margin: '0 0 8px', fontSize: '18px', fontWeight: 600 }}>Select Active Google Calendar</h3>
+            <p style={{ fontSize: '13px', color: 'hsl(var(--muted-fg))', margin: '0 0 16px' }}>
+              Choose which Google Calendar Aether should read and schedule events into:
+            </p>
+
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '8px', marginBottom: '20px' }}>
+              {googleCalendars.map(cal => (
+                <div
+                  key={cal.id}
+                  style={{
+                    padding: '12px 14px',
+                    borderRadius: '8px',
+                    border: '1px solid hsl(var(--border))',
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'space-between',
+                  }}
+                >
+                  <div>
+                    <div style={{ fontWeight: 600, fontSize: '14px' }}>
+                      {cal.summary} {cal.primary && <span style={{ fontSize: '10px', backgroundColor: '#4285F420', color: '#4285F4', padding: '2px 6px', borderRadius: '4px', marginLeft: '6px' }}>Primary</span>}
+                    </div>
+                    {cal.description && (
+                      <div style={{ fontSize: '11px', color: 'hsl(var(--muted-fg))', marginTop: '2px' }}>
+                        {cal.description}
+                      </div>
+                    )}
+                  </div>
+                  <button
+                    className="btn btn-primary"
+                    onClick={() => handleSelectCalendar(cal.id, cal.summary)}
+                    style={{ fontSize: '11px', padding: '4px 10px' }}
+                  >
+                    Select
+                  </button>
+                </div>
+              ))}
+            </div>
+
+            <div style={{ display: 'flex', justifyContent: 'flex-end' }}>
+              <button
+                type="button"
+                className="btn btn-ghost"
+                onClick={() => setIsCalendarPickerOpen(false)}
+              >
+                Cancel
+              </button>
+            </div>
           </div>
         </div>
       )}

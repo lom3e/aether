@@ -89,7 +89,7 @@ class Connection:
         if mask_secrets:
             masked = {}
             for k, v in meta.items():
-                if any(secret_word in k.lower() for secret_word in ("token", "secret", "password", "key", "webhook", "pat")):
+                if any(secret_word in k.lower() for secret_word in ("token", "secret", "password", "key", "webhook", "pat", "verifier", "credential")):
                     if isinstance(v, str) and len(v) > 6:
                         masked[k] = f"{v[:4]}...{v[-3:]}"
                     elif isinstance(v, str) and v:

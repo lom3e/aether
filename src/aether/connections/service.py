@@ -19,6 +19,7 @@ from aether.connections.base import (
 )
 from aether.connections.email import EmailConnector
 from aether.connections.github import GitHubConnector
+from aether.connections.google_calendar import GoogleCalendarConnector
 from aether.connections.http import HttpConnector
 from aether.connections.models import CalendarEvent, Connection, ConnectionStatus
 from aether.connections.slack import SlackConnector
@@ -152,6 +153,15 @@ class ConnectionService:
             return ["http.request", "http.get", "http.post", "http.put", "http.patch", "http.delete"]
         elif p == "calendar":
             return ["calendar.create_event", "calendar.list_events"]
+        elif p == "google_calendar":
+            return [
+                "google_calendar.list_events",
+                "google_calendar.create_event",
+                "google_calendar.get_event",
+                "google_calendar.update_event",
+                "google_calendar.delete_event",
+                "google_calendar.list_calendars",
+            ]
         elif p == "telegram":
             return ["telegram.send_message", "telegram.send_approval", "telegram.verify"]
         return [f"{p}.read", f"{p}.write"]
@@ -393,6 +403,14 @@ class ConnectionService:
         """Disconnects a service."""
         conn = self.store.get_connection_by_provider(workspace_id, provider)
         if conn:
+            if provider.lower().strip() == "google_calendar" and conn.auth_metadata:
+                try:
+                    connector = GoogleCalendarConnector(auth_metadata=conn.auth_metadata)
+                    connector.revoke()
+                except Exception as exc:
+                    logger.warning("Failed to revoke Google token during disconnect: %s", exc)
+                conn.auth_metadata["access_token"] = ""
+                conn.auth_metadata["refresh_token"] = ""
             conn.status = ConnectionStatus.DISCONNECTED
             conn.last_verified_at = None
             conn.updated_at = datetime.now(timezone.utc).isoformat()
@@ -485,6 +503,19 @@ class ConnectionService:
         meta = conn.auth_metadata if conn else {}
         return TelegramConnector(auth_metadata=meta)
 
+    def get_google_calendar_connector(self, workspace_id: str) -> GoogleCalendarConnector:
+        """Returns GoogleCalendarConnector configured with the workspace's credentials."""
+        conn = self.store.get_connection_by_provider(workspace_id, "google_calendar")
+        if not conn:
+            raise RuntimeError("Google Calendar connection is not configured in this workspace.")
+        if conn.status == ConnectionStatus.DISCONNECTED:
+            raise RuntimeError("Google Calendar connection is disconnected in this workspace.")
+        return GoogleCalendarConnector(
+            auth_metadata=conn.auth_metadata,
+            workspace_id=workspace_id,
+            store=self.store,
+        )
+
     def get_connector(self, workspace_id: str, provider: str) -> BaseConnector | None:
         """Generic connector resolver."""
         p = provider.lower().strip()
@@ -500,6 +531,8 @@ class ConnectionService:
             return self.get_telegram_connector(workspace_id)
         elif p == "calendar":
             return self.get_calendar_connector(workspace_id)
+        elif p == "google_calendar":
+            return self.get_google_calendar_connector(workspace_id)
         return None
 
 
@@ -514,6 +547,9 @@ def verify_credentials(
 
     if prov == "calendar":
         return True, "Aether local calendar storage ready."
+
+    elif prov == "google_calendar":
+        return GoogleCalendarConnector(auth_metadata=meta).verify(meta, live_check=live_check)
 
     elif prov == "github":
         return GitHubConnector(auth_metadata=meta).verify(meta, live_check=live_check)

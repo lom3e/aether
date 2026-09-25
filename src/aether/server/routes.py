@@ -1,7 +1,9 @@
 import asyncio
+from datetime import datetime, timezone
 import json
+import logging
 from fastapi import APIRouter, Request, HTTPException, UploadFile, File, Form, status, Query
-from fastapi.responses import FileResponse, StreamingResponse, PlainTextResponse
+from fastapi.responses import FileResponse, StreamingResponse, PlainTextResponse, HTMLResponse
 from pydantic import BaseModel, Field
 from typing import Any
 import hashlib
@@ -12,6 +14,8 @@ from pathlib import Path
 
 from aether.core.paths import get_global_config_path
 from aether.commands import CommandContext, get_default_command_dispatcher
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter()
 
@@ -5765,6 +5769,36 @@ class CreateCalendarEventPayload(BaseModel):
     workspace_id: str | None = None
 
 
+class GoogleOAuthStartPayload(BaseModel):
+    workspace_id: str | None = None
+    client_id: str | None = None
+    client_secret: str | None = None
+    redirect_uri: str | None = None
+
+
+class GoogleOAuthExchangePayload(BaseModel):
+    workspace_id: str | None = None
+    code: str
+    state: str
+    redirect_uri: str | None = None
+
+
+class GoogleSelectCalendarPayload(BaseModel):
+    workspace_id: str | None = None
+    calendar_id: str
+    calendar_summary: str | None = None
+
+
+class CreateGoogleCalendarEventPayload(BaseModel):
+    title: str
+    start_time: str
+    end_time: str | None = None
+    description: str = ""
+    location: str = ""
+    calendar_id: str | None = None
+    workspace_id: str | None = None
+
+
 # ---------------------------------------------------------------------------
 # Personal Agent Endpoints
 # ---------------------------------------------------------------------------
@@ -6121,6 +6155,335 @@ async def create_calendar_event_route(request: Request, payload: CreateCalendarE
         description=payload.description,
         location=payload.location,
     )
+    return event
+
+
+# ---------------------------------------------------------------------------
+# Google Calendar & OAuth 2.0 PKCE Endpoints (Macro-pass P0.2)
+# ---------------------------------------------------------------------------
+
+@router.post("/connections/google_calendar/oauth/start")
+async def start_google_oauth_route(request: Request, payload: GoogleOAuthStartPayload | None = None):
+    ws = getattr(request.app.state, "workspace", None)
+    if not ws:
+        raise HTTPException(status_code=503, detail="Workspace not initialized.")
+    ws_id = ((payload.workspace_id if payload else None) or ws.name).strip()
+
+    from aether.connections.google_calendar import GoogleOAuthManager
+    redirect_uri = payload.redirect_uri if payload and payload.redirect_uri else None
+    if not redirect_uri:
+        base = str(request.base_url).rstrip("/")
+        redirect_uri = f"{base}/api/connections/google_calendar/oauth/callback"
+
+    client_id = payload.client_id if payload else None
+    client_secret = payload.client_secret if payload else None
+
+    existing = ws.connections.get_connection(ws_id, "google_calendar")
+    if existing and existing.auth_metadata:
+        if not client_id and existing.auth_metadata.get("client_id"):
+            client_id = existing.auth_metadata["client_id"]
+        if not client_secret and existing.auth_metadata.get("client_secret"):
+            client_secret = existing.auth_metadata["client_secret"]
+
+    auth_url, state = GoogleOAuthManager.create_auth_flow(
+        workspace_id=ws_id,
+        client_id=client_id,
+        client_secret=client_secret,
+        redirect_uri=redirect_uri,
+    )
+    return {"auth_url": auth_url, "state": state, "redirect_uri": redirect_uri}
+
+
+@router.get("/connections/google_calendar/oauth/callback")
+async def google_oauth_callback_route(
+    request: Request,
+    code: str | None = None,
+    state: str | None = None,
+    error: str | None = None,
+    error_description: str | None = None,
+):
+    ws = getattr(request.app.state, "workspace", None)
+    from aether.connections.google_calendar import GoogleOAuthManager, GoogleCalendarConnector
+    from aether.connections.models import Connection, ConnectionStatus
+    from datetime import datetime, timezone
+
+    if error:
+        err_msg = error_description or error
+        logger.warning("Google OAuth authorization failed or was canceled: %s", err_msg)
+        html = f"""<!DOCTYPE html>
+<html>
+<head><title>Aether — Authorization Canceled</title></head>
+<body style="font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; background: #090d16; color: #f8fafc; padding: 48px; text-align: center;">
+  <div style="max-width: 440px; margin: 0 auto; background: #131b2e; border: 1px solid #ef444450; border-radius: 12px; padding: 32px;">
+    <h2 style="color: #ef4444; margin-top: 0;">Authorization Canceled</h2>
+    <p style="font-size: 14px; color: #cbd5e1; line-height: 1.5;">{err_msg}</p>
+    <p style="font-size: 12px; color: #64748b; margin-top: 24px;">You can close this window and try again from Aether Connections.</p>
+  </div>
+  <script>
+    if (window.opener) {{
+      window.opener.postMessage({{ type: 'aether_oauth_error', provider: 'google_calendar', error: {json.dumps(err_msg)} }}, '*');
+    }}
+  </script>
+</body>
+</html>"""
+        return HTMLResponse(content=html, status_code=200)
+
+    if not state or not code:
+        html = """<!DOCTYPE html>
+<html>
+<head><title>Aether — Invalid Request</title></head>
+<body style="font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; background: #090d16; color: #f8fafc; padding: 48px; text-align: center;">
+  <div style="max-width: 440px; margin: 0 auto; background: #131b2e; border: 1px solid #ef444450; border-radius: 12px; padding: 32px;">
+    <h2 style="color: #ef4444; margin-top: 0;">Invalid State</h2>
+    <p style="font-size: 14px; color: #cbd5e1;">Missing OAuth code or state parameter.</p>
+  </div>
+</body>
+</html>"""
+        return HTMLResponse(content=html, status_code=400)
+
+    state_data = GoogleOAuthManager.validate_and_consume_state(state)
+    if not state_data:
+        html = """<!DOCTYPE html>
+<html>
+<head><title>Aether — Invalid or Expired State</title></head>
+<body style="font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; background: #090d16; color: #f8fafc; padding: 48px; text-align: center;">
+  <div style="max-width: 440px; margin: 0 auto; background: #131b2e; border: 1px solid #ef444450; border-radius: 12px; padding: 32px;">
+    <h2 style="color: #ef4444; margin-top: 0;">Session Expired</h2>
+    <p style="font-size: 14px; color: #cbd5e1;">OAuth state is invalid or has expired (timeout is 15 minutes). Please restart connection from Aether.</p>
+  </div>
+</body>
+</html>"""
+        return HTMLResponse(content=html, status_code=400)
+
+    ws_id = state_data.workspace_id or (ws.name if ws else "default")
+
+    try:
+        tokens = GoogleOAuthManager.exchange_code(code, state_data)
+    except Exception as exc:
+        err_msg = str(exc)
+        logger.error("Token exchange failed during Google callback: %s", err_msg)
+        if ws:
+            ws.connections.record_operation_failure(ws_id, "google_calendar", "oauth_exchange", err_msg, is_auth_error=True)
+        html = f"""<!DOCTYPE html>
+<html>
+<head><title>Aether — Token Exchange Failed</title></head>
+<body style="font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; background: #090d16; color: #f8fafc; padding: 48px; text-align: center;">
+  <div style="max-width: 440px; margin: 0 auto; background: #131b2e; border: 1px solid #ef444450; border-radius: 12px; padding: 32px;">
+    <h2 style="color: #ef4444; margin-top: 0;">Authorization Failed</h2>
+    <p style="font-size: 14px; color: #cbd5e1;">{err_msg}</p>
+  </div>
+  <script>
+    if (window.opener) {{
+      window.opener.postMessage({{ type: 'aether_oauth_error', provider: 'google_calendar', error: {json.dumps(err_msg)} }}, '*');
+    }}
+  </script>
+</body>
+</html>"""
+        return HTMLResponse(content=html, status_code=200)
+
+    connector = GoogleCalendarConnector(auth_metadata=tokens, workspace_id=ws_id, store=ws.connections.store if ws else None)
+    valid, message = connector.verify(tokens, live_check=True)
+
+    now_iso = datetime.now(timezone.utc).isoformat()
+    account_email = tokens.get("email") or "Google User"
+
+    if ws:
+        existing = ws.connections.get_connection(ws_id, "google_calendar")
+        status = ConnectionStatus.VERIFIED if valid else ConnectionStatus.VERIFICATION_FAILED
+        conn = Connection(
+            id=existing.id if existing else f"conn-{uuid.uuid4().hex[:10]}",
+            workspace_id=ws_id,
+            provider="google_calendar",
+            account_name=account_email,
+            status=status,
+            scopes=["openid", "email", "calendar.events", "calendar.readonly"],
+            capabilities=ws.connections.get_default_capabilities("google_calendar"),
+            auth_metadata=tokens,
+            last_verified_at=now_iso if valid else None,
+            last_verification_error=None if valid else message,
+            verification_method="google_oauth_pkce",
+            created_at=existing.created_at if existing else now_iso,
+            updated_at=now_iso,
+        )
+        ws.connections.save_connection(conn)
+
+        if ws.activity:
+            from aether.activity.models import ActivityCategory, ActivityStatus
+            act_status = ActivityStatus.COMPLETED if valid else ActivityStatus.FAILED
+            act_title = "Verified: Google Calendar" if valid else "Verification Failed: Google Calendar"
+            ws.activity.log(
+                workspace_id=ws_id,
+                title=act_title,
+                description=f"Google Calendar authorization {'verified' if valid else 'failed'}: {message}",
+                category=ActivityCategory.CONNECTION,
+                status=act_status,
+                link_view="connections",
+                link_id=conn.id,
+            )
+
+    if valid:
+        html = f"""<!DOCTYPE html>
+<html>
+<head><title>Aether — Google Calendar Connected</title></head>
+<body style="font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; background: #090d16; color: #f8fafc; padding: 48px; text-align: center;">
+  <div style="max-width: 440px; margin: 0 auto; background: #131b2e; border: 1px solid #10b98150; border-radius: 12px; padding: 32px;">
+    <div style="width: 48px; height: 48px; border-radius: 50%; background: #10b98120; color: #10b981; display: flex; align-items: center; justify-content: center; margin: 0 auto 16px; font-size: 24px; font-weight: bold;">✓</div>
+    <h2 style="color: #10b981; margin: 0 0 8px;">Connected & Verified!</h2>
+    <p style="font-size: 14px; color: #cbd5e1; margin: 0 0 4px;">Authorized as <strong>{account_email}</strong></p>
+    <p style="font-size: 13px; color: #94a3b8; line-height: 1.4;">Live access to Google Calendar API verified.</p>
+    <p style="font-size: 12px; color: #64748b; margin-top: 20px;">Closing window...</p>
+  </div>
+  <script>
+    if (window.opener) {{
+      window.opener.postMessage({{ type: 'aether_oauth_success', provider: 'google_calendar', email: {json.dumps(account_email)} }}, '*');
+      setTimeout(function() {{ window.close(); }}, 1200);
+    }}
+  </script>
+</body>
+</html>"""
+        return HTMLResponse(content=html, status_code=200)
+    else:
+        html = f"""<!DOCTYPE html>
+<html>
+<head><title>Aether — Google Calendar Verification Failed</title></head>
+<body style="font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; background: #090d16; color: #f8fafc; padding: 48px; text-align: center;">
+  <div style="max-width: 440px; margin: 0 auto; background: #131b2e; border: 1px solid #ef444450; border-radius: 12px; padding: 32px;">
+    <h2 style="color: #ef4444; margin-top: 0;">Live Verification Failed</h2>
+    <p style="font-size: 14px; color: #cbd5e1; line-height: 1.5;">{message}</p>
+    <p style="font-size: 12px; color: #64748b; margin-top: 24px;">Please check Google Cloud API permissions or retry.</p>
+  </div>
+  <script>
+    if (window.opener) {{
+      window.opener.postMessage({{ type: 'aether_oauth_error', provider: 'google_calendar', error: {json.dumps(message)} }}, '*');
+    }}
+  </script>
+</body>
+</html>"""
+        return HTMLResponse(content=html, status_code=200)
+
+
+@router.post("/connections/google_calendar/oauth/exchange")
+async def exchange_google_oauth_route(request: Request, payload: GoogleOAuthExchangePayload):
+    """
+    Direct code-exchange endpoint supporting programmatic testing and alternative flows.
+    Consumes PKCE state, exchanges code for tokens, verifies live access, and persists.
+    """
+    ws = getattr(request.app.state, "workspace", None)
+    if not ws:
+        raise HTTPException(status_code=503, detail="Workspace not initialized.")
+    ws_id = (payload.workspace_id or ws.name).strip()
+
+    from aether.connections.google_calendar import GoogleOAuthManager, GoogleCalendarConnector
+    from aether.connections.models import Connection, ConnectionStatus
+    from datetime import datetime, timezone
+
+    state_data = GoogleOAuthManager.validate_and_consume_state(payload.state)
+    if not state_data:
+        raise HTTPException(status_code=400, detail="Invalid or expired OAuth state.")
+
+    if payload.redirect_uri:
+        state_data.redirect_uri = payload.redirect_uri
+
+    tokens = GoogleOAuthManager.exchange_code(payload.code, state_data)
+
+    connector = GoogleCalendarConnector(auth_metadata=tokens, workspace_id=ws_id, store=ws.connections.store)
+    valid, message = connector.verify(tokens, live_check=True)
+
+    now_iso = datetime.now(timezone.utc).isoformat()
+    account_email = tokens.get("email") or "Google User"
+
+    existing = ws.connections.get_connection(ws_id, "google_calendar")
+    status = ConnectionStatus.VERIFIED if valid else ConnectionStatus.VERIFICATION_FAILED
+    conn = Connection(
+        id=existing.id if existing else f"conn-{uuid.uuid4().hex[:10]}",
+        workspace_id=ws_id,
+        provider="google_calendar",
+        account_name=account_email,
+        status=status,
+        scopes=["openid", "email", "calendar.events", "calendar.readonly"],
+        capabilities=ws.connections.get_default_capabilities("google_calendar"),
+        auth_metadata=tokens,
+        last_verified_at=now_iso if valid else None,
+        last_verification_error=None if valid else message,
+        verification_method="google_oauth_pkce",
+        created_at=existing.created_at if existing else now_iso,
+        updated_at=now_iso,
+    )
+    saved = ws.connections.save_connection(conn)
+
+    return {
+        "valid": valid,
+        "message": message,
+        "status": saved.status.value,
+        "connection": saved.to_dict(mask_secrets=True),
+    }
+
+
+@router.get("/connections/google_calendar/calendars")
+async def list_google_calendars_route(request: Request, workspace_id: str | None = None):
+    """Lists available Google Calendars for the authorized account."""
+    ws = getattr(request.app.state, "workspace", None)
+    if not ws:
+        raise HTTPException(status_code=503, detail="Workspace not initialized.")
+    ws_id = (workspace_id or ws.name).strip()
+    connector = ws.connections.get_google_calendar_connector(workspace_id=ws_id)
+    calendars = connector.list_calendars()
+    return {"calendars": calendars}
+
+
+@router.post("/connections/google_calendar/select-calendar")
+async def select_google_calendar_route(request: Request, payload: GoogleSelectCalendarPayload):
+    """Sets the active calendar ID for Google Calendar operations."""
+    ws = getattr(request.app.state, "workspace", None)
+    if not ws:
+        raise HTTPException(status_code=503, detail="Workspace not initialized.")
+    ws_id = (payload.workspace_id or ws.name).strip()
+    conn = ws.connections.get_connection(ws_id, "google_calendar")
+    if not conn:
+        raise HTTPException(status_code=404, detail="Google Calendar connection not found.")
+
+    conn.auth_metadata["selected_calendar_id"] = payload.calendar_id
+    if payload.calendar_summary:
+        conn.auth_metadata["selected_calendar_summary"] = payload.calendar_summary
+    conn.updated_at = datetime.now(timezone.utc).isoformat()
+    saved = ws.connections.save_connection(conn)
+    return saved.to_dict(mask_secrets=True)
+
+
+@router.get("/connections/google_calendar/events")
+async def list_google_calendar_events_route(
+    request: Request,
+    workspace_id: str | None = None,
+    calendar_id: str | None = None,
+    limit: int = 50,
+):
+    """Queries events from the active Google Calendar."""
+    ws = getattr(request.app.state, "workspace", None)
+    if not ws:
+        return []
+    ws_id = (workspace_id or ws.name).strip()
+    connector = ws.connections.get_google_calendar_connector(workspace_id=ws_id)
+    return connector.list_events(calendar_id=calendar_id, limit=limit)
+
+
+@router.post("/connections/google_calendar/events")
+async def create_google_calendar_event_route(request: Request, payload: CreateGoogleCalendarEventPayload):
+    """Creates a new event on Google Calendar."""
+    ws = getattr(request.app.state, "workspace", None)
+    if not ws:
+        raise HTTPException(status_code=503, detail="Workspace not initialized.")
+    ws_id = (payload.workspace_id or ws.name).strip()
+    connector = ws.connections.get_google_calendar_connector(workspace_id=ws_id)
+    event = connector.create_event(
+        title=payload.title,
+        start_time=payload.start_time,
+        end_time=payload.end_time,
+        description=payload.description,
+        location=payload.location,
+        calendar_id=payload.calendar_id,
+    )
+    if hasattr(ws.connections, "record_operation_success"):
+        ws.connections.record_operation_success(ws_id, "google_calendar", "google_calendar.create_event")
     return event
 
 

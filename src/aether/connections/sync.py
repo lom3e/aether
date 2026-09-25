@@ -65,7 +65,7 @@ class ConnectorSyncEngine:
             results.append(cls.sync_provider(workspace, "calendar", options))
 
         for conn in connections:
-            if conn.status == ConnectionStatus.CONNECTED:
+            if conn.is_verified:
                 results.append(cls.sync_provider(workspace, conn.provider, options))
 
         return results
@@ -83,6 +83,8 @@ class ConnectorSyncEngine:
 
         if prov == "calendar":
             return cls._sync_calendar(workspace, opts)
+        elif prov == "google_calendar":
+            return cls._sync_google_calendar(workspace, opts)
         elif prov == "github":
             return cls._sync_github(workspace, opts)
         elif prov == "slack":
@@ -212,6 +214,130 @@ class ConnectorSyncEngine:
             status="synced",
             items_synced=synced_count,
             summary=f"Synced {synced_count} calendar events into workforce memory and knowledge.",
+            details=details,
+            synced_at=now_iso,
+        )
+
+    # ---------------------------------------------------------------------------
+    # Google Calendar Sync (Macro-pass P0.2)
+    # ---------------------------------------------------------------------------
+
+    @classmethod
+    def _sync_google_calendar(cls, workspace: "Workspace", options: dict[str, Any]) -> ConnectorSyncResult:
+        """
+        Synchronizes Google Calendar events into WorkforceMemoryStore and KnowledgeStore.
+        Requires active and verified Google Calendar connection.
+        """
+        now_iso = datetime.now(timezone.utc).isoformat()
+        conn = workspace.connections.get_connection(workspace.id, "google_calendar")
+        if not conn or not conn.is_verified:
+            return ConnectorSyncResult(
+                provider="google_calendar",
+                status="skipped",
+                items_synced=0,
+                summary="Google Calendar is not connected or not verified. Sync skipped.",
+            )
+
+        try:
+            connector = workspace.connections.get_google_calendar_connector(workspace.id)
+            events = connector.list_events(limit=int(options.get("limit", 100)))
+        except Exception as e:
+            logger.error(f"Failed to access Google Calendar events for sync: {e}")
+            return ConnectorSyncResult(
+                provider="google_calendar",
+                status="error",
+                items_synced=0,
+                summary=f"Google Calendar sync failed: {e}",
+            )
+
+        synced_count = 0
+        details = {"events": []}
+
+        for ev in events:
+            ev_id = ev.get("id") or ev.get("event_id") or ""
+            title = ev.get("title", "Google Calendar Event")
+            start_time = ev.get("start_time", now_iso)
+            end_time = ev.get("end_time")
+            location = ev.get("location") or ""
+            desc = ev.get("description") or ""
+
+            # 1. Ingest as structured FACT memory into WorkforceMemoryStore
+            time_span = f"starts at {start_time}" + (f" and ends at {end_time}" if end_time else "")
+            loc_txt = f" Location: {location}." if location else ""
+            desc_txt = f" Description: {desc}." if desc else ""
+            content = f"Google Calendar event '{title}' {time_span}.{loc_txt}{desc_txt}"
+
+            mem = WorkforceMemory(
+                id=f"mem_gcal_{ev_id}",
+                workspace_id=workspace.id,
+                category=MemoryCategory.FACT,
+                summary=f"Google Calendar Event: {title} ({start_time[:10]})",
+                content=content,
+                provenance=MemoryProvenance(
+                    source_entity="google_calendar_sync",
+                    source_id=ev_id,
+                    author_agent="GoogleCalendarConnector",
+                    verification_status="verified",
+                    evidence={"event_id": ev_id, "start_time": start_time, "location": location},
+                ),
+                confidence=1.0,
+                tags=["google_calendar", "calendar", "event", "schedule", "meeting"],
+                created_at=now_iso,
+                updated_at=now_iso,
+            )
+
+            try:
+                saved_mem = workspace.memory.create_memory(mem)
+                if hasattr(workspace, "knowledge_graph") and workspace.knowledge_graph:
+                    try:
+                        from aether.knowledge.graph.builder import KnowledgeGraphBuilder
+                        KnowledgeGraphBuilder.compile_memory(saved_mem, workspace.knowledge_graph)
+                    except Exception:
+                        pass
+            except Exception as mem_err:
+                logger.warning(f"Error persisting Google calendar memory for {ev_id}: {mem_err}")
+
+            # 2. Ingest document chunks into KnowledgeStore
+            try:
+                if hasattr(workspace, "knowledge") and workspace.knowledge:
+                    from aether.knowledge.ingestion import DocumentIngester
+                    ingester = DocumentIngester(workspace.knowledge)
+                    doc_content = (
+                        f"# Google Calendar Event: {title}\n"
+                        f"- **Event ID:** {ev_id}\n"
+                        f"- **Start Time:** {start_time}\n"
+                        f"- **End Time:** {end_time or 'N/A'}\n"
+                        f"- **Location:** {location or 'N/A'}\n"
+                        f"- **Details:** {desc or 'No description'}\n"
+                    )
+                    ingester.ingest_text(doc_content, source_name=f"google_calendar:{ev_id}", scope="workspace")
+            except Exception as kn_err:
+                logger.warning(f"Error ingesting Google calendar knowledge chunk for {ev_id}: {kn_err}")
+
+            synced_count += 1
+            details["events"].append({"id": ev_id, "title": title, "start_time": start_time})
+
+        # Update Connection last_synced_at timestamp
+        conn.last_synced_at = now_iso
+        conn.updated_at = now_iso
+        workspace.connections.save_connection(conn)
+
+        # Log Activity
+        if hasattr(workspace, "activity") and workspace.activity:
+            workspace.activity.log(
+                workspace_id=workspace.id,
+                title="Synced Google Calendar Events",
+                description=f"Synchronized {synced_count} events from Google Calendar into workforce memory and knowledge.",
+                category=ActivityCategory.CONNECTION,
+                status=ActivityStatus.COMPLETED,
+                link_view="connections",
+            )
+
+        return ConnectorSyncResult(
+            provider="google_calendar",
+            status="synced",
+            items_synced=synced_count,
+            summary=f"Synced {synced_count} Google Calendar events into workforce memory and knowledge.",
             details=details,
             synced_at=now_iso,
         )
