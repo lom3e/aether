@@ -4934,6 +4934,139 @@ async def get_model_routing_status_route(
     }
 
 
+class CreateWorkflowPayload(BaseModel):
+    id: str | None = None
+    workspace_id: str | None = None
+    name: str
+    description: str = ""
+    graph: dict[str, Any] = Field(default_factory=dict)
+
+
+class CompileWorkflowPayload(BaseModel):
+    workspace_id: str | None = None
+    target_type: str = "mission"
+    params: dict[str, Any] = Field(default_factory=dict)
+
+
+@router.get("/workflows")
+async def list_workflows_route(
+    request: Request,
+    workspace_id: str | None = None,
+):
+    ws = getattr(request.app.state, "workspace", None)
+    if not ws:
+        raise HTTPException(status_code=503, detail="Workspace not initialized.")
+    ws_id = (workspace_id or ws.name).strip()
+    workflows = ws.workflows.list_workflows(ws_id)
+    return [w.to_dict() for w in workflows]
+
+
+@router.post("/workflows")
+async def create_workflow_route(
+    request: Request,
+    payload: CreateWorkflowPayload,
+):
+    from aether.workflows.models import Workflow
+    ws = getattr(request.app.state, "workspace", None)
+    if not ws:
+        raise HTTPException(status_code=503, detail="Workspace not initialized.")
+    ws_id = (payload.workspace_id or ws.name).strip()
+
+    wf_dict = payload.model_dump() if hasattr(payload, "model_dump") else payload.dict()
+    wf_dict["workspace_id"] = ws_id
+    wf = Workflow.from_dict(wf_dict)
+    saved = ws.workflows.save_workflow(wf)
+    return saved.to_dict()
+
+
+@router.get("/workflows/{workflow_id}")
+async def get_workflow_route(
+    request: Request,
+    workflow_id: str,
+    workspace_id: str | None = None,
+):
+    ws = getattr(request.app.state, "workspace", None)
+    if not ws:
+        raise HTTPException(status_code=503, detail="Workspace not initialized.")
+    ws_id = (workspace_id or ws.name).strip()
+    wf = ws.workflows.get_workflow(workflow_id, workspace_id=ws_id)
+    if not wf:
+        raise HTTPException(status_code=404, detail=f"Workflow '{workflow_id}' not found.")
+    return wf.to_dict()
+
+
+@router.delete("/workflows/{workflow_id}")
+async def delete_workflow_route(
+    request: Request,
+    workflow_id: str,
+    workspace_id: str | None = None,
+):
+    ws = getattr(request.app.state, "workspace", None)
+    if not ws:
+        raise HTTPException(status_code=503, detail="Workspace not initialized.")
+    ws_id = (workspace_id or ws.name).strip()
+    success = ws.workflows.delete_workflow(workflow_id, workspace_id=ws_id)
+    if not success:
+        raise HTTPException(status_code=404, detail=f"Workflow '{workflow_id}' not found.")
+    return {"status": "deleted", "id": workflow_id}
+
+
+@router.post("/workflows/{workflow_id}/compile")
+async def compile_workflow_route(
+    request: Request,
+    workflow_id: str,
+    payload: CompileWorkflowPayload,
+):
+    from aether.workflows.compiler import WorkflowCompiler, WorkflowValidationError
+    ws = getattr(request.app.state, "workspace", None)
+    if not ws:
+        raise HTTPException(status_code=503, detail="Workspace not initialized.")
+    ws_id = (payload.workspace_id or ws.name).strip()
+    wf = ws.workflows.get_workflow(workflow_id, workspace_id=ws_id)
+    if not wf:
+        raise HTTPException(status_code=404, detail=f"Workflow '{workflow_id}' not found.")
+
+    try:
+        if payload.target_type.lower() == "automation":
+            auto = WorkflowCompiler.compile_to_automation(wf, ws.automations)
+            ws.workflows.save_workflow(wf)
+            return {"compiled_id": auto.id, "target_type": "automation", "name": auto.name}
+        else:
+            msn = WorkflowCompiler.compile_to_mission(wf, ws.missions, params=payload.params)
+            ws.workflows.save_workflow(wf)
+            return {"compiled_id": msn.id, "target_type": "mission", "name": msn.title}
+    except WorkflowValidationError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+
+
+@router.post("/workflows/{workflow_id}/run")
+async def run_workflow_route(
+    request: Request,
+    workflow_id: str,
+    payload: CompileWorkflowPayload,
+):
+    from aether.workflows.compiler import WorkflowCompiler, WorkflowValidationError
+    ws = getattr(request.app.state, "workspace", None)
+    if not ws:
+        raise HTTPException(status_code=503, detail="Workspace not initialized.")
+    ws_id = (payload.workspace_id or ws.name).strip()
+    wf = ws.workflows.get_workflow(workflow_id, workspace_id=ws_id)
+    if not wf:
+        raise HTTPException(status_code=404, detail=f"Workflow '{workflow_id}' not found.")
+
+    try:
+        msn = WorkflowCompiler.compile_to_mission(wf, ws.missions, params=payload.params)
+        ws.workflows.save_workflow(wf)
+        return {
+            "mission_id": msn.id,
+            "title": msn.title,
+            "status": msn.status.value if hasattr(msn.status, "value") else str(msn.status),
+            "milestones_count": len(msn.milestones),
+        }
+    except WorkflowValidationError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+
+
 # ===========================================================================
 # PHASE C — PERSONAL AGENT, ACTIONS, CONNECTIONS, AND ACTIVITY API
 # ===========================================================================

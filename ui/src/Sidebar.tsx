@@ -751,6 +751,14 @@ export function Sidebar({
                 >
                   <span>{t('navAutomations')}</span>
                 </button>
+                <button
+                  data-testid="nav-workflows"
+                  className={`btn btn-ghost ${currentView === 'workflows' ? 'active' : ''}`}
+                  style={{ width: '100%', justifyContent: 'flex-start', padding: '4px 8px', fontSize: '12px' }}
+                  onClick={() => onNavigate('workflows')}
+                >
+                  <span>Visual Workflows</span>
+                </button>
               </div>
             )}
 

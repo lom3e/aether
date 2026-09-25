@@ -380,6 +380,22 @@ class Workspace:
         return self._get_or_create("model_router", _factory)
 
     @property
+    def workflows_db_path(self) -> str:
+        """Path to the persistent visual workflows database."""
+        if self.data_dir.exists() or self.config_path.exists():
+            return str(self.data_dir / "workflows.db")
+        return str(self.legacy_aether_dir / "workflows.db")
+
+    @property
+    def workflows(self):
+        """Return the WorkflowStore for this workspace."""
+        def _factory():
+            from aether.workflows.store import WorkflowStore
+            Path(self.workflows_db_path).parent.mkdir(parents=True, exist_ok=True)
+            return WorkflowStore(self.workflows_db_path)
+        return self._get_or_create("workflows", _factory)
+
+    @property
     def intelligence(self):
         """Return the UnifiedIntelligenceService for this workspace."""
         def _factory():

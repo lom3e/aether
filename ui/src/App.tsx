@@ -20,6 +20,7 @@ import { ThemeProvider } from './theme';
 import { apiUrl } from './api';
 import { isCompanionSurface } from './desktop';
 import { AmbientCompanion } from './AmbientCompanion';
+import { WorkflowBuilder } from './WorkflowBuilder';
 
 function MainApp() {
   const [currentView, setCurrentView] = useState('home');
@@ -303,6 +304,7 @@ function MainApp() {
         {currentView === 'memory' && <WorkforceHub initialTab="memory" navigate={navigate} />}
         {currentView === 'learning' && <WorkforceHub initialTab="learning" navigate={navigate} />}
         {currentView === 'automations' && <Automations />}
+        {currentView === 'workflows' && <WorkflowBuilder navigate={navigate} />}
         {currentView === 'skills' && <WorkforceHub initialTab="skills" navigate={navigate} />}
         {currentView === 'settings' && <Settings onWorkspaceSwitched={handleWorkspaceSwitched} />}
         {currentView === 'marketplace' && <Marketplace />}

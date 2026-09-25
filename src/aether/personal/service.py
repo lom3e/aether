@@ -572,6 +572,36 @@ class PersonalAgentService:
                 action_args={},
             )
 
+        # 3e12. Visual Workflow Listing (ANSWER tier - immediate read-only)
+        workflow_list_triggers = [
+            "mostra workflow", "elenca workflow", "visual workflows", "list workflows",
+            "quali workflow abbiamo", "workflows salvati", "elenco workflow",
+        ]
+        if any(k in p_lower for k in workflow_list_triggers):
+            return UserIntent(
+                raw_prompt=effective_prompt,
+                tier=IntentTier.ANSWER,
+                summary="List visual workflow blueprints in workspace",
+                action_id="workflow.list",
+                action_args={},
+            )
+
+        # 3e13. Visual Workflow Execution (ACT tier - requires confirmation)
+        workflow_run_triggers = [
+            "esegui workflow", "lancia workflow", "avvia workflow", "run workflow",
+            "execute workflow", "compila ed esegui workflow",
+        ]
+        if any(k in p_lower for k in workflow_run_triggers):
+            wf_match = re.search(r"(?:workflow\s+(?:chiamato\s+|named\s+|id\s*)?|chiamato\s+|named\s+|id\s*)[\"']?([a-zA-Z0-9_-]+)[\"']?", prompt, re.IGNORECASE)
+            wf_id = wf_match.group(1).strip() if wf_match else "default-wf"
+            return UserIntent(
+                raw_prompt=effective_prompt,
+                tier=IntentTier.ACT,
+                summary=f"Compile and execute visual workflow '{wf_id}' as an active mission",
+                action_id="workflow.run",
+                action_args={"workflow_id": wf_id},
+            )
+
 
         # 3e. GitHub issue creation (ACT tier - requires safety confirmation)
         github_issue_triggers = [

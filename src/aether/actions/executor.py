@@ -902,6 +902,98 @@ class ActionExecutor:
                 "tiers": router.config.to_dict(),
             }
 
+        elif action_id == "workflow.list":
+            from aether.workspace.workspace import Workspace
+            ws = None
+            try:
+                ws = Workspace.get(ws_id) if hasattr(Workspace, "get") else None
+                if not ws and self.project_path:
+                    ws = Workspace.get_or_init(self.project_path)
+            except Exception:
+                pass
+            wf_store = getattr(ws, "workflows", None) if ws else None
+            if not wf_store:
+                raise ValueError("Workflow store is not available in current workspace.")
+            wfs = wf_store.list_workflows(ws_id)
+            return {
+                "workflows": [w.to_dict() for w in wfs],
+                "count": len(wfs),
+            }
+
+        elif action_id == "workflow.compile":
+            from aether.workflows.compiler import WorkflowCompiler
+            from aether.workspace.workspace import Workspace
+            ws = None
+            try:
+                ws = Workspace.get(ws_id) if hasattr(Workspace, "get") else None
+                if not ws and self.project_path:
+                    ws = Workspace.get_or_init(self.project_path)
+            except Exception:
+                pass
+            wf_store = getattr(ws, "workflows", None) if ws else None
+            if not wf_store:
+                raise ValueError("Workflow store is not available in current workspace.")
+
+            wf_id = inp.get("workflow_id", "")
+            target_type = inp.get("target_type", "mission").lower()
+            workflow = wf_store.get_workflow(wf_id, workspace_id=ws_id)
+            if not workflow:
+                raise ValueError(f"Workflow '{wf_id}' not found.")
+
+            if target_type == "automation":
+                auto_store = getattr(ws, "automations", None)
+                if not auto_store:
+                    raise ValueError("Automation store is not available.")
+                res_obj = WorkflowCompiler.compile_to_automation(workflow, auto_store)
+                wf_store.save_workflow(workflow)
+                return {
+                    "workflow_id": wf_id,
+                    "compiled_id": res_obj.id,
+                    "target_type": "automation",
+                    "name": res_obj.name,
+                }
+            else:
+                m_store = getattr(ws, "missions", None)
+                if not m_store:
+                    raise ValueError("Mission store is not available.")
+                res_obj = WorkflowCompiler.compile_to_mission(workflow, m_store, params=inp.get("params"))
+                wf_store.save_workflow(workflow)
+                return {
+                    "workflow_id": wf_id,
+                    "compiled_id": res_obj.id,
+                    "target_type": "mission",
+                    "name": res_obj.title,
+                }
+
+        elif action_id == "workflow.run":
+            from aether.workflows.compiler import WorkflowCompiler
+            from aether.workspace.workspace import Workspace
+            ws = None
+            try:
+                ws = Workspace.get(ws_id) if hasattr(Workspace, "get") else None
+                if not ws and self.project_path:
+                    ws = Workspace.get_or_init(self.project_path)
+            except Exception:
+                pass
+            wf_store = getattr(ws, "workflows", None) if ws else None
+            m_store = getattr(ws, "missions", None) if ws else None
+            if not wf_store or not m_store:
+                raise ValueError("Workflow and Mission stores are required.")
+
+            wf_id = inp.get("workflow_id", "")
+            workflow = wf_store.get_workflow(wf_id, workspace_id=ws_id)
+            if not workflow:
+                raise ValueError(f"Workflow '{wf_id}' not found.")
+
+            mission = WorkflowCompiler.compile_to_mission(workflow, m_store, params=inp.get("params"))
+            wf_store.save_workflow(workflow)
+            return {
+                "mission_id": mission.id,
+                "title": mission.title,
+                "status": mission.status.value if hasattr(mission.status, "value") else str(mission.status),
+                "milestones_count": len(mission.milestones),
+            }
+
         raise ValueError(
             f"Action '{action_id}' is not supported by built-in connectors and has no registered handler."
         )

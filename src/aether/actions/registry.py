@@ -995,4 +995,87 @@ class ActionRegistry:
             )
         )
 
+        self.register(
+            ActionDefinition(
+                id="workflow.list",
+                name="List Visual Workflows",
+                description="Lists visual workflow blueprints and visual DAG configurations in the workspace.",
+                tier=ActionTier.ANSWER,
+                permission_level=ActionPermissionLevel.READ_ONLY,
+                requires_confirmation=False,
+                provider="workflow",
+                input_schema={
+                    "type": "object",
+                    "properties": {
+                        "workspace_id": {"type": "string"},
+                    },
+                },
+                output_schema={
+                    "type": "object",
+                    "properties": {
+                        "workflows": {"type": "array"},
+                        "count": {"type": "integer"},
+                    },
+                },
+            )
+        )
+
+        self.register(
+            ActionDefinition(
+                id="workflow.compile",
+                name="Compile Visual Workflow",
+                description="Compiles a visual workflow graph into an executable Mission or Automation daemon.",
+                tier=ActionTier.ACT,
+                permission_level=ActionPermissionLevel.LOCAL_MUTATION,
+                requires_confirmation=True,
+                provider="workflow",
+                input_schema={
+                    "type": "object",
+                    "properties": {
+                        "workflow_id": {"type": "string"},
+                        "target_type": {"type": "string", "enum": ["mission", "automation"], "default": "mission"},
+                        "workspace_id": {"type": "string"},
+                    },
+                    "required": ["workflow_id"],
+                },
+                output_schema={
+                    "type": "object",
+                    "properties": {
+                        "compiled_id": {"type": "string"},
+                        "target_type": {"type": "string"},
+                        "name": {"type": "string"},
+                    },
+                },
+            )
+        )
+
+        self.register(
+            ActionDefinition(
+                id="workflow.run",
+                name="Run Visual Workflow",
+                description="Compiles and executes a visual workflow as an active Mission.",
+                tier=ActionTier.ACT,
+                permission_level=ActionPermissionLevel.LOCAL_MUTATION,
+                requires_confirmation=True,
+                provider="workflow",
+                input_schema={
+                    "type": "object",
+                    "properties": {
+                        "workflow_id": {"type": "string"},
+                        "workspace_id": {"type": "string"},
+                        "params": {"type": "object"},
+                    },
+                    "required": ["workflow_id"],
+                },
+                output_schema={
+                    "type": "object",
+                    "properties": {
+                        "mission_id": {"type": "string"},
+                        "title": {"type": "string"},
+                        "status": {"type": "string"},
+                    },
+                },
+            )
+        )
+
 
