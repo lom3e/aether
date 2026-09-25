@@ -224,6 +224,9 @@ class ActionExecutor:
 
         return execution
 
+    approve_execution = approve
+    reject_execution = reject
+
     def _dispatch_and_run(
         self,
         definition: ActionDefinition,
@@ -1739,6 +1742,100 @@ class ActionExecutor:
                 limit = int(inp.get("limit", 50))
                 receipts = notif_svc.get_delivery_history(ws_id, limit=limit)
                 return {"receipts": [r.to_dict() for r in receipts]}
+
+        # ---------------------------------------------------------------------
+        # Execution Fabric & Hardware Mesh Execution (Layer 17)
+        # ---------------------------------------------------------------------
+        elif action_id.startswith("fabric."):
+            from aether.workspace.workspace import Workspace
+            ws = None
+            try:
+                ws = Workspace.get(ws_id) if hasattr(Workspace, "get") else None
+                if not ws and self.project_path:
+                    ws = Workspace.get_or_init(self.project_path)
+            except Exception:
+                pass
+            if not ws:
+                raise ValueError("Active workspace required for execution fabric actions.")
+            fab_engine = getattr(ws, "fabric_engine", None)
+            if not fab_engine:
+                raise ValueError("Fabric engine not available on workspace.")
+
+            if action_id == "fabric.list_nodes":
+                nodes = fab_engine.list_nodes(ws_id)
+                return {"nodes": [n.to_dict() for n in nodes]}
+
+            elif action_id == "fabric.register_node":
+                node = fab_engine.register_remote_node(
+                    workspace_id=ws_id,
+                    name=inp.get("name", "Remote Worker"),
+                    role=inp.get("role", "worker"),
+                    endpoint=inp.get("endpoint", "http://localhost:8000"),
+                    capabilities=inp.get("capabilities"),
+                    tags=inp.get("tags"),
+                )
+                return {"node": node.to_dict()}
+
+            elif action_id == "fabric.route_workload":
+                assignment = fab_engine.route_workload(
+                    workspace_id=ws_id,
+                    workload_name=inp.get("workload_name", "General Task"),
+                    tier=inp.get("tier", "local_fast"),
+                    min_cores=int(inp.get("min_cores", 1)),
+                    min_vram_gb=float(inp.get("min_vram_gb", 0.0)),
+                )
+                return {"assignment": assignment.to_dict()}
+
+            elif action_id == "fabric.get_telemetry":
+                snapshot = fab_engine.get_telemetry_snapshot(ws_id)
+                return {"telemetry": snapshot.to_dict()}
+
+            elif action_id == "fabric.delete_node":
+                deleted = fab_engine.delete_node(ws_id, inp.get("node_id", ""))
+                return {"status": "ok" if deleted else "not_found", "node_id": inp.get("node_id")}
+
+            elif action_id == "fabric.node_heartbeat":
+                success = fab_engine.heartbeat_node(
+                    ws_id,
+                    inp.get("node_id", ""),
+                    ping_ms=float(inp.get("ping_ms", 0.0)),
+                )
+                return {"status": "ok" if success else "failed", "node_id": inp.get("node_id")}
+
+        elif action_id.startswith("autonomy."):
+            from aether.workspace.workspace import Workspace
+            ws = None
+            try:
+                ws = Workspace.get(ws_id) if hasattr(Workspace, "get") else None
+                if not ws and self.project_path:
+                    ws = Workspace.get_or_init(self.project_path)
+            except Exception:
+                pass
+            if not ws:
+                raise ValueError("Active workspace required for operational autonomy actions.")
+            orchestrator = getattr(ws, "autonomy_orchestrator", None)
+            if not orchestrator:
+                raise ValueError("Autonomy orchestrator not available on workspace.")
+
+            if action_id == "autonomy.take_care_of_it":
+                goal = orchestrator.plan_and_execute(
+                    workspace_id=ws_id,
+                    goal_prompt=inp.get("goal", ""),
+                    context=inp.get("context", {}),
+                )
+                return {"goal": goal.to_dict()}
+
+            elif action_id == "autonomy.list_goals":
+                store = getattr(ws, "autonomy_store", None)
+                goals = store.list_goals(ws_id, limit=int(inp.get("limit", 50))) if store else []
+                return {"goals": [g.to_dict() for g in goals], "count": len(goals)}
+
+            elif action_id == "autonomy.get_goal":
+                store = getattr(ws, "autonomy_store", None)
+                goal = store.get_goal(inp.get("goal_id", "")) if store else None
+                if not goal:
+                    raise ValueError(f"Autonomous goal '{inp.get('goal_id')}' not found.")
+                return {"goal": goal.to_dict()}
 
         raise ValueError(
             f"Action '{action_id}' is not supported by built-in connectors and has no registered handler."

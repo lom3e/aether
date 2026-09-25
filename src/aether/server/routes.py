@@ -5817,6 +5817,84 @@ async def get_personal_overview_route(request: Request, workspace_id: str | None
     return ws.personal.get_overview(workspace_id=ws_id)
 
 
+class CompanionQuickActionPayload(BaseModel):
+    action_id: str
+    workspace_id: str | None = None
+    context: dict[str, Any] = Field(default_factory=dict)
+
+
+class CompanionDropPayload(BaseModel):
+    filename: str
+    content_base64: str | None = None
+    text_content: str | None = None
+    session_id: str | None = None
+    workspace_id: str | None = None
+
+
+@router.post("/personal/companion/context")
+async def get_companion_context_route(request: Request):
+    """Captures frontmost application, active window, and clipboard context for Companion."""
+    ws = getattr(request.app.state, "workspace", None)
+    if not ws:
+        raise HTTPException(status_code=503, detail="Workspace not initialized.")
+    return ws.personal.capture_context()
+
+
+@router.get("/personal/companion/deliverables")
+async def list_companion_deliverables_route(
+    request: Request,
+    workspace_id: str | None = None,
+    limit: int = 25,
+):
+    """Lists recent outputs, deliverables, and artifacts across missions, tasks, and files."""
+    ws = getattr(request.app.state, "workspace", None)
+    if not ws:
+        return []
+    ws_id = (workspace_id or ws.name).strip()
+    return ws.personal.list_deliverables(workspace_id=ws_id, limit=limit)
+
+
+@router.post("/personal/companion/drop")
+async def companion_drop_route(request: Request, payload: CompanionDropPayload):
+    """Ingests drag-and-dropped file into workspace inbox and attaches context."""
+    import base64
+    ws = getattr(request.app.state, "workspace", None)
+    if not ws:
+        raise HTTPException(status_code=503, detail="Workspace not initialized.")
+    ws_id = (payload.workspace_id or ws.name).strip()
+
+    raw_bytes = b""
+    if payload.content_base64:
+        try:
+            raw_bytes = base64.b64decode(payload.content_base64)
+        except Exception:
+            raw_bytes = payload.content_base64.encode("utf-8")
+    elif payload.text_content:
+        raw_bytes = payload.text_content.encode("utf-8")
+
+    res = ws.personal.ingest_dropped_file(
+        workspace_id=ws_id,
+        filename=payload.filename,
+        content=raw_bytes,
+        session_id=payload.session_id,
+    )
+    return res
+
+
+@router.post("/personal/companion/quick-action")
+async def execute_companion_quick_action_route(request: Request, payload: CompanionQuickActionPayload):
+    """Dispatches an instant companion quick action across the unified system."""
+    ws = getattr(request.app.state, "workspace", None)
+    if not ws:
+        raise HTTPException(status_code=503, detail="Workspace not initialized.")
+    ws_id = (payload.workspace_id or ws.name).strip()
+    return ws.personal.execute_quick_action(
+        workspace_id=ws_id,
+        quick_action_id=payload.action_id,
+        context=payload.context,
+    )
+
+
 # ---------------------------------------------------------------------------
 # Action Layer Endpoints
 # ---------------------------------------------------------------------------
@@ -6625,7 +6703,240 @@ async def call_mcp_tool(request: Request, payload: MCPCallPayload):
         raise HTTPException(status_code=502, detail=f"MCP call failed: {exc}")
 
 
+# ---------------------------------------------------------------------------
+# Local Execution Fabric & Hardware Mesh (Layer 17) Endpoints
+# ---------------------------------------------------------------------------
+
+class RegisterFabricNodePayload(BaseModel):
+    name: str
+    role: str = "worker"
+    endpoint: str = "http://localhost:8000"
+    capabilities: dict[str, Any] | None = None
+    tags: list[str] = Field(default_factory=list)
 
 
+class RouteWorkloadPayload(BaseModel):
+    workload_name: str
+    tier: str = "local_fast"
+    min_cores: int = 1
+    min_vram_gb: float = 0.0
 
+
+class FabricHeartbeatPayload(BaseModel):
+    ping_ms: float = 0.0
+
+
+@router.get("/fabric/nodes")
+async def list_fabric_nodes(request: Request, workspace_id: str | None = None):
+    """Lists all compute nodes in the local execution mesh."""
+    ws = getattr(request.app.state, "workspace", None)
+    if not ws:
+        raise HTTPException(status_code=503, detail="Workspace not initialized.")
+    ws_id = (workspace_id or getattr(ws, "id", None) or ws.name).strip()
+    nodes = ws.fabric_engine.list_nodes(ws_id)
+    return [n.to_dict() for n in nodes]
+
+
+@router.post("/fabric/nodes")
+async def register_fabric_node(request: Request, payload: RegisterFabricNodePayload, workspace_id: str | None = None):
+    """Registers a remote workstation, GPU worker, or cloud gateway into the mesh."""
+    ws = getattr(request.app.state, "workspace", None)
+    if not ws:
+        raise HTTPException(status_code=503, detail="Workspace not initialized.")
+    ws_id = (workspace_id or getattr(ws, "id", None) or ws.name).strip()
+    node = ws.fabric_engine.register_remote_node(
+        workspace_id=ws_id,
+        name=payload.name,
+        role=payload.role,
+        endpoint=payload.endpoint,
+        capabilities=payload.capabilities,
+        tags=payload.tags,
+    )
+    return node.to_dict()
+
+
+@router.get("/fabric/nodes/{node_id}")
+async def get_fabric_node(request: Request, node_id: str, workspace_id: str | None = None):
+    """Retrieves a single compute node by ID."""
+    ws = getattr(request.app.state, "workspace", None)
+    if not ws:
+        raise HTTPException(status_code=503, detail="Workspace not initialized.")
+    ws_id = (workspace_id or getattr(ws, "id", None) or ws.name).strip()
+    node = ws.fabric_engine.get_node(ws_id, node_id)
+    if not node:
+        raise HTTPException(status_code=404, detail="Compute node not found.")
+    return node.to_dict()
+
+
+@router.delete("/fabric/nodes/{node_id}")
+async def delete_fabric_node(request: Request, node_id: str, workspace_id: str | None = None):
+    """Deletes a remote compute node from the mesh (controller cannot be deleted)."""
+    ws = getattr(request.app.state, "workspace", None)
+    if not ws:
+        raise HTTPException(status_code=503, detail="Workspace not initialized.")
+    ws_id = (workspace_id or getattr(ws, "id", None) or ws.name).strip()
+    success = ws.fabric_engine.delete_node(ws_id, node_id)
+    if not success:
+        raise HTTPException(status_code=400, detail="Cannot delete node (may be local controller or does not exist).")
+    return {"status": "deleted", "node_id": node_id}
+
+
+@router.post("/fabric/nodes/{node_id}/heartbeat")
+async def fabric_node_heartbeat(
+    request: Request,
+    node_id: str,
+    payload: FabricHeartbeatPayload,
+    workspace_id: str | None = None,
+):
+    """Updates heartbeat and latency for a node."""
+    ws = getattr(request.app.state, "workspace", None)
+    if not ws:
+        raise HTTPException(status_code=503, detail="Workspace not initialized.")
+    ws_id = (workspace_id or getattr(ws, "id", None) or ws.name).strip()
+    success = ws.fabric_engine.heartbeat_node(ws_id, node_id, ping_ms=payload.ping_ms)
+    return {"status": "ok" if success else "failed", "node_id": node_id}
+
+
+@router.get("/fabric/telemetry")
+async def get_fabric_telemetry(request: Request, workspace_id: str | None = None):
+    """Returns consolidated real-time hardware telemetry across all connected nodes."""
+    ws = getattr(request.app.state, "workspace", None)
+    if not ws:
+        raise HTTPException(status_code=503, detail="Workspace not initialized.")
+    ws_id = (workspace_id or getattr(ws, "id", None) or ws.name).strip()
+    snapshot = ws.fabric_engine.get_telemetry_snapshot(ws_id)
+    return snapshot.to_dict()
+
+
+@router.post("/fabric/route-workload")
+async def route_fabric_workload(
+    request: Request,
+    payload: RouteWorkloadPayload,
+    workspace_id: str | None = None,
+):
+    """Allocates a workload to the optimal mesh node based on tier and hardware constraints."""
+    ws = getattr(request.app.state, "workspace", None)
+    if not ws:
+        raise HTTPException(status_code=503, detail="Workspace not initialized.")
+    ws_id = (workspace_id or getattr(ws, "id", None) or ws.name).strip()
+    assignment = ws.fabric_engine.route_workload(
+        workspace_id=ws_id,
+        workload_name=payload.workload_name,
+        tier=payload.tier,
+        min_cores=payload.min_cores,
+        min_vram_gb=payload.min_vram_gb,
+    )
+    return assignment.to_dict()
+
+
+@router.get("/fabric/workloads")
+async def list_fabric_workloads(
+    request: Request,
+    workspace_id: str | None = None,
+    limit: int = 50,
+):
+    """Lists recent workload allocations across the execution mesh."""
+    ws = getattr(request.app.state, "workspace", None)
+    if not ws:
+        raise HTTPException(status_code=503, detail="Workspace not initialized.")
+    ws_id = (workspace_id or getattr(ws, "id", None) or ws.name).strip()
+    assignments = ws.fabric_engine.list_workload_assignments(ws_id, limit=limit)
+    return [a.to_dict() for a in assignments]
+
+
+# -----------------------------------------------------------------------------
+# Macro-Step 20: Operational Autonomy Endpoints ("Aether, take care of it")
+# -----------------------------------------------------------------------------
+
+class AutonomousExecutePayload(BaseModel):
+    goal: str
+    workspace_id: str | None = None
+    context: dict[str, Any] | None = None
+    auto_approve_safe: bool = True
+
+
+class AutonomousApprovePayload(BaseModel):
+    approved: bool = True
+
+
+@router.post("/autonomy/execute")
+async def execute_autonomous_goal_route(
+    request: Request,
+    payload: AutonomousExecutePayload,
+):
+    """
+    Executes an end-to-end operational autonomy mission ("Aether, take care of it").
+    Runs the 9-stage loop: intent → understand → plan → mesh allocation → workforce → actions → safety gate → deliverable → notify → learn.
+    """
+    ws = getattr(request.app.state, "workspace", None)
+    if not ws:
+        raise HTTPException(status_code=503, detail="Workspace not initialized.")
+    ws_id = (payload.workspace_id or getattr(ws, "id", None) or ws.name).strip()
+    orchestrator = getattr(ws, "autonomy_orchestrator", None)
+    if not orchestrator:
+        raise HTTPException(status_code=503, detail="Autonomous goal orchestrator not available.")
+
+    goal = orchestrator.plan_and_execute(
+        workspace_id=ws_id,
+        goal_prompt=payload.goal,
+        context=payload.context or {},
+        auto_approve_safe=payload.auto_approve_safe,
+    )
+    return goal.to_dict()
+
+
+@router.get("/autonomy/goals")
+async def list_autonomous_goals_route(
+    request: Request,
+    workspace_id: str | None = None,
+    limit: int = 50,
+):
+    """Lists recent autonomous operational missions and their execution statuses."""
+    ws = getattr(request.app.state, "workspace", None)
+    if not ws:
+        raise HTTPException(status_code=503, detail="Workspace not initialized.")
+    ws_id = (workspace_id or getattr(ws, "id", None) or ws.name).strip()
+    store = getattr(ws, "autonomy_store", None)
+    if not store:
+        return []
+    goals = store.list_goals(ws_id, limit=limit)
+    return [g.to_dict() for g in goals]
+
+
+@router.get("/autonomy/goals/{goal_id}")
+async def get_autonomous_goal_route(
+    request: Request,
+    goal_id: str,
+):
+    """Retrieves full execution graph, stages, hardware tier, and deliverables for an autonomous goal."""
+    ws = getattr(request.app.state, "workspace", None)
+    if not ws:
+        raise HTTPException(status_code=503, detail="Workspace not initialized.")
+    store = getattr(ws, "autonomy_store", None)
+    if not store:
+        raise HTTPException(status_code=503, detail="Autonomy store not available.")
+    goal = store.get_goal(goal_id)
+    if not goal:
+        raise HTTPException(status_code=404, detail=f"Autonomous goal '{goal_id}' not found.")
+    return goal.to_dict()
+
+
+@router.post("/autonomy/goals/{goal_id}/approve")
+async def approve_autonomous_goal_route(
+    request: Request,
+    goal_id: str,
+    payload: AutonomousApprovePayload,
+):
+    """Confirms or rejects safety approval for an autonomous operational goal."""
+    ws = getattr(request.app.state, "workspace", None)
+    if not ws:
+        raise HTTPException(status_code=503, detail="Workspace not initialized.")
+    orchestrator = getattr(ws, "autonomy_orchestrator", None)
+    if not orchestrator:
+        raise HTTPException(status_code=503, detail="Autonomy orchestrator not available.")
+    try:
+        goal = orchestrator.approve_and_resume(goal_id, approved=payload.approved)
+        return goal.to_dict()
+    except ValueError as ve:
+        raise HTTPException(status_code=404, detail=str(ve))
 

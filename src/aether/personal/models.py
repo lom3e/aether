@@ -253,3 +253,80 @@ class PersonalTask:
             updated_at=data.get("updated_at") or datetime.now(timezone.utc).isoformat(),
         )
 
+
+class CompanionSurfaceMode(StrEnum):
+    ORB = "orb"
+    COMPACT = "compact"
+    EXPANDED = "expanded"
+    COCKPIT = "cockpit"
+
+
+@dataclass(slots=True)
+class DesktopAppContext:
+    """Active desktop window, application, and clipboard context for on-demand inspection."""
+    app_name: str = "Desktop"
+    window_title: str = ""
+    selected_text: str = ""
+    clipboard_text: str = ""
+    screen_summary: str = ""
+    timestamp: str = field(default_factory=lambda: datetime.now(timezone.utc).isoformat())
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "app_name": self.app_name,
+            "window_title": self.window_title,
+            "selected_text": self.selected_text,
+            "clipboard_text": self.clipboard_text,
+            "screen_summary": self.screen_summary,
+            "timestamp": self.timestamp,
+        }
+
+    @classmethod
+    def from_dict(cls, data: dict[str, Any]) -> DesktopAppContext:
+        return cls(
+            app_name=data.get("app_name", "Desktop"),
+            window_title=data.get("window_title", ""),
+            selected_text=data.get("selected_text", ""),
+            clipboard_text=data.get("clipboard_text", ""),
+            screen_summary=data.get("screen_summary", ""),
+            timestamp=data.get("timestamp") or datetime.now(timezone.utc).isoformat(),
+        )
+
+
+@dataclass(slots=True)
+class CompanionDeliverable:
+    """Artifact, document, or code deliverable immediately accessible in Companion."""
+    id: str
+    title: str
+    source: str
+    file_path: str
+    file_type: str
+    file_size_bytes: int = 0
+    summary: str = ""
+    created_at: str = field(default_factory=lambda: datetime.now(timezone.utc).isoformat())
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "id": self.id,
+            "title": self.title,
+            "source": self.source,
+            "file_path": self.file_path,
+            "file_type": self.file_type,
+            "file_size_bytes": self.file_size_bytes,
+            "summary": self.summary,
+            "created_at": self.created_at,
+        }
+
+    @classmethod
+    def from_dict(cls, data: dict[str, Any]) -> CompanionDeliverable:
+        return cls(
+            id=data.get("id") or f"deliv-{uuid.uuid4().hex[:8]}",
+            title=data.get("title", "Deliverable"),
+            source=data.get("source", "workspace"),
+            file_path=data.get("file_path", ""),
+            file_type=data.get("file_type", "document"),
+            file_size_bytes=int(data.get("file_size_bytes", 0)),
+            summary=data.get("summary", ""),
+            created_at=data.get("created_at") or datetime.now(timezone.utc).isoformat(),
+        )
+

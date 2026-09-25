@@ -154,6 +154,18 @@ class PersonalAgentService:
                     effective_prompt = f"{context_hint} (Confirmed by user: {prompt})"
                     p_lower = effective_prompt.lower()
 
+        # Operational Autonomy ("Aether, take care of it" / "Prenditene cura tu")
+        from aether.autonomy.engine import AutonomousGoalOrchestrator
+        if AutonomousGoalOrchestrator.is_autonomous_intent(p_lower):
+            return UserIntent(
+                raw_prompt=effective_prompt,
+                tier=IntentTier.DELEGATE,
+                summary=f"Autonomous Operational Loop: {effective_prompt[:50]}",
+                action_id="autonomy.take_care_of_it",
+                action_args={"goal": effective_prompt},
+                delegation_goal=effective_prompt,
+            )
+
         # 0. Automations creation (ACT tier - creates draft workflow requiring confirmation)
         automation_triggers = [
             "crea un'automazione", "crea automazione", "programma un'automazione", "schedula un controllo", "automatizza",
@@ -1009,8 +1021,54 @@ class PersonalAgentService:
                 action_args={"channel_type": c_type, "enabled": enable_val},
             )
 
+        # 3e37. List Compute Mesh Nodes & Telemetry (ANSWER tier)
+        fabric_list_triggers = [
+            "mostra nodi di calcolo", "quali nodi di calcolo", "stato hardware mesh",
+            "nodi disponibili", "telemetria hardware", "list compute nodes", "mesh nodes",
+            "risorse di calcolo", "mostra nodi",
+        ]
+        if any(k in p_lower for k in fabric_list_triggers) or (
+            ("nodi" in p_lower or "nodes" in p_lower) and any(w in p_lower for w in ["calcolo", "compute", "mesh", "hardware"])
+        ):
+            return UserIntent(
+                raw_prompt=effective_prompt,
+                tier=IntentTier.ANSWER,
+                summary="List compute mesh nodes and hardware capacity",
+                action_id="fabric.list_nodes",
+                action_args={},
+            )
+
+        # 3e38. Route Workload or Register Node (DO tier)
+        fabric_route_triggers = [
+            "alloca carico di lavoro", "instrada workload", "route workload", "alloca workload",
+            "esegui su gpu", "carico di calcolo",
+        ]
+        if any(k in p_lower for k in fabric_route_triggers):
+            target_tier = "gpu_heavy" if ("gpu" in p_lower or "vram" in p_lower) else "local_fast"
+            return UserIntent(
+                raw_prompt=effective_prompt,
+                tier=IntentTier.DO,
+                summary=f"Route workload across execution fabric with tier '{target_tier}'",
+                action_id="fabric.route_workload",
+                action_args={"workload_name": f"Task: {prompt[:30]}", "tier": target_tier},
+            )
+
+        fabric_register_triggers = [
+            "registra nodo", "aggiungi nodo", "register compute node", "nuovo nodo",
+        ]
+        if any(k in p_lower for k in fabric_register_triggers):
+            name_match = re.search(r"(?:nodo|node|chiamato|named)\s+[\"']?([^\"'\n,]+)[\"']?", prompt, re.IGNORECASE)
+            node_name = name_match.group(1).strip() if name_match else "Remote Worker"
+            return UserIntent(
+                raw_prompt=effective_prompt,
+                tier=IntentTier.DO,
+                summary=f"Register new compute node '{node_name}' into execution fabric",
+                action_id="fabric.register_node",
+                action_args={"name": node_name, "endpoint": "http://192.168.1.100:8000", "role": "worker"},
+            )
 
         # 3e. GitHub issue creation (ACT tier - requires safety confirmation)
+
         github_issue_triggers = [
             "apri una issue", "apri issue", "crea una issue", "crea issue", "create an issue", "create issue",
             "open an issue", "open issue", "new issue", "nuova issue", "segnala una issue",
@@ -1472,108 +1530,146 @@ class PersonalAgentService:
                     )
 
         elif intent.tier == IntentTier.DELEGATE:
-            step_del = PersonalStep(
-                id=f"step-{uuid.uuid4().hex[:8]}",
-                title="Orchestrating digital workforce",
-                status="running",
-                category="delegation",
-            )
-            steps.append(step_del)
-
-            topic_title = self._extract_task_topic(prompt)
-            mission_title = f"Task: {topic_title}"
-
-            if self.mission_store:
-                try:
-                    milestones = [
-                        {"title": f"Scope & Context: {topic_title}", "description": f"Gather context and scope objective for {prompt}"},
-                        {"title": f"Workforce Execution: {topic_title}", "description": f"Domain specialists perform structured analysis for {prompt}"},
-                        {"title": f"Synthesize Deliverables", "description": f"Consolidate domain findings and verify deliverables for {prompt}"},
+            if intent.action_id == "autonomy.take_care_of_it":
+                step_del = PersonalStep(
+                    id=f"step-{uuid.uuid4().hex[:8]}",
+                    title="Aether Operational Autonomy: Take Care of It",
+                    status="running",
+                    category="delegation",
+                )
+                steps.append(step_del)
+                orchestrator = getattr(self.workspace, "autonomy_orchestrator", None)
+                if orchestrator:
+                    goal = orchestrator.plan_and_execute(workspace_id, prompt)
+                    step_del.status = "completed" if goal.status == "completed" else str(goal.status)
+                    step_del.details = {
+                        "goal_id": goal.id,
+                        "stages": len(goal.stages),
+                        "deliverables": len(goal.deliverables),
+                        "tier": goal.allocated_tier,
+                    }
+                    lines = [
+                        f"### ⚡ Operazione Autonoma Completata: `{goal.goal[:50]}`",
+                        f"- **Stato:** `{goal.status.value.upper()}`",
+                        f"- **Compute Fabric Tier:** `{goal.allocated_tier}` (Nodo: `{goal.allocated_node_id}`)",
+                        f"- **Fasi Completate:** {len(goal.stages)} fasi end-to-end",
+                        "",
                     ]
-                    mission = self.mission_store.create_mission(
-                        title=mission_title,
-                        objective=intent.delegation_goal or prompt,
-                        workspace_id=workspace_id,
-                        milestones=milestones,
-                    )
-                    mission_id = mission.id
-                    step_del.details = {"mission_id": mission_id}
-                except Exception as e:
-                    logger.warning(f"Mission creation fallback: {e}")
-                    mission_id = f"msn-{uuid.uuid4().hex[:8]}"
+                    if goal.deliverables:
+                        lines.append("#### 📁 Deliverable e Artefatti:")
+                        for d in goal.deliverables:
+                            lines.append(f"- **{d.get('name')}** (`{d.get('path')}`)")
+                        lines.append("")
+                    if goal.learning_summary:
+                        lines.append(f"> 💡 *Apprendimento registrato nella Workforce Memory.*")
+                    response_text = "\n".join(lines)
+                else:
+                    response_text = "Operational autonomy orchestrator not available."
+
             else:
-                mission_id = f"msn-{uuid.uuid4().hex[:8]}"
+                step_del = PersonalStep(
+                    id=f"step-{uuid.uuid4().hex[:8]}",
+                    title="Orchestrating digital workforce",
+                    status="running",
+                    category="delegation",
+                )
+                steps.append(step_del)
 
-            exec_request.mission_id = mission_id
+                topic_title = self._extract_task_topic(prompt)
+                mission_title = f"Task: {topic_title}"
 
-            def background_workforce_worker(progress_cb: Any) -> dict[str, Any]:
-                res = self.runtime.execute(exec_request, progress_callback=progress_cb)
-                deliverables = res.deliverables or []
-                deliv_path = deliverables[0]["path"] if deliverables else None
-                deliv_name = deliverables[0]["name"] if deliverables else None
-
-                if self.mission_store and mission_id:
+                if self.mission_store:
                     try:
-                        ms = self.mission_store.list_milestones(mission_id)
-                        for m in ms:
-                            self.mission_store.update_milestone(
-                                m.id,
-                                status=MilestoneStatus.COMPLETED if res.success else MilestoneStatus.FAILED,
-                            )
-                        self.mission_store.update_mission(
-                            mission_id,
-                            status=MissionStatus.COMPLETED if res.success else MissionStatus.FAILED,
+                        milestones = [
+                            {"title": f"Scope & Context: {topic_title}", "description": f"Gather context and scope objective for {prompt}"},
+                            {"title": f"Workforce Execution: {topic_title}", "description": f"Domain specialists perform structured analysis for {prompt}"},
+                            {"title": f"Synthesize Deliverables", "description": f"Consolidate domain findings and verify deliverables for {prompt}"},
+                        ]
+                        mission = self.mission_store.create_mission(
+                            title=mission_title,
+                            objective=intent.delegation_goal or prompt,
+                            workspace_id=workspace_id,
+                            milestones=milestones,
                         )
-                        if deliverables:
-                            for d in deliverables:
-                                if isinstance(d, dict) and d.get("path"):
-                                    self.mission_store.add_deliverable(
-                                        mission_id=mission_id,
-                                        deliverable=Deliverable(
-                                            id=f"del_{uuid.uuid4().hex[:12]}",
-                                            mission_id=mission_id,
-                                            execution_id=res.execution_id or "",
-                                            name=d.get("name", "deliverable"),
-                                            path=d.get("path", ""),
-                                            type=d.get("type", "document"),
-                                            status="verified",
-                                        ),
+                        mission_id = mission.id
+                        step_del.details = {"mission_id": mission_id}
+                    except Exception as e:
+                        logger.warning(f"Mission creation fallback: {e}")
+                        mission_id = f"msn-{uuid.uuid4().hex[:8]}"
+                else:
+                    mission_id = f"msn-{uuid.uuid4().hex[:8]}"
+
+                exec_request.mission_id = mission_id
+
+                def background_workforce_worker(progress_cb: Any) -> dict[str, Any]:
+                    res = self.runtime.execute(exec_request, progress_callback=progress_cb)
+                    deliverables = res.deliverables or []
+                    deliv_path = deliverables[0]["path"] if deliverables else None
+                    deliv_name = deliverables[0]["name"] if deliverables else None
+
+                    if self.mission_store and mission_id:
+                        try:
+                            ms = self.mission_store.list_milestones(mission_id)
+                            for m in ms:
+                                self.mission_store.update_milestone(
+                                    m.id,
+                                    status=MilestoneStatus.COMPLETED if res.success else MilestoneStatus.FAILED,
                                     )
-                    except Exception as me:
-                        logger.warning(f"Failed to synchronize mission after workforce run: {me}")
+                            self.mission_store.update_mission(
+                                mission_id,
+                                status=MissionStatus.COMPLETED if res.success else MissionStatus.FAILED,
+                            )
+                            if deliverables:
+                                for d in deliverables:
+                                    if isinstance(d, dict) and d.get("path"):
+                                        self.mission_store.add_deliverable(
+                                            mission_id=mission_id,
+                                            deliverable=Deliverable(
+                                                id=f"del_{uuid.uuid4().hex[:12]}",
+                                                mission_id=mission_id,
+                                                execution_id=res.execution_id or "",
+                                                name=d.get("name", "deliverable"),
+                                                path=d.get("path", ""),
+                                                type=d.get("type", "document"),
+                                                status="verified",
+                                            ),
+                                        )
+                        except Exception as me:
+                            logger.warning(f"Failed to synchronize mission after workforce run: {me}")
 
-                return {
-                    "summary": f"Completed workforce delegation for {topic_title}. Findings compiled into executive deliverable.",
-                    "deliverable_name": deliv_name,
-                    "deliverable_path": deliv_path,
-                    "mission_id": mission_id,
-                    "specialists": res.metadata.get("specialists", []),
-                    "coordinator": res.metadata.get("coordinator", "coordinator"),
-                }
+                    return {
+                        "summary": f"Completed workforce delegation for {topic_title}. Findings compiled into executive deliverable.",
+                        "deliverable_name": deliv_name,
+                        "deliverable_path": deliv_path,
+                        "mission_id": mission_id,
+                        "specialists": res.metadata.get("specialists", []),
+                        "coordinator": res.metadata.get("coordinator", "coordinator"),
+                    }
 
-            task = self.task_manager.submit_task(
-                workspace_id=workspace_id,
-                session_id=session_id,
-                title=f"Analysis: {topic_title}",
-                tier=IntentTier.DELEGATE,
-                worker_fn=background_workforce_worker,
-                mission_id=mission_id,
-                metadata={"prompt": prompt, "entity": topic_title},
-            )
-
-            is_italian = any(w in prompt.lower() for w in ["chi", "cosa", "come", "perché", "perche", "dove", "dimmi", "puoi", "aiutami", "ciao", "buongiorno", "qual è", "quali", "grazie", "stai", "chiedi", "fai", "delega"])
-            if is_italian:
-                response_text = (
-                    f"Ho preso in carico la tua richiesta per **{topic_title}** e ho attivato la Digital Workforce in background.\n\n"
-                    f"Non è necessario attendere qui: riceverai una notifica non appena il deliverable sarà pronto. "
-                    f"Puoi anche seguire l'avanzamento in tempo reale o consultare la sezione **Work** (Mission: `{mission_id}`)."
+                task = self.task_manager.submit_task(
+                    workspace_id=workspace_id,
+                    session_id=session_id,
+                    title=f"Analysis: {topic_title}",
+                    tier=IntentTier.DELEGATE,
+                    worker_fn=background_workforce_worker,
+                    mission_id=mission_id,
+                    metadata={"prompt": prompt, "entity": topic_title},
                 )
-            else:
-                response_text = (
-                    f"I've initiated your request for **{topic_title}** with the digital workforce in the background.\n\n"
-                    f"You don't need to wait here: you'll receive a notification once the report and deliverables are ready. "
-                    f"You can monitor live progress or check the **Work** section (Mission: `{mission_id}`)."
-                )
+
+                is_italian = any(w in prompt.lower() for w in ["chi", "cosa", "come", "perché", "perche", "dove", "dimmi", "puoi", "aiutami", "ciao", "buongiorno", "qual è", "quali", "grazie", "stai", "chiedi", "fai", "delega"])
+                if is_italian:
+                    response_text = (
+                        f"Ho preso in carico la tua richiesta per **{topic_title}** e ho attivato la Digital Workforce in background.\n\n"
+                        f"Non è necessario attendere qui: riceverai una notifica non appena il deliverable sarà pronto. "
+                        f"Puoi anche seguire l'avanzamento in tempo reale o consultare la sezione **Work** (Mission: `{mission_id}`)."
+                    )
+                else:
+                    response_text = (
+                        f"I've initiated your request for **{topic_title}** with the digital workforce in the background.\n\n"
+                        f"You don't need to wait here: you'll receive a notification once the report and deliverables are ready. "
+                        f"You can monitor live progress or check the **Work** section (Mission: `{mission_id}`)."
+                    )
+
 
         else:
             # ANSWER tier
@@ -1914,6 +2010,10 @@ class PersonalAgentService:
         if self.notification_service:
             unread_notifications = self.notification_service.get_unread_count(workspace_id)
 
+        # 7. Deliverables overview
+        from aether.personal.context import collect_workspace_deliverables
+        deliverables = collect_workspace_deliverables(self.workspace, limit=5)
+
         return {
             "pending_approvals": pending_approvals,
             "recent_activities": recent_activities,
@@ -1922,4 +2022,79 @@ class PersonalAgentService:
             "recent_works": recent_works[:5],
             "background_tasks": background_tasks,
             "unread_notifications": unread_notifications,
+            "recent_deliverables": [d.to_dict() for d in deliverables],
+            "deliverables_count": len(deliverables),
         }
+
+    def capture_context(self, timeout_seconds: float = 1.5) -> dict[str, Any]:
+        """Captures active application, window title, and clipboard context for on-demand inspection."""
+        from aether.personal.context import capture_desktop_context
+        ctx = capture_desktop_context(timeout_seconds=timeout_seconds)
+        return ctx.to_dict()
+
+    def list_deliverables(self, workspace_id: str, limit: int = 25) -> list[dict[str, Any]]:
+        """Lists accessible deliverables and output artifacts in the workspace."""
+        from aether.personal.context import collect_workspace_deliverables
+        deliverables = collect_workspace_deliverables(self.workspace, limit=limit)
+        return [d.to_dict() for d in deliverables]
+
+    def ingest_dropped_file(
+        self,
+        workspace_id: str,
+        filename: str,
+        content: bytes,
+        session_id: str | None = None,
+    ) -> dict[str, Any]:
+        """Ingests a file dropped into the Companion into the workspace inbox and attaches context."""
+        from aether.personal.context import handle_drag_and_drop_file
+        res = handle_drag_and_drop_file(self.workspace, filename, content, session_id=session_id)
+        return res
+
+    def execute_quick_action(
+        self,
+        workspace_id: str,
+        quick_action_id: str,
+        context: dict[str, Any] | None = None,
+    ) -> dict[str, Any]:
+        """Dispatches an instant companion quick action across the unified system."""
+        context = context or {}
+        if quick_action_id == "capture_screen_context":
+            ctx = self.capture_context()
+            return {"action": "capture_screen_context", "status": "completed", "context": ctx}
+
+        elif quick_action_id == "check_notifications":
+            unread_cnt = self.notification_service.get_unread_count(workspace_id) if self.notification_service else 0
+            recent_notifs = self.notification_service.list_notifications(workspace_id, limit=5) if self.notification_service else []
+            return {
+                "action": "check_notifications",
+                "status": "completed",
+                "unread_count": unread_cnt,
+                "notifications": [n.to_dict() for n in recent_notifs],
+            }
+
+        elif quick_action_id == "run_quick_audit":
+            # Delegate fast code/system check action
+            exec_res = self.action_executor.execute("fabric.get_telemetry", workspace_id, {})
+            return {
+                "action": "run_quick_audit",
+                "status": "completed",
+                "telemetry": exec_res.output_data.get("telemetry") if hasattr(exec_res, "output_data") else {},
+            }
+
+        elif quick_action_id == "refresh_deliverables":
+            delivs = self.list_deliverables(workspace_id, limit=10)
+            return {"action": "refresh_deliverables", "status": "completed", "deliverables": delivs}
+
+        elif quick_action_id == "take_care_of_it":
+            orch = getattr(self.workspace, "autonomy_orchestrator", None)
+            goal_prompt = context.get("goal") or "Verify workspace health, inspect active compute, and synthesize deliverables"
+            goal = orch.plan_and_execute(workspace_id, goal_prompt, context=context) if orch else None
+            return {
+                "action": "take_care_of_it",
+                "status": "completed",
+                "goal": goal.to_dict() if goal else {},
+            }
+
+        # Fallback to direct prompt processing
+        msg = self.process_prompt(workspace_id, f"Quick Action: {quick_action_id}")
+        return {"action": quick_action_id, "status": "completed", "message": msg.to_dict()}

@@ -348,6 +348,11 @@ class Workspace:
         return self._get_or_create("actions", _factory)
 
     @property
+    def action_executor(self):
+        """Alias for actions (ActionExecutor)."""
+        return self.actions
+
+    @property
     def policy_db_path(self) -> str:
         """Path to the persistent workspace policy database."""
         if self.data_dir.exists() or self.config_path.exists():
@@ -507,7 +512,53 @@ class Workspace:
             return ProactiveIntelligenceEngine(store=self.proactive_store)
         return self._get_or_create("proactive_engine", _factory)
 
+    @property
+    def fabric_db_path(self) -> str:
+        """Path to the persistent execution fabric database."""
+        if self.data_dir.exists() or self.config_path.exists():
+            return str(self.data_dir / "fabric.db")
+        return str(self.legacy_aether_dir / "fabric.db")
 
+    @property
+    def fabric_store(self):
+        """Return the FabricStore for this workspace."""
+        def _factory():
+            from aether.fabric.store import FabricStore
+            Path(self.fabric_db_path).parent.mkdir(parents=True, exist_ok=True)
+            return FabricStore(self.fabric_db_path)
+        return self._get_or_create("fabric_store", _factory)
+
+    @property
+    def fabric_engine(self):
+        """Return the ExecutionFabricEngine for this workspace."""
+        def _factory():
+            from aether.fabric.engine import ExecutionFabricEngine
+            return ExecutionFabricEngine(store=self.fabric_store)
+        return self._get_or_create("fabric_engine", _factory)
+
+    @property
+    def autonomy_db_path(self) -> str:
+        """Path to the persistent operational autonomy database."""
+        if self.data_dir.exists() or self.config_path.exists():
+            return str(self.data_dir / "autonomy.db")
+        return str(self.legacy_aether_dir / "autonomy.db")
+
+    @property
+    def autonomy_store(self):
+        """Return the AutonomousGoalStore for this workspace."""
+        def _factory():
+            from aether.autonomy.store import AutonomousGoalStore
+            Path(self.autonomy_db_path).parent.mkdir(parents=True, exist_ok=True)
+            return AutonomousGoalStore(self.autonomy_db_path)
+        return self._get_or_create("autonomy_store", _factory)
+
+    @property
+    def autonomy_orchestrator(self):
+        """Return the AutonomousGoalOrchestrator for this workspace."""
+        def _factory():
+            from aether.autonomy.engine import AutonomousGoalOrchestrator
+            return AutonomousGoalOrchestrator(self, store=self.autonomy_store)
+        return self._get_or_create("autonomy_orchestrator", _factory)
 
     @property
     def intelligence(self):

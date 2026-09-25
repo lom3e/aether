@@ -23,6 +23,7 @@ import { AmbientCompanion } from './AmbientCompanion';
 import { WorkflowBuilder } from './WorkflowBuilder';
 import { ContentRepurposing } from './ContentRepurposing';
 import { ProactiveWatchersView } from './ProactiveWatchersView';
+import ExecutionFabricView from './ExecutionFabricView';
 
 
 function MainApp() {
@@ -311,6 +312,7 @@ function MainApp() {
         {currentView === 'skills' && <WorkforceHub initialTab="skills" navigate={navigate} />}
         {currentView === 'content' && <ContentRepurposing navigate={navigate} />}
         {currentView === 'proactive' && <ProactiveWatchersView />}
+        {currentView === 'fabric' && <ExecutionFabricView />}
         {currentView === 'settings' && <Settings onWorkspaceSwitched={handleWorkspaceSwitched} />}
         {currentView === 'marketplace' && <Marketplace />}
       </div>

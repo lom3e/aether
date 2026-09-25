@@ -17,6 +17,15 @@ import {
   Eye,
   MessageSquare,
   Info,
+  Maximize2,
+  Minimize2,
+  FileText,
+  UploadCloud,
+  Target,
+  RefreshCw,
+  Copy,
+  Circle,
+  ArrowUpRight,
 } from "lucide-react";
 import { apiUrl, getSessionToken } from "./api";
 import { hideCompanion, showMainWindow, notifyDesktop } from "./desktop";
@@ -80,6 +89,26 @@ interface NotificationItem {
   created_at: string;
 }
 
+interface CompanionDeliverableItem {
+  id: string;
+  title: string;
+  source: string;
+  file_path: string;
+  file_type: string;
+  file_size_bytes: number;
+  summary: string;
+  created_at: string;
+}
+
+interface DesktopAppContextItem {
+  app_name: string;
+  window_title: string;
+  selected_text: string;
+  clipboard_text: string;
+  screen_summary: string;
+  timestamp: string;
+}
+
 export function AmbientCompanion({
   workspaceName: propWorkspaceName,
   onOpenWorkspace,
@@ -97,9 +126,19 @@ export function AmbientCompanion({
   const [unreadNotifications, setUnreadNotifications] = useState<NotificationItem[]>([]);
   const [unreadCount, setUnreadCount] = useState<number>(0);
 
-  // Progressive UI Modes
+  // Progressive UI Modes & Tabs
+  const [surfaceMode, setSurfaceMode] = useState<"orb" | "hud" | "expanded">("hud");
+  const [activeTab, setActiveTab] = useState<"chat" | "missions" | "approvals" | "deliverables" | "context">("chat");
   const [showVisualNotice, setShowVisualNotice] = useState(false);
   const [showSuggestions, setShowSuggestions] = useState(true);
+
+  // Context & Deliverables & Drag and Drop
+  const [capturedContext, setCapturedContext] = useState<DesktopAppContextItem | null>(null);
+  const [isCapturingContext, setIsCapturingContext] = useState(false);
+  const [deliverables, setDeliverables] = useState<CompanionDeliverableItem[]>([]);
+  const [activeMissions, setActiveMissions] = useState<any[]>([]);
+  const [isDragging, setIsDragging] = useState(false);
+  const [droppedFiles, setDroppedFiles] = useState<Array<{ filename: string; size: number; path: string; preview?: string }>>([]);
 
   // Voice State
   const [isListening, setIsListening] = useState(false);
@@ -132,6 +171,123 @@ export function AmbientCompanion({
     }
   }, [propWorkspaceName, fetchWorkspace]);
 
+  // Deliverables fetcher
+  const fetchDeliverables = useCallback(async () => {
+    if (!activeWorkspace) return;
+    try {
+      const res = await fetch(
+        apiUrl(`/api/personal/companion/deliverables?workspace_id=${encodeURIComponent(activeWorkspace)}&limit=15`)
+      );
+      if (res.ok) {
+        const data = await res.json();
+        if (Array.isArray(data)) {
+          setDeliverables(data);
+        }
+      }
+    } catch (err) {
+      console.warn("Could not fetch deliverables:", err);
+    }
+  }, [activeWorkspace]);
+
+  // Context capture handler
+  const handleCaptureContext = async () => {
+    setIsCapturingContext(true);
+    try {
+      const res = await fetch(apiUrl("/api/personal/companion/context"), {
+        method: "POST",
+      });
+      if (res.ok) {
+        const data = await res.json();
+        setCapturedContext(data);
+        showToast(`Captured: ${data.app_name} (${data.window_title || "Active Window"})`, "info");
+      } else {
+        showToast("Could not inspect desktop context.", "warning");
+      }
+    } catch (e) {
+      console.warn("Context capture error:", e);
+      showToast("Context capture error.", "warning");
+    } finally {
+      setIsCapturingContext(false);
+    }
+  };
+
+  // Drag & drop file handler
+  const handleFileDrop = async (e: React.DragEvent) => {
+    e.preventDefault();
+    setIsDragging(false);
+    if (!e.dataTransfer.files || e.dataTransfer.files.length === 0) return;
+
+    const file = e.dataTransfer.files[0];
+    const reader = new FileReader();
+
+    reader.onload = async () => {
+      try {
+        const base64Content = (reader.result as string).split(",")[1] || "";
+        const res = await fetch(apiUrl("/api/personal/companion/drop"), {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            filename: file.name,
+            content_base64: base64Content,
+            session_id: sessionId,
+            workspace_id: activeWorkspace || undefined,
+          }),
+        });
+        if (res.ok) {
+          const dropData = await res.json();
+          setDroppedFiles(prev => [...prev, {
+            filename: dropData.file_name,
+            size: dropData.file_size,
+            path: dropData.file_path,
+            preview: dropData.text_preview,
+          }]);
+          showToast(`Ingested ${file.name} into Workspace Inbox`, "success");
+          if (!promptInput.trim()) {
+            setPromptInput(`Review and analyze ingested file: ${dropData.file_name}`);
+          }
+        }
+      } catch (err) {
+        console.error("File drop failed:", err);
+        showToast("Failed to ingest dropped file", "error");
+      }
+    };
+    reader.readAsDataURL(file);
+  };
+
+  // Quick Action execution
+  const handleQuickAction = async (actionId: string) => {
+    try {
+      const res = await fetch(apiUrl("/api/personal/companion/quick-action"), {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          action_id: actionId,
+          workspace_id: activeWorkspace || undefined,
+        }),
+      });
+      if (res.ok) {
+        const data = await res.json();
+        if (actionId === "capture_screen_context" && data.context) {
+          setCapturedContext(data.context);
+          setActiveTab("context");
+          showToast(`Captured: ${data.context.app_name}`, "info");
+        } else if (actionId === "refresh_deliverables") {
+          await fetchDeliverables();
+          setActiveTab("deliverables");
+        } else if (actionId === "take_care_of_it") {
+          showToast("Autonomous loop completed: deliverable ready!", "success");
+          await fetchDeliverables();
+          fetchOverview();
+        } else {
+          showToast(`Executed: ${actionId}`, "success");
+          fetchOverview();
+        }
+      }
+    } catch (err) {
+      console.error("Quick action failed:", err);
+    }
+  };
+
   // 2. Fetch Overview & Pending State from single source of truth
   const fetchOverview = useCallback(async () => {
     if (!activeWorkspace) return;
@@ -147,6 +303,12 @@ export function AmbientCompanion({
           }
           if (Array.isArray(data.background_tasks)) {
             setBackgroundTasks(data.background_tasks);
+          }
+          if (Array.isArray(data.active_works)) {
+            setActiveMissions(data.active_works);
+          }
+          if (Array.isArray(data.recent_deliverables)) {
+            setDeliverables(data.recent_deliverables);
           }
           if (typeof data.unread_notifications === "number") {
             setUnreadCount(data.unread_notifications);
@@ -489,26 +651,143 @@ export function AmbientCompanion({
     t => t.status === "completed" && t.deliverable_path
   );
 
+  // Floating Orb Minimal Mode
+  if (surfaceMode === "orb") {
+    return (
+      <div
+        data-testid="companion-floating-orb"
+        onClick={() => setSurfaceMode("hud")}
+        title="Aether Companion — Click to expand (Option+Space)"
+        style={{
+          width: "100vw",
+          height: "100vh",
+          display: "flex",
+          alignItems: "center",
+          justifyContent: "center",
+          background: "transparent",
+          cursor: "pointer",
+        }}
+      >
+        <div
+          style={{
+            width: "56px",
+            height: "56px",
+            borderRadius: "50%",
+            backgroundColor: "rgba(15, 23, 42, 0.90)",
+            border: "2px solid rgba(56, 189, 248, 0.6)",
+            boxShadow: isListening
+              ? "0 0 24px rgba(239, 68, 68, 0.8), 0 0 10px rgba(239, 68, 68, 0.4)"
+              : activeRunningTasks.length > 0
+              ? "0 0 24px rgba(245, 158, 11, 0.8), 0 0 10px rgba(245, 158, 11, 0.4)"
+              : "0 0 24px rgba(56, 189, 248, 0.8), 0 0 10px rgba(56, 189, 248, 0.4)",
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "center",
+            position: "relative",
+            transition: "all 0.3s cubic-bezier(0.4, 0, 0.2, 1)",
+            animation: isListening || activeRunningTasks.length > 0 ? "pulse 1.6s infinite" : "none",
+          }}
+        >
+          <Sparkles size={24} color="#38bdf8" />
+          {unreadCount > 0 && (
+            <span
+              style={{
+                position: "absolute",
+                top: "-4px",
+                right: "-4px",
+                backgroundColor: "#ef4444",
+                color: "#fff",
+                fontSize: "10px",
+                fontWeight: 700,
+                borderRadius: "10px",
+                padding: "2px 5px",
+                boxShadow: "0 0 6px rgba(239,68,68,0.8)",
+              }}
+            >
+              {unreadCount}
+            </span>
+          )}
+          {pendingApprovals.length > 0 && (
+            <span
+              style={{
+                position: "absolute",
+                bottom: "-2px",
+                right: "-2px",
+                backgroundColor: "#f59e0b",
+                color: "#000",
+                borderRadius: "50%",
+                width: "15px",
+                height: "15px",
+                display: "flex",
+                alignItems: "center",
+                justifyContent: "center",
+                fontSize: "10px",
+                fontWeight: 800,
+              }}
+            >
+              !
+            </span>
+          )}
+        </div>
+      </div>
+    );
+  }
+
   return (
     <div
       data-testid="ambient-companion-surface"
+      onDragOver={e => {
+        e.preventDefault();
+        setIsDragging(true);
+      }}
+      onDragLeave={() => setIsDragging(false)}
+      onDrop={handleFileDrop}
       style={{
         display: "flex",
         flexDirection: "column",
         width: "100vw",
         height: "100vh",
-        backgroundColor: "rgba(15, 23, 42, 0.90)",
+        backgroundColor: "rgba(15, 23, 42, 0.92)",
         backdropFilter: "blur(28px) saturate(190%)",
         WebkitBackdropFilter: "blur(28px) saturate(190%)",
         color: "hsl(var(--fg))",
         boxSizing: "border-box",
         overflow: "hidden",
-        border: "1px solid rgba(255, 255, 255, 0.12)",
-        borderRadius: "18px",
+        border: isDragging ? "2px dashed #38bdf8" : "1px solid rgba(255, 255, 255, 0.12)",
+        borderRadius: surfaceMode === "expanded" ? "0px" : "18px",
         boxShadow: "0 20px 50px rgba(0, 0, 0, 0.65), 0 0 40px rgba(56, 189, 248, 0.12)",
         fontFamily: "-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif",
+        position: "relative",
       }}
     >
+      {/* Drag & Drop Ingestion Overlay */}
+      {isDragging && (
+        <div
+          style={{
+            position: "absolute",
+            top: 0,
+            left: 0,
+            right: 0,
+            bottom: 0,
+            backgroundColor: "rgba(15, 23, 42, 0.85)",
+            backdropFilter: "blur(8px)",
+            display: "flex",
+            flexDirection: "column",
+            alignItems: "center",
+            justifyContent: "center",
+            zIndex: 9999,
+            gap: "12px",
+            color: "#38bdf8",
+          }}
+        >
+          <UploadCloud size={48} className="animate-bounce" />
+          <div style={{ fontSize: "16px", fontWeight: 700 }}>Drop file to ingest into Workspace Inbox</div>
+          <div style={{ fontSize: "12px", color: "rgba(255, 255, 255, 0.6)" }}>
+            Automatically parsed and attached to active Companion context
+          </div>
+        </div>
+      )}
+
       {/* 1. Sleek Ambient HUD Header */}
       <header
         data-tauri-drag-region
@@ -558,7 +837,7 @@ export function AmbientCompanion({
               letterSpacing: "0.02em",
             }}
           >
-            {isListening ? "Listening" : activeRunningTasks.length > 0 ? "Active" : "Ambient"}
+            {isListening ? "Listening" : activeRunningTasks.length > 0 ? "Active" : "Companion"}
           </span>
           {activeWorkspace && (
             <span
@@ -594,8 +873,40 @@ export function AmbientCompanion({
           )}
         </div>
 
-        {/* Quick Transition Controls */}
+        {/* Header Mode & Window Controls */}
         <div style={{ display: "flex", alignItems: "center", gap: "6px", cursor: "default" }}>
+          {/* Collapse to Orb */}
+          <button
+            onClick={() => setSurfaceMode("orb")}
+            title="Collapse to Floating Orb"
+            style={{
+              padding: "4px 6px",
+              borderRadius: "6px",
+              border: "1px solid rgba(255, 255, 255, 0.08)",
+              backgroundColor: "rgba(255, 255, 255, 0.03)",
+              color: "rgba(255, 255, 255, 0.6)",
+              cursor: "pointer",
+            }}
+          >
+            <Circle size={12} />
+          </button>
+
+          {/* Toggle Expand / Cockpit */}
+          <button
+            onClick={() => setSurfaceMode(prev => (prev === "expanded" ? "hud" : "expanded"))}
+            title={surfaceMode === "expanded" ? "Restore Compact HUD" : "Expand Cockpit"}
+            style={{
+              padding: "4px 6px",
+              borderRadius: "6px",
+              border: "1px solid rgba(255, 255, 255, 0.08)",
+              backgroundColor: "rgba(255, 255, 255, 0.03)",
+              color: "rgba(255, 255, 255, 0.6)",
+              cursor: "pointer",
+            }}
+          >
+            {surfaceMode === "expanded" ? <Minimize2 size={12} /> : <Maximize2 size={12} />}
+          </button>
+
           <button
             onClick={handleOpenFullWorkspace}
             title="Open Full Workspace (Cmd+O)"
@@ -618,6 +929,7 @@ export function AmbientCompanion({
             <ExternalLink size={11} />
             <span>Workspace</span>
           </button>
+
           <button
             onClick={handleDismiss}
             title="Dismiss (Esc)"
@@ -638,6 +950,205 @@ export function AmbientCompanion({
           </button>
         </div>
       </header>
+
+      {/* Universal Navigation Tabs Bar */}
+      <div
+        style={{
+          display: "flex",
+          alignItems: "center",
+          gap: "4px",
+          padding: "6px 14px",
+          borderBottom: "1px solid rgba(255, 255, 255, 0.06)",
+          backgroundColor: "rgba(0, 0, 0, 0.2)",
+          overflowX: "auto",
+          flexShrink: 0,
+        }}
+      >
+        <button
+          onClick={() => setActiveTab("chat")}
+          style={{
+            display: "inline-flex",
+            alignItems: "center",
+            gap: "5px",
+            fontSize: "11px",
+            fontWeight: activeTab === "chat" ? 600 : 500,
+            padding: "4px 10px",
+            borderRadius: "6px",
+            border: "none",
+            backgroundColor: activeTab === "chat" ? "rgba(56, 189, 248, 0.15)" : "transparent",
+            color: activeTab === "chat" ? "#38bdf8" : "rgba(255, 255, 255, 0.6)",
+            cursor: "pointer",
+          }}
+        >
+          <MessageSquare size={12} />
+          <span>Chat</span>
+        </button>
+
+        <button
+          onClick={() => {
+            setActiveTab("missions");
+            fetchOverview();
+          }}
+          style={{
+            display: "inline-flex",
+            alignItems: "center",
+            gap: "5px",
+            fontSize: "11px",
+            fontWeight: activeTab === "missions" ? 600 : 500,
+            padding: "4px 10px",
+            borderRadius: "6px",
+            border: "none",
+            backgroundColor: activeTab === "missions" ? "rgba(56, 189, 248, 0.15)" : "transparent",
+            color: activeTab === "missions" ? "#38bdf8" : "rgba(255, 255, 255, 0.6)",
+            cursor: "pointer",
+          }}
+        >
+          <Target size={12} />
+          <span>Missions</span>
+          {activeMissions.length > 0 && (
+            <span style={{ fontSize: "9px", backgroundColor: "#38bdf8", color: "#000", padding: "1px 5px", borderRadius: "8px", fontWeight: 700 }}>
+              {activeMissions.length}
+            </span>
+          )}
+        </button>
+
+        <button
+          onClick={() => setActiveTab("approvals")}
+          style={{
+            display: "inline-flex",
+            alignItems: "center",
+            gap: "5px",
+            fontSize: "11px",
+            fontWeight: activeTab === "approvals" ? 600 : 500,
+            padding: "4px 10px",
+            borderRadius: "6px",
+            border: "none",
+            backgroundColor: activeTab === "approvals" ? "rgba(245, 158, 11, 0.15)" : "transparent",
+            color: activeTab === "approvals" ? "#fbbf24" : "rgba(255, 255, 255, 0.6)",
+            cursor: "pointer",
+          }}
+        >
+          <Shield size={12} />
+          <span>Approvals</span>
+          {pendingApprovals.length > 0 && (
+            <span style={{ fontSize: "9px", backgroundColor: "#f59e0b", color: "#000", padding: "1px 5px", borderRadius: "8px", fontWeight: 700 }}>
+              {pendingApprovals.length}
+            </span>
+          )}
+        </button>
+
+        <button
+          onClick={() => {
+            setActiveTab("deliverables");
+            fetchDeliverables();
+          }}
+          style={{
+            display: "inline-flex",
+            alignItems: "center",
+            gap: "5px",
+            fontSize: "11px",
+            fontWeight: activeTab === "deliverables" ? 600 : 500,
+            padding: "4px 10px",
+            borderRadius: "6px",
+            border: "none",
+            backgroundColor: activeTab === "deliverables" ? "rgba(56, 189, 248, 0.15)" : "transparent",
+            color: activeTab === "deliverables" ? "#38bdf8" : "rgba(255, 255, 255, 0.6)",
+            cursor: "pointer",
+          }}
+        >
+          <FileText size={12} />
+          <span>Deliverables</span>
+          {deliverables.length > 0 && (
+            <span style={{ fontSize: "9px", backgroundColor: "rgba(255, 255, 255, 0.1)", color: "#fff", padding: "1px 5px", borderRadius: "8px" }}>
+              {deliverables.length}
+            </span>
+          )}
+        </button>
+
+        <button
+          onClick={() => {
+            setActiveTab("context");
+            handleCaptureContext();
+          }}
+          style={{
+            display: "inline-flex",
+            alignItems: "center",
+            gap: "5px",
+            fontSize: "11px",
+            fontWeight: activeTab === "context" ? 600 : 500,
+            padding: "4px 10px",
+            borderRadius: "6px",
+            border: "none",
+            backgroundColor: activeTab === "context" ? "rgba(56, 189, 248, 0.15)" : "transparent",
+            color: activeTab === "context" ? "#38bdf8" : "rgba(255, 255, 255, 0.6)",
+            cursor: "pointer",
+          }}
+        >
+          <Eye size={12} />
+          <span>Context</span>
+          {capturedContext && (
+            <span style={{ fontSize: "9px", color: "rgba(255, 255, 255, 0.5)", maxWidth: "80px", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+              {capturedContext.app_name}
+            </span>
+          )}
+        </button>
+      </div>
+
+      {/* Attached Context or Dropped Files Pills */}
+      {(droppedFiles.length > 0 || capturedContext) && (
+        <div style={{ display: "flex", gap: "6px", padding: "6px 14px", backgroundColor: "rgba(0, 0, 0, 0.1)", flexWrap: "wrap", alignItems: "center" }}>
+          {droppedFiles.map((f, i) => (
+            <div
+              key={i}
+              style={{
+                fontSize: "11px",
+                backgroundColor: "rgba(56, 189, 248, 0.15)",
+                border: "1px solid rgba(56, 189, 248, 0.3)",
+                color: "#38bdf8",
+                padding: "2px 8px",
+                borderRadius: "12px",
+                display: "flex",
+                alignItems: "center",
+                gap: "6px",
+              }}
+            >
+              <FileText size={10} />
+              <span>{f.filename} ({Math.round(f.size / 1024)} KB)</span>
+              <button
+                onClick={() => setDroppedFiles(prev => prev.filter((_, idx) => idx !== i))}
+                style={{ background: "transparent", border: "none", color: "#38bdf8", cursor: "pointer", padding: 0 }}
+              >
+                ×
+              </button>
+            </div>
+          ))}
+
+          {capturedContext && (
+            <div
+              style={{
+                fontSize: "11px",
+                backgroundColor: "rgba(147, 51, 234, 0.15)",
+                border: "1px solid rgba(147, 51, 234, 0.3)",
+                color: "#c084fc",
+                padding: "2px 8px",
+                borderRadius: "12px",
+                display: "flex",
+                alignItems: "center",
+                gap: "6px",
+              }}
+            >
+              <Eye size={10} />
+              <span>{capturedContext.app_name}: {capturedContext.window_title || "Screen"}</span>
+              <button
+                onClick={() => setCapturedContext(null)}
+                style={{ background: "transparent", border: "none", color: "#c084fc", cursor: "pointer", padding: 0 }}
+              >
+                ×
+              </button>
+            </div>
+          )}
+        </div>
+      )}
 
       {/* 2. Top-Anchored Jarvis Command Bar */}
       <div
@@ -827,6 +1338,86 @@ export function AmbientCompanion({
           </button>
         </div>
 
+        {/* Quick Action Chips */}
+        <div style={{ display: "flex", gap: "6px", overflowX: "auto", paddingBottom: "2px" }}>
+          <button
+            onClick={() => handleQuickAction("take_care_of_it")}
+            style={{
+              fontSize: "11px",
+              padding: "3px 8px",
+              borderRadius: "6px",
+              border: "1px solid rgba(16, 185, 129, 0.4)",
+              backgroundColor: "rgba(16, 185, 129, 0.15)",
+              color: "#34d399",
+              cursor: "pointer",
+              fontWeight: 600,
+              whiteSpace: "nowrap",
+            }}
+          >
+            ⚡ Take Care of It
+          </button>
+          <button
+            onClick={() => handleQuickAction("capture_screen_context")}
+            style={{
+              fontSize: "11px",
+              padding: "3px 8px",
+              borderRadius: "6px",
+              border: "1px solid rgba(147, 51, 234, 0.3)",
+              backgroundColor: "rgba(147, 51, 234, 0.1)",
+              color: "#c084fc",
+              cursor: "pointer",
+              whiteSpace: "nowrap",
+            }}
+          >
+            🔍 Inspect Screen
+          </button>
+          <button
+            onClick={() => handleQuickAction("refresh_deliverables")}
+            style={{
+              fontSize: "11px",
+              padding: "3px 8px",
+              borderRadius: "6px",
+              border: "1px solid rgba(56, 189, 248, 0.3)",
+              backgroundColor: "rgba(56, 189, 248, 0.1)",
+              color: "#38bdf8",
+              cursor: "pointer",
+              whiteSpace: "nowrap",
+            }}
+          >
+            📁 Deliverables
+          </button>
+          <button
+            onClick={() => handleQuickAction("run_quick_audit")}
+            style={{
+              fontSize: "11px",
+              padding: "3px 8px",
+              borderRadius: "6px",
+              border: "1px solid rgba(255, 255, 255, 0.1)",
+              backgroundColor: "rgba(255, 255, 255, 0.04)",
+              color: "rgba(255, 255, 255, 0.7)",
+              cursor: "pointer",
+              whiteSpace: "nowrap",
+            }}
+          >
+            🛡️ Mesh Audit
+          </button>
+          <button
+            onClick={() => handleQuickAction("check_notifications")}
+            style={{
+              fontSize: "11px",
+              padding: "3px 8px",
+              borderRadius: "6px",
+              border: "1px solid rgba(255, 255, 255, 0.1)",
+              backgroundColor: "rgba(255, 255, 255, 0.04)",
+              color: "rgba(255, 255, 255, 0.7)",
+              cursor: "pointer",
+              whiteSpace: "nowrap",
+            }}
+          >
+            🔔 Check Alerts
+          </button>
+        </div>
+
         {/* Suggestion Chips */}
         {showSuggestions && !latestResponse && !promptInput && (
           <div style={{ display: "flex", gap: "6px", overflowX: "auto", paddingBottom: "2px" }}>
@@ -953,8 +1544,256 @@ export function AmbientCompanion({
           gap: "12px",
         }}
       >
-        {/* Human-Centric Safety Approvals (Only visible when pending) */}
-        {pendingApprovals.length > 0 && (
+        {/* Missions Tab View */}
+        {activeTab === "missions" && (
+          <div style={{ display: "flex", flexDirection: "column", gap: "10px" }}>
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+              <div style={{ display: "flex", alignItems: "center", gap: "6px", fontSize: "13px", fontWeight: 600, color: "#38bdf8" }}>
+                <Target size={15} />
+                <span>Workforce Missions ({activeMissions.length})</span>
+              </div>
+              <button
+                onClick={handleOpenFullWorkspace}
+                style={{ fontSize: "11px", background: "transparent", border: "none", color: "rgba(255,255,255,0.6)", cursor: "pointer", display: "flex", alignItems: "center", gap: "3px" }}
+              >
+                <span>Full Mission Center</span>
+                <ExternalLink size={10} />
+              </button>
+            </div>
+
+            {activeMissions.length === 0 ? (
+              <div style={{ textAlign: "center", padding: "28px 14px", color: "rgba(255, 255, 255, 0.4)", fontSize: "12px" }}>
+                No active missions currently executing. Type a goal in Chat to dispatch the digital workforce.
+              </div>
+            ) : (
+              activeMissions.map(m => (
+                <div
+                  key={m.id || m.mission_id}
+                  style={{
+                    backgroundColor: "rgba(0, 0, 0, 0.3)",
+                    border: "1px solid rgba(255, 255, 255, 0.08)",
+                    borderRadius: "10px",
+                    padding: "12px",
+                    display: "flex",
+                    flexDirection: "column",
+                    gap: "8px",
+                  }}
+                >
+                  <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start" }}>
+                    <span style={{ fontSize: "13px", fontWeight: 600, color: "#f8fafc" }}>
+                      {m.title || m.goal || "Mission"}
+                    </span>
+                    <span style={{ fontSize: "10px", textTransform: "uppercase", backgroundColor: "rgba(56, 189, 248, 0.15)", color: "#38bdf8", padding: "2px 6px", borderRadius: "4px" }}>
+                      {m.status || "running"}
+                    </span>
+                  </div>
+
+                  {m.current_step && (
+                    <div style={{ fontSize: "11px", color: "rgba(255, 255, 255, 0.6)" }}>
+                      Current Step: {m.current_step}
+                    </div>
+                  )}
+
+                  <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginTop: "4px" }}>
+                    <span style={{ fontSize: "10px", color: "rgba(255, 255, 255, 0.4)" }}>
+                      Agents: {m.agent_count || (m.assigned_agents ? m.assigned_agents.length : 1)}
+                    </span>
+                    <button
+                      onClick={handleOpenFullWorkspace}
+                      style={{ fontSize: "11px", color: "#38bdf8", background: "transparent", border: "none", cursor: "pointer", display: "flex", alignItems: "center", gap: "2px" }}
+                    >
+                      <span>View Graph</span>
+                      <ArrowUpRight size={11} />
+                    </button>
+                  </div>
+                </div>
+              ))
+            )}
+          </div>
+        )}
+
+        {/* Deliverables Tab View */}
+        {activeTab === "deliverables" && (
+          <div style={{ display: "flex", flexDirection: "column", gap: "10px" }}>
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+              <div style={{ display: "flex", alignItems: "center", gap: "6px", fontSize: "13px", fontWeight: 600, color: "#38bdf8" }}>
+                <FileText size={15} />
+                <span>Recent Deliverables & Outputs</span>
+              </div>
+              <button
+                onClick={fetchDeliverables}
+                title="Refresh Deliverables"
+                style={{ background: "transparent", border: "none", color: "rgba(255, 255, 255, 0.6)", cursor: "pointer" }}
+              >
+                <RefreshCw size={12} />
+              </button>
+            </div>
+
+            {deliverables.length === 0 ? (
+              <div style={{ textAlign: "center", padding: "28px 14px", color: "rgba(255, 255, 255, 0.4)", fontSize: "12px" }}>
+                No output files or deliverables recorded in this workspace yet.
+              </div>
+            ) : (
+              deliverables.map(d => (
+                <div
+                  key={d.id}
+                  style={{
+                    backgroundColor: "rgba(0, 0, 0, 0.3)",
+                    border: "1px solid rgba(255, 255, 255, 0.08)",
+                    borderRadius: "10px",
+                    padding: "10px 12px",
+                    display: "flex",
+                    justifyContent: "space-between",
+                    alignItems: "center",
+                    gap: "8px",
+                  }}
+                >
+                  <div style={{ display: "flex", flexDirection: "column", gap: "2px", minWidth: 0, flex: 1 }}>
+                    <div style={{ fontSize: "12.5px", fontWeight: 600, color: "#f8fafc", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                      {d.title}
+                    </div>
+                    <div style={{ fontSize: "11px", color: "rgba(255, 255, 255, 0.5)", display: "flex", gap: "6px", alignItems: "center" }}>
+                      <span style={{ textTransform: "uppercase", fontSize: "9px", backgroundColor: "rgba(255,255,255,0.06)", padding: "1px 4px", borderRadius: "3px" }}>
+                        {d.source}
+                      </span>
+                      {d.file_size_bytes > 0 && <span>{Math.round(d.file_size_bytes / 1024)} KB</span>}
+                    </div>
+                  </div>
+
+                  <div style={{ display: "flex", gap: "4px" }}>
+                    <button
+                      onClick={() => {
+                        navigator.clipboard?.writeText(d.file_path);
+                        showToast("File path copied to clipboard", "info");
+                      }}
+                      title="Copy file path"
+                      style={{ padding: "4px 8px", borderRadius: "6px", border: "1px solid rgba(255, 255, 255, 0.1)", background: "rgba(255, 255, 255, 0.05)", color: "rgba(255, 255, 255, 0.7)", cursor: "pointer" }}
+                    >
+                      <Copy size={11} />
+                    </button>
+                    <button
+                      onClick={handleOpenFullWorkspace}
+                      title="Open in Workspace"
+                      style={{ padding: "4px 8px", borderRadius: "6px", border: "none", background: "rgba(56, 189, 248, 0.2)", color: "#38bdf8", cursor: "pointer" }}
+                    >
+                      <ExternalLink size={11} />
+                    </button>
+                  </div>
+                </div>
+              ))
+            )}
+          </div>
+        )}
+
+        {/* Screen & Context Inspector Tab View */}
+        {activeTab === "context" && (
+          <div style={{ display: "flex", flexDirection: "column", gap: "12px" }}>
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+              <div style={{ display: "flex", alignItems: "center", gap: "6px", fontSize: "13px", fontWeight: 600, color: "#c084fc" }}>
+                <Eye size={15} />
+                <span>On-Demand Desktop & Screen Context</span>
+              </div>
+              <button
+                onClick={handleCaptureContext}
+                disabled={isCapturingContext}
+                style={{
+                  fontSize: "11px",
+                  padding: "4px 8px",
+                  borderRadius: "6px",
+                  border: "1px solid rgba(147, 51, 234, 0.4)",
+                  backgroundColor: "rgba(147, 51, 234, 0.15)",
+                  color: "#c084fc",
+                  cursor: "pointer",
+                  display: "flex",
+                  alignItems: "center",
+                  gap: "4px",
+                }}
+              >
+                <RefreshCw size={11} className={isCapturingContext ? "animate-spin" : ""} />
+                <span>{isCapturingContext ? "Probing..." : "Probe Now"}</span>
+              </button>
+            </div>
+
+            {capturedContext ? (
+              <div
+                style={{
+                  backgroundColor: "rgba(0, 0, 0, 0.35)",
+                  border: "1px solid rgba(147, 51, 234, 0.3)",
+                  borderRadius: "10px",
+                  padding: "12px",
+                  display: "flex",
+                  flexDirection: "column",
+                  gap: "10px",
+                }}
+              >
+                <div>
+                  <div style={{ fontSize: "11px", color: "rgba(255, 255, 255, 0.45)", textTransform: "uppercase" }}>Active Application</div>
+                  <div style={{ fontSize: "14px", fontWeight: 600, color: "#f8fafc", marginTop: "2px" }}>
+                    {capturedContext.app_name} {capturedContext.window_title ? `— "${capturedContext.window_title}"` : ""}
+                  </div>
+                </div>
+
+                {capturedContext.clipboard_text && (
+                  <div>
+                    <div style={{ fontSize: "11px", color: "rgba(255, 255, 255, 0.45)", textTransform: "uppercase" }}>Clipboard Snippet</div>
+                    <pre
+                      style={{
+                        margin: "4px 0 0 0",
+                        padding: "8px",
+                        borderRadius: "6px",
+                        backgroundColor: "rgba(0, 0, 0, 0.4)",
+                        color: "rgba(255, 255, 255, 0.8)",
+                        fontSize: "11px",
+                        maxHeight: "120px",
+                        overflowY: "auto",
+                        whiteSpace: "pre-wrap",
+                        wordBreak: "break-word",
+                      }}
+                    >
+                      {capturedContext.clipboard_text}
+                    </pre>
+                  </div>
+                )}
+
+                <div style={{ display: "flex", gap: "8px", marginTop: "4px" }}>
+                  <button
+                    onClick={() => {
+                      const snippet = `Context [${capturedContext.app_name} - ${capturedContext.window_title || "Active"}]:\n${capturedContext.clipboard_text || ""}`;
+                      setPromptInput(prev => (prev ? `${prev}\n\n${snippet}` : snippet));
+                      setActiveTab("chat");
+                      inputRef.current?.focus();
+                      showToast("Context appended to Chat prompt", "success");
+                    }}
+                    style={{
+                      flex: 1,
+                      padding: "6px 12px",
+                      fontSize: "12px",
+                      fontWeight: 600,
+                      borderRadius: "6px",
+                      border: "none",
+                      backgroundColor: "#9333ea",
+                      color: "#fff",
+                      cursor: "pointer",
+                      display: "flex",
+                      alignItems: "center",
+                      justifyContent: "center",
+                      gap: "6px",
+                    }}
+                  >
+                    <span>Insert into Chat Prompt</span>
+                  </button>
+                </div>
+              </div>
+            ) : (
+              <div style={{ textAlign: "center", padding: "28px 14px", color: "rgba(255, 255, 255, 0.4)", fontSize: "12px" }}>
+                Click "Probe Now" to inspect the active application and clipboard.
+              </div>
+            )}
+          </div>
+        )}
+
+        {/* Approvals Tab View (standalone if tab chosen, or visible at top of chat) */}
+        {(activeTab === "approvals" || (activeTab === "chat" && pendingApprovals.length > 0)) && (
           <div
             data-testid="companion-approvals-card"
             style={{

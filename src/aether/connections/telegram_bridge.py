@@ -96,16 +96,61 @@ class TelegramBridge:
 
             if text.startswith("/start") or text.startswith("/help"):
                 welcome = (
-                    "👋 *Benvenuto su Aether!*\n\n"
-                    "Sono il tuo Assistente Operativo Aether. Puoi scrivermi qualsiasi richiesta:\n"
-                    "- 📅 _\"Crea un evento domani alle 15 con il team\"_\n"
-                    "- 📧 _\"Invia una email di recap a matteo@example.com\"_\n"
-                    "- 🚀 _\"Sincronizza le connessioni\"_\n"
-                    "- 🤖 _\"Delega all'agente esterno l'analisi dei contratti\"_\n\n"
-                    "Se un'azione richiede la tua verifica, ti manderò un pulsante per approvarla istantaneamente da qui."
+                    "👋 *Benvenuto su Aether Operativo!*\n\n"
+                    "Sono il tuo Assistente Companion connesso all'intero ecosistema Aether:\n"
+                    "- 📊 `/status` — Panoramica missioni, task e approvazioni\n"
+                    "- 🎯 `/missions` — Missioni attive del workforce\n"
+                    "- 📁 `/deliverables` — Ultimi deliverable e artefatti generati\n"
+                    "- 💬 Oppure scrivi qualsiasi istruzione in linguaggio naturale!\n\n"
+                    "Se un'azione richiede la tua verifica, riceverai pulsanti inline per approvarla istantaneamente."
                 )
                 connector.send_message(chat_id=chat_id, text=welcome)
                 return {"status": "welcome_sent"}
+
+            if text.startswith("/status") or text.startswith("/overview"):
+                ov = workspace.personal.get_overview(workspace.name)
+                pending_cnt = len(ov.get("pending_approvals", []))
+                active_m = len(ov.get("active_works", []))
+                tasks_cnt = len(ov.get("background_tasks", []))
+                unread_n = ov.get("unread_notifications", 0)
+                msg_status = (
+                    f"🧭 *Stato Operativo Aether*\n"
+                    f"Workspace: `{workspace.name}`\n\n"
+                    f"• 🎯 Missioni Attive: *{active_m}*\n"
+                    f"• ⚡ Background Tasks: *{tasks_cnt}*\n"
+                    f"• 🛡️ Approvazioni in Attesa: *{pending_cnt}*\n"
+                    f"• 🔔 Notifiche non lette: *{unread_n}*\n"
+                )
+                connector.send_message(chat_id=chat_id, text=msg_status)
+                return {"status": "status_sent"}
+
+            if text.startswith("/missions"):
+                ov = workspace.personal.get_overview(workspace.name)
+                active = ov.get("active_works", [])
+                if not active:
+                    connector.send_message(chat_id=chat_id, text="🎯 Nessuna missione attualmente in corso.")
+                else:
+                    lines = ["🎯 *Missioni del Workforce Attive:*\n"]
+                    for m in active[:5]:
+                        title = m.get("title") or m.get("goal") or "Missione"
+                        status = m.get("status", "running")
+                        lines.append(f"• *{title}* (`{status}`)")
+                    connector.send_message(chat_id=chat_id, text="\n".join(lines))
+                return {"status": "missions_sent"}
+
+            if text.startswith("/deliverables"):
+                delivs = workspace.personal.list_deliverables(workspace.name, limit=5)
+                if not delivs:
+                    connector.send_message(chat_id=chat_id, text="📁 Nessun deliverable recente trovato nel workspace.")
+                else:
+                    lines = ["📁 *Ultimi Deliverable e Artefatti:*\n"]
+                    for d in delivs:
+                        title = d.get("title", "File")
+                        src = d.get("source", "workspace")
+                        summary = d.get("summary", "")
+                        lines.append(f"• *{title}* ({src})\n  _{summary[:60]}_")
+                    connector.send_message(chat_id=chat_id, text="\n".join(lines))
+                return {"status": "deliverables_sent"}
 
             # Process prompt through PersonalAgentService
             reply = workspace.personal.process_prompt(

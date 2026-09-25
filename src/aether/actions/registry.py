@@ -1930,3 +1930,184 @@ class ActionRegistry:
             )
         )
 
+        # ---------------------------------------------------------------------
+        # Local Execution Fabric & Hardware Mesh Actions (Layer 17)
+        # ---------------------------------------------------------------------
+        self.register(
+            ActionDefinition(
+                id="fabric.list_nodes",
+                name="List Mesh Compute Nodes",
+                description="Lists all detected local and networked compute nodes in the execution mesh.",
+                tier=ActionTier.ANSWER,
+                permission_level=ActionPermissionLevel.READ_ONLY,
+                requires_confirmation=False,
+                provider="fabric",
+                input_schema={"type": "object"},
+                output_schema={"type": "object"},
+            )
+        )
+
+        self.register(
+            ActionDefinition(
+                id="fabric.register_node",
+                name="Register Mesh Compute Node",
+                description="Registers a remote workstation, GPU worker, or cloud gateway into the compute fabric.",
+                tier=ActionTier.DO,
+                permission_level=ActionPermissionLevel.LOCAL_MUTATION,
+                requires_confirmation=False,
+                provider="fabric",
+                input_schema={
+                    "type": "object",
+                    "properties": {
+                        "name": {"type": "string"},
+                        "role": {"type": "string"},
+                        "endpoint": {"type": "string"},
+                        "capabilities": {"type": "object"},
+                        "tags": {"type": "array", "items": {"type": "string"}},
+                    },
+                    "required": ["name", "endpoint"],
+                },
+                output_schema={"type": "object"},
+            )
+        )
+
+        self.register(
+            ActionDefinition(
+                id="fabric.route_workload",
+                name="Route Workload to Node",
+                description="Intelligently routes a task or workload to the optimal compute node based on tier and hardware requirements.",
+                tier=ActionTier.DO,
+                permission_level=ActionPermissionLevel.LOCAL_MUTATION,
+                requires_confirmation=False,
+                provider="fabric",
+                input_schema={
+                    "type": "object",
+                    "properties": {
+                        "workload_name": {"type": "string"},
+                        "tier": {"type": "string"},
+                        "min_cores": {"type": "integer"},
+                        "min_vram_gb": {"type": "number"},
+                    },
+                    "required": ["workload_name"],
+                },
+                output_schema={"type": "object"},
+            )
+        )
+
+        self.register(
+            ActionDefinition(
+                id="fabric.get_telemetry",
+                name="Get Mesh Telemetry",
+                description="Returns aggregated CPU, RAM, and GPU accelerator telemetry across the mesh.",
+                tier=ActionTier.ANSWER,
+                permission_level=ActionPermissionLevel.READ_ONLY,
+                requires_confirmation=False,
+                provider="fabric",
+                input_schema={"type": "object"},
+                output_schema={"type": "object"},
+            )
+        )
+
+        self.register(
+            ActionDefinition(
+                id="fabric.delete_node",
+                name="Remove Mesh Node",
+                description="Removes a remote node from the compute fabric.",
+                tier=ActionTier.DO,
+                permission_level=ActionPermissionLevel.LOCAL_MUTATION,
+                requires_confirmation=False,
+                provider="fabric",
+                input_schema={
+                    "type": "object",
+                    "properties": {
+                        "node_id": {"type": "string"},
+                    },
+                    "required": ["node_id"],
+                },
+                output_schema={"type": "object"},
+            )
+        )
+
+        self.register(
+            ActionDefinition(
+                id="fabric.node_heartbeat",
+                name="Record Node Heartbeat",
+                description="Records a liveness heartbeat and latency ping for a compute node.",
+                tier=ActionTier.DO,
+                permission_level=ActionPermissionLevel.LOCAL_MUTATION,
+                requires_confirmation=False,
+                provider="fabric",
+                input_schema={
+                    "type": "object",
+                    "properties": {
+                        "node_id": {"type": "string"},
+                        "ping_ms": {"type": "number"},
+                    },
+                    "required": ["node_id"],
+                },
+                output_schema={"type": "object"},
+            )
+        )
+
+        self.register(
+            ActionDefinition(
+                id="autonomy.take_care_of_it",
+                name="Take Care of It (Autonomous Loop)",
+                description="Autonomously executes end-to-end operational loop from high-level goal to verified deliverable and learning.",
+                tier=ActionTier.DO,
+                permission_level=ActionPermissionLevel.LOCAL_MUTATION,
+                requires_confirmation=False,
+                provider="autonomy",
+                input_schema={
+                    "type": "object",
+                    "properties": {
+                        "goal": {"type": "string"},
+                        "context": {"type": "object"},
+                    },
+                    "required": ["goal"],
+                },
+                output_schema={"type": "object"},
+            )
+        )
+
+        self.register(
+            ActionDefinition(
+                id="autonomy.list_goals",
+                name="List Autonomous Goals",
+                description="Lists historical and ongoing autonomous operational goals.",
+                tier=ActionTier.ANSWER,
+                permission_level=ActionPermissionLevel.READ_ONLY,
+                requires_confirmation=False,
+                provider="autonomy",
+                input_schema={
+                    "type": "object",
+                    "properties": {
+                        "limit": {"type": "integer"},
+                    },
+                },
+                output_schema={"type": "object"},
+            )
+        )
+
+        self.register(
+            ActionDefinition(
+                id="autonomy.get_goal",
+                name="Get Autonomous Goal Status",
+                description="Retrieves current status, execution stages, and deliverables of an autonomous goal.",
+                tier=ActionTier.ANSWER,
+                permission_level=ActionPermissionLevel.READ_ONLY,
+                requires_confirmation=False,
+                provider="autonomy",
+                input_schema={
+                    "type": "object",
+                    "properties": {
+                        "goal_id": {"type": "string"},
+                    },
+                    "required": ["goal_id"],
+                },
+                output_schema={"type": "object"},
+            )
+        )
+
+
+

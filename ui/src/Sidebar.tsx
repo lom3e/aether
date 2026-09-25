@@ -4,7 +4,7 @@ import {
   Plus, ChevronLeft, Moon, Sun, Globe, Trash2, Search,
   ChevronDown, MoreVertical, Archive, Copy, Edit2, Check,
   Pin, Folder, GitBranch, ExternalLink, RefreshCw, X, Target,
-  Link2, Activity as ActivityIcon, Share2, Eye
+  Link2, Activity as ActivityIcon, Share2, Eye, Cpu
 } from 'lucide-react';
 import { useTranslation } from './i18n';
 import { useTheme } from './theme';
@@ -827,6 +827,18 @@ export function Sidebar({
               >
                 <ActivityIcon size={15} />
                 {!collapsed && <span>Activity</span>}
+              </button>
+            </Tooltip>
+
+            <Tooltip content="Hardware Fabric" position={collapsed ? 'right' : 'top'} disabled={!collapsed}>
+              <button
+                data-testid="nav-fabric"
+                className={`btn btn-ghost ${currentView === 'fabric' ? 'active' : ''}`}
+                style={{ width: '100%', justifyContent: collapsed ? 'center' : 'flex-start', padding: '7px 8px', fontSize: '13px', marginTop: '2px' }}
+                onClick={() => onNavigate('fabric')}
+              >
+                <Cpu size={15} />
+                {!collapsed && <span>Hardware Fabric</span>}
               </button>
             </Tooltip>
           </div>
