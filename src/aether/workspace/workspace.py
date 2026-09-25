@@ -412,6 +412,31 @@ class Workspace:
         return self._get_or_create("ecosystem", _factory)
 
     @property
+    def content_db_path(self) -> str:
+        """Path to the persistent content & campaigns database."""
+        if self.data_dir.exists() or self.config_path.exists():
+            return str(self.data_dir / "content.db")
+        return str(self.legacy_aether_dir / "content.db")
+
+    @property
+    def content(self):
+        """Return the ContentStore for this workspace."""
+        def _factory():
+            from aether.content.store import ContentStore
+            Path(self.content_db_path).parent.mkdir(parents=True, exist_ok=True)
+            return ContentStore(self.content_db_path)
+        return self._get_or_create("content", _factory)
+
+    @property
+    def content_engine(self):
+        """Return the ContentRepurposingEngine for this workspace."""
+        def _factory():
+            from aether.content.repurposer import ContentRepurposingEngine
+            return ContentRepurposingEngine()
+        return self._get_or_create("content_engine", _factory)
+
+
+    @property
     def intelligence(self):
         """Return the UnifiedIntelligenceService for this workspace."""
         def _factory():

@@ -665,6 +665,65 @@ class PersonalAgentService:
                 action_args={"package_id": pkg_id},
             )
 
+        # 3e18. Content Repurposing & Social Workforce (DO tier)
+        content_repurpose_triggers = [
+            "repurpose", "riutilizza contenuto", "formatta per social", "crea thread twitter",
+            "draft linkedin post", "social media post", "genera post", "converti per linkedin",
+            "crea video script", "repurpose content", "trasforma in post", "pubblica sui social",
+        ]
+        if any(k in p_lower for k in content_repurpose_triggers):
+            title_match = re.search(r"(?:about|su|intitolato|called|named|titled)\s+[\"']?([^\"'\n,]+)[\"']?", prompt, re.IGNORECASE)
+            title = title_match.group(1).strip() if title_match else "Repurposed Asset"
+            return UserIntent(
+                raw_prompt=effective_prompt,
+                tier=IntentTier.DO,
+                summary=f"Repurpose content for social platforms: {title}",
+                action_id="content.repurpose",
+                action_args={
+                    "source_text": prompt,
+                    "title": title,
+                    "target_platforms": ["linkedin", "twitter_thread", "newsletter", "video_script"],
+                },
+            )
+
+        # 3e19. Content Campaign Creation (DO tier)
+        campaign_create_triggers = [
+            "crea campagna", "create campaign", "nuova campagna", "lancia campagna",
+            "start campaign", "imposta campagna",
+        ]
+        if any(k in p_lower for k in campaign_create_triggers):
+            name_match = re.search(r"(?:campagna|campaign|called|named|chiamata)\s+[\"']?([^\"'\n,]+)[\"']?", prompt, re.IGNORECASE)
+            name = name_match.group(1).strip() if name_match else "Q1 Product Launch"
+            return UserIntent(
+                raw_prompt=effective_prompt,
+                tier=IntentTier.DO,
+                summary=f"Create content marketing campaign: {name}",
+                action_id="content.create_campaign",
+                action_args={
+                    "name": name,
+                    "description": f"Campaign generated from: '{prompt}'",
+                    "target_audience": "Tech Professionals & Developers",
+                },
+            )
+
+        # 3e20. Content Campaign Listing (ANSWER tier)
+        campaign_list_triggers = [
+            "mostra campagne", "elenco campagne", "lista campagne", "list campaigns", "show campaigns",
+            "campagne attive", "social campaigns", "contenuti social", "campagne social",
+        ]
+        if any(k in p_lower for k in campaign_list_triggers) or (
+            ("campagne" in p_lower or "campaigns" in p_lower)
+            and any(v in p_lower for v in ["mostra", "elenco", "lista", "list", "show", "view", "attive", "active"])
+        ):
+            return UserIntent(
+                raw_prompt=effective_prompt,
+                tier=IntentTier.ANSWER,
+                summary="List active marketing campaigns and social deliverables",
+                action_id="content.list_campaigns",
+                action_args={},
+            )
+
+
 
         # 3e. GitHub issue creation (ACT tier - requires safety confirmation)
         github_issue_triggers = [

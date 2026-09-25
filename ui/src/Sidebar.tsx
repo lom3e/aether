@@ -4,7 +4,7 @@ import {
   Plus, ChevronLeft, Moon, Sun, Globe, Trash2, Search,
   ChevronDown, MoreVertical, Archive, Copy, Edit2, Check,
   Pin, Folder, GitBranch, ExternalLink, RefreshCw, X, Target,
-  Link2, Activity as ActivityIcon
+  Link2, Activity as ActivityIcon, Share2
 } from 'lucide-react';
 import { useTranslation } from './i18n';
 import { useTheme } from './theme';
@@ -759,8 +759,28 @@ export function Sidebar({
                 >
                   <span>Visual Workflows</span>
                 </button>
+                <button
+                  data-testid="nav-content"
+                  className={`btn btn-ghost ${currentView === 'content' ? 'active' : ''}`}
+                  style={{ width: '100%', justifyContent: 'flex-start', padding: '4px 8px', fontSize: '12px' }}
+                  onClick={() => onNavigate('content')}
+                >
+                  <span>Content & Social</span>
+                </button>
               </div>
             )}
+
+            <Tooltip content="Content & Social" position={collapsed ? 'right' : 'top'} disabled={!collapsed}>
+              <button
+                data-testid="nav-content-social"
+                className={`btn btn-ghost ${currentView === 'content' ? 'active' : ''}`}
+                style={{ width: '100%', justifyContent: collapsed ? 'center' : 'flex-start', padding: '7px 8px', fontSize: '13px', marginTop: '2px' }}
+                onClick={() => onNavigate('content')}
+              >
+                <Share2 size={15} />
+                {!collapsed && <span>Content & Social</span>}
+              </button>
+            </Tooltip>
 
             <Tooltip content={t('navKnowledge')} position={collapsed ? 'right' : 'top'} disabled={!collapsed}>
               <button

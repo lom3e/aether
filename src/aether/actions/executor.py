@@ -1088,6 +1088,140 @@ class ActionExecutor:
                 "uninstalled": success,
             }
 
+        elif action_id == "content.repurpose":
+            from aether.workspace.workspace import Workspace
+            from aether.content.models import RepurposeRequest, PlatformType, ContentTone
+            ws = None
+            try:
+                ws = Workspace.get(ws_id) if hasattr(Workspace, "get") else None
+                if not ws and self.project_path:
+                    ws = Workspace.get_or_init(self.project_path)
+            except Exception:
+                pass
+            if not ws:
+                raise ValueError("Active workspace required to repurpose content.")
+            content_store = getattr(ws, "content", None)
+            content_engine = getattr(ws, "content_engine", None)
+            if not content_store or not content_engine:
+                raise ValueError("Content store or engine not available in workspace.")
+
+            target_platforms_raw = inp.get("target_platforms") or ["linkedin", "twitter_thread", "newsletter", "video_script"]
+            target_platforms = [PlatformType(p) for p in target_platforms_raw]
+            tone_str = inp.get("tone", "thought_leadership")
+            try:
+                tone = ContentTone(tone_str)
+            except ValueError:
+                tone = ContentTone.THOUGHT_LEADERSHIP
+
+            req = RepurposeRequest(
+                source_text=inp.get("source_text", ""),
+                title=inp.get("title") or "Repurposed Content",
+                target_platforms=target_platforms,
+                tone=tone,
+                target_audience=inp.get("target_audience") or "Professionals & Developers",
+                campaign_id=inp.get("campaign_id"),
+            )
+            result = content_engine.repurpose(req)
+            content_store.save_content_item(result.item)
+            for var in result.variants:
+                content_store.save_variant(var)
+
+            return result.to_dict()
+
+        elif action_id == "content.create_campaign":
+            from aether.workspace.workspace import Workspace
+            from aether.content.models import Campaign
+            ws = None
+            try:
+                ws = Workspace.get(ws_id) if hasattr(Workspace, "get") else None
+                if not ws and self.project_path:
+                    ws = Workspace.get_or_init(self.project_path)
+            except Exception:
+                pass
+            if not ws:
+                raise ValueError("Active workspace required to create campaign.")
+            content_store = getattr(ws, "content", None)
+            if not content_store:
+                raise ValueError("Content store not available in workspace.")
+
+            camp = Campaign(
+                name=inp.get("name", "New Campaign"),
+                description=inp.get("description", ""),
+                target_audience=inp.get("target_audience", "General Audience"),
+                objectives=inp.get("objectives", []),
+                tags=inp.get("tags", []),
+            )
+            saved = content_store.create_campaign(camp)
+            return {"campaign": saved.to_dict()}
+
+        elif action_id == "content.list_campaigns":
+            from aether.workspace.workspace import Workspace
+            ws = None
+            try:
+                ws = Workspace.get(ws_id) if hasattr(Workspace, "get") else None
+                if not ws and self.project_path:
+                    ws = Workspace.get_or_init(self.project_path)
+            except Exception:
+                pass
+            if not ws:
+                raise ValueError("Active workspace required to list campaigns.")
+            content_store = getattr(ws, "content", None)
+            if not content_store:
+                return {"campaigns": []}
+
+            status = inp.get("status")
+            camps = content_store.list_campaigns(status=status)
+            return {"campaigns": [c.to_dict() for c in camps]}
+
+        elif action_id == "content.schedule_variant":
+            from aether.workspace.workspace import Workspace
+            from aether.content.models import ContentStatus
+            ws = None
+            try:
+                ws = Workspace.get(ws_id) if hasattr(Workspace, "get") else None
+                if not ws and self.project_path:
+                    ws = Workspace.get_or_init(self.project_path)
+            except Exception:
+                pass
+            if not ws:
+                raise ValueError("Active workspace required to schedule variant.")
+            content_store = getattr(ws, "content", None)
+            if not content_store:
+                raise ValueError("Content store not available in workspace.")
+
+            variant_id = inp.get("variant_id", "")
+            scheduled_at = inp.get("scheduled_at")
+            updated = content_store.update_variant_status(
+                variant_id=variant_id,
+                status=ContentStatus.SCHEDULED,
+                scheduled_at=scheduled_at,
+            )
+            if not updated:
+                raise ValueError(f"Variant '{variant_id}' not found.")
+            return {"variant": updated.to_dict()}
+
+        elif action_id == "content.list_variants":
+            from aether.workspace.workspace import Workspace
+            ws = None
+            try:
+                ws = Workspace.get(ws_id) if hasattr(Workspace, "get") else None
+                if not ws and self.project_path:
+                    ws = Workspace.get_or_init(self.project_path)
+            except Exception:
+                pass
+            if not ws:
+                raise ValueError("Active workspace required to list variants.")
+            content_store = getattr(ws, "content", None)
+            if not content_store:
+                return {"variants": []}
+
+            vars_list = content_store.list_variants(
+                item_id=inp.get("item_id"),
+                platform=inp.get("platform"),
+                status=inp.get("status"),
+            )
+            return {"variants": [v.to_dict() for v in vars_list]}
+
         raise ValueError(
             f"Action '{action_id}' is not supported by built-in connectors and has no registered handler."
         )

@@ -5158,6 +5158,164 @@ async def uninstall_marketplace_package_route(
 
 
 # ===========================================================================
+# CONTENT REPURPOSING & SOCIAL WORKFORCE API
+# ===========================================================================
+
+class RepurposePayload(BaseModel):
+    source_text: str
+    title: str = "Repurposed Content"
+    target_platforms: list[str] = Field(default_factory=lambda: ["linkedin", "twitter_thread", "newsletter", "video_script"])
+    tone: str = "thought_leadership"
+    target_audience: str = "Professionals & Developers"
+    campaign_id: str | None = None
+
+
+class CreateCampaignPayload(BaseModel):
+    name: str
+    description: str = ""
+    target_audience: str = "General Audience"
+    objectives: list[str] = Field(default_factory=list)
+    tags: list[str] = Field(default_factory=list)
+
+
+class ScheduleVariantPayload(BaseModel):
+    scheduled_at: str | None = None
+
+
+@router.post("/content/repurpose")
+async def repurpose_content_route(request: Request, payload: RepurposePayload):
+    ws = getattr(request.app.state, "workspace", None)
+    if not ws:
+        raise HTTPException(status_code=503, detail="Workspace not initialized.")
+
+    from aether.content.models import RepurposeRequest, PlatformType, ContentTone
+    target_platforms = []
+    for p in payload.target_platforms:
+        try:
+            target_platforms.append(PlatformType(p))
+        except ValueError:
+            pass
+    if not target_platforms:
+        target_platforms = [PlatformType.LINKEDIN, PlatformType.TWITTER_THREAD]
+
+    try:
+        tone = ContentTone(payload.tone)
+    except ValueError:
+        tone = ContentTone.THOUGHT_LEADERSHIP
+
+    req = RepurposeRequest(
+        source_text=payload.source_text,
+        title=payload.title,
+        target_platforms=target_platforms,
+        tone=tone,
+        target_audience=payload.target_audience,
+        campaign_id=payload.campaign_id,
+    )
+    result = ws.content_engine.repurpose(req)
+    ws.content.save_content_item(result.item)
+    for var in result.variants:
+        ws.content.save_variant(var)
+
+    return result.to_dict()
+
+
+@router.get("/content/campaigns")
+async def list_campaigns_route(request: Request, status: str | None = None):
+    ws = getattr(request.app.state, "workspace", None)
+    if not ws:
+        raise HTTPException(status_code=503, detail="Workspace not initialized.")
+    campaigns = ws.content.list_campaigns(status=status)
+    return [c.to_dict() for c in campaigns]
+
+
+@router.post("/content/campaigns")
+async def create_campaign_route(request: Request, payload: CreateCampaignPayload):
+    ws = getattr(request.app.state, "workspace", None)
+    if not ws:
+        raise HTTPException(status_code=503, detail="Workspace not initialized.")
+
+    from aether.content.models import Campaign
+    camp = Campaign(
+        name=payload.name,
+        description=payload.description,
+        target_audience=payload.target_audience,
+        objectives=payload.objectives,
+        tags=payload.tags,
+    )
+    saved = ws.content.create_campaign(camp)
+    return saved.to_dict()
+
+
+@router.get("/content/campaigns/{campaign_id}")
+async def get_campaign_route(request: Request, campaign_id: str):
+    ws = getattr(request.app.state, "workspace", None)
+    if not ws:
+        raise HTTPException(status_code=503, detail="Workspace not initialized.")
+    camp = ws.content.get_campaign(campaign_id)
+    if not camp:
+        raise HTTPException(status_code=404, detail="Campaign not found.")
+    return camp.to_dict()
+
+
+@router.get("/content/items")
+async def list_content_items_route(request: Request, campaign_id: str | None = None):
+    ws = getattr(request.app.state, "workspace", None)
+    if not ws:
+        raise HTTPException(status_code=503, detail="Workspace not initialized.")
+    items = ws.content.list_content_items(campaign_id=campaign_id)
+    return [item.to_dict() for item in items]
+
+
+@router.get("/content/variants")
+async def list_content_variants_route(
+    request: Request,
+    item_id: str | None = None,
+    platform: str | None = None,
+    status: str | None = None,
+):
+    ws = getattr(request.app.state, "workspace", None)
+    if not ws:
+        raise HTTPException(status_code=503, detail="Workspace not initialized.")
+    variants = ws.content.list_variants(item_id=item_id, platform=platform, status=status)
+    return [v.to_dict() for v in variants]
+
+
+@router.post("/content/variants/{variant_id}/schedule")
+async def schedule_variant_route(
+    request: Request, variant_id: str, payload: ScheduleVariantPayload | None = None
+):
+    ws = getattr(request.app.state, "workspace", None)
+    if not ws:
+        raise HTTPException(status_code=503, detail="Workspace not initialized.")
+
+    from aether.content.models import ContentStatus
+    scheduled_at = payload.scheduled_at if payload else None
+    var = ws.content.update_variant_status(
+        variant_id=variant_id, status=ContentStatus.SCHEDULED, scheduled_at=scheduled_at
+    )
+    if not var:
+        raise HTTPException(status_code=404, detail="Variant not found.")
+    return var.to_dict()
+
+
+@router.post("/content/variants/{variant_id}/publish")
+async def publish_variant_route(request: Request, variant_id: str):
+    ws = getattr(request.app.state, "workspace", None)
+    if not ws:
+        raise HTTPException(status_code=503, detail="Workspace not initialized.")
+
+    from datetime import timezone, datetime
+    from aether.content.models import ContentStatus
+    now_str = datetime.now(timezone.utc).isoformat()
+    var = ws.content.update_variant_status(
+        variant_id=variant_id, status=ContentStatus.PUBLISHED, published_at=now_str
+    )
+    if not var:
+        raise HTTPException(status_code=404, detail="Variant not found.")
+    return var.to_dict()
+
+
+# ===========================================================================
 # PHASE C — PERSONAL AGENT, ACTIONS, CONNECTIONS, AND ACTIVITY API
 # ===========================================================================
 

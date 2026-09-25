@@ -1189,4 +1189,142 @@ class ActionRegistry:
             )
         )
 
+        # Content & Social Media Workforce actions
+        self.register(
+            ActionDefinition(
+                id="content.repurpose",
+                name="Repurpose Content",
+                description="Repurposes raw content or mission deliverables into multi-platform social assets (LinkedIn, Twitter Threads, Newsletter, Video Scripts).",
+                tier=ActionTier.DO,
+                permission_level=ActionPermissionLevel.LOCAL_MUTATION,
+                requires_confirmation=False,
+                provider="content",
+                input_schema={
+                    "type": "object",
+                    "properties": {
+                        "source_text": {"type": "string"},
+                        "title": {"type": "string"},
+                        "target_platforms": {"type": "array", "items": {"type": "string"}},
+                        "tone": {"type": "string"},
+                        "target_audience": {"type": "string"},
+                        "campaign_id": {"type": "string"},
+                    },
+                    "required": ["source_text"],
+                },
+                output_schema={
+                    "type": "object",
+                    "properties": {
+                        "item": {"type": "object"},
+                        "variants": {"type": "array"},
+                    },
+                },
+            )
+        )
+
+        self.register(
+            ActionDefinition(
+                id="content.create_campaign",
+                name="Create Content Campaign",
+                description="Creates a cross-platform marketing, product launch, or educational campaign.",
+                tier=ActionTier.DO,
+                permission_level=ActionPermissionLevel.LOCAL_MUTATION,
+                requires_confirmation=False,
+                provider="content",
+                input_schema={
+                    "type": "object",
+                    "properties": {
+                        "name": {"type": "string"},
+                        "description": {"type": "string"},
+                        "target_audience": {"type": "string"},
+                        "objectives": {"type": "array", "items": {"type": "string"}},
+                        "tags": {"type": "array", "items": {"type": "string"}},
+                    },
+                    "required": ["name"],
+                },
+                output_schema={
+                    "type": "object",
+                    "properties": {
+                        "campaign": {"type": "object"},
+                    },
+                },
+            )
+        )
+
+        self.register(
+            ActionDefinition(
+                id="content.list_campaigns",
+                name="List Content Campaigns",
+                description="Lists all marketing and social media campaigns.",
+                tier=ActionTier.ANSWER,
+                permission_level=ActionPermissionLevel.READ_ONLY,
+                requires_confirmation=False,
+                provider="content",
+                input_schema={
+                    "type": "object",
+                    "properties": {
+                        "status": {"type": "string"},
+                    },
+                },
+                output_schema={
+                    "type": "object",
+                    "properties": {
+                        "campaigns": {"type": "array"},
+                    },
+                },
+            )
+        )
+
+        self.register(
+            ActionDefinition(
+                id="content.schedule_variant",
+                name="Schedule Content Variant",
+                description="Schedules a repurposed variant for publishing.",
+                tier=ActionTier.ACT,
+                permission_level=ActionPermissionLevel.LOCAL_MUTATION,
+                requires_confirmation=False,
+                provider="content",
+                input_schema={
+                    "type": "object",
+                    "properties": {
+                        "variant_id": {"type": "string"},
+                        "scheduled_at": {"type": "string"},
+                    },
+                    "required": ["variant_id"],
+                },
+                output_schema={
+                    "type": "object",
+                    "properties": {
+                        "variant": {"type": "object"},
+                    },
+                },
+            )
+        )
+
+        self.register(
+            ActionDefinition(
+                id="content.list_variants",
+                name="List Repurposed Variants",
+                description="Lists repurposed content variants with optional platform or campaign filtering.",
+                tier=ActionTier.ANSWER,
+                permission_level=ActionPermissionLevel.READ_ONLY,
+                requires_confirmation=False,
+                provider="content",
+                input_schema={
+                    "type": "object",
+                    "properties": {
+                        "item_id": {"type": "string"},
+                        "platform": {"type": "string"},
+                        "status": {"type": "string"},
+                    },
+                },
+                output_schema={
+                    "type": "object",
+                    "properties": {
+                        "variants": {"type": "array"},
+                    },
+                },
+            )
+        )
+
+
 
