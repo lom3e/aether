@@ -291,7 +291,7 @@ def test_h_connection_service_connect_and_disconnect(temp_workspace_dir):
         provider="email",
         account_name="test@example.com",
     )
-    assert conn.status == ConnectionStatus.CONNECTED
+    assert conn.status == ConnectionStatus.NOT_CONFIGURED
 
     conns = svc.list_connections("test_ws")
     assert len(conns) == 1
@@ -575,7 +575,7 @@ async def test_t_rest_connections_and_activity(workspace):
             workspace_id=workspace.name,
         ),
     )
-    assert conn_data["status"] == "connected"
+    assert conn_data["status"] == "not_configured"
 
     # 2. List connections
     req2 = make_request("GET", "/api/connections")
@@ -691,7 +691,7 @@ async def test_v_connection_verification_and_secret_masking(workspace):
             auth_metadata={"token": raw_token, "org": "aether-corp"},
         ),
     )
-    assert conn_res["status"] == "connected"
+    assert conn_res["status"] in ("configured", "verified")
     # Secret must be masked in response
     assert conn_res["auth_metadata"]["token"] != raw_token
     assert "..." in conn_res["auth_metadata"]["token"]

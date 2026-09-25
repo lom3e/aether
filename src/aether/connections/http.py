@@ -103,7 +103,7 @@ class HttpConnector(BaseConnector):
             ),
         ]
 
-    def verify(self, auth_metadata: dict[str, Any] | None = None) -> tuple[bool, str]:
+    def verify(self, auth_metadata: dict[str, Any] | None = None, live_check: bool = False) -> tuple[bool, str]:
         meta = auth_metadata or self._auth_metadata
         base_url = str(meta.get("base_url") or "").strip()
         auth_type = str(meta.get("auth_type") or "none").strip().lower()
@@ -112,6 +112,11 @@ class HttpConnector(BaseConnector):
             parsed = urllib.parse.urlparse(base_url)
             if parsed.scheme not in ("http", "https"):
                 return False, f"Invalid base URL scheme: '{parsed.scheme}'. Must be http or https."
+
+        token = ""
+        key = ""
+        user = ""
+        password = ""
 
         if auth_type == "bearer":
             token = str(meta.get("token") or meta.get("bearer_token") or "").strip()
@@ -129,13 +134,35 @@ class HttpConnector(BaseConnector):
             if not user or not password:
                 return False, "Username and password required for Basic auth."
 
+        if (live_check or meta.get("live_check")) and base_url:
+            try:
+                headers = {"User-Agent": "Aether/1.0"}
+                if auth_type == "bearer" and token:
+                    headers["Authorization"] = f"Bearer {token}"
+                elif auth_type == "api_key" and key:
+                    headers["X-API-Key"] = key
+                elif auth_type == "basic" and user and password:
+                    import base64
+                    encoded = base64.b64encode(f"{user}:{password}".encode("utf-8")).decode("ascii")
+                    headers["Authorization"] = f"Basic {encoded}"
+                req = urllib.request.Request(base_url, headers=headers, method="GET")
+                try:
+                    with urllib.request.urlopen(req, timeout=5.0) as resp:
+                        return True, f"HTTP endpoint verified reachable (HTTP {resp.status})."
+                except urllib.error.HTTPError as exc:
+                    if exc.code in (401, 403):
+                        return False, f"HTTP authentication failed (HTTP {exc.code}): {exc.reason}"
+                    return True, f"HTTP endpoint reachable (HTTP {exc.code})."
+            except Exception as exc:
+                return False, f"Could not reach HTTP endpoint '{base_url}': {exc}"
+
         return True, "HTTP connector configuration verified."
 
     def get_health(self) -> ConnectorHealth:
-        valid, msg = self.verify()
+        valid, msg = self.verify(live_check=True)
         return ConnectorHealth(
             healthy=valid,
-            status=ConnectionStatus.CONNECTED if valid else ConnectionStatus.ERROR,
+            status=ConnectionStatus.VERIFIED if valid else ConnectionStatus.VERIFICATION_FAILED,
             message=msg,
         )
 

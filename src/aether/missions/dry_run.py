@@ -343,7 +343,7 @@ class MissionDryRunEngine:
                 conns = conn_svc.list_connections(ws_id)
                 for c in conns:
                     status_val = c.status.value if hasattr(c.status, "value") else str(c.status)
-                    if status_val in ("connected", "active"):
+                    if getattr(c, "is_verified", False) or status_val in ("verified", "connected", "active"):
                         connected.add(c.provider.lower())
             except Exception:
                 pass

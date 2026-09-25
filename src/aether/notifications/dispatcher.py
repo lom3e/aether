@@ -358,7 +358,7 @@ class NotificationDispatcher:
         if self.connection_service:
             try:
                 conn = self.connection_service.get_connection(channel.workspace_id, "telegram")
-                if conn and getattr(conn.status, "value", str(conn.status)) == "connected":
+                if conn and (getattr(conn, "is_verified", False) or getattr(conn, "is_configured", False)):
                     telegram_connector = self.connection_service.get_telegram_connector(channel.workspace_id)
                     chat_id = telegram_connector._get_default_chat_id()
                     if chat_id:

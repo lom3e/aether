@@ -5747,11 +5747,13 @@ class ConnectPayload(BaseModel):
     capabilities: list[str] | None = None
     auth_metadata: dict[str, Any] | None = None
     workspace_id: str | None = None
+    live_check: bool = False
 
 
 class VerifyConnectionPayload(BaseModel):
     workspace_id: str | None = None
     auth_metadata: dict[str, Any] = Field(default_factory=dict)
+    live_check: bool = False
 
 
 class CreateCalendarEventPayload(BaseModel):
@@ -6024,6 +6026,7 @@ async def connect_service_route(request: Request, payload: ConnectPayload):
         scopes=payload.scopes,
         capabilities=payload.capabilities,
         auth_metadata=auth_meta,
+        live_check=payload.live_check,
     )
     return conn.to_dict(mask_secrets=True)
 
@@ -6040,19 +6043,20 @@ async def verify_connection_route(
     ws_id = ((payload.workspace_id if payload else None) or ws.name).strip()
 
     meta = payload.auth_metadata if (payload and payload.auth_metadata) else None
-    if not meta:
-        existing = ws.connections.get_connection(ws_id, provider)
-        if existing and existing.auth_metadata:
-            meta = existing.auth_metadata
-        else:
-            meta = {}
+    live_check = payload.live_check if payload is not None else True
 
-    from aether.connections.service import verify_credentials
-    valid, message = verify_credentials(provider, meta)
+    valid, message, conn = ws.connections.verify_connection(
+        workspace_id=ws_id,
+        provider=provider,
+        auth_metadata=meta,
+        live_check=live_check,
+    )
     return {
         "provider": provider,
         "valid": valid,
         "message": message,
+        "status": conn.status.value if conn else ("verified" if valid else "verification_failed"),
+        "connection": conn.to_dict(mask_secrets=True) if conn else None,
     }
 
 

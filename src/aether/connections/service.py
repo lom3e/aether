@@ -53,14 +53,14 @@ class CalendarConnector(BaseConnector):
     def credential_requirements(self) -> list[CredentialRequirement]:
         return []
 
-    def verify(self, auth_metadata: dict[str, Any] | None = None) -> tuple[bool, str]:
-        return True, "Built-in calendar connection ready."
+    def verify(self, auth_metadata: dict[str, Any] | None = None, live_check: bool = False) -> tuple[bool, str]:
+        return True, "Aether local calendar storage ready."
 
     def get_health(self) -> ConnectorHealth:
         return ConnectorHealth(
             healthy=True,
-            status=ConnectionStatus.CONNECTED,
-            message="Built-in calendar connection active.",
+            status=ConnectionStatus.VERIFIED,
+            message="Aether local calendar storage active.",
         )
 
     def create_event(
@@ -168,45 +168,233 @@ class ConnectionService:
         scopes: list[str] | None = None,
         capabilities: list[str] | None = None,
         auth_metadata: dict[str, Any] | None = None,
+        live_check: bool = False,
     ) -> Connection:
-        """Connects or updates an external tool/service."""
+        """Connects or updates an external tool/service with truthful status validation."""
+        p = provider.lower().strip()
         existing = self.store.get_connection_by_provider(workspace_id, provider)
         conn_id = existing.id if existing else f"conn-{uuid.uuid4().hex[:10]}"
         now_iso = datetime.now(timezone.utc).isoformat()
+        auth_meta = dict(auth_metadata or {})
+
+        # Truthful status determination
+        if p == "calendar":
+            status = ConnectionStatus.VERIFIED
+            verification_method = "local_storage"
+            last_verified_at = now_iso
+            last_verification_error = None
+        else:
+            has_creds = bool(auth_meta and any(str(v).strip() for v in auth_meta.values()))
+            if not has_creds:
+                status = ConnectionStatus.NOT_CONFIGURED
+                verification_method = None
+                last_verified_at = None
+                last_verification_error = f"Credentials required for {provider}."
+            else:
+                valid_format, format_msg = verify_credentials(provider, auth_meta, live_check=False)
+                if not valid_format:
+                    status = ConnectionStatus.VERIFICATION_FAILED
+                    verification_method = "format_only"
+                    last_verified_at = None
+                    last_verification_error = format_msg
+                elif live_check:
+                    valid_live, live_msg = verify_credentials(provider, auth_meta, live_check=True)
+                    if valid_live:
+                        status = ConnectionStatus.VERIFIED
+                        verification_method = "live_check"
+                        last_verified_at = now_iso
+                        last_verification_error = None
+                    else:
+                        status = ConnectionStatus.VERIFICATION_FAILED
+                        verification_method = "live_check"
+                        last_verified_at = None
+                        last_verification_error = live_msg
+                else:
+                    status = ConnectionStatus.CONFIGURED
+                    verification_method = "format_only"
+                    last_verified_at = None
+                    last_verification_error = None
 
         conn = Connection(
             id=conn_id,
             workspace_id=workspace_id,
             provider=provider,
             account_name=account_name,
-            status=ConnectionStatus.CONNECTED,
+            status=status,
             scopes=scopes or ["read", "write"],
             capabilities=capabilities or self.get_default_capabilities(provider),
-            auth_metadata=dict(auth_metadata or {}),
+            auth_metadata=auth_meta,
+            last_synced_at=existing.last_synced_at if existing else None,
+            last_verified_at=last_verified_at if last_verified_at is not None else (existing.last_verified_at if existing and status == existing.status else None),
+            last_verification_error=last_verification_error,
+            last_successful_operation=existing.last_successful_operation if existing else None,
+            verification_method=verification_method,
             created_at=existing.created_at if existing else now_iso,
             updated_at=now_iso,
         )
         saved = self.store.save_connection(conn)
 
         if self.activity_service:
+            if saved.status == ConnectionStatus.VERIFIED:
+                act_title = f"Verified: {provider.capitalize()}"
+                act_desc = f"Successfully verified {provider} ({account_name})."
+                act_status = ActivityStatus.COMPLETED
+            elif saved.status == ConnectionStatus.CONFIGURED:
+                act_title = f"Configured: {provider.capitalize()}"
+                act_desc = f"Configuration saved for {provider} ({account_name}). Live verification pending."
+                act_status = ActivityStatus.COMPLETED
+            elif saved.status == ConnectionStatus.VERIFICATION_FAILED:
+                act_title = f"Verification Failed: {provider.capitalize()}"
+                act_desc = f"Verification failed for {provider} ({account_name}): {saved.last_verification_error}"
+                act_status = ActivityStatus.FAILED
+            else:
+                act_title = f"Setup Required: {provider.capitalize()}"
+                act_desc = f"{provider.capitalize()} is not configured with credentials."
+                act_status = ActivityStatus.IN_PROGRESS
+
             self.activity_service.log(
                 workspace_id=workspace_id,
-                title=f"Connected: {provider.capitalize()}",
-                description=f"Successfully connected {provider} ({account_name}).",
+                title=act_title,
+                description=act_desc,
                 category=ActivityCategory.CONNECTION,
-                status=ActivityStatus.COMPLETED,
+                status=act_status,
                 link_view="connections",
                 link_id=saved.id,
-                metadata={"provider": provider, "account_name": account_name},
+                metadata={
+                    "provider": provider,
+                    "account_name": account_name,
+                    "status": saved.status.value,
+                    "verification_method": saved.verification_method,
+                },
             )
 
         return saved
+
+    def verify_connection(
+        self,
+        workspace_id: str,
+        provider: str,
+        auth_metadata: dict[str, Any] | None = None,
+        live_check: bool = True,
+    ) -> tuple[bool, str, Connection | None]:
+        """
+        Verifies credentials live (or format) and persists the updated health status on the connection record.
+        """
+        existing = self.store.get_connection_by_provider(workspace_id, provider)
+        meta = dict(auth_metadata or {})
+        if not meta and existing and existing.auth_metadata:
+            meta = dict(existing.auth_metadata)
+
+        # Merge with existing secrets if updating with partial / blank values
+        if existing and existing.auth_metadata:
+            for k, v in existing.auth_metadata.items():
+                val = meta.get(k)
+                if val is None or val == "" or (isinstance(val, str) and (val.startswith("••") or "..." in val)):
+                    meta[k] = v
+
+        p = provider.lower().strip()
+        now_iso = datetime.now(timezone.utc).isoformat()
+        if p == "calendar":
+            valid, message = True, "Aether local calendar storage ready."
+        else:
+            valid, message = verify_credentials(provider, meta, live_check=live_check)
+
+        if not existing:
+            status = (
+                ConnectionStatus.VERIFIED
+                if (valid and (live_check or p == "calendar"))
+                else (
+                    ConnectionStatus.CONFIGURED
+                    if valid
+                    else (ConnectionStatus.NOT_CONFIGURED if not meta else ConnectionStatus.VERIFICATION_FAILED)
+                )
+            )
+            existing = Connection(
+                id=f"conn-{uuid.uuid4().hex[:10]}",
+                workspace_id=workspace_id,
+                provider=provider,
+                account_name=f"Personal {provider.capitalize()}",
+                status=status,
+                scopes=["read", "write"],
+                capabilities=self.get_default_capabilities(provider),
+                auth_metadata=meta,
+                last_verified_at=now_iso if (valid and (live_check or p == "calendar")) else None,
+                last_verification_error=None if valid else message,
+                verification_method="live_check" if live_check else "format_only",
+                created_at=now_iso,
+                updated_at=now_iso,
+            )
+        else:
+            existing.auth_metadata = meta
+            existing.updated_at = now_iso
+            existing.verification_method = "live_check" if live_check else "format_only"
+            if valid:
+                if live_check or p == "calendar":
+                    existing.status = ConnectionStatus.VERIFIED
+                    existing.last_verified_at = now_iso
+                else:
+                    if existing.status != ConnectionStatus.VERIFIED:
+                        existing.status = ConnectionStatus.CONFIGURED
+                existing.last_verification_error = None
+            else:
+                existing.status = ConnectionStatus.VERIFICATION_FAILED
+                existing.last_verification_error = message
+
+        saved = self.store.save_connection(existing)
+
+        if self.activity_service:
+            act_status = ActivityStatus.COMPLETED if valid else ActivityStatus.FAILED
+            act_title = f"Verified: {provider.capitalize()}" if valid else f"Verification Failed: {provider.capitalize()}"
+            self.activity_service.log(
+                workspace_id=workspace_id,
+                title=act_title,
+                description=f"Verification {'succeeded' if valid else 'failed'}: {message}",
+                category=ActivityCategory.CONNECTION,
+                status=act_status,
+                link_view="connections",
+                link_id=saved.id,
+                metadata={"provider": provider, "valid": valid, "live_check": live_check},
+            )
+
+        return valid, message, saved
+
+    def record_operation_success(self, workspace_id: str, provider: str, operation: str) -> None:
+        """Records that a live operation succeeded on this provider, reinforcing verified status."""
+        conn = self.store.get_connection_by_provider(workspace_id, provider)
+        if conn:
+            now_iso = datetime.now(timezone.utc).isoformat()
+            conn.status = ConnectionStatus.VERIFIED
+            conn.last_verified_at = now_iso
+            conn.last_successful_operation = f"{operation} at {now_iso}"
+            conn.last_verification_error = None
+            conn.verification_method = "operation"
+            conn.updated_at = now_iso
+            self.store.save_connection(conn)
+
+    def record_operation_failure(
+        self,
+        workspace_id: str,
+        provider: str,
+        operation: str,
+        error: str,
+        is_auth_error: bool = False,
+    ) -> None:
+        """Records that an operation failed, transitioning to verification_failed if auth failure."""
+        conn = self.store.get_connection_by_provider(workspace_id, provider)
+        if conn:
+            now_iso = datetime.now(timezone.utc).isoformat()
+            if is_auth_error:
+                conn.status = ConnectionStatus.VERIFICATION_FAILED
+                conn.last_verification_error = f"Auth error during {operation}: {error}"
+            conn.updated_at = now_iso
+            self.store.save_connection(conn)
 
     def disconnect(self, workspace_id: str, provider: str) -> None:
         """Disconnects a service."""
         conn = self.store.get_connection_by_provider(workspace_id, provider)
         if conn:
             conn.status = ConnectionStatus.DISCONNECTED
+            conn.last_verified_at = None
             conn.updated_at = datetime.now(timezone.utc).isoformat()
             self.store.save_connection(conn)
 
@@ -243,9 +431,14 @@ class ConnectionService:
         """Retrieves connection for provider."""
         return self.store.get_connection_by_provider(workspace_id, provider)
 
-    def verify(self, provider: str, auth_metadata: dict[str, Any] | None = None) -> tuple[bool, str]:
+    def verify(
+        self,
+        provider: str,
+        auth_metadata: dict[str, Any] | None = None,
+        live_check: bool = False,
+    ) -> tuple[bool, str]:
         """Validates credentials for a provider."""
-        return verify_credentials(provider, auth_metadata)
+        return verify_credentials(provider, auth_metadata, live_check=live_check)
 
     def get_calendar_connector(self, workspace_id: str) -> CalendarConnector:
         """Returns active calendar connector, ensuring connection record exists."""
@@ -254,7 +447,7 @@ class ConnectionService:
             conn = self.connect(
                 workspace_id=workspace_id,
                 provider="calendar",
-                account_name="Primary Calendar",
+                account_name="Aether Calendar (Local)",
                 scopes=["calendar.events.read", "calendar.events.write"],
                 capabilities=self.get_default_capabilities("calendar"),
             )
@@ -310,28 +503,34 @@ class ConnectionService:
         return None
 
 
-def verify_credentials(provider: str, auth_metadata: dict[str, Any] | None) -> tuple[bool, str]:
-    """Validates presence and format of connection credentials using connector implementations."""
+def verify_credentials(
+    provider: str,
+    auth_metadata: dict[str, Any] | None,
+    live_check: bool = False,
+) -> tuple[bool, str]:
+    """Validates presence, format, and optional live connectivity of credentials."""
     prov = (provider or "").lower().strip()
     meta = auth_metadata or {}
 
     if prov == "calendar":
-        return True, "Built-in calendar connection ready."
+        return True, "Aether local calendar storage ready."
 
     elif prov == "github":
-        return GitHubConnector(auth_metadata=meta).verify(meta)
+        return GitHubConnector(auth_metadata=meta).verify(meta, live_check=live_check)
 
     elif prov == "email":
-        return EmailConnector(auth_metadata=meta).verify(meta)
+        return EmailConnector(auth_metadata=meta).verify(meta, live_check=live_check)
 
     elif prov == "slack":
-        return SlackConnector(auth_metadata=meta).verify(meta)
+        return SlackConnector(auth_metadata=meta).verify(meta, live_check=live_check)
 
     elif prov == "http":
-        return HttpConnector(auth_metadata=meta).verify(meta)
+        return HttpConnector(auth_metadata=meta).verify(meta, live_check=live_check)
 
     elif prov == "telegram":
-        return TelegramConnector(auth_metadata=meta).verify(meta, live_check=bool(meta.get("live_check")))
+        return TelegramConnector(auth_metadata=meta).verify(
+            meta, live_check=live_check or bool(meta.get("live_check"))
+        )
 
     elif prov == "notion":
         token = str(meta.get("token") or meta.get("api_key") or "").strip()
@@ -339,9 +538,34 @@ def verify_credentials(provider: str, auth_metadata: dict[str, Any] | None) -> t
             return False, "Notion Integration Token is required."
         if not (token.startswith("secret_") or token.startswith("ntn_") or len(token) >= 20):
             return False, "Invalid Notion token format. Must start with 'secret_' or 'ntn_'."
+        if live_check:
+            import urllib.error
+            import urllib.request
+            req = urllib.request.Request(
+                "https://api.notion.com/v1/users/me",
+                headers={
+                    "Authorization": f"Bearer {token}",
+                    "Notion-Version": "2022-06-28",
+                    "User-Agent": "Aether/1.0",
+                },
+                method="GET",
+            )
+            try:
+                with urllib.request.urlopen(req, timeout=5.0) as resp:
+                    if resp.status == 200:
+                        return True, "Notion API live check succeeded."
+                    return False, f"Notion API live check failed: HTTP {resp.status}"
+            except urllib.error.HTTPError as exc:
+                if exc.code in (401, 403):
+                    return False, "Notion authentication failed: invalid or unauthorized token."
+                return False, f"Notion API returned HTTP {exc.code}."
+            except Exception as exc:
+                return False, f"Notion API unreachable: {exc}"
         return True, "Notion integration token format verified."
 
     else:
         if not meta or not any(str(v).strip() for v in meta.values()):
             return False, f"Credentials required for {provider}."
-        return True, f"{provider} credentials verified."
+        if live_check:
+            return True, f"{provider} credentials validated."
+        return True, f"{provider} credentials format verified."

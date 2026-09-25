@@ -15,6 +15,10 @@ interface ConnectionItem {
   capabilities: string[];
   auth_metadata?: Record<string, any>;
   last_synced_at?: string;
+  last_verified_at?: string;
+  last_verification_error?: string;
+  last_successful_operation?: string;
+  verification_method?: string;
   updated_at?: string;
 }
 
@@ -44,6 +48,7 @@ export function Connections({ navigate: _navigate }: { navigate?: (view: string,
   const [executions, setExecutions] = useState<ActionExecutionItem[]>([]);
   const [loading, setLoading] = useState(false);
   const [syncingProvider, setSyncingProvider] = useState<string | null>(null);
+  const [verifyingProvider, setVerifyingProvider] = useState<string | null>(null);
   const [syncingAll, setSyncingAll] = useState(false);
 
   // New Event Form State
@@ -88,11 +93,11 @@ export function Connections({ navigate: _navigate }: { navigate?: (view: string,
   const availableProviders = [
     {
       id: 'calendar',
-      name: 'Google Calendar / Sync',
+      name: 'Aether Calendar (Local)',
       icon: Calendar,
-      description: 'Sync schedule, check availability, and book appointments with approval.',
-      capabilitiesText: 'Can view availability, list events, and schedule meetings with confirmation',
-      color: '#4285F4',
+      description: 'Built-in local workspace schedule and event storage with zero external dependencies.',
+      capabilitiesText: 'Can view schedule, list local events, and record meetings directly in workspace storage',
+      color: '#06b6d4',
       builtIn: true,
     },
     {
@@ -176,7 +181,7 @@ export function Connections({ navigate: _navigate }: { navigate?: (view: string,
   const openConfigModal = (provider: (typeof availableProviders)[0], existingConn?: ConnectionItem) => {
     setConfigModalProvider(provider);
     setCredAccountName(existingConn?.account_name || `Personal ${provider.name}`);
-    setIsConfigured(Boolean(existingConn && existingConn.status === 'connected'));
+    setIsConfigured(Boolean(existingConn && existingConn.status !== 'not_configured' && existingConn.status !== 'disconnected'));
     setTestResult(null);
     setGithubToken('');
     setSlackToken('');
@@ -212,6 +217,28 @@ export function Connections({ navigate: _navigate }: { navigate?: (view: string,
         }
       }
       // Sensitive fields (token, password, secret) remain blank to prevent leakage
+    }
+  };
+
+  const handleVerifyConnection = async (providerId: string) => {
+    try {
+      setVerifyingProvider(providerId);
+      const res = await fetch(apiUrl(`/api/connections/${providerId}/verify`), {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ live_check: true }),
+      });
+      const data = await res.json();
+      if (data.valid) {
+        showToast(`Verified ${providerId} successfully.`, 'success');
+      } else {
+        showToast(data.message || `Verification failed for ${providerId}.`, 'error');
+      }
+      await fetchAll();
+    } catch (err: any) {
+      showToast(err.message || 'Verification request failed.', 'error');
+    } finally {
+      setVerifyingProvider(null);
     }
   };
 
@@ -304,12 +331,13 @@ export function Connections({ navigate: _navigate }: { navigate?: (view: string,
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           auth_metadata: authMeta,
+          live_check: true,
         }),
       });
       const data = await res.json();
       setTestResult({
         valid: Boolean(data.valid),
-        message: data.message || (data.valid ? 'Credentials format verified.' : 'Verification failed.'),
+        message: data.message || (data.valid ? 'Credentials verified successfully.' : 'Verification failed.'),
       });
     } catch (err) {
       setTestResult({
@@ -328,21 +356,6 @@ export function Connections({ navigate: _navigate }: { navigate?: (view: string,
     const authMeta = buildAuthMetadata(configModalProvider.id);
     setSavingCreds(true);
     try {
-      const verifyRes = await fetch(apiUrl(`/api/connections/${configModalProvider.id}/verify`), {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ auth_metadata: authMeta }),
-      });
-      const verifyData = await verifyRes.json();
-      if (!verifyData.valid) {
-        setTestResult({
-          valid: false,
-          message: verifyData.message || 'Invalid credentials format. Please review requirements.',
-        });
-        setSavingCreds(false);
-        return;
-      }
-
       const res = await fetch(apiUrl('/api/connections'), {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -350,10 +363,11 @@ export function Connections({ navigate: _navigate }: { navigate?: (view: string,
           provider: configModalProvider.id,
           account_name: credAccountName.trim() || `Personal ${configModalProvider.name}`,
           auth_metadata: authMeta,
+          live_check: false,
         }),
       });
       if (res.ok) {
-        showToast(`Connected ${configModalProvider.name} successfully.`, 'success');
+        showToast(`Configuration saved for ${configModalProvider.name}.`, 'success');
         setConfigModalProvider(null);
         fetchAll();
       } else {
@@ -374,16 +388,16 @@ export function Connections({ navigate: _navigate }: { navigate?: (view: string,
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           provider: 'calendar',
-          account_name: 'Primary Calendar (Sync)',
+          account_name: 'Aether Calendar (Local)',
           auth_metadata: { type: 'sqlite_built_in' },
         }),
       });
       if (res.ok) {
-        showToast('Connected Calendar successfully.', 'success');
+        showToast('Aether Calendar ready.', 'success');
         fetchAll();
       }
     } catch (e) {
-      showToast('Failed to connect Calendar.', 'error');
+      showToast('Failed to initialize Calendar.', 'error');
     }
   };
 
@@ -501,7 +515,7 @@ export function Connections({ navigate: _navigate }: { navigate?: (view: string,
           onClick={() => setActiveTab('apps')}
           style={{ borderBottom: activeTab === 'apps' ? '2px solid hsl(var(--primary))' : 'none', borderRadius: 0, padding: '8px 16px', fontWeight: 600 }}
         >
-          Connected Apps ({connections.filter(c => c.status === 'connected').length})
+          Connected Apps ({connections.filter(c => c.status === 'verified' || c.status === 'connected' || c.status === 'configured').length})
         </button>
         <button
           className={`btn btn-ghost ${activeTab === 'calendar' ? 'active' : ''}`}
@@ -536,8 +550,12 @@ export function Connections({ navigate: _navigate }: { navigate?: (view: string,
         <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(320px, 1fr))', gap: '16px' }}>
           {availableProviders.map(p => {
             const conn = connections.find(c => c.provider === p.id);
-            const isConnected = conn?.status === 'connected';
-            const hasAuth = p.builtIn || (conn?.auth_metadata && Object.keys(conn.auth_metadata).length > 0);
+            const status = conn?.status;
+            const isVerified = status === 'verified' || status === 'connected';
+            const isConfiguredStatus = status === 'configured';
+            const isVerificationFailed = status === 'verification_failed' || status === 'error';
+            const isVerificationRequired = status === 'verification_required' || status === 'needs_auth';
+            const isDisconnected = status === 'disconnected';
             const Icon = p.icon;
 
             return (
@@ -547,7 +565,13 @@ export function Connections({ navigate: _navigate }: { navigate?: (view: string,
                 style={{
                   padding: '20px',
                   borderRadius: '12px',
-                  border: isConnected ? '1px solid hsl(var(--primary)/0.4)' : '1px solid hsl(var(--border))',
+                  border: isVerified
+                    ? '1px solid hsl(var(--primary)/0.4)'
+                    : isConfiguredStatus
+                    ? '1px solid #38bdf840'
+                    : isVerificationFailed
+                    ? '1px solid #ef444440'
+                    : '1px solid hsl(var(--border))',
                   display: 'flex',
                   flexDirection: 'column',
                   justifyContent: 'space-between',
@@ -572,88 +596,150 @@ export function Connections({ navigate: _navigate }: { navigate?: (view: string,
                       <div>
                         <div style={{ fontWeight: 600, fontSize: '15px' }}>{p.name}</div>
                         <div style={{ fontSize: '12px', color: 'hsl(var(--muted-fg))' }}>
-                          {conn ? conn.account_name : (p.builtIn ? 'Local Engine' : 'Not configured')}
+                          {conn ? conn.account_name : (p.builtIn ? 'Local Workspace Engine' : 'Not configured')}
                         </div>
                       </div>
                     </div>
-                    {isConnected ? (
-                      hasAuth ? (
-                        <span style={{ display: 'flex', alignItems: 'center', gap: '4px', fontSize: '12px', color: '#10b981', fontWeight: 600 }}>
-                          <CheckCircle2 size={14} /> Connected
-                        </span>
-                      ) : (
-                        <span style={{ display: 'flex', alignItems: 'center', gap: '4px', fontSize: '12px', color: '#f59e0b', fontWeight: 600 }}>
-                          Needs Auth
-                        </span>
-                      )
+                    {isVerified ? (
+                      <span style={{ display: 'flex', alignItems: 'center', gap: '4px', fontSize: '12px', color: '#10b981', fontWeight: 600 }}>
+                        <CheckCircle2 size={14} /> Verified
+                      </span>
+                    ) : isConfiguredStatus ? (
+                      <span style={{ display: 'flex', alignItems: 'center', gap: '4px', fontSize: '12px', color: '#38bdf8', fontWeight: 600 }}>
+                        <ShieldCheck size={14} /> Configured
+                      </span>
+                    ) : isVerificationFailed ? (
+                      <span style={{ display: 'flex', alignItems: 'center', gap: '4px', fontSize: '12px', color: '#ef4444', fontWeight: 600 }}>
+                        <AlertCircle size={14} /> Verification Failed
+                      </span>
+                    ) : isVerificationRequired ? (
+                      <span style={{ display: 'flex', alignItems: 'center', gap: '4px', fontSize: '12px', color: '#f59e0b', fontWeight: 600 }}>
+                        <AlertCircle size={14} /> Needs Auth
+                      </span>
+                    ) : isDisconnected ? (
+                      <span style={{ fontSize: '12px', color: 'hsl(var(--muted-fg))' }}>
+                        Disconnected
+                      </span>
                     ) : (
                       <span style={{ fontSize: '12px', color: 'hsl(var(--muted-fg))' }}>
-                        {p.builtIn ? 'Ready' : 'Not configured'}
+                        {p.builtIn ? 'Ready (Local)' : 'Not configured'}
                       </span>
                     )}
                   </div>
                   <p style={{ fontSize: '13px', color: 'hsl(var(--muted-fg))', margin: 0, lineHeight: 1.4 }}>
                     {p.description}
                   </p>
+                  {conn?.last_verified_at && (
+                    <div style={{ fontSize: '11px', color: '#10b981', display: 'flex', alignItems: 'center', gap: '4px', marginTop: '6px' }}>
+                      <CheckCircle2 size={11} /> Verified: {new Date(conn.last_verified_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', month: 'short', day: 'numeric' })}
+                      {conn.verification_method ? ` (${conn.verification_method})` : ''}
+                    </div>
+                  )}
+                  {conn?.last_successful_operation && (
+                    <div style={{ fontSize: '11px', color: 'hsl(var(--muted-fg))', display: 'flex', alignItems: 'center', gap: '4px', marginTop: '3px' }}>
+                      <Zap size={11} /> Last Op: {conn.last_successful_operation}
+                    </div>
+                  )}
+                  {isVerificationFailed && conn?.last_verification_error && (
+                    <div style={{ fontSize: '11px', color: '#ef4444', marginTop: '5px', lineHeight: 1.3 }}>
+                      {conn.last_verification_error}
+                    </div>
+                  )}
+                  {isConfiguredStatus && (
+                    <div style={{ fontSize: '11px', color: '#38bdf8', marginTop: '5px' }}>
+                      Credentials saved. Live probe pending.
+                    </div>
+                  )}
                   {conn?.last_synced_at && (
-                    <div style={{ fontSize: '11px', color: 'hsl(var(--muted-fg))', display: 'flex', alignItems: 'center', gap: '4px', marginTop: '6px' }}>
+                    <div style={{ fontSize: '11px', color: 'hsl(var(--muted-fg))', display: 'flex', alignItems: 'center', gap: '4px', marginTop: '4px' }}>
                       <Clock size={11} /> Last synced: {new Date(conn.last_synced_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', month: 'short', day: 'numeric' })}
                     </div>
                   )}
                 </div>
 
-                <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '8px', borderTop: '1px solid hsl(var(--border)/0.5)', paddingTop: '14px' }}>
-                  {isConnected ? (
+                <div style={{ display: 'flex', justifyContent: 'flex-end', flexWrap: 'wrap', gap: '8px', borderTop: '1px solid hsl(var(--border)/0.5)', paddingTop: '14px' }}>
+                  {p.id === 'calendar' ? (
                     <>
-                      <button
-                        className="btn btn-secondary"
-                        onClick={() => handleSync(p.id)}
-                        disabled={syncingProvider === p.id}
-                        style={{ fontSize: '12px', padding: '6px 12px', display: 'flex', alignItems: 'center', gap: '4px' }}
-                        title="Sync external entities into persistent memory and knowledge"
-                      >
-                        <RefreshCw size={12} className={syncingProvider === p.id ? 'animate-spin' : ''} />
-                        {syncingProvider === p.id ? 'Syncing...' : 'Sync Now'}
-                      </button>
-                      {p.id === 'calendar' ? (
-                        <button
-                          className="btn btn-secondary"
-                          onClick={() => setActiveTab('calendar')}
-                          style={{ fontSize: '12px', padding: '6px 12px' }}
-                        >
-                          View Schedule
-                        </button>
+                      {isVerified ? (
+                        <>
+                          <button
+                            className="btn btn-secondary"
+                            onClick={() => setActiveTab('calendar')}
+                            style={{ fontSize: '12px', padding: '6px 12px' }}
+                          >
+                            View Schedule
+                          </button>
+                          <button
+                            className="btn btn-ghost"
+                            onClick={() => handleDisconnect(p.id)}
+                            style={{ fontSize: '12px', padding: '6px 12px', color: 'hsl(var(--destructive))' }}
+                          >
+                            Disconnect
+                          </button>
+                        </>
                       ) : (
                         <button
-                          className="btn btn-secondary"
-                          onClick={() => openConfigModal(p, conn)}
-                          style={{ fontSize: '12px', padding: '6px 12px', display: 'flex', alignItems: 'center', gap: '4px' }}
+                          className="btn btn-primary"
+                          onClick={handleConnectCalendar}
+                          style={{ fontSize: '12px', padding: '6px 14px' }}
                         >
-                          <Settings size={12} /> Configure
+                          Initialize Calendar
                         </button>
                       )}
-                      <button
-                        className="btn btn-ghost"
-                        onClick={() => handleDisconnect(p.id)}
-                        style={{ fontSize: '12px', padding: '6px 12px', color: 'hsl(var(--destructive))' }}
-                      >
-                        Disconnect
-                      </button>
                     </>
                   ) : (
-                    <button
-                      className="btn btn-primary"
-                      onClick={() => {
-                        if (p.builtIn) {
-                          handleConnectCalendar();
-                        } else {
-                          openConfigModal(p);
-                        }
-                      }}
-                      style={{ fontSize: '12px', padding: '6px 14px' }}
-                    >
-                      {p.builtIn ? 'Connect' : 'Configure & Connect'}
-                    </button>
+                    <>
+                      {isVerified && (
+                        <button
+                          className="btn btn-secondary"
+                          onClick={() => handleSync(p.id)}
+                          disabled={syncingProvider === p.id}
+                          style={{ fontSize: '12px', padding: '6px 12px', display: 'flex', alignItems: 'center', gap: '4px' }}
+                          title="Sync external entities into persistent memory and knowledge"
+                        >
+                          <RefreshCw size={12} className={syncingProvider === p.id ? 'animate-spin' : ''} />
+                          {syncingProvider === p.id ? 'Syncing...' : 'Sync Now'}
+                        </button>
+                      )}
+                      {(isConfiguredStatus || isVerificationFailed || isVerified) && (
+                        <button
+                          className={`btn ${isConfiguredStatus || isVerificationFailed ? 'btn-primary' : 'btn-secondary'}`}
+                          onClick={() => handleVerifyConnection(p.id)}
+                          disabled={verifyingProvider === p.id}
+                          style={{ fontSize: '12px', padding: '6px 12px', display: 'flex', alignItems: 'center', gap: '4px' }}
+                          title="Perform live credentials test"
+                        >
+                          <ShieldCheck size={12} className={verifyingProvider === p.id ? 'animate-spin' : ''} />
+                          {verifyingProvider === p.id ? 'Verifying...' : isVerificationFailed ? 'Retry Verify' : 'Verify'}
+                        </button>
+                      )}
+                      {conn && !isDisconnected ? (
+                        <>
+                          <button
+                            className="btn btn-secondary"
+                            onClick={() => openConfigModal(p, conn)}
+                            style={{ fontSize: '12px', padding: '6px 12px', display: 'flex', alignItems: 'center', gap: '4px' }}
+                          >
+                            <Settings size={12} /> Configure
+                          </button>
+                          <button
+                            className="btn btn-ghost"
+                            onClick={() => handleDisconnect(p.id)}
+                            style={{ fontSize: '12px', padding: '6px 12px', color: 'hsl(var(--destructive))' }}
+                          >
+                            Disconnect
+                          </button>
+                        </>
+                      ) : (
+                        <button
+                          className="btn btn-primary"
+                          onClick={() => openConfigModal(p, conn)}
+                          style={{ fontSize: '12px', padding: '6px 14px' }}
+                        >
+                          Configure & Connect
+                        </button>
+                      )}
+                    </>
                   )}
                 </div>
               </div>
@@ -976,8 +1062,8 @@ export function Connections({ navigate: _navigate }: { navigate?: (view: string,
                   <input
                     type="password"
                     className="input"
-                    required
-                    placeholder="ghp_xxxxxxxxxxxxxxxxxxxx or github_pat_..."
+                    required={!isConfigured}
+                    placeholder={isConfigured ? '•••••••••••••••• (leave blank to keep current)' : 'ghp_xxxxxxxxxxxxxxxxxxxx or github_pat_...'}
                     value={githubToken}
                     onChange={e => { setGithubToken(e.target.value); setTestResult(null); }}
                     style={{ width: '100%' }}
@@ -995,7 +1081,7 @@ export function Connections({ navigate: _navigate }: { navigate?: (view: string,
                     <input
                       type="password"
                       className="input"
-                      placeholder="xoxb-xxxxxxxxxxxx-xxxxxxxxxxxx"
+                      placeholder={isConfigured ? '•••••••••••••••• (leave blank to keep current)' : 'xoxb-xxxxxxxxxxxx-xxxxxxxxxxxx'}
                       value={slackToken}
                       onChange={e => { setSlackToken(e.target.value); setTestResult(null); }}
                       style={{ width: '100%' }}
@@ -1007,7 +1093,7 @@ export function Connections({ navigate: _navigate }: { navigate?: (view: string,
                     <input
                       type="url"
                       className="input"
-                      placeholder="https://hooks.slack.com/services/..."
+                      placeholder={isConfigured ? '•••••••••••••••• (leave blank to keep current)' : 'https://hooks.slack.com/services/...'}
                       value={slackWebhook}
                       onChange={e => { setSlackWebhook(e.target.value); setTestResult(null); }}
                       style={{ width: '100%' }}
@@ -1035,8 +1121,8 @@ export function Connections({ navigate: _navigate }: { navigate?: (view: string,
                     <input
                       type="password"
                       className="input"
-                      required
-                      placeholder="Application specific password"
+                      required={!isConfigured}
+                      placeholder={isConfigured ? '•••••••••••••••• (leave blank to keep current)' : 'Application specific password'}
                       value={emailPass}
                       onChange={e => { setEmailPass(e.target.value); setTestResult(null); }}
                       style={{ width: '100%' }}
@@ -1076,8 +1162,8 @@ export function Connections({ navigate: _navigate }: { navigate?: (view: string,
                     <input
                       type="password"
                       className="input"
-                      required
-                      placeholder="123456789:ABCdefGhIJKlmNoPQRsTUVwxyZ"
+                      required={!isConfigured}
+                      placeholder={isConfigured ? '•••••••••••••••• (leave blank to keep current)' : '123456789:ABCdefGhIJKlmNoPQRsTUVwxyZ'}
                       value={telegramBotToken}
                       onChange={e => { setTelegramBotToken(e.target.value); setTestResult(null); }}
                       style={{ width: '100%' }}
@@ -1153,7 +1239,7 @@ export function Connections({ navigate: _navigate }: { navigate?: (view: string,
                       <input
                         type="password"
                         className="input"
-                        placeholder="Secret token, key, or credentials"
+                        placeholder={isConfigured ? '•••••••••••••••• (leave blank to keep current)' : 'Secret token, key, or credentials'}
                         value={httpToken}
                         onChange={e => { setHttpToken(e.target.value); setTestResult(null); }}
                         style={{ width: '100%' }}
@@ -1169,8 +1255,8 @@ export function Connections({ navigate: _navigate }: { navigate?: (view: string,
                   <input
                     type="password"
                     className="input"
-                    required
-                    placeholder="secret_xxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
+                    required={!isConfigured}
+                    placeholder={isConfigured ? '•••••••••••••••• (leave blank to keep current)' : 'secret_xxxxxxxxxxxxxxxxxxxxxxxxxxxxx'}
                     value={notionToken}
                     onChange={e => { setNotionToken(e.target.value); setTestResult(null); }}
                     style={{ width: '100%' }}

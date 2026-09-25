@@ -98,10 +98,17 @@ class ConnectionStore:
             cursor.execute("CREATE INDEX IF NOT EXISTS idx_cal_time ON calendar_events(workspace_id, start_time DESC);")
 
             # Safe column migration
-            try:
-                cursor.execute("ALTER TABLE connections ADD COLUMN last_synced_at TEXT DEFAULT NULL;")
-            except Exception:
-                pass
+            for col in (
+                "last_synced_at TEXT DEFAULT NULL",
+                "last_verified_at TEXT DEFAULT NULL",
+                "last_verification_error TEXT DEFAULT NULL",
+                "last_successful_operation TEXT DEFAULT NULL",
+                "verification_method TEXT DEFAULT NULL",
+            ):
+                try:
+                    cursor.execute(f"ALTER TABLE connections ADD COLUMN {col};")
+                except Exception:
+                    pass
 
     def save_connection(self, conn: Connection) -> Connection:
         """Saves or updates a connection."""
@@ -110,8 +117,11 @@ class ConnectionStore:
                 """
                 INSERT OR REPLACE INTO connections (
                     id, workspace_id, provider, account_name, status,
-                    scopes, capabilities, auth_metadata, last_synced_at, created_at, updated_at
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    scopes, capabilities, auth_metadata, last_synced_at,
+                    last_verified_at, last_verification_error,
+                    last_successful_operation, verification_method,
+                    created_at, updated_at
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 (
                     conn.id,
@@ -123,6 +133,10 @@ class ConnectionStore:
                     json.dumps(conn.capabilities or []),
                     json.dumps(conn.auth_metadata or {}),
                     conn.last_synced_at,
+                    conn.last_verified_at,
+                    conn.last_verification_error,
+                    conn.last_successful_operation,
+                    conn.verification_method,
                     conn.created_at,
                     conn.updated_at,
                 ),
@@ -226,6 +240,10 @@ class ConnectionStore:
             capabilities=json.loads(row["capabilities"]) if row["capabilities"] else [],
             auth_metadata=json.loads(row["auth_metadata"]) if row["auth_metadata"] else {},
             last_synced_at=row["last_synced_at"] if "last_synced_at" in keys else None,
+            last_verified_at=row["last_verified_at"] if "last_verified_at" in keys else None,
+            last_verification_error=row["last_verification_error"] if "last_verification_error" in keys else None,
+            last_successful_operation=row["last_successful_operation"] if "last_successful_operation" in keys else None,
+            verification_method=row["verification_method"] if "verification_method" in keys else None,
             created_at=row["created_at"],
             updated_at=row["updated_at"],
         )

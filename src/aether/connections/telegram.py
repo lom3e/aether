@@ -140,13 +140,13 @@ class TelegramConnector(BaseConnector):
         if not token:
             return ConnectorHealth(
                 healthy=False,
-                status=ConnectionStatus.NEEDS_AUTH,
+                status=ConnectionStatus.NOT_CONFIGURED,
                 message="Telegram Bot Token not configured.",
             )
-        valid, msg = self.verify()
+        valid, msg = self.verify(live_check=True)
         return ConnectorHealth(
             healthy=valid,
-            status=ConnectionStatus.CONNECTED if valid else ConnectionStatus.ERROR,
+            status=ConnectionStatus.VERIFIED if valid else ConnectionStatus.VERIFICATION_FAILED,
             message=msg,
         )
 

@@ -283,6 +283,38 @@ class ActionExecutor:
 
         return execution
 
+    def _run_provider_connector(
+        self,
+        provider: str,
+        workspace_id: str,
+        action_id: str,
+        input_data: dict[str, Any],
+        get_connector_fn: Any,
+    ) -> dict[str, Any]:
+        """Dispatches an action to a connector with truthful status enforcement and operation auditing."""
+        if not self.connection_service:
+            raise RuntimeError(f"{provider.capitalize()} connection is not configured in this workspace.")
+        conn = self.connection_service.get_connection(workspace_id, provider)
+        if not conn or conn.status in (ConnectionStatus.NOT_CONFIGURED, ConnectionStatus.DISCONNECTED):
+            raise RuntimeError(f"{provider.capitalize()} connection is not configured in this workspace.")
+        if conn.status == ConnectionStatus.VERIFICATION_FAILED:
+            raise RuntimeError(
+                f"{provider.capitalize()} connection verification failed: {conn.last_verification_error or 'invalid credentials'}. Please update credentials."
+            )
+
+        connector = get_connector_fn()
+        try:
+            res = connector.execute(action_id, input_data)
+            if hasattr(self.connection_service, "record_operation_success"):
+                self.connection_service.record_operation_success(workspace_id, provider, action_id)
+            return res.data
+        except Exception as exc:
+            err_str = str(exc).lower()
+            is_auth = any(t in err_str for t in ("401", "403", "unauthorized", "bad credentials", "invalid token", "auth failed", "authentication failed"))
+            if hasattr(self.connection_service, "record_operation_failure"):
+                self.connection_service.record_operation_failure(workspace_id, provider, action_id, str(exc), is_auth_error=is_auth)
+            raise
+
     def _execute_builtin_action(
         self,
         definition: ActionDefinition,
@@ -295,55 +327,44 @@ class ActionExecutor:
 
         # 1. GitHub connector actions
         if action_id.startswith("github."):
-            if not self.connection_service:
-                raise RuntimeError("GitHub connection is not configured in this workspace.")
-            conn = self.connection_service.get_connection(ws_id, "github")
-            if not conn or conn.status != ConnectionStatus.CONNECTED:
-                raise RuntimeError("GitHub connection is not configured in this workspace.")
-            connector = self.connection_service.get_github_connector(ws_id)
-            res = connector.execute(action_id, inp)
-            return res.data
+            return self._run_provider_connector(
+                "github", ws_id, action_id, inp, lambda: self.connection_service.get_github_connector(ws_id)
+            )
 
         # 2. Email connector actions
         elif action_id.startswith("email."):
-            if not self.connection_service:
-                raise RuntimeError("Email connection is not configured in this workspace.")
-            conn = self.connection_service.get_connection(ws_id, "email")
-            if not conn or conn.status != ConnectionStatus.CONNECTED:
-                raise RuntimeError("Email connection is not configured in this workspace.")
-            connector = self.connection_service.get_email_connector(ws_id)
-            res = connector.execute(action_id, inp)
-            return res.data
+            return self._run_provider_connector(
+                "email", ws_id, action_id, inp, lambda: self.connection_service.get_email_connector(ws_id)
+            )
 
         # 3. Slack connector actions
         elif action_id.startswith("slack."):
-            if not self.connection_service:
-                raise RuntimeError("Slack connection is not configured in this workspace.")
-            conn = self.connection_service.get_connection(ws_id, "slack")
-            if not conn or conn.status != ConnectionStatus.CONNECTED:
-                raise RuntimeError("Slack connection is not configured in this workspace.")
-            connector = self.connection_service.get_slack_connector(ws_id)
-            res = connector.execute(action_id, inp)
-            return res.data
+            return self._run_provider_connector(
+                "slack", ws_id, action_id, inp, lambda: self.connection_service.get_slack_connector(ws_id)
+            )
 
         # 3b. Telegram connector actions
         elif action_id.startswith("telegram."):
-            if not self.connection_service:
-                raise RuntimeError("Telegram connection is not configured in this workspace.")
-            conn = self.connection_service.get_connection(ws_id, "telegram")
-            if not conn or conn.status != ConnectionStatus.CONNECTED:
-                raise RuntimeError("Telegram connection is not configured in this workspace.")
-            connector = self.connection_service.get_telegram_connector(ws_id)
-            res = connector.execute(action_id, inp)
-            return res.data
+            return self._run_provider_connector(
+                "telegram", ws_id, action_id, inp, lambda: self.connection_service.get_telegram_connector(ws_id)
+            )
 
         # 4. HTTP connector actions
         elif action_id.startswith("http."):
             if not self.connection_service:
                 raise RuntimeError("HTTP connection service is not configured.")
             connector = self.connection_service.get_http_connector(ws_id)
-            res = connector.execute(action_id, inp)
-            return res.data
+            try:
+                res = connector.execute(action_id, inp)
+                if hasattr(self.connection_service, "record_operation_success"):
+                    self.connection_service.record_operation_success(ws_id, "http", action_id)
+                return res.data
+            except Exception as exc:
+                err_str = str(exc).lower()
+                is_auth = any(t in err_str for t in ("401", "403", "unauthorized", "auth failed"))
+                if hasattr(self.connection_service, "record_operation_failure"):
+                    self.connection_service.record_operation_failure(ws_id, "http", action_id, str(exc), is_auth_error=is_auth)
+                raise
 
         # 5. Calendar actions
         elif action_id == "calendar.create_event":
@@ -353,13 +374,16 @@ class ActionExecutor:
             if conn and conn.status == ConnectionStatus.DISCONNECTED:
                 raise RuntimeError("Calendar connection is disconnected in this workspace.")
             connector = self.connection_service.get_calendar_connector(ws_id)
-            return connector.create_event(
+            res = connector.create_event(
                 title=inp.get("title", "Untitled Event"),
                 start_time=inp.get("start_time", datetime.now(timezone.utc).isoformat()),
                 end_time=inp.get("end_time"),
                 description=inp.get("description", ""),
                 location=inp.get("location", ""),
             )
+            if hasattr(self.connection_service, "record_operation_success"):
+                self.connection_service.record_operation_success(ws_id, "calendar", action_id)
+            return res
 
         elif action_id == "calendar.list_events":
             if not self.connection_service:
@@ -368,7 +392,10 @@ class ActionExecutor:
             if conn and conn.status == ConnectionStatus.DISCONNECTED:
                 raise RuntimeError("Calendar connection is disconnected in this workspace.")
             connector = self.connection_service.get_calendar_connector(ws_id)
-            return {"events": connector.list_events(limit=int(inp.get("limit", 50)))}
+            events = connector.list_events(limit=int(inp.get("limit", 50)))
+            if hasattr(self.connection_service, "record_operation_success"):
+                self.connection_service.record_operation_success(ws_id, "calendar", action_id)
+            return {"events": events}
 
         # 6. Local file actions
         elif action_id == "files.create_document":
