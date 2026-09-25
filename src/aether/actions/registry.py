@@ -1326,5 +1326,166 @@ class ActionRegistry:
             )
         )
 
+        # Client Work Automation & BI actions
+        self.register(
+            ActionDefinition(
+                id="client.create_profile",
+                name="Create Client Profile",
+                description="Creates or updates a managed client profile with brand voice, SLA, and token budget.",
+                tier=ActionTier.DO,
+                permission_level=ActionPermissionLevel.LOCAL_MUTATION,
+                requires_confirmation=False,
+                provider="client",
+                input_schema={
+                    "type": "object",
+                    "properties": {
+                        "name": {"type": "string"},
+                        "domain": {"type": "string"},
+                        "contact_email": {"type": "string"},
+                        "tone": {"type": "string"},
+                        "target_audience": {"type": "string"},
+                        "monthly_budget_tokens": {"type": "integer"},
+                    },
+                    "required": ["name"],
+                },
+                output_schema={
+                    "type": "object",
+                    "properties": {
+                        "client": {"type": "object"},
+                    },
+                },
+            )
+        )
+
+        self.register(
+            ActionDefinition(
+                id="client.list_profiles",
+                name="List Client Profiles",
+                description="Lists all managed client organizations.",
+                tier=ActionTier.ANSWER,
+                permission_level=ActionPermissionLevel.READ_ONLY,
+                requires_confirmation=False,
+                provider="client",
+                input_schema={
+                    "type": "object",
+                    "properties": {
+                        "status": {"type": "string"},
+                    },
+                },
+                output_schema={
+                    "type": "object",
+                    "properties": {
+                        "clients": {"type": "array"},
+                    },
+                },
+            )
+        )
+
+        self.register(
+            ActionDefinition(
+                id="client.create_review_link",
+                name="Create Client Review Link",
+                description="Generates an external sign-off link and token for client deliverable approval.",
+                tier=ActionTier.ACT,
+                permission_level=ActionPermissionLevel.LOCAL_MUTATION,
+                requires_confirmation=False,
+                provider="client",
+                input_schema={
+                    "type": "object",
+                    "properties": {
+                        "client_id": {"type": "string"},
+                        "deliverable_title": {"type": "string"},
+                        "deliverable_type": {"type": "string"},
+                        "deliverable_payload": {"type": "object"},
+                    },
+                    "required": ["client_id", "deliverable_title"],
+                },
+                output_schema={
+                    "type": "object",
+                    "properties": {
+                        "review": {"type": "object"},
+                    },
+                },
+            )
+        )
+
+        self.register(
+            ActionDefinition(
+                id="client.submit_review",
+                name="Submit Client Review Decision",
+                description="Records client approval or revision request on a review token.",
+                tier=ActionTier.DO,
+                permission_level=ActionPermissionLevel.LOCAL_MUTATION,
+                requires_confirmation=False,
+                provider="client",
+                input_schema={
+                    "type": "object",
+                    "properties": {
+                        "token": {"type": "string"},
+                        "decision": {"type": "string"},  # approved, revision_requested
+                        "feedback": {"type": "string"},
+                    },
+                    "required": ["token", "decision"],
+                },
+                output_schema={
+                    "type": "object",
+                    "properties": {
+                        "review": {"type": "object"},
+                    },
+                },
+            )
+        )
+
+        self.register(
+            ActionDefinition(
+                id="client.generate_report",
+                name="Generate Client Executive Report",
+                description="Compiles an executive weekly/monthly status report for a client.",
+                tier=ActionTier.DO,
+                permission_level=ActionPermissionLevel.LOCAL_MUTATION,
+                requires_confirmation=False,
+                provider="client",
+                input_schema={
+                    "type": "object",
+                    "properties": {
+                        "client_id": {"type": "string"},
+                    },
+                    "required": ["client_id"],
+                },
+                output_schema={
+                    "type": "object",
+                    "properties": {
+                        "report_markdown": {"type": "string"},
+                    },
+                },
+            )
+        )
+
+        self.register(
+            ActionDefinition(
+                id="analytics.get_campaign_bi",
+                name="Get Campaign Business Intelligence",
+                description="Computes aggregated multi-channel performance, estimated reach, and ROI analytics for a campaign.",
+                tier=ActionTier.ANSWER,
+                permission_level=ActionPermissionLevel.READ_ONLY,
+                requires_confirmation=False,
+                provider="analytics",
+                input_schema={
+                    "type": "object",
+                    "properties": {
+                        "campaign_id": {"type": "string"},
+                    },
+                    "required": ["campaign_id"],
+                },
+                output_schema={
+                    "type": "object",
+                    "properties": {
+                        "bi": {"type": "object"},
+                    },
+                },
+            )
+        )
+
+
 
 

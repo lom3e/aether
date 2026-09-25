@@ -435,6 +435,30 @@ class Workspace:
             return ContentRepurposingEngine()
         return self._get_or_create("content_engine", _factory)
 
+    @property
+    def client_db_path(self) -> str:
+        """Path to the persistent client automation database."""
+        if self.data_dir.exists() or self.config_path.exists():
+            return str(self.data_dir / "client.db")
+        return str(self.legacy_aether_dir / "client.db")
+
+    @property
+    def client_store(self):
+        """Return the ClientStore for this workspace."""
+        def _factory():
+            from aether.client.store import ClientStore
+            Path(self.client_db_path).parent.mkdir(parents=True, exist_ok=True)
+            return ClientStore(self.client_db_path)
+        return self._get_or_create("client_store", _factory)
+
+    @property
+    def client_engine(self):
+        """Return the ClientAutomationEngine for this workspace."""
+        def _factory():
+            from aether.client.automation import ClientAutomationEngine
+            return ClientAutomationEngine()
+        return self._get_or_create("client_engine", _factory)
+
 
     @property
     def intelligence(self):

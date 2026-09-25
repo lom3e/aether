@@ -1222,6 +1222,149 @@ class ActionExecutor:
             )
             return {"variants": [v.to_dict() for v in vars_list]}
 
+        elif action_id == "client.create_profile":
+            from aether.workspace.workspace import Workspace
+            from aether.client.models import ClientProfile, BrandStyleGuide
+            ws = None
+            try:
+                ws = Workspace.get(ws_id) if hasattr(Workspace, "get") else None
+                if not ws and self.project_path:
+                    ws = Workspace.get_or_init(self.project_path)
+            except Exception:
+                pass
+            if not ws:
+                raise ValueError("Active workspace required to create client profile.")
+            client_store = getattr(ws, "client_store", None)
+            if not client_store:
+                raise ValueError("Client store not available in workspace.")
+
+            brand_style = BrandStyleGuide(
+                tone=inp.get("tone", "professional"),
+                target_audience=inp.get("target_audience", "B2B Decision Makers"),
+            )
+            profile = ClientProfile(
+                name=inp.get("name", "Client Org"),
+                domain=inp.get("domain", ""),
+                contact_email=inp.get("contact_email", ""),
+                brand_style=brand_style,
+                monthly_budget_tokens=inp.get("monthly_budget_tokens", 10_000_000),
+            )
+            saved = client_store.create_client(profile)
+            return {"client": saved.to_dict()}
+
+        elif action_id == "client.list_profiles":
+            from aether.workspace.workspace import Workspace
+            ws = None
+            try:
+                ws = Workspace.get(ws_id) if hasattr(Workspace, "get") else None
+                if not ws and self.project_path:
+                    ws = Workspace.get_or_init(self.project_path)
+            except Exception:
+                pass
+            if not ws:
+                raise ValueError("Active workspace required to list clients.")
+            client_store = getattr(ws, "client_store", None)
+            if not client_store:
+                return {"clients": []}
+
+            clients = client_store.list_clients(status=inp.get("status"))
+            return {"clients": [c.to_dict() for c in clients]}
+
+        elif action_id == "client.create_review_link":
+            from aether.workspace.workspace import Workspace
+            ws = None
+            try:
+                ws = Workspace.get(ws_id) if hasattr(Workspace, "get") else None
+                if not ws and self.project_path:
+                    ws = Workspace.get_or_init(self.project_path)
+            except Exception:
+                pass
+            if not ws:
+                raise ValueError("Active workspace required to create review link.")
+            client_store = getattr(ws, "client_store", None)
+            client_engine = getattr(ws, "client_engine", None)
+            if not client_store or not client_engine:
+                raise ValueError("Client store or engine not available in workspace.")
+
+            rev = client_engine.create_review_link(
+                client_id=inp.get("client_id", ""),
+                deliverable_title=inp.get("deliverable_title", "Deliverable Batch"),
+                deliverable_type=inp.get("deliverable_type", "content_batch"),
+                deliverable_payload=inp.get("deliverable_payload", {}),
+            )
+            saved_rev = client_store.create_review_link(rev)
+            return {"review": saved_rev.to_dict()}
+
+        elif action_id == "client.submit_review":
+            from aether.workspace.workspace import Workspace
+            from aether.client.models import ReviewStatus
+            ws = None
+            try:
+                ws = Workspace.get(ws_id) if hasattr(Workspace, "get") else None
+                if not ws and self.project_path:
+                    ws = Workspace.get_or_init(self.project_path)
+            except Exception:
+                pass
+            if not ws:
+                raise ValueError("Active workspace required to submit review decision.")
+            client_store = getattr(ws, "client_store", None)
+            if not client_store:
+                raise ValueError("Client store not available in workspace.")
+
+            token = inp.get("token", "")
+            decision_str = inp.get("decision", "approved")
+            status = ReviewStatus.APPROVED if decision_str == "approved" else ReviewStatus.REVISION_REQUESTED
+            feedback = inp.get("feedback", "")
+            updated = client_store.update_review_decision(token, status=status, feedback=feedback)
+            if not updated:
+                raise ValueError(f"Review link with token '{token}' not found.")
+            return {"review": updated.to_dict()}
+
+        elif action_id == "client.generate_report":
+            from aether.workspace.workspace import Workspace
+            ws = None
+            try:
+                ws = Workspace.get(ws_id) if hasattr(Workspace, "get") else None
+                if not ws and self.project_path:
+                    ws = Workspace.get_or_init(self.project_path)
+            except Exception:
+                pass
+            if not ws:
+                raise ValueError("Active workspace required to generate client report.")
+            client_store = getattr(ws, "client_store", None)
+            client_engine = getattr(ws, "client_engine", None)
+            content_store = getattr(ws, "content", None)
+            if not client_store or not client_engine:
+                raise ValueError("Client store or engine not available in workspace.")
+
+            client_id = inp.get("client_id", "")
+            client = client_store.get_client(client_id)
+            if not client:
+                raise ValueError(f"Client '{client_id}' not found.")
+
+            report = client_engine.generate_client_executive_report(client, client_store, content_store)
+            return {"report_markdown": report}
+
+        elif action_id == "analytics.get_campaign_bi":
+            from aether.workspace.workspace import Workspace
+            ws = None
+            try:
+                ws = Workspace.get(ws_id) if hasattr(Workspace, "get") else None
+                if not ws and self.project_path:
+                    ws = Workspace.get_or_init(self.project_path)
+            except Exception:
+                pass
+            if not ws:
+                raise ValueError("Active workspace required for campaign business intelligence.")
+            client_engine = getattr(ws, "client_engine", None)
+            content_store = getattr(ws, "content", None)
+            if not client_engine:
+                raise ValueError("Client engine not available in workspace.")
+
+            campaign_id = inp.get("campaign_id", "")
+            bi = client_engine.generate_campaign_bi(campaign_id, content_store=content_store)
+            return {"bi": bi.to_dict()}
+
         raise ValueError(
             f"Action '{action_id}' is not supported by built-in connectors and has no registered handler."
         )

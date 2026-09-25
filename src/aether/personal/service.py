@@ -723,6 +723,75 @@ class PersonalAgentService:
                 action_args={},
             )
 
+        # 3e21. Client Profile Creation (DO tier)
+        client_create_triggers = [
+            "crea cliente", "nuovo cliente", "create client", "new client",
+            "client profile", "aggiungi cliente", "profilo cliente",
+        ]
+        if any(k in p_lower for k in client_create_triggers):
+            name_match = re.search(r"(?:cliente|client|called|named|chiamato)\s+[\"']?([^\"'\n,]+)[\"']?", prompt, re.IGNORECASE)
+            name = name_match.group(1).strip() if name_match else "Acme Corp"
+            return UserIntent(
+                raw_prompt=effective_prompt,
+                tier=IntentTier.DO,
+                summary=f"Create client organization profile: {name}",
+                action_id="client.create_profile",
+                action_args={
+                    "name": name,
+                    "tone": "professional",
+                    "target_audience": "Enterprise Decision Makers",
+                },
+            )
+
+        # 3e22. Client Review Link Generation (ACT tier)
+        client_review_triggers = [
+            "invia per approvazione", "approvazione cliente", "review link",
+            "link di revisione", "create review link", "client review", "condividi con il cliente",
+        ]
+        if any(k in p_lower for k in client_review_triggers):
+            title_match = re.search(r"(?:deliverable|per|for|asset|title)\s+[\"']?([^\"'\n,]+)[\"']?", prompt, re.IGNORECASE)
+            title = title_match.group(1).strip() if title_match else "Deliverable Review"
+            return UserIntent(
+                raw_prompt=effective_prompt,
+                tier=IntentTier.ACT,
+                summary=f"Create client approval review link: {title}",
+                action_id="client.create_review_link",
+                action_args={
+                    "client_id": "cli-default",
+                    "deliverable_title": title,
+                },
+            )
+
+        # 3e23. Client Executive Report Generation (DO tier)
+        client_report_triggers = [
+            "genera report cliente", "client report", "executive report",
+            "report per il cliente", "client executive report", "report cliente",
+        ]
+        if any(k in p_lower for k in client_report_triggers):
+            return UserIntent(
+                raw_prompt=effective_prompt,
+                tier=IntentTier.DO,
+                summary="Generate executive client progress and ROI report",
+                action_id="client.generate_report",
+                action_args={"client_id": "cli-default"},
+            )
+
+        # 3e24. Campaign Business Intelligence (ANSWER tier)
+        campaign_bi_triggers = [
+            "business intelligence", "roi della campagna", "campaign bi",
+            "metriche campagna", "analytics campagna", "campaign roi", "campaign analytics",
+        ]
+        if any(k in p_lower for k in campaign_bi_triggers):
+            camp_match = re.search(r"(?:campagna|campaign)\s+([a-zA-Z0-9_-]+)", prompt, re.IGNORECASE)
+            campaign_id = camp_match.group(1).strip() if camp_match else "camp-default"
+            return UserIntent(
+                raw_prompt=effective_prompt,
+                tier=IntentTier.ANSWER,
+                summary=f"Query campaign business intelligence and ROI metrics for {campaign_id}",
+                action_id="analytics.get_campaign_bi",
+                action_args={"campaign_id": campaign_id},
+            )
+
 
 
         # 3e. GitHub issue creation (ACT tier - requires safety confirmation)

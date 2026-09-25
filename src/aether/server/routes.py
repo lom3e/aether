@@ -5316,6 +5316,137 @@ async def publish_variant_route(request: Request, variant_id: str):
 
 
 # ===========================================================================
+# CLIENT WORK AUTOMATION & BUSINESS INTELLIGENCE API
+# ===========================================================================
+
+class CreateClientPayload(BaseModel):
+    name: str
+    domain: str = ""
+    contact_email: str = ""
+    tone: str = "professional"
+    target_audience: str = "Enterprise Decision Makers"
+    monthly_budget_tokens: int = 10_000_000
+
+
+class CreateReviewLinkPayload(BaseModel):
+    client_id: str
+    deliverable_title: str
+    deliverable_type: str = "content_batch"
+    deliverable_payload: dict[str, Any] = Field(default_factory=dict)
+    expires_in_days: int = 7
+
+
+class SubmitReviewDecisionPayload(BaseModel):
+    decision: str  # approved, revision_requested
+    feedback: str = ""
+
+
+@router.get("/client/profiles")
+async def list_clients_route(request: Request, status: str | None = None):
+    ws = getattr(request.app.state, "workspace", None)
+    if not ws:
+        raise HTTPException(status_code=503, detail="Workspace not initialized.")
+    clients = ws.client_store.list_clients(status=status)
+    return [c.to_dict() for c in clients]
+
+
+@router.post("/client/profiles")
+async def create_client_route(request: Request, payload: CreateClientPayload):
+    ws = getattr(request.app.state, "workspace", None)
+    if not ws:
+        raise HTTPException(status_code=503, detail="Workspace not initialized.")
+    from aether.client.models import ClientProfile, BrandStyleGuide
+    brand = BrandStyleGuide(tone=payload.tone, target_audience=payload.target_audience)
+    profile = ClientProfile(
+        name=payload.name,
+        domain=payload.domain,
+        contact_email=payload.contact_email,
+        brand_style=brand,
+        monthly_budget_tokens=payload.monthly_budget_tokens,
+    )
+    saved = ws.client_store.create_client(profile)
+    return saved.to_dict()
+
+
+@router.get("/client/profiles/{client_id}")
+async def get_client_route(request: Request, client_id: str):
+    ws = getattr(request.app.state, "workspace", None)
+    if not ws:
+        raise HTTPException(status_code=503, detail="Workspace not initialized.")
+    client = ws.client_store.get_client(client_id)
+    if not client:
+        raise HTTPException(status_code=404, detail="Client not found.")
+    return client.to_dict()
+
+
+@router.post("/client/profiles/{client_id}/reports")
+async def generate_client_report_route(request: Request, client_id: str):
+    ws = getattr(request.app.state, "workspace", None)
+    if not ws:
+        raise HTTPException(status_code=503, detail="Workspace not initialized.")
+    client = ws.client_store.get_client(client_id)
+    if not client:
+        raise HTTPException(status_code=404, detail="Client not found.")
+    report_md = ws.client_engine.generate_client_executive_report(
+        client, ws.client_store, ws.content
+    )
+    return {"client_id": client_id, "report_markdown": report_md}
+
+
+@router.post("/client/reviews")
+async def create_review_link_route(request: Request, payload: CreateReviewLinkPayload):
+    ws = getattr(request.app.state, "workspace", None)
+    if not ws:
+        raise HTTPException(status_code=503, detail="Workspace not initialized.")
+    review = ws.client_engine.create_review_link(
+        client_id=payload.client_id,
+        deliverable_title=payload.deliverable_title,
+        deliverable_type=payload.deliverable_type,
+        deliverable_payload=payload.deliverable_payload,
+        expires_in_days=payload.expires_in_days,
+    )
+    saved = ws.client_store.create_review_link(review)
+    return saved.to_dict()
+
+
+@router.get("/client/reviews/{token}")
+async def get_review_by_token_route(request: Request, token: str):
+    ws = getattr(request.app.state, "workspace", None)
+    if not ws:
+        raise HTTPException(status_code=503, detail="Workspace not initialized.")
+    rev = ws.client_store.get_review_by_token(token)
+    if not rev:
+        raise HTTPException(status_code=404, detail="Review link not found or expired.")
+    return rev.to_dict()
+
+
+@router.post("/client/reviews/{token}/decision")
+async def submit_review_decision_route(
+    request: Request, token: str, payload: SubmitReviewDecisionPayload
+):
+    ws = getattr(request.app.state, "workspace", None)
+    if not ws:
+        raise HTTPException(status_code=503, detail="Workspace not initialized.")
+    from aether.client.models import ReviewStatus
+    status = ReviewStatus.APPROVED if payload.decision.lower() == "approved" else ReviewStatus.REVISION_REQUESTED
+    updated = ws.client_store.update_review_decision(
+        token=token, status=status, feedback=payload.feedback
+    )
+    if not updated:
+        raise HTTPException(status_code=404, detail="Review link not found.")
+    return updated.to_dict()
+
+
+@router.get("/analytics/campaigns/{campaign_id}")
+async def get_campaign_bi_route(request: Request, campaign_id: str):
+    ws = getattr(request.app.state, "workspace", None)
+    if not ws:
+        raise HTTPException(status_code=503, detail="Workspace not initialized.")
+    bi = ws.client_engine.generate_campaign_bi(campaign_id, content_store=ws.content)
+    return bi.to_dict()
+
+
+# ===========================================================================
 # PHASE C — PERSONAL AGENT, ACTIONS, CONNECTIONS, AND ACTIVITY API
 # ===========================================================================
 
