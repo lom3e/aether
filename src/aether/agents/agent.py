@@ -987,7 +987,7 @@ class Agent:
         self,
         task: Task,
         context: ExecutionContext,
-        unit_results: list,
+        unit_results: list | None = None,
     ) -> list[Message]:
         """Build a structured message list for the provider.
 
@@ -1087,11 +1087,15 @@ class Agent:
                 )
                 messages.append(Message(role="system", content=skill_content))
 
+        learned_guidance = self._collect_learned_guidance(task, context)
+        if learned_guidance:
+            messages.append(Message(role="system", content=learned_guidance))
+
         memory_context = self._collect_memory_context(task, context)
         if memory_context:
             messages.append(Message(role="system", content=f"Memory context: {memory_context}"))
 
-        for result in unit_results:
+        for result in (unit_results or []):
             if result.unit_type == UnitType.TOOL and result.output:
                 messages.append(Message(role="system", content=f"Tool result: {result.output}"))
 
@@ -1117,3 +1121,57 @@ class Agent:
                 values.append(f"{key}={value}")
 
         return ", ".join(values) if values else None
+
+    def _collect_learned_guidance(self, task: Task, context: ExecutionContext) -> str | None:
+        """
+        Retrieves active verified lessons relevant to this agent, team, or task
+        to prevent operational regressions and continuously refine execution.
+        """
+        ws = None
+        if self.metadata and "workspace" in self.metadata:
+            ws = self.metadata["workspace"]
+        elif context.metadata and "workspace" in context.metadata:
+            ws = context.metadata["workspace"]
+
+        ws_id = (
+            getattr(ws, "id", None)
+            or (self.metadata.get("workspace_id") if self.metadata else None)
+            or (task.metadata.get("workspace_id") if task.metadata else None)
+            or "default"
+        )
+
+        learning_svc = getattr(ws, "learning", None)
+        if not learning_svc and hasattr(self, "learning_service"):
+            learning_svc = self.learning_service
+
+        if not learning_svc:
+            lstore = getattr(ws, "learning_store", None)
+            if lstore:
+                from aether.learning.service import LearningService
+                learning_svc = LearningService(learning_store=lstore)
+
+        if not learning_svc:
+            return None
+
+        try:
+            team_name = (self.metadata.get("team_name") if self.metadata else None) or (task.metadata.get("team_name") if task.metadata else None)
+            guidance = learning_svc.get_relevant_guidance(
+                workspace_id=ws_id,
+                agent_name=self.name,
+                team_name=team_name,
+                query=task.instruction,
+                limit=5,
+            )
+            if not guidance:
+                return None
+
+            lines = ["## Operational Lessons & Verified Guidelines (Continuous Learning):"]
+            for l in guidance:
+                scope_str = l.scope.value if hasattr(l.scope, "value") else str(l.scope)
+                regr_tag = " [REGRESSION RISK]" if l.is_regression else ""
+                lines.append(f"- [{scope_str.upper()}{regr_tag}] **{l.title}**: {l.lesson_text}")
+            lines.append("CRITICAL: Strictly adhere to these verified operational guidelines.")
+            return "\n".join(lines)
+        except Exception:
+            return None
+

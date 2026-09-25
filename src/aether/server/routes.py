@@ -4868,6 +4868,18 @@ async def distill_lesson_route(
         raise HTTPException(status_code=404, detail=str(exc))
 
 
+@router.get("/learning/insights")
+async def get_learning_insights_route(
+    request: Request,
+    workspace_id: str | None = None,
+):
+    ws = getattr(request.app.state, "workspace", None)
+    if not ws:
+        raise HTTPException(status_code=503, detail="Workspace not initialized.")
+    ws_id = (workspace_id or ws.name).strip()
+    return ws.learning.get_insights(ws_id)
+
+
 # ===========================================================================
 # PHASE C — PERSONAL AGENT, ACTIONS, CONNECTIONS, AND ACTIVITY API
 # ===========================================================================

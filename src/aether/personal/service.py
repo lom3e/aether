@@ -446,6 +446,80 @@ class PersonalAgentService:
                 action_args={"mission_id": mission_id, "format": "markdown"},
             )
 
+        # 3e5. Learning Correction Recording (ACT tier - requires confirmation)
+        learning_correction_triggers = [
+            "correggi l'agente", "correggi agente", "registra correzione", "salva correzione",
+            "record correction", "correct agent", "add correction", "segnala errore agente",
+        ]
+        if any(k in p_lower for k in learning_correction_triggers):
+            agent_match = re.search(r"(?:agente|agent)\s+([a-zA-Z0-9_-]+)", prompt, re.IGNORECASE)
+            agent_name = agent_match.group(1).strip() if agent_match else "worker"
+            # Try to extract the colon or correction part
+            parts = prompt.split(":", 1)
+            if len(parts) > 1:
+                correction_text = parts[1].strip()
+                problem_text = parts[0].strip()
+            else:
+                correction_text = prompt
+                problem_text = f"Correction requested for agent {agent_name}"
+            return UserIntent(
+                raw_prompt=effective_prompt,
+                tier=IntentTier.ACT,
+                summary=f"Record operational correction for agent '{agent_name}'",
+                action_id="learning.record_correction",
+                action_args={
+                    "target_scope": "agent",
+                    "target_identifier": agent_name,
+                    "problem": problem_text,
+                    "correction": correction_text,
+                    "auto_verify": True,
+                },
+            )
+
+        # 3e6. Learning Correction Verification (ACT tier - requires confirmation)
+        learning_verify_triggers = [
+            "verifica la correzione", "approva correzione", "conferma correzione",
+            "verify correction", "approve correction",
+        ]
+        if any(k in p_lower for k in learning_verify_triggers):
+            corr_match = re.search(r"(?:correzione|correction|id)\s+([a-zA-Z0-9_-]+)", prompt, re.IGNORECASE)
+            corr_id = corr_match.group(1).strip() if corr_match else "corr-default"
+            return UserIntent(
+                raw_prompt=effective_prompt,
+                tier=IntentTier.ACT,
+                summary=f"Verify learning correction '{corr_id}'",
+                action_id="learning.verify_correction",
+                action_args={"correction_id": corr_id},
+            )
+
+        # 3e7. Learning Lessons Listing (ANSWER tier - immediate read-only)
+        learning_list_triggers = [
+            "quali lezioni abbiamo appreso", "mostra lezioni", "elenca lezioni", "cosa abbiamo imparato",
+            "list lessons", "show learned lessons", "what have we learned", "lezioni apprese",
+        ]
+        if any(k in p_lower for k in learning_list_triggers):
+            return UserIntent(
+                raw_prompt=effective_prompt,
+                tier=IntentTier.ANSWER,
+                summary="List distilled operational lessons",
+                action_id="learning.list_lessons",
+                action_args={"limit": 20},
+            )
+
+        # 3e8. Learning Insights & Regressions Metrics (ANSWER tier - immediate read-only)
+        learning_insights_triggers = [
+            "statistiche apprendimento", "mostra statistiche apprendimento", "learning insights",
+            "metriche apprendimento", "come sta migliorando", "learning metrics",
+        ]
+        if any(k in p_lower for k in learning_insights_triggers):
+            return UserIntent(
+                raw_prompt=effective_prompt,
+                tier=IntentTier.ANSWER,
+                summary="Calculate workspace learning insights and metrics",
+                action_id="learning.get_insights",
+                action_args={},
+            )
+
 
         # 3e. GitHub issue creation (ACT tier - requires safety confirmation)
         github_issue_triggers = [

@@ -706,6 +706,109 @@ class ActionExecutor:
                 "mission_id": mission_id,
             }
 
+        elif action_id == "learning.record_correction":
+            from aether.workspace.workspace import Workspace
+            ws = None
+            try:
+                ws = Workspace.get(ws_id) if hasattr(Workspace, "get") else None
+                if not ws and self.project_path:
+                    ws = Workspace.get_or_init(self.project_path)
+            except Exception:
+                pass
+            learning_svc = getattr(ws, "learning", None) if ws else None
+            if not learning_svc:
+                raise ValueError("Learning service is not available in current workspace.")
+
+            target_scope = inp.get("target_scope", "workspace")
+            target_id = inp.get("target_identifier") or ("workspace" if target_scope == "workspace" else "default")
+            problem = inp.get("problem", "")
+            correction = inp.get("correction", "")
+            rationale = inp.get("rationale", "")
+            auto_verify = bool(inp.get("auto_verify", False))
+
+            corr, lsn = learning_svc.record_correction(
+                workspace_id=ws_id,
+                target_scope=target_scope,
+                target_identifier=target_id,
+                problem=problem,
+                correction=correction,
+                rationale=rationale,
+                auto_verify=auto_verify,
+            )
+            return {
+                "correction_id": corr.id,
+                "verification_status": corr.verification_status.value if hasattr(corr.verification_status, "value") else str(corr.verification_status),
+                "lesson_id": lsn.id if lsn else None,
+                "problem": corr.problem,
+                "correction": corr.correction,
+            }
+
+        elif action_id == "learning.verify_correction":
+            from aether.workspace.workspace import Workspace
+            ws = None
+            try:
+                ws = Workspace.get(ws_id) if hasattr(Workspace, "get") else None
+                if not ws and self.project_path:
+                    ws = Workspace.get_or_init(self.project_path)
+            except Exception:
+                pass
+            learning_svc = getattr(ws, "learning", None) if ws else None
+            if not learning_svc:
+                raise ValueError("Learning service is not available in current workspace.")
+
+            corr_id = inp.get("correction_id", "")
+            lesson = learning_svc.verify_correction(correction_id=corr_id, workspace_id=ws_id)
+            return {
+                "lesson_id": lesson.id,
+                "title": lesson.title,
+                "verification_status": lesson.verification_status.value if hasattr(lesson.verification_status, "value") else str(lesson.verification_status),
+                "scope": lesson.scope.value if hasattr(lesson.scope, "value") else str(lesson.scope),
+                "lesson_text": lesson.lesson_text,
+            }
+
+        elif action_id == "learning.list_lessons":
+            from aether.workspace.workspace import Workspace
+            ws = None
+            try:
+                ws = Workspace.get(ws_id) if hasattr(Workspace, "get") else None
+                if not ws and self.project_path:
+                    ws = Workspace.get_or_init(self.project_path)
+            except Exception:
+                pass
+            learning_store = getattr(ws, "learning_store", None) if ws else None
+            if not learning_store:
+                raise ValueError("Learning store is not available in current workspace.")
+
+            scope = inp.get("scope")
+            status = inp.get("verification_status")
+            limit = int(inp.get("limit", 50))
+            lessons = learning_store.list_lessons(
+                workspace_id=ws_id,
+                scope=scope,
+                verification_status=status,
+                limit=limit,
+            )
+            return {
+                "lessons": [l.to_dict() for l in lessons],
+                "count": len(lessons),
+            }
+
+        elif action_id == "learning.get_insights":
+            from aether.workspace.workspace import Workspace
+            ws = None
+            try:
+                ws = Workspace.get(ws_id) if hasattr(Workspace, "get") else None
+                if not ws and self.project_path:
+                    ws = Workspace.get_or_init(self.project_path)
+            except Exception:
+                pass
+            learning_svc = getattr(ws, "learning", None) if ws else None
+            if not learning_svc:
+                raise ValueError("Learning service is not available in current workspace.")
+
+            insights = learning_svc.get_insights(workspace_id=ws_id)
+            return insights
+
         raise ValueError(
             f"Action '{action_id}' is not supported by built-in connectors and has no registered handler."
         )

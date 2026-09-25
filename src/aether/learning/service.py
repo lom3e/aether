@@ -568,3 +568,131 @@ class LearningService:
 
         corr.verification_status = LearningVerificationStatus.REJECTED
         return self.learning_store.update_correction(corr)
+
+    def record_correction(
+        self,
+        workspace_id: str,
+        target_scope: LearningScope | str,
+        target_identifier: str,
+        problem: str,
+        correction: str,
+        rationale: str = "",
+        evidence: dict[str, Any] | None = None,
+        source_mission_id: str | None = None,
+        source_execution_id: str | None = None,
+        auto_verify: bool = False,
+    ) -> tuple[Correction, DistilledLesson | None]:
+        """
+        Directly creates an operational correction.
+        If auto_verify is True, immediately verifies the correction and distills it into workforce memory.
+        """
+        if isinstance(target_scope, str):
+            try:
+                target_scope = LearningScope(target_scope.lower())
+            except ValueError:
+                target_scope = LearningScope.WORKSPACE
+
+        clean_prob = sanitize_memory_text(problem)
+        clean_corr = sanitize_memory_text(correction)
+        clean_rat = sanitize_memory_text(rationale)
+
+        corr = Correction(
+            id=f"corr-{uuid.uuid4().hex[:12]}",
+            workspace_id=workspace_id,
+            target_scope=target_scope,
+            target_identifier=target_identifier,
+            problem=clean_prob,
+            correction=clean_corr,
+            rationale=clean_rat,
+            evidence=dict(evidence or {}),
+            source_mission_id=source_mission_id,
+            source_execution_id=source_execution_id,
+            verification_status=LearningVerificationStatus.PROPOSED,
+        )
+        saved_corr, _ = self.learning_store.create_or_get_correction(corr)
+
+        lesson = None
+        if auto_verify:
+            saved_corr.verification_status = LearningVerificationStatus.VERIFIED
+            saved_corr.verified_at = datetime.now(timezone.utc).isoformat()
+            self.learning_store.update_correction(saved_corr)
+            lesson = self.distill_lesson(workspace_id=workspace_id, correction=saved_corr)
+
+        return saved_corr, lesson
+
+    def get_insights(self, workspace_id: str) -> dict[str, Any]:
+        """Calculates comprehensive operational learning insights and metrics for the workspace."""
+        lessons = self.learning_store.list_lessons(workspace_id=workspace_id, limit=500)
+        corrections = self.learning_store.list_corrections(workspace_id=workspace_id, limit=500)
+        events = self.learning_store.list_events(workspace_id=workspace_id, limit=500)
+
+        verified_lessons = [l for l in lessons if l.verification_status == LearningVerificationStatus.VERIFIED]
+        regressions = [l for l in lessons if l.is_regression]
+        pending_corrections = [c for c in corrections if c.verification_status == LearningVerificationStatus.PROPOSED]
+
+        by_scope: dict[str, int] = {}
+        for l in lessons:
+            s_val = l.scope.value if hasattr(l.scope, "value") else str(l.scope)
+            by_scope[s_val] = by_scope.get(s_val, 0) + 1
+
+        recent_lessons = [l.to_dict() for l in lessons[:5]]
+
+        return {
+            "workspace_id": workspace_id,
+            "total_lessons": len(lessons),
+            "verified_lessons": len(verified_lessons),
+            "total_corrections": len(corrections),
+            "pending_corrections": len(pending_corrections),
+            "total_events": len(events),
+            "regressions_detected": len(regressions),
+            "lessons_by_scope": by_scope,
+            "recent_lessons": recent_lessons,
+        }
+
+    def get_relevant_guidance(
+        self,
+        workspace_id: str,
+        agent_name: str | None = None,
+        team_name: str | None = None,
+        query: str | None = None,
+        limit: int = 5,
+    ) -> list[DistilledLesson]:
+        """
+        Retrieves active verified lessons relevant to an agent, team, or task context.
+        Matches agent-specific lessons, team lessons, and workspace-wide principles.
+        """
+        lessons = self.learning_store.list_lessons(
+            workspace_id=workspace_id,
+            verification_status="verified",
+            limit=100,
+        )
+        if not lessons:
+            return []
+
+        matched: list[DistilledLesson] = []
+        q_tokens = set(query.lower().split()) if query else set()
+
+        for l in lessons:
+            s_val = l.scope.value if hasattr(l.scope, "value") else str(l.scope)
+            is_agent_match = bool(s_val == "agent" and agent_name and l.target_identifier and l.target_identifier.lower() == agent_name.lower())
+            is_team_match = bool(s_val == "team" and team_name and l.target_identifier and l.target_identifier.lower() == team_name.lower())
+            is_global_match = s_val in ("workspace", "process")
+
+            keyword_score = 0
+            if q_tokens:
+                text_to_search = f"{l.title} {l.lesson_text}".lower()
+                for token in q_tokens:
+                    if len(token) > 3 and token in text_to_search:
+                        keyword_score += 1
+
+            if is_agent_match or is_team_match or is_global_match or keyword_score > 0:
+                matched.append(l)
+
+        def _sort_key(lsn: DistilledLesson):
+            s_val = lsn.scope.value if hasattr(lsn.scope, "value") else str(lsn.scope)
+            priority = 3 if s_val == "agent" else (2 if s_val == "team" else 1)
+            return (priority, lsn.regression_count, lsn.created_at)
+
+        matched.sort(key=_sort_key, reverse=True)
+        return matched[:limit]
+

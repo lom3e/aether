@@ -799,4 +799,121 @@ class ActionRegistry:
             )
         )
 
+        self.register(
+            ActionDefinition(
+                id="learning.record_correction",
+                name="Record Learning Correction",
+                description="Records an operational or behavioral correction for an agent, team, or workspace to prevent future mistakes.",
+                tier=ActionTier.ACT,
+                permission_level=ActionPermissionLevel.LOCAL_MUTATION,
+                requires_confirmation=True,
+                provider="learning",
+                input_schema={
+                    "type": "object",
+                    "properties": {
+                        "workspace_id": {"type": "string"},
+                        "target_scope": {"type": "string", "enum": ["agent", "team", "workspace", "process"], "default": "workspace"},
+                        "target_identifier": {"type": "string"},
+                        "problem": {"type": "string"},
+                        "correction": {"type": "string"},
+                        "rationale": {"type": "string"},
+                        "auto_verify": {"type": "boolean", "default": False},
+                    },
+                    "required": ["problem", "correction"],
+                },
+                output_schema={
+                    "type": "object",
+                    "properties": {
+                        "correction_id": {"type": "string"},
+                        "verification_status": {"type": "string"},
+                        "lesson_id": {"type": "string"},
+                    },
+                },
+            )
+        )
+
+        self.register(
+            ActionDefinition(
+                id="learning.verify_correction",
+                name="Verify Learning Correction",
+                description="Verifies a proposed operational correction and distills it into durable workforce memory.",
+                tier=ActionTier.ACT,
+                permission_level=ActionPermissionLevel.LOCAL_MUTATION,
+                requires_confirmation=True,
+                provider="learning",
+                input_schema={
+                    "type": "object",
+                    "properties": {
+                        "correction_id": {"type": "string"},
+                        "workspace_id": {"type": "string"},
+                    },
+                    "required": ["correction_id"],
+                },
+                output_schema={
+                    "type": "object",
+                    "properties": {
+                        "lesson_id": {"type": "string"},
+                        "title": {"type": "string"},
+                        "verification_status": {"type": "string"},
+                    },
+                },
+            )
+        )
+
+        self.register(
+            ActionDefinition(
+                id="learning.list_lessons",
+                name="List Distilled Lessons",
+                description="Lists verified operational lessons distilled from corrections and mission quality gates.",
+                tier=ActionTier.ANSWER,
+                permission_level=ActionPermissionLevel.READ_ONLY,
+                requires_confirmation=False,
+                provider="learning",
+                input_schema={
+                    "type": "object",
+                    "properties": {
+                        "workspace_id": {"type": "string"},
+                        "scope": {"type": "string"},
+                        "verification_status": {"type": "string"},
+                        "limit": {"type": "integer", "default": 50},
+                    },
+                },
+                output_schema={
+                    "type": "object",
+                    "properties": {
+                        "lessons": {"type": "array"},
+                        "count": {"type": "integer"},
+                    },
+                },
+            )
+        )
+
+        self.register(
+            ActionDefinition(
+                id="learning.get_insights",
+                name="Get Learning Insights",
+                description="Calculates comprehensive operational learning insights, metrics, and regression stats for the workspace.",
+                tier=ActionTier.ANSWER,
+                permission_level=ActionPermissionLevel.READ_ONLY,
+                requires_confirmation=False,
+                provider="learning",
+                input_schema={
+                    "type": "object",
+                    "properties": {
+                        "workspace_id": {"type": "string"},
+                    },
+                },
+                output_schema={
+                    "type": "object",
+                    "properties": {
+                        "total_lessons": {"type": "integer"},
+                        "verified_lessons": {"type": "integer"},
+                        "pending_corrections": {"type": "integer"},
+                        "regressions_detected": {"type": "integer"},
+                        "lessons_by_scope": {"type": "object"},
+                    },
+                },
+            )
+        )
+
 
