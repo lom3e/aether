@@ -335,15 +335,49 @@ class Workspace:
     def actions(self):
         """Return the ActionExecutor for this workspace."""
         def _factory():
-            from aether.actions.executor import ActionExecutor
+            from aether.actions.executor import ActionExecutor, ActionSafetyPolicy
+            safety_policy = ActionSafetyPolicy(policy_service=self.policy)
             return ActionExecutor(
                 registry=self.action_registry,
                 store=self.action_store,
                 activity_service=self.activity,
                 connection_service=self.connections,
                 project_path=self.project_path or self.root,
+                safety_policy=safety_policy,
             )
         return self._get_or_create("actions", _factory)
+
+    @property
+    def policy_db_path(self) -> str:
+        """Path to the persistent workspace policy database."""
+        if self.data_dir.exists() or self.config_path.exists():
+            return str(self.data_dir / "policies.db")
+        return str(self.legacy_aether_dir / "policies.db")
+
+    @property
+    def policy_store(self):
+        """Return the PolicyStore for this workspace."""
+        def _factory():
+            from aether.policy.store import PolicyStore
+            Path(self.policy_db_path).parent.mkdir(parents=True, exist_ok=True)
+            return PolicyStore(self.policy_db_path)
+        return self._get_or_create("policy_store", _factory)
+
+    @property
+    def policy(self):
+        """Return the PolicyService for this workspace."""
+        def _factory():
+            from aether.policy.service import PolicyService
+            return PolicyService(self.policy_store)
+        return self._get_or_create("policy", _factory)
+
+    @property
+    def model_router(self):
+        """Return the ModelRouter for this workspace."""
+        def _factory():
+            from aether.routing.router import ModelRouter
+            return ModelRouter()
+        return self._get_or_create("model_router", _factory)
 
     @property
     def intelligence(self):

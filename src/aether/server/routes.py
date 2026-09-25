@@ -4880,6 +4880,60 @@ async def get_learning_insights_route(
     return ws.learning.get_insights(ws_id)
 
 
+class UpdatePolicyPayload(BaseModel):
+    workspace_id: str | None = None
+    autopilot_tier: str | None = None
+    monthly_spending_cap: float | None = None
+    max_budget_per_mission: float | None = None
+    prohibited_actions: list[str] | None = None
+    require_quality_gate: bool | None = None
+    allowed_connectors: list[str] | None = None
+
+
+@router.get("/policies")
+async def get_workspace_policy_route(
+    request: Request,
+    workspace_id: str | None = None,
+):
+    ws = getattr(request.app.state, "workspace", None)
+    if not ws:
+        raise HTTPException(status_code=503, detail="Workspace not initialized.")
+    ws_id = (workspace_id or ws.name).strip()
+    return ws.policy.get_policy(ws_id).to_dict()
+
+
+@router.post("/policies")
+async def update_workspace_policy_route(
+    request: Request,
+    payload: UpdatePolicyPayload,
+):
+    ws = getattr(request.app.state, "workspace", None)
+    if not ws:
+        raise HTTPException(status_code=503, detail="Workspace not initialized.")
+    ws_id = (payload.workspace_id or ws.name).strip()
+    updates = payload.model_dump(exclude_unset=True) if hasattr(payload, "model_dump") else payload.dict(exclude_unset=True)
+    updates.pop("workspace_id", None)
+    updated = ws.policy.update_policy(ws_id, updates)
+    return updated.to_dict()
+
+
+@router.get("/routing/status")
+async def get_model_routing_status_route(
+    request: Request,
+    workspace_id: str | None = None,
+):
+    ws = getattr(request.app.state, "workspace", None)
+    if not ws:
+        raise HTTPException(status_code=503, detail="Workspace not initialized.")
+    router = getattr(ws, "model_router", None)
+    if not router:
+        from aether.routing.router import ModelRouter
+        router = ModelRouter()
+    return {
+        "tiers": router.config.to_dict(),
+    }
+
+
 # ===========================================================================
 # PHASE C — PERSONAL AGENT, ACTIONS, CONNECTIONS, AND ACTIVITY API
 # ===========================================================================

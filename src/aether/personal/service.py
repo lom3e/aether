@@ -520,6 +520,58 @@ class PersonalAgentService:
                 action_args={},
             )
 
+        # 3e9. Policy & Autopilot Tier Inspection (ANSWER tier - immediate read-only)
+        policy_get_triggers = [
+            "mostra policy", "visualizza policy", "regole workspace", "show policy",
+            "get policy", "workspace policy", "livello autopilota", "current autopilot tier",
+        ]
+        if any(k in p_lower for k in policy_get_triggers):
+            return UserIntent(
+                raw_prompt=effective_prompt,
+                tier=IntentTier.ANSWER,
+                summary="Retrieve active workspace governance policy and autopilot tier",
+                action_id="policy.get_policy",
+                action_args={},
+            )
+
+        # 3e10. Policy & Autopilot Tier Update (ACT tier - requires confirmation)
+        policy_update_triggers = [
+            "imposta autopilota", "cambia autopilota", "set autopilot", "change autopilot",
+            "aggiorna policy", "update policy", "imposta policy",
+        ]
+        if any(k in p_lower for k in policy_update_triggers):
+            tier = "supervised"
+            if any(t in p_lower for t in ["manual", "manuale"]):
+                tier = "manual"
+            elif any(t in p_lower for t in ["assistito", "assisted"]):
+                tier = "assisted"
+            elif any(t in p_lower for t in ["autonomo", "autonomous"]):
+                tier = "autonomous"
+            elif any(t in p_lower for t in ["supervisionato", "supervised"]):
+                tier = "supervised"
+
+            return UserIntent(
+                raw_prompt=effective_prompt,
+                tier=IntentTier.ACT,
+                summary=f"Update workspace autopilot tier to '{tier}'",
+                action_id="policy.update_policy",
+                action_args={"autopilot_tier": tier},
+            )
+
+        # 3e11. Model Routing Status Inspection (ANSWER tier - immediate read-only)
+        routing_status_triggers = [
+            "routing modelli", "stato routing", "quali modelli sono attivi", "model routing",
+            "model routing status", "show model routing", "model fallback",
+        ]
+        if any(k in p_lower for k in routing_status_triggers):
+            return UserIntent(
+                raw_prompt=effective_prompt,
+                tier=IntentTier.ANSWER,
+                summary="Inspect active model routing tiers and fallback chains",
+                action_id="routing.get_status",
+                action_args={},
+            )
+
 
         # 3e. GitHub issue creation (ACT tier - requires safety confirmation)
         github_issue_triggers = [

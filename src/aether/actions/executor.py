@@ -31,10 +31,30 @@ logger = logging.getLogger(__name__)
 class ActionSafetyPolicy:
     """
     Policy governing auto-approval and mandatory safety confirmation requirements.
-    Prevents unauthorized bypass of external or sensitive state changes.
+    Prevents unauthorized bypass of external or sensitive state changes and enforces Autopilot Tiers.
     """
 
-    def can_auto_approve(self, definition: ActionDefinition, auto_approve_requested: bool) -> bool:
+    def __init__(self, policy_service: Any | None = None) -> None:
+        self.policy_service = policy_service
+
+    def can_auto_approve(
+        self,
+        definition: ActionDefinition,
+        auto_approve_requested: bool,
+        workspace_id: str | None = None,
+        cost: float = 0.0,
+    ) -> bool:
+        if self.policy_service and workspace_id:
+            can_auto, _ = self.policy_service.evaluate_action(
+                workspace_id=workspace_id,
+                action_id=definition.id,
+                permission_level=definition.permission_level,
+                requires_confirmation=definition.requires_confirmation,
+                auto_approve_requested=auto_approve_requested,
+                estimated_cost=cost,
+            )
+            return can_auto
+
         if not auto_approve_requested:
             return False
 
@@ -104,7 +124,33 @@ class ActionExecutor:
             )
         )
 
-        can_auto_run = not requires_gate or self.safety_policy.can_auto_approve(definition, auto_approve)
+        if hasattr(self.safety_policy, "policy_service") and self.safety_policy.policy_service:
+            can_eval, reason = self.safety_policy.policy_service.evaluate_action(
+                workspace_id=workspace_id,
+                action_id=definition.id,
+                permission_level=definition.permission_level,
+                requires_confirmation=definition.requires_confirmation,
+                auto_approve_requested=auto_approve,
+            )
+            if "prohibited" in reason.lower() or "spending cap" in reason.lower():
+                execution.status = ActionExecutionStatus.FAILED
+                execution.error_message = reason
+                self.store.save_execution(execution)
+                if self.activity_service:
+                    self.activity_service.log(
+                        workspace_id=workspace_id,
+                        title=f"Action Blocked: {definition.name}",
+                        description=reason,
+                        category=ActivityCategory.ACTION,
+                        status=ActivityStatus.FAILED,
+                        link_view="home",
+                        link_id=execution.id,
+                        metadata={"action_id": action_id, "execution_id": execution.id, "reason": reason},
+                    )
+                return execution
+            can_auto_run = can_eval
+        else:
+            can_auto_run = not requires_gate or self.safety_policy.can_auto_approve(definition, auto_approve, workspace_id=workspace_id)
 
         if requires_gate and not can_auto_run:
             execution.status = ActionExecutionStatus.PENDING_APPROVAL
@@ -808,6 +854,53 @@ class ActionExecutor:
 
             insights = learning_svc.get_insights(workspace_id=ws_id)
             return insights
+
+        elif action_id == "policy.get_policy":
+            from aether.workspace.workspace import Workspace
+            ws = None
+            try:
+                ws = Workspace.get(ws_id) if hasattr(Workspace, "get") else None
+                if not ws and self.project_path:
+                    ws = Workspace.get_or_init(self.project_path)
+            except Exception:
+                pass
+            policy_svc = getattr(ws, "policy", None) if ws else None
+            if not policy_svc:
+                raise ValueError("Policy service is not available in current workspace.")
+            p = policy_svc.get_policy(ws_id)
+            return p.to_dict()
+
+        elif action_id == "policy.update_policy":
+            from aether.workspace.workspace import Workspace
+            ws = None
+            try:
+                ws = Workspace.get(ws_id) if hasattr(Workspace, "get") else None
+                if not ws and self.project_path:
+                    ws = Workspace.get_or_init(self.project_path)
+            except Exception:
+                pass
+            policy_svc = getattr(ws, "policy", None) if ws else None
+            if not policy_svc:
+                raise ValueError("Policy service is not available in current workspace.")
+            p = policy_svc.update_policy(ws_id, inp)
+            return {"policy": p.to_dict()}
+
+        elif action_id == "routing.get_status":
+            from aether.workspace.workspace import Workspace
+            ws = None
+            try:
+                ws = Workspace.get(ws_id) if hasattr(Workspace, "get") else None
+                if not ws and self.project_path:
+                    ws = Workspace.get_or_init(self.project_path)
+            except Exception:
+                pass
+            router = getattr(ws, "model_router", None) if ws else None
+            if not router:
+                from aether.routing.router import ModelRouter
+                router = ModelRouter()
+            return {
+                "tiers": router.config.to_dict(),
+            }
 
         raise ValueError(
             f"Action '{action_id}' is not supported by built-in connectors and has no registered handler."

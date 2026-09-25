@@ -916,4 +916,83 @@ class ActionRegistry:
             )
         )
 
+        self.register(
+            ActionDefinition(
+                id="policy.get_policy",
+                name="Get Workspace Policy",
+                description="Retrieves active workspace governance policies, autopilot tier, and budget caps.",
+                tier=ActionTier.ANSWER,
+                permission_level=ActionPermissionLevel.READ_ONLY,
+                requires_confirmation=False,
+                provider="policy",
+                input_schema={
+                    "type": "object",
+                    "properties": {
+                        "workspace_id": {"type": "string"},
+                    },
+                },
+                output_schema={
+                    "type": "object",
+                    "properties": {
+                        "autopilot_tier": {"type": "string"},
+                        "monthly_spending_cap": {"type": "number"},
+                        "current_monthly_spend": {"type": "number"},
+                        "prohibited_actions": {"type": "array"},
+                    },
+                },
+            )
+        )
+
+        self.register(
+            ActionDefinition(
+                id="policy.update_policy",
+                name="Update Workspace Policy",
+                description="Updates autopilot tier, prohibited actions, or spending limits for the workspace.",
+                tier=ActionTier.ACT,
+                permission_level=ActionPermissionLevel.LOCAL_MUTATION,
+                requires_confirmation=True,
+                provider="policy",
+                input_schema={
+                    "type": "object",
+                    "properties": {
+                        "workspace_id": {"type": "string"},
+                        "autopilot_tier": {"type": "string", "enum": ["manual", "assisted", "supervised", "autonomous"]},
+                        "monthly_spending_cap": {"type": "number"},
+                        "max_budget_per_mission": {"type": "number"},
+                        "prohibited_actions": {"type": "array", "items": {"type": "string"}},
+                    },
+                },
+                output_schema={
+                    "type": "object",
+                    "properties": {
+                        "policy": {"type": "object"},
+                    },
+                },
+            )
+        )
+
+        self.register(
+            ActionDefinition(
+                id="routing.get_status",
+                name="Get Model Routing Status",
+                description="Inspects active model routing tiers and fallback configurations.",
+                tier=ActionTier.ANSWER,
+                permission_level=ActionPermissionLevel.READ_ONLY,
+                requires_confirmation=False,
+                provider="routing",
+                input_schema={
+                    "type": "object",
+                    "properties": {
+                        "workspace_id": {"type": "string"},
+                    },
+                },
+                output_schema={
+                    "type": "object",
+                    "properties": {
+                        "tiers": {"type": "object"},
+                    },
+                },
+            )
+        )
+
 
