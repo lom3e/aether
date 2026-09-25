@@ -79,20 +79,88 @@ export async function quitAether(): Promise<void> {
   }
 }
 
-export async function notifyDesktop(title: string, options?: NotificationOptions): Promise<void> {
+export interface AetherNotificationOptions {
+  id?: string;
+  body?: string;
+  sound?: string;
+  link_view?: string;
+  link_id?: string;
+  metadata?: Record<string, any>;
+  onClick?: () => void;
+}
+
+export async function consumeNotificationTarget(): Promise<{ view: string; id: string | null } | null> {
+  if (isTauri()) {
+    try {
+      const res = await invoke<[string, string | null] | null>('consume_notification_target');
+      if (res && res[0]) {
+        return { view: res[0], id: res[1] || null };
+      }
+    } catch (e) {
+      console.debug('Error consuming notification target:', e);
+    }
+  }
+  return null;
+}
+
+export async function notifyDesktop(
+  title: string,
+  options?: AetherNotificationOptions
+): Promise<void> {
   if (typeof window === 'undefined') return;
+
+  // 1. Primary path: Native Tauri notification with official app bundle icon and click routing
+  if (isTauri()) {
+    try {
+      await invoke('send_desktop_notification', {
+        payload: {
+          id: options?.id || null,
+          title,
+          body: options?.body || null,
+          sound: options?.sound || 'Glass',
+          link_view: options?.link_view || null,
+          link_id: options?.link_id || null,
+        },
+      });
+      return;
+    } catch (e) {
+      console.warn('Native desktop notification via Tauri IPC failed, falling back:', e);
+    }
+  }
+
+  // 2. Web browser fallback: Web Notification API
   try {
     if ('Notification' in window) {
+      const showWebNotif = () => {
+        const notif = new Notification(title, {
+          body: options?.body,
+          icon: '/logo.png',
+        });
+        notif.onclick = () => {
+          window.focus();
+          if (options?.onClick) {
+            options.onClick();
+          } else if (options?.link_view) {
+            window.dispatchEvent(
+              new CustomEvent('aether:navigate', {
+                detail: { view: options.link_view, id: options.link_id },
+              })
+            );
+          }
+        };
+      };
+
       if (Notification.permission === 'granted') {
-        new Notification(title, options);
+        showWebNotif();
       } else if (Notification.permission !== 'denied') {
         const permission = await Notification.requestPermission();
         if (permission === 'granted') {
-          new Notification(title, options);
+          showWebNotif();
         }
       }
     }
   } catch (e) {
-    console.debug('Desktop notification error:', e);
+    console.debug('Web desktop notification error:', e);
   }
 }
+

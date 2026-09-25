@@ -1,6 +1,7 @@
 // Prevents additional console window on Windows in release, DO NOT REMOVE!!
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
+use std::collections::HashMap;
 use std::io::{BufRead, BufReader};
 use std::path::{Path, PathBuf};
 use std::process::{Child, Command, Stdio};
@@ -10,12 +11,23 @@ use std::time::{Duration, Instant};
 
 use rand::distributions::Alphanumeric;
 use rand::Rng;
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use std::sync::atomic::{AtomicBool, Ordering};
 use tauri::menu::{MenuBuilder, MenuItemBuilder};
 use tauri::tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent};
-use tauri::{AppHandle, Manager, RunEvent, State, WebviewUrl, WebviewWindow, WebviewWindowBuilder};
+use tauri::{AppHandle, Emitter, Manager, RunEvent, State, WebviewUrl, WebviewWindow, WebviewWindowBuilder};
 use tauri_plugin_global_shortcut::{GlobalShortcutExt, Shortcut, ShortcutState};
+use tauri_plugin_notification::NotificationExt;
+
+#[derive(Clone, Deserialize, Serialize, Debug)]
+pub struct DesktopNotificationPayload {
+    pub id: Option<String>,
+    pub title: String,
+    pub body: Option<String>,
+    pub sound: Option<String>,
+    pub link_view: Option<String>,
+    pub link_id: Option<String>,
+}
 
 #[allow(dead_code)]
 struct RuntimeState {
@@ -23,6 +35,8 @@ struct RuntimeState {
     token: String,
     child: Arc<Mutex<Option<Child>>>,
     notifications_muted: Arc<AtomicBool>,
+    recent_notifications: Arc<Mutex<HashMap<String, Instant>>>,
+    last_notification_target: Arc<Mutex<Option<(String, Option<String>)>>>,
 }
 
 #[derive(Serialize)]
@@ -87,6 +101,83 @@ fn is_notifications_muted(state: State<RuntimeState>) -> bool {
 #[tauri::command]
 fn set_notifications_muted(muted: bool, state: State<RuntimeState>) {
     state.notifications_muted.store(muted, Ordering::Relaxed);
+}
+
+#[tauri::command]
+fn send_desktop_notification(
+    app: AppHandle,
+    state: State<RuntimeState>,
+    payload: DesktopNotificationPayload,
+) -> Result<bool, String> {
+    // 1. Check if notifications are muted
+    if state.notifications_muted.load(Ordering::Relaxed) {
+        println!("[Aether Desktop] Notification suppressed (muted): {}", payload.title);
+        return Ok(false);
+    }
+
+    // 2. Deduplication check (10-second window based on ID or title+body)
+    let dedup_key = payload
+        .id
+        .clone()
+        .unwrap_or_else(|| format!("{}:{}", payload.title, payload.body.as_deref().unwrap_or("")));
+
+    {
+        let mut recent = state
+            .recent_notifications
+            .lock()
+            .map_err(|e| format!("Lock error: {}", e))?;
+        let now = Instant::now();
+        // Prune entries older than 30 seconds
+        recent.retain(|_, time| now.duration_since(*time) < Duration::from_secs(30));
+
+        if let Some(last_time) = recent.get(&dedup_key) {
+            if now.duration_since(*last_time) < Duration::from_secs(10) {
+                println!("[Aether Desktop] Duplicate notification suppressed: {}", dedup_key);
+                return Ok(false);
+            }
+        }
+        recent.insert(dedup_key, now);
+    }
+
+    // 3. Record navigation target if provided
+    if let Some(ref view) = payload.link_view {
+        if let Ok(mut target) = state.last_notification_target.lock() {
+            *target = Some((view.clone(), payload.link_id.clone()));
+        }
+    }
+
+    // 4. Send native OS notification via tauri-plugin-notification
+    let mut builder = app.notification().builder();
+    builder = builder.title(&payload.title);
+
+    if let Some(ref body) = payload.body {
+        builder = builder.body(body);
+    }
+
+    let sound = payload.sound.unwrap_or_else(|| "Glass".to_string());
+    if !sound.is_empty() && sound != "none" {
+        builder = builder.sound(sound);
+    }
+
+    match builder.show() {
+        Ok(_) => {
+            println!("[Aether Desktop] Native notification dispatched: {}", payload.title);
+            Ok(true)
+        }
+        Err(err) => {
+            eprintln!("[Aether Desktop] Failed to show native notification: {:?}", err);
+            Err(err.to_string())
+        }
+    }
+}
+
+#[tauri::command]
+fn consume_notification_target(state: State<RuntimeState>) -> Option<(String, Option<String>)> {
+    if let Ok(mut target) = state.last_notification_target.lock() {
+        target.take()
+    } else {
+        None
+    }
 }
 
 #[tauri::command]
@@ -551,13 +642,18 @@ fn main() {
 
     let notifications_muted_for_state = Arc::clone(&notifications_muted);
     let notifications_muted_for_tray = Arc::clone(&notifications_muted);
+    let recent_notifications = Arc::new(Mutex::new(HashMap::new()));
+    let last_notification_target = Arc::new(Mutex::new(None));
 
     let app = tauri::Builder::default()
+        .plugin(tauri_plugin_notification::init())
         .manage(RuntimeState {
             port,
             token: token.clone(),
             child: Arc::clone(&child_arc),
             notifications_muted: notifications_muted_for_state,
+            recent_notifications,
+            last_notification_target,
         })
         .invoke_handler(tauri::generate_handler![
             get_runtime_info,
@@ -568,6 +664,8 @@ fn main() {
             minimize_to_companion,
             is_notifications_muted,
             set_notifications_muted,
+            send_desktop_notification,
+            consume_notification_target,
             quit_aether,
         ])
         .setup(move |app| {
@@ -710,7 +808,22 @@ fn main() {
         .build(tauri::generate_context!())
         .expect("Error building Tauri application");
 
-    app.run(move |_app_handle, event| match event {
+    app.run(move |app_handle, event| match event {
+        RunEvent::Reopen { has_visible_windows, .. } => {
+            println!("[Aether Desktop] macOS Reopen event (has_visible_windows={}). Focusing main window...", has_visible_windows);
+            show_main_window_action(&app_handle);
+            if let Some(state) = app_handle.try_state::<RuntimeState>() {
+                if let Ok(mut target_guard) = state.last_notification_target.lock() {
+                    if let Some((view, id)) = target_guard.take() {
+                        println!("[Aether Desktop] Dispatched notification target navigation on reopen: view={}, id={:?}", view, id);
+                        let _ = app_handle.emit("navigate_view", serde_json::json!({
+                            "view": view,
+                            "id": id,
+                        }));
+                    }
+                }
+            }
+        }
         RunEvent::Exit | RunEvent::ExitRequested { .. } => {
             graceful_shutdown(port, &token_clone, &child_arc_clone);
         }

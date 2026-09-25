@@ -439,7 +439,14 @@ export function AmbientCompanion({
           const data = JSON.parse(e.data);
           if (data && data.title) {
             notifyDesktop(data.title, {
+              id: data.id,
               body: data.message || "Aether Notification",
+              link_view: data.link_view,
+              link_id: data.link_id,
+              sound: data.metadata?.sound || "Glass",
+              onClick: () => {
+                showMainWindow();
+              },
             });
           }
         } catch {

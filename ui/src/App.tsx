@@ -18,7 +18,8 @@ import { ToastProvider, ToastContext } from './toast';
 import { LanguageProvider } from './i18n';
 import { ThemeProvider } from './theme';
 import { apiUrl } from './api';
-import { isCompanionSurface } from './desktop';
+import { isCompanionSurface, isTauri, notifyDesktop, consumeNotificationTarget } from './desktop';
+import { listen } from '@tauri-apps/api/event';
 import { AmbientCompanion } from './AmbientCompanion';
 import { WorkflowBuilder } from './WorkflowBuilder';
 import { ContentRepurposing } from './ContentRepurposing';
@@ -184,10 +185,103 @@ function MainApp() {
     };
   }, [workspaceName, registerShortcut, openShortcutsModal, closeShortcutsModal]);
 
-  const navigate = (view: string, params: any = null) => {
+  const navigate = useCallback((view: string, params: any = null) => {
+    if (view === 'chat' && params && typeof params === 'string') {
+      setActiveConversationId(params);
+    }
     setCurrentView(view);
     setViewParams(params);
-  };
+  }, []);
+
+  // Listen for Tauri IPC navigation events (triggered when clicking native macOS notifications or dock reopen)
+  useEffect(() => {
+    let unlisten: (() => void) | undefined;
+    if (isTauri()) {
+      listen<{ view: string; id?: string }>('navigate_view', (event) => {
+        console.log('[Aether App] navigate_view from Tauri:', event.payload);
+        if (event.payload && event.payload.view) {
+          navigate(event.payload.view, event.payload.id || null);
+        }
+      }).then((fn) => {
+        unlisten = fn;
+      }).catch(console.error);
+    }
+    return () => {
+      if (unlisten) unlisten();
+    };
+  }, [navigate]);
+
+  // Check and consume pending notification target on window focus
+  useEffect(() => {
+    const checkPending = async () => {
+      const target = await consumeNotificationTarget();
+      if (target && target.view) {
+        console.log('[Aether App] Consumed pending notification target:', target);
+        navigate(target.view, target.id);
+      }
+    };
+    window.addEventListener('focus', checkPending);
+    checkPending();
+    return () => window.removeEventListener('focus', checkPending);
+  }, [navigate]);
+
+  // Listen for DOM custom navigation events (web fallback)
+  useEffect(() => {
+    const handleCustomNav = (e: any) => {
+      if (e.detail && e.detail.view) {
+        navigate(e.detail.view, e.detail.id || null);
+      }
+    };
+    window.addEventListener('aether:navigate', handleCustomNav);
+    return () => window.removeEventListener('aether:navigate', handleCustomNav);
+  }, [navigate]);
+
+  // Global SSE subscription for notifications
+  useEffect(() => {
+    if (!workspaceName) return;
+    let eventSource: EventSource | null = null;
+    try {
+      const token = (typeof window !== 'undefined' && (window as any).__AETHER_SESSION_TOKEN__) || '';
+      const tokenQuery = token ? `&token=${encodeURIComponent(token)}` : '';
+      eventSource = new EventSource(
+        apiUrl(`/api/personal/events?workspace_id=${encodeURIComponent(workspaceName)}${tokenQuery}`)
+      );
+
+      eventSource.addEventListener('notification', (e: MessageEvent) => {
+        try {
+          const notif = JSON.parse(e.data);
+          if (notif && notif.title) {
+            showToast(
+              `${notif.title}: ${notif.message || ''}`,
+              notif.priority === 'high' ? 'warning' : 'info'
+            );
+            notifyDesktop(notif.title, {
+              id: notif.id,
+              body: notif.message,
+              link_view: notif.link_view,
+              link_id: notif.link_id,
+              sound: notif.metadata?.sound || 'Glass',
+              onClick: () => {
+                if (notif.link_view) {
+                  navigate(notif.link_view, notif.link_id);
+                }
+              },
+            });
+          }
+        } catch (err) {
+          console.debug('Error parsing SSE notification event:', err);
+        }
+      });
+    } catch (err) {
+      console.debug('Global notification SSE connection error:', err);
+    }
+
+    return () => {
+      if (eventSource) {
+        eventSource.close();
+      }
+    };
+  }, [workspaceName, showToast, navigate]);
 
   const handleSelectConversation = (id: string, tempTitle?: string) => {
     setActiveConversationId(id);

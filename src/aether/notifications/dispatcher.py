@@ -186,6 +186,15 @@ class NotificationDispatcher:
         )
 
         start_t = time.perf_counter()
+        if c_type == ChannelType.DESKTOP and self.event_hub:
+            try:
+                self.event_hub.publish(
+                    workspace_id=workspace_id,
+                    event_type="notification",
+                    data=test_notif.to_dict(),
+                )
+            except Exception:
+                pass
         status, detail = self._deliver_to_channel(channel, test_notif, is_test=True)
         latency = (time.perf_counter() - start_t) * 1000.0
 
@@ -293,11 +302,20 @@ class NotificationDispatcher:
         sound_enabled = channel.config.get("sound_enabled", True)
         sound_name = channel.config.get("sound", "Glass") if sound_enabled else None
 
+        # 1. When running with Event Hub (Aether Desktop app runtime),
+        # notification is dispatched directly to the desktop frontend via SSE/Tauri IPC.
+        # This completely avoids executing osascript, ensuring the official Aether app icon,
+        # correct sound, and direct in-app focus/navigation without any file picker dialog.
+        if self.event_hub is not None:
+            return DeliveryStatus.SENT, "Delivered to native desktop surface via Event Hub"
+
         if sys.platform == "darwin":
             # Sanitize quotes for AppleScript
             clean_title = title.replace("\\", "\\\\").replace('"', '\\"').replace("'", "’")
             clean_msg = message.replace("\\", "\\\\").replace('"', '\\"').replace("'", "’")
-            script = f'display notification "{clean_msg}" with title "{clean_title}" subtitle "Aether Notification Fabric"'
+            # Target System Events specifically so macOS never attributes this to Script Editor
+            # nor opens an open-file dialog on banner click.
+            script = f'tell application "System Events" to display notification "{clean_msg}" with title "{clean_title}" subtitle "Aether Notification Fabric"'
             if sound_name:
                 script += f' sound name "{sound_name}"'
 
@@ -310,7 +328,7 @@ class NotificationDispatcher:
                     check=False,
                 )
                 if proc.returncode == 0:
-                    return DeliveryStatus.SENT, "Desktop banner displayed via osascript"
+                    return DeliveryStatus.SENT, "Desktop banner displayed via System Events"
                 return DeliveryStatus.FAILED, f"osascript returned {proc.returncode}: {proc.stderr.strip()}"
             except Exception as e:
                 return DeliveryStatus.FAILED, f"macOS notification failed: {e}"
