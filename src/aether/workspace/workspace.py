@@ -459,6 +459,30 @@ class Workspace:
             return ClientAutomationEngine()
         return self._get_or_create("client_engine", _factory)
 
+    @property
+    def benchmarking_db_path(self) -> str:
+        """Path to the persistent workforce benchmarking database."""
+        if self.data_dir.exists() or self.config_path.exists():
+            return str(self.data_dir / "benchmarking.db")
+        return str(self.legacy_aether_dir / "benchmarking.db")
+
+    @property
+    def benchmarking_store(self):
+        """Return the BenchmarkingStore for this workspace."""
+        def _factory():
+            from aether.benchmarking.store import BenchmarkingStore
+            Path(self.benchmarking_db_path).parent.mkdir(parents=True, exist_ok=True)
+            return BenchmarkingStore(self.benchmarking_db_path)
+        return self._get_or_create("benchmarking_store", _factory)
+
+    @property
+    def benchmarking_engine(self):
+        """Return the WorkforceEvolutionEngine for this workspace."""
+        def _factory():
+            from aether.benchmarking.engine import WorkforceEvolutionEngine
+            return WorkforceEvolutionEngine(store=self.benchmarking_store)
+        return self._get_or_create("benchmarking_engine", _factory)
+
 
     @property
     def intelligence(self):

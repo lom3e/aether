@@ -1,11 +1,14 @@
 import { useState, useEffect } from 'react';
-import { Users, Brain, GraduationCap, Activity, Puzzle, Bot } from 'lucide-react';
+import { Users, Brain, GraduationCap, Activity, Puzzle, Bot, Award } from 'lucide-react';
 import { Teams } from './Teams';
 import { Agents } from './Agents';
 import { Memory } from './Memory';
 import { Learning } from './Learning';
 import { WorkforceHealthView } from './WorkforceHealthView';
 import { Skills } from './Skills';
+import { BenchmarkingView } from './BenchmarkingView';
+
+
 
 interface WorkforceHubProps {
   initialTab?: string;
@@ -135,6 +138,24 @@ export function WorkforceHub({ initialTab = 'teams', navigate = () => {} }: Work
         >
           <Activity size={15} /> Workforce Health
         </button>
+
+        <button
+          data-testid="tab-benchmarking"
+          className={`btn btn-ghost ${currentTab === 'benchmarking' ? 'active' : ''}`}
+          onClick={() => setCurrentTab('benchmarking')}
+          style={{
+            borderBottom: currentTab === 'benchmarking' ? '2px solid hsl(var(--primary))' : 'none',
+            borderRadius: 0,
+            padding: '8px 14px',
+            fontSize: '13px',
+            fontWeight: 600,
+            display: 'flex',
+            alignItems: 'center',
+            gap: '6px',
+          }}
+        >
+          <Award size={15} /> Evolution & Benchmarks
+        </button>
       </div>
 
       {/* Tab Content */}
@@ -145,7 +166,9 @@ export function WorkforceHub({ initialTab = 'teams', navigate = () => {} }: Work
         {currentTab === 'learning' && <Learning />}
         {currentTab === 'health' && <WorkforceHealthView />}
         {currentTab === 'skills' && <Skills navigate={navigate} />}
+        {currentTab === 'benchmarking' && <BenchmarkingView />}
       </div>
     </div>
   );
 }
+

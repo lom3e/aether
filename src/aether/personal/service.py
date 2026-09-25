@@ -792,7 +792,67 @@ class PersonalAgentService:
                 action_args={"campaign_id": campaign_id},
             )
 
+        # 3e25. Workforce Benchmarking Suite (DO tier)
+        benchmarking_run_triggers = [
+            "valuta agente", "run benchmark", "benchmark workforce", "testa performance",
+            "benchmark agente", "valuta workforce", "esegui benchmark", "avvia benchmark",
+        ]
+        if any(k in p_lower for k in benchmarking_run_triggers):
+            target_match = re.search(r"(?:agente|agent|workforce|target)\s+[\"']?([a-zA-Z0-9_-]+)[\"']?", prompt, re.IGNORECASE)
+            target_id = target_match.group(1).strip() if target_match else "researcher"
+            is_wf = "workforce" in p_lower
+            return UserIntent(
+                raw_prompt=effective_prompt,
+                tier=IntentTier.DO,
+                summary=f"Run performance benchmark suite for {'workforce' if is_wf else 'agent'} '{target_id}'",
+                action_id="benchmarking.run_suite",
+                action_args={
+                    "target_type": "workforce" if is_wf else "agent",
+                    "target_id": target_id,
+                },
+            )
 
+        # 3e26. Benchmarking Leaderboard (ANSWER tier)
+        benchmarking_leaderboard_triggers = [
+            "classifica agenti", "benchmark leaderboard", "mostra leaderboard",
+            "classifica workforce", "leaderboard agenti", "leaderboard benchmark", "leaderboard",
+        ]
+        if any(k in p_lower for k in benchmarking_leaderboard_triggers):
+            return UserIntent(
+                raw_prompt=effective_prompt,
+                tier=IntentTier.ANSWER,
+                summary="Retrieve workforce and agent performance benchmark leaderboard",
+                action_id="benchmarking.get_leaderboard",
+                action_args={},
+            )
+
+        # 3e27. Workforce Evolution Proposals (ANSWER tier)
+        benchmarking_proposals_triggers = [
+            "ottimizzazioni agenti", "evolution proposals", "proposte di evoluzione",
+            "proposte evoluzione", "ottimizza workforce", "proposte ottimizzazione", "proposte miglioramento",
+        ]
+        if any(k in p_lower for k in benchmarking_proposals_triggers):
+            return UserIntent(
+                raw_prompt=effective_prompt,
+                tier=IntentTier.ANSWER,
+                summary="List autonomous evolution proposals for workforce and agents",
+                action_id="benchmarking.list_proposals",
+                action_args={},
+            )
+
+        # 3e28. Benchmarking Regression Alerts (ANSWER tier)
+        benchmarking_alerts_triggers = [
+            "regression alerts", "allarmi regressione", "allerte regressione",
+            "warning regressione", "errori prestazioni agenti", "allerte benchmark",
+        ]
+        if any(k in p_lower for k in benchmarking_alerts_triggers):
+            return UserIntent(
+                raw_prompt=effective_prompt,
+                tier=IntentTier.ANSWER,
+                summary="Retrieve active performance regression alerts and degradation warnings",
+                action_id="benchmarking.list_regression_alerts",
+                action_args={},
+            )
 
         # 3e. GitHub issue creation (ACT tier - requires safety confirmation)
         github_issue_triggers = [

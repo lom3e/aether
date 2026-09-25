@@ -1365,6 +1365,140 @@ class ActionExecutor:
             bi = client_engine.generate_campaign_bi(campaign_id, content_store=content_store)
             return {"bi": bi.to_dict()}
 
+        elif action_id == "benchmarking.run_suite":
+            from aether.workspace.workspace import Workspace
+            from aether.benchmarking.models import BenchmarkTargetType
+            ws = None
+            try:
+                ws = Workspace.get(ws_id) if hasattr(Workspace, "get") else None
+                if not ws and self.project_path:
+                    ws = Workspace.get_or_init(self.project_path)
+            except Exception:
+                pass
+            if not ws:
+                raise ValueError("Active workspace required to run benchmark suite.")
+            bm_store = getattr(ws, "benchmarking_store", None)
+            bm_engine = getattr(ws, "benchmarking_engine", None)
+            if not bm_store or not bm_engine:
+                raise ValueError("Benchmarking store or engine not available in workspace.")
+
+            target_id = inp.get("target_id") or inp.get("target_name") or "researcher"
+            target_name = inp.get("target_name") or inp.get("target_id") or "researcher"
+            target_type_str = inp.get("target_type", "agent")
+            target_type = BenchmarkTargetType(target_type_str) if target_type_str in [t.value for t in BenchmarkTargetType] else BenchmarkTargetType.AGENT
+            suite_name = inp.get("suite_name", "general_capability_v1")
+
+            saved_run, alerts, proposals = bm_engine.evaluate_target(
+                target_id=target_id,
+                target_name=target_name,
+                target_type=target_type,
+                suite_name=suite_name,
+                latency_ms=inp.get("latency_ms"),
+                tokens_used=inp.get("tokens_used"),
+                error_rate=inp.get("error_rate"),
+                quality_score=inp.get("quality_score"),
+                safety_compliance=inp.get("safety_compliance"),
+            )
+
+            return {
+                "run": saved_run.to_dict(),
+                "benchmark_run": saved_run.to_dict(),
+                "alerts": [a.to_dict() for a in alerts],
+                "proposals": [p.to_dict() for p in proposals],
+                "proposal": proposals[0].to_dict() if proposals else None,
+            }
+
+        elif action_id == "benchmarking.get_leaderboard":
+            from aether.workspace.workspace import Workspace
+            ws = None
+            try:
+                ws = Workspace.get(ws_id) if hasattr(Workspace, "get") else None
+                if not ws and self.project_path:
+                    ws = Workspace.get_or_init(self.project_path)
+            except Exception:
+                pass
+            if not ws:
+                raise ValueError("Active workspace required for benchmark leaderboard.")
+            bm_store = getattr(ws, "benchmarking_store", None)
+            if not bm_store:
+                return {"leaderboard": []}
+
+            target_type = inp.get("target_type")
+            limit = int(inp.get("limit", 20))
+            runs = bm_store.list_runs(target_type=target_type, limit=limit)
+            sorted_runs = sorted(runs, key=lambda r: r.overall_score, reverse=True)
+            return {"leaderboard": [r.to_dict() for r in sorted_runs]}
+
+        elif action_id == "benchmarking.list_proposals":
+            from aether.workspace.workspace import Workspace
+            ws = None
+            try:
+                ws = Workspace.get(ws_id) if hasattr(Workspace, "get") else None
+                if not ws and self.project_path:
+                    ws = Workspace.get_or_init(self.project_path)
+            except Exception:
+                pass
+            if not ws:
+                raise ValueError("Active workspace required to list evolution proposals.")
+            bm_store = getattr(ws, "benchmarking_store", None)
+            if not bm_store:
+                return {"proposals": []}
+
+            props = bm_store.list_proposals(
+                target_agent=inp.get("target_agent"),
+                status=inp.get("status"),
+            )
+            return {"proposals": [p.to_dict() for p in props]}
+
+        elif action_id == "benchmarking.apply_proposal":
+            from aether.workspace.workspace import Workspace
+            from aether.benchmarking.models import ProposalStatus
+            ws = None
+            try:
+                ws = Workspace.get(ws_id) if hasattr(Workspace, "get") else None
+                if not ws and self.project_path:
+                    ws = Workspace.get_or_init(self.project_path)
+            except Exception:
+                pass
+            if not ws:
+                raise ValueError("Active workspace required to apply evolution proposal.")
+            bm_store = getattr(ws, "benchmarking_store", None)
+            bm_engine = getattr(ws, "benchmarking_engine", None)
+            if not bm_store or not bm_engine:
+                raise ValueError("Benchmarking store or engine not available in workspace.")
+
+            proposal_id = inp.get("proposal_id", "")
+            prop = bm_store.get_proposal(proposal_id)
+            if not prop:
+                raise ValueError(f"Proposal '{proposal_id}' not found.")
+
+            applied = bm_engine.apply_evolution_proposal(prop, ws)
+            updated = bm_store.update_proposal_status(proposal_id, ProposalStatus.APPLIED)
+            return {
+                "proposal": updated.to_dict() if updated else prop.to_dict(),
+                "applied": applied,
+            }
+
+        elif action_id == "benchmarking.list_regression_alerts":
+            from aether.workspace.workspace import Workspace
+            ws = None
+            try:
+                ws = Workspace.get(ws_id) if hasattr(Workspace, "get") else None
+                if not ws and self.project_path:
+                    ws = Workspace.get_or_init(self.project_path)
+            except Exception:
+                pass
+            if not ws:
+                raise ValueError("Active workspace required to list regression alerts.")
+            bm_store = getattr(ws, "benchmarking_store", None)
+            if not bm_store:
+                return {"alerts": []}
+
+            target_id = inp.get("target_id")
+            unresolved = bool(inp.get("unresolved_only", False))
+            alerts = bm_store.list_alerts(target_id=target_id, unresolved_only=unresolved)
+            return {"alerts": [a.to_dict() for a in alerts]}
+
         raise ValueError(
             f"Action '{action_id}' is not supported by built-in connectors and has no registered handler."
         )

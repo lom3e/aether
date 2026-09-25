@@ -5447,6 +5447,127 @@ async def get_campaign_bi_route(request: Request, campaign_id: str):
 
 
 # ===========================================================================
+# WORKFORCE BENCHMARKING & EVOLUTION API
+# ===========================================================================
+
+class RunBenchmarkPayload(BaseModel):
+    target_type: str = "agent"
+    target_id: str = "researcher"
+    target_name: str | None = None
+    suite_name: str = "standard_eval"
+    test_suite: list[str] | None = None
+    latency_ms: float | None = None
+    tokens_used: int | None = None
+    error_rate: float | None = None
+    quality_score: float | None = None
+    safety_compliance: float | None = None
+    status: str = "completed"
+    metadata: dict[str, Any] = Field(default_factory=dict)
+
+
+@router.post("/benchmarking/run")
+async def run_benchmark_route(request: Request, payload: RunBenchmarkPayload):
+    ws = getattr(request.app.state, "workspace", None)
+    if not ws:
+        raise HTTPException(status_code=503, detail="Workspace not initialized.")
+    run, alerts, proposals = ws.benchmarking_engine.evaluate_target(
+        target_type=payload.target_type,
+        target_id=payload.target_id,
+        target_name=payload.target_name,
+        suite_name=payload.suite_name,
+        test_suite=payload.test_suite,
+        latency_ms=payload.latency_ms,
+        tokens_used=payload.tokens_used,
+        error_rate=payload.error_rate,
+        quality_score=payload.quality_score,
+        safety_compliance=payload.safety_compliance,
+        status=payload.status,
+        metadata=payload.metadata,
+    )
+    return {
+        "benchmark_run": run.to_dict(),
+        "alerts": [a.to_dict() for a in alerts],
+        "proposals": [p.to_dict() for p in proposals],
+    }
+
+
+@router.get("/benchmarking/runs")
+async def list_benchmark_runs_route(
+    request: Request,
+    target_id: str | None = None,
+    target_type: str | None = None,
+    limit: int = 50,
+):
+    ws = getattr(request.app.state, "workspace", None)
+    if not ws:
+        raise HTTPException(status_code=503, detail="Workspace not initialized.")
+    runs = ws.benchmarking_store.list_runs(
+        target_id=target_id, target_type=target_type, limit=limit
+    )
+    return [r.to_dict() for r in runs]
+
+
+@router.get("/benchmarking/leaderboard")
+async def get_benchmarking_leaderboard_route(
+    request: Request, target_type: str | None = None
+):
+    ws = getattr(request.app.state, "workspace", None)
+    if not ws:
+        raise HTTPException(status_code=503, detail="Workspace not initialized.")
+    return ws.benchmarking_engine.get_leaderboard(target_type=target_type)
+
+
+@router.get("/benchmarking/proposals")
+async def list_evolution_proposals_route(
+    request: Request, target_agent: str | None = None, status: str | None = None
+):
+    ws = getattr(request.app.state, "workspace", None)
+    if not ws:
+        raise HTTPException(status_code=503, detail="Workspace not initialized.")
+    props = ws.benchmarking_store.list_proposals(
+        target_agent=target_agent, status=status
+    )
+    return [p.to_dict() for p in props]
+
+
+@router.post("/benchmarking/proposals/{proposal_id}/apply")
+async def apply_evolution_proposal_route(request: Request, proposal_id: str):
+    ws = getattr(request.app.state, "workspace", None)
+    if not ws:
+        raise HTTPException(status_code=503, detail="Workspace not initialized.")
+    proposal = ws.benchmarking_engine.apply_proposal(proposal_id)
+    if not proposal:
+        raise HTTPException(status_code=404, detail="Proposal not found.")
+    return proposal.to_dict()
+
+
+@router.get("/benchmarking/alerts")
+async def list_regression_alerts_route(
+    request: Request,
+    target_id: str | None = None,
+    unresolved_only: bool = False,
+):
+    ws = getattr(request.app.state, "workspace", None)
+    if not ws:
+        raise HTTPException(status_code=503, detail="Workspace not initialized.")
+    alerts = ws.benchmarking_store.list_alerts(
+        target_id=target_id, unresolved_only=unresolved_only
+    )
+    return [a.to_dict() for a in alerts]
+
+
+@router.post("/benchmarking/alerts/{alert_id}/resolve")
+async def resolve_regression_alert_route(request: Request, alert_id: str):
+    ws = getattr(request.app.state, "workspace", None)
+    if not ws:
+        raise HTTPException(status_code=503, detail="Workspace not initialized.")
+    alert = ws.benchmarking_store.resolve_alert(alert_id)
+    if not alert:
+        raise HTTPException(status_code=404, detail="Alert not found.")
+    return alert.to_dict()
+
+
+# ===========================================================================
 # PHASE C — PERSONAL AGENT, ACTIONS, CONNECTIONS, AND ACTIVITY API
 # ===========================================================================
 

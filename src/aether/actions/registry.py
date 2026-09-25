@@ -1486,6 +1486,138 @@ class ActionRegistry:
             )
         )
 
+        # Workforce Benchmarking & Evolution actions
+        self.register(
+            ActionDefinition(
+                id="benchmarking.run_suite",
+                name="Run Workforce Benchmark Suite",
+                description="Executes capability, latency, error-rate, and safety evaluations against an agent or team.",
+                tier=ActionTier.DO,
+                permission_level=ActionPermissionLevel.LOCAL_MUTATION,
+                requires_confirmation=False,
+                provider="benchmarking",
+                input_schema={
+                    "type": "object",
+                    "properties": {
+                        "target_name": {"type": "string"},
+                        "target_type": {"type": "string"},
+                        "suite_name": {"type": "string"},
+                    },
+                    "required": ["target_name"],
+                },
+                output_schema={
+                    "type": "object",
+                    "properties": {
+                        "run": {"type": "object"},
+                        "alerts": {"type": "array"},
+                        "proposal": {"type": "object"},
+                    },
+                },
+            )
+        )
+
+        self.register(
+            ActionDefinition(
+                id="benchmarking.get_leaderboard",
+                name="Get Workforce Benchmark Leaderboard",
+                description="Returns rankings, quality scores, and efficiency metrics across evaluated workforce agents.",
+                tier=ActionTier.ANSWER,
+                permission_level=ActionPermissionLevel.READ_ONLY,
+                requires_confirmation=False,
+                provider="benchmarking",
+                input_schema={
+                    "type": "object",
+                    "properties": {
+                        "target_type": {"type": "string"},
+                        "limit": {"type": "integer"},
+                    },
+                },
+                output_schema={
+                    "type": "object",
+                    "properties": {
+                        "leaderboard": {"type": "array"},
+                    },
+                },
+            )
+        )
+
+        self.register(
+            ActionDefinition(
+                id="benchmarking.list_proposals",
+                name="List Evolution Proposals",
+                description="Lists automated prompt, routing, and guardrail optimization proposals for agents.",
+                tier=ActionTier.ANSWER,
+                permission_level=ActionPermissionLevel.READ_ONLY,
+                requires_confirmation=False,
+                provider="benchmarking",
+                input_schema={
+                    "type": "object",
+                    "properties": {
+                        "target_agent": {"type": "string"},
+                        "status": {"type": "string"},
+                    },
+                },
+                output_schema={
+                    "type": "object",
+                    "properties": {
+                        "proposals": {"type": "array"},
+                    },
+                },
+            )
+        )
+
+        self.register(
+            ActionDefinition(
+                id="benchmarking.apply_proposal",
+                name="Apply Evolution Proposal",
+                description="Applies an automated prompt optimization or routing upgrade to an agent's configuration.",
+                tier=ActionTier.ACT,
+                permission_level=ActionPermissionLevel.LOCAL_MUTATION,
+                requires_confirmation=True,
+                provider="benchmarking",
+                input_schema={
+                    "type": "object",
+                    "properties": {
+                        "proposal_id": {"type": "string"},
+                    },
+                    "required": ["proposal_id"],
+                },
+                output_schema={
+                    "type": "object",
+                    "properties": {
+                        "proposal": {"type": "object"},
+                        "applied": {"type": "boolean"},
+                    },
+                },
+            )
+        )
+
+        self.register(
+            ActionDefinition(
+                id="benchmarking.list_regression_alerts",
+                name="List Regression Alerts",
+                description="Lists performance, quality, or latency degradation alerts across benchmarked agents.",
+                tier=ActionTier.ANSWER,
+                permission_level=ActionPermissionLevel.READ_ONLY,
+                requires_confirmation=False,
+                provider="benchmarking",
+                input_schema={
+                    "type": "object",
+                    "properties": {
+                        "target_id": {"type": "string"},
+                        "unresolved_only": {"type": "boolean"},
+                    },
+                },
+                output_schema={
+                    "type": "object",
+                    "properties": {
+                        "alerts": {"type": "array"},
+                    },
+                },
+            )
+        )
+
+
 
 
 
