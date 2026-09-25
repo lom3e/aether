@@ -1078,4 +1078,115 @@ class ActionRegistry:
             )
         )
 
+        # Marketplace & Ecosystem Package Management Actions
+        self.register(
+            ActionDefinition(
+                id="marketplace.list",
+                name="List Marketplace Packages",
+                description="Lists available packages, workforces, skills, tools, and workflows in the ecosystem catalog.",
+                tier=ActionTier.ANSWER,
+                permission_level=ActionPermissionLevel.READ_ONLY,
+                requires_confirmation=False,
+                provider="marketplace",
+                input_schema={
+                    "type": "object",
+                    "properties": {
+                        "type": {"type": "string", "enum": ["workforce", "skill", "tool", "connector", "workflow_template"]},
+                        "category": {"type": "string"},
+                        "search": {"type": "string"},
+                        "workspace_id": {"type": "string"},
+                    },
+                },
+                output_schema={
+                    "type": "object",
+                    "properties": {
+                        "packages": {"type": "array"},
+                        "count": {"type": "integer"},
+                    },
+                },
+            )
+        )
+
+        self.register(
+            ActionDefinition(
+                id="marketplace.inspect",
+                name="Inspect Marketplace Package",
+                description="Retrieves manifest, security permission breakdown, and contents of a package.",
+                tier=ActionTier.ANSWER,
+                permission_level=ActionPermissionLevel.READ_ONLY,
+                requires_confirmation=False,
+                provider="marketplace",
+                input_schema={
+                    "type": "object",
+                    "properties": {
+                        "package_id": {"type": "string"},
+                    },
+                    "required": ["package_id"],
+                },
+                output_schema={
+                    "type": "object",
+                    "properties": {
+                        "package": {"type": "object"},
+                        "security_summary": {"type": "object"},
+                    },
+                },
+            )
+        )
+
+        self.register(
+            ActionDefinition(
+                id="marketplace.install",
+                name="Install Marketplace Package",
+                description="Installs a workforce, skill, tool, connector, or workflow template into the active workspace.",
+                tier=ActionTier.ACT,
+                permission_level=ActionPermissionLevel.LOCAL_MUTATION,
+                requires_confirmation=True,
+                provider="marketplace",
+                input_schema={
+                    "type": "object",
+                    "properties": {
+                        "package_id": {"type": "string"},
+                        "workspace_id": {"type": "string"},
+                    },
+                    "required": ["package_id"],
+                },
+                output_schema={
+                    "type": "object",
+                    "properties": {
+                        "package_id": {"type": "string"},
+                        "installed": {"type": "boolean"},
+                        "version": {"type": "string"},
+                        "install_path": {"type": "string"},
+                    },
+                },
+            )
+        )
+
+        self.register(
+            ActionDefinition(
+                id="marketplace.uninstall",
+                name="Uninstall Marketplace Package",
+                description="Safely removes an installed package and its artifacts from the workspace.",
+                tier=ActionTier.ACT,
+                permission_level=ActionPermissionLevel.LOCAL_MUTATION,
+                requires_confirmation=True,
+                provider="marketplace",
+                input_schema={
+                    "type": "object",
+                    "properties": {
+                        "package_id": {"type": "string"},
+                        "workspace_id": {"type": "string"},
+                    },
+                    "required": ["package_id"],
+                },
+                output_schema={
+                    "type": "object",
+                    "properties": {
+                        "package_id": {"type": "string"},
+                        "uninstalled": {"type": "boolean"},
+                    },
+                },
+            )
+        )
+
 

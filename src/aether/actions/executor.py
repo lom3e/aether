@@ -994,6 +994,100 @@ class ActionExecutor:
                 "milestones_count": len(mission.milestones),
             }
 
+        elif action_id == "marketplace.list":
+            from aether.workspace.workspace import Workspace
+            ws = None
+            try:
+                ws = Workspace.get(ws_id) if hasattr(Workspace, "get") else None
+                if not ws and self.project_path:
+                    ws = Workspace.get_or_init(self.project_path)
+            except Exception:
+                pass
+            eco_store = getattr(ws, "ecosystem", None) if ws else None
+            if not eco_store:
+                from aether.ecosystem.store import EcosystemStore
+                eco_store = EcosystemStore(":memory:")
+
+            pkgs = eco_store.list_packages(
+                pkg_type=inp.get("type"),
+                category=inp.get("category"),
+                search=inp.get("search"),
+                workspace_id=ws_id,
+            )
+            return {
+                "packages": pkgs,
+                "count": len(pkgs),
+            }
+
+        elif action_id == "marketplace.inspect":
+            from aether.workspace.workspace import Workspace
+            ws = None
+            try:
+                ws = Workspace.get(ws_id) if hasattr(Workspace, "get") else None
+                if not ws and self.project_path:
+                    ws = Workspace.get_or_init(self.project_path)
+            except Exception:
+                pass
+            eco_store = getattr(ws, "ecosystem", None) if ws else None
+            if not eco_store:
+                raise ValueError("Ecosystem store is not available.")
+
+            pkg_id = inp.get("package_id", "")
+            pkg = eco_store.get_package(pkg_id)
+            if not pkg:
+                raise ValueError(f"Package '{pkg_id}' not found in marketplace catalog.")
+
+            return {
+                "package": pkg.to_dict(),
+                "security_summary": pkg.security_summary.to_dict(),
+            }
+
+        elif action_id == "marketplace.install":
+            from aether.workspace.workspace import Workspace
+            ws = None
+            try:
+                ws = Workspace.get(ws_id) if hasattr(Workspace, "get") else None
+                if not ws and self.project_path:
+                    ws = Workspace.get_or_init(self.project_path)
+            except Exception:
+                pass
+            if not ws:
+                raise ValueError("Active workspace required to install marketplace package.")
+            eco_store = getattr(ws, "ecosystem", None)
+            if not eco_store:
+                raise ValueError("Ecosystem store is not available in workspace.")
+
+            pkg_id = inp.get("package_id", "")
+            installed = eco_store.install_package(pkg_id, ws)
+            return {
+                "package_id": installed.package_id,
+                "installed": True,
+                "version": installed.version,
+                "install_path": installed.install_path or "",
+            }
+
+        elif action_id == "marketplace.uninstall":
+            from aether.workspace.workspace import Workspace
+            ws = None
+            try:
+                ws = Workspace.get(ws_id) if hasattr(Workspace, "get") else None
+                if not ws and self.project_path:
+                    ws = Workspace.get_or_init(self.project_path)
+            except Exception:
+                pass
+            if not ws:
+                raise ValueError("Active workspace required to uninstall marketplace package.")
+            eco_store = getattr(ws, "ecosystem", None)
+            if not eco_store:
+                raise ValueError("Ecosystem store is not available in workspace.")
+
+            pkg_id = inp.get("package_id", "")
+            success = eco_store.uninstall_package(pkg_id, ws)
+            return {
+                "package_id": pkg_id,
+                "uninstalled": success,
+            }
+
         raise ValueError(
             f"Action '{action_id}' is not supported by built-in connectors and has no registered handler."
         )

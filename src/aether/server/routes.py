@@ -5068,6 +5068,96 @@ async def run_workflow_route(
 
 
 # ===========================================================================
+# MARKETPLACE & ECOSYSTEM PACKAGE ENDPOINTS
+# ===========================================================================
+
+class InstallPackagePayload(BaseModel):
+    workspace_id: str | None = None
+
+
+@router.get("/marketplace/packages")
+async def list_marketplace_packages_route(
+    request: Request,
+    type: str | None = None,
+    category: str | None = None,
+    search: str | None = None,
+    workspace_id: str | None = None,
+):
+    ws = getattr(request.app.state, "workspace", None)
+    if not ws:
+        raise HTTPException(status_code=503, detail="Workspace not initialized.")
+    ws_id = (workspace_id or ws.name).strip()
+    packages = ws.ecosystem.list_packages(
+        pkg_type=type,
+        category=category,
+        search=search,
+        workspace_id=ws_id,
+    )
+    return packages
+
+
+@router.get("/marketplace/packages/{package_id}")
+async def get_marketplace_package_route(
+    request: Request,
+    package_id: str,
+):
+    ws = getattr(request.app.state, "workspace", None)
+    if not ws:
+        raise HTTPException(status_code=503, detail="Workspace not initialized.")
+    pkg = ws.ecosystem.get_package(package_id)
+    if not pkg:
+        raise HTTPException(status_code=404, detail=f"Package '{package_id}' not found.")
+    pkg_dict = pkg.to_dict()
+    pkg_dict["is_installed"] = ws.ecosystem.is_installed(package_id, ws.name)
+    return pkg_dict
+
+
+@router.get("/marketplace/packages/{package_id}/security")
+async def get_marketplace_package_security_route(
+    request: Request,
+    package_id: str,
+):
+    ws = getattr(request.app.state, "workspace", None)
+    if not ws:
+        raise HTTPException(status_code=503, detail="Workspace not initialized.")
+    summary = ws.ecosystem.get_security_summary(package_id)
+    if not summary:
+        raise HTTPException(status_code=404, detail=f"Package '{package_id}' not found.")
+    return summary.to_dict()
+
+
+@router.post("/marketplace/packages/{package_id}/install")
+async def install_marketplace_package_route(
+    request: Request,
+    package_id: str,
+    payload: InstallPackagePayload | None = None,
+):
+    ws = getattr(request.app.state, "workspace", None)
+    if not ws:
+        raise HTTPException(status_code=503, detail="Workspace not initialized.")
+    try:
+        installed = ws.ecosystem.install_package(package_id, ws)
+        return installed.to_dict()
+    except ValueError as exc:
+        raise HTTPException(status_code=404, detail=str(exc))
+
+
+@router.post("/marketplace/packages/{package_id}/uninstall")
+async def uninstall_marketplace_package_route(
+    request: Request,
+    package_id: str,
+    payload: InstallPackagePayload | None = None,
+):
+    ws = getattr(request.app.state, "workspace", None)
+    if not ws:
+        raise HTTPException(status_code=503, detail="Workspace not initialized.")
+    success = ws.ecosystem.uninstall_package(package_id, ws)
+    if not success:
+        raise HTTPException(status_code=404, detail=f"Package '{package_id}' is not installed.")
+    return {"package_id": package_id, "uninstalled": True}
+
+
+# ===========================================================================
 # PHASE C — PERSONAL AGENT, ACTIONS, CONNECTIONS, AND ACTIVITY API
 # ===========================================================================
 

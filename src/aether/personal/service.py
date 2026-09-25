@@ -602,6 +602,69 @@ class PersonalAgentService:
                 action_args={"workflow_id": wf_id},
             )
 
+        # 3e14. Marketplace Listing (ANSWER tier - immediate read-only)
+        marketplace_list_triggers = [
+            "mostra marketplace", "cerca nel marketplace", "pacchetti marketplace",
+            "list marketplace", "search marketplace", "show marketplace", "marketplace packages",
+            "catalogo marketplace",
+        ]
+        if any(k in p_lower for k in marketplace_list_triggers):
+            return UserIntent(
+                raw_prompt=effective_prompt,
+                tier=IntentTier.ANSWER,
+                summary="List packages and workforces from the Aether ecosystem marketplace",
+                action_id="marketplace.list",
+                action_args={},
+            )
+
+        # 3e15. Marketplace Package Inspection (ANSWER tier - immediate read-only)
+        marketplace_inspect_triggers = [
+            "ispeziona pacchetto", "permessi pacchetto", "sicurezza pacchetto",
+            "inspect package", "package security", "package permissions",
+        ]
+        if any(k in p_lower for k in marketplace_inspect_triggers):
+            pkg_match = re.search(r"(?:pacchetto|package|id|named|chiamato)\s+[\"']?([a-zA-Z0-9_-]+)[\"']?", prompt, re.IGNORECASE)
+            pkg_id = pkg_match.group(1).strip() if pkg_match else "default-pkg"
+            return UserIntent(
+                raw_prompt=effective_prompt,
+                tier=IntentTier.ANSWER,
+                summary=f"Inspect security permissions and manifest for package '{pkg_id}'",
+                action_id="marketplace.inspect",
+                action_args={"package_id": pkg_id},
+            )
+
+        # 3e16. Marketplace Package Uninstall (ACT tier - requires confirmation)
+        marketplace_uninstall_triggers = [
+            "disinstalla pacchetto", "rimuovi pacchetto", "uninstall package",
+            "remove package", "disinstalla skill", "disinstalla workforce",
+        ]
+        if any(k in p_lower for k in marketplace_uninstall_triggers):
+            pkg_match = re.search(r"(?:pacchetto|package|id|named|chiamato)\s+[\"']?([a-zA-Z0-9_-]+)[\"']?", prompt, re.IGNORECASE)
+            pkg_id = pkg_match.group(1).strip() if pkg_match else "default-pkg"
+            return UserIntent(
+                raw_prompt=effective_prompt,
+                tier=IntentTier.ACT,
+                summary=f"Uninstall ecosystem package '{pkg_id}' from workspace",
+                action_id="marketplace.uninstall",
+                action_args={"package_id": pkg_id},
+            )
+
+        # 3e17. Marketplace Package Install (ACT tier - requires confirmation)
+        marketplace_install_triggers = [
+            "installa pacchetto", "installa dal marketplace", "install package",
+            "installa workforce", "installa skill",
+        ]
+        if any(k in p_lower for k in marketplace_install_triggers):
+            pkg_match = re.search(r"(?:pacchetto|package|id|named|chiamato)\s+[\"']?([a-zA-Z0-9_-]+)[\"']?", prompt, re.IGNORECASE)
+            pkg_id = pkg_match.group(1).strip() if pkg_match else "default-pkg"
+            return UserIntent(
+                raw_prompt=effective_prompt,
+                tier=IntentTier.ACT,
+                summary=f"Install ecosystem package '{pkg_id}' into active workspace",
+                action_id="marketplace.install",
+                action_args={"package_id": pkg_id},
+            )
+
 
         # 3e. GitHub issue creation (ACT tier - requires safety confirmation)
         github_issue_triggers = [

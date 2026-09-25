@@ -396,6 +396,22 @@ class Workspace:
         return self._get_or_create("workflows", _factory)
 
     @property
+    def ecosystem_db_path(self) -> str:
+        """Path to the persistent ecosystem & marketplace database."""
+        if self.data_dir.exists() or self.config_path.exists():
+            return str(self.data_dir / "marketplace.db")
+        return str(self.legacy_aether_dir / "marketplace.db")
+
+    @property
+    def ecosystem(self):
+        """Return the EcosystemStore for this workspace."""
+        def _factory():
+            from aether.ecosystem.store import EcosystemStore
+            Path(self.ecosystem_db_path).parent.mkdir(parents=True, exist_ok=True)
+            return EcosystemStore(self.ecosystem_db_path)
+        return self._get_or_create("ecosystem", _factory)
+
+    @property
     def intelligence(self):
         """Return the UnifiedIntelligenceService for this workspace."""
         def _factory():
