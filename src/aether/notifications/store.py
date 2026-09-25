@@ -14,8 +14,14 @@ from typing import Any, Generator
 import uuid
 
 from aether.notifications.models import (
+    ChannelType,
+    DeliveryReceipt,
+    DeliveryStatus,
     Notification,
+    NotificationBriefing,
+    NotificationChannel,
     NotificationPriority,
+    NotificationRule,
     NotificationStatus,
     NotificationType,
 )
@@ -89,6 +95,81 @@ class NotificationStore:
             )
             cursor.execute(
                 "CREATE INDEX IF NOT EXISTS idx_notif_created ON notifications(created_at DESC);"
+            )
+            cursor.execute(
+                """
+                CREATE TABLE IF NOT EXISTS notification_channels (
+                    id TEXT PRIMARY KEY,
+                    workspace_id TEXT NOT NULL,
+                    channel_type TEXT NOT NULL,
+                    name TEXT NOT NULL,
+                    enabled INTEGER NOT NULL DEFAULT 1,
+                    config TEXT NOT NULL,
+                    created_at TEXT NOT NULL,
+                    updated_at TEXT NOT NULL
+                );
+                """
+            )
+            cursor.execute(
+                "CREATE UNIQUE INDEX IF NOT EXISTS idx_channel_ws_type ON notification_channels(workspace_id, channel_type);"
+            )
+            cursor.execute(
+                """
+                CREATE TABLE IF NOT EXISTS notification_rules (
+                    id TEXT PRIMARY KEY,
+                    workspace_id TEXT NOT NULL,
+                    name TEXT NOT NULL,
+                    enabled INTEGER NOT NULL DEFAULT 1,
+                    event_types TEXT NOT NULL,
+                    min_priority TEXT NOT NULL,
+                    channels TEXT NOT NULL,
+                    quiet_hours_enabled INTEGER NOT NULL DEFAULT 0,
+                    quiet_hours_start TEXT,
+                    quiet_hours_end TEXT,
+                    created_at TEXT NOT NULL
+                );
+                """
+            )
+            cursor.execute(
+                "CREATE INDEX IF NOT EXISTS idx_rules_ws ON notification_rules(workspace_id, enabled);"
+            )
+            cursor.execute(
+                """
+                CREATE TABLE IF NOT EXISTS delivery_receipts (
+                    id TEXT PRIMARY KEY,
+                    notification_id TEXT NOT NULL,
+                    workspace_id TEXT NOT NULL,
+                    channel_type TEXT NOT NULL,
+                    status TEXT NOT NULL,
+                    detail TEXT NOT NULL,
+                    latency_ms REAL NOT NULL DEFAULT 0.0,
+                    timestamp TEXT NOT NULL
+                );
+                """
+            )
+            cursor.execute(
+                "CREATE INDEX IF NOT EXISTS idx_receipts_ws_time ON delivery_receipts(workspace_id, timestamp DESC);"
+            )
+            cursor.execute(
+                "CREATE INDEX IF NOT EXISTS idx_receipts_notif ON delivery_receipts(notification_id);"
+            )
+            cursor.execute(
+                """
+                CREATE TABLE IF NOT EXISTS briefings (
+                    id TEXT PRIMARY KEY,
+                    workspace_id TEXT NOT NULL,
+                    title TEXT NOT NULL,
+                    summary TEXT NOT NULL,
+                    highlights TEXT NOT NULL,
+                    metrics TEXT NOT NULL,
+                    action_links TEXT NOT NULL,
+                    channels_dispatched TEXT NOT NULL,
+                    created_at TEXT NOT NULL
+                );
+                """
+            )
+            cursor.execute(
+                "CREATE INDEX IF NOT EXISTS idx_briefings_ws ON briefings(workspace_id, created_at DESC);"
             )
 
     def save(self, notification: Notification) -> Notification:
@@ -189,6 +270,350 @@ class NotificationStore:
             (workspace_id, NotificationStatus.UNREAD.value),
         ).fetchone()
         return int(row["cnt"]) if row else 0
+
+    # -------------------------------------------------------------------------
+    # Channel Management
+    # -------------------------------------------------------------------------
+
+    def ensure_default_channels(self, workspace_id: str) -> list[NotificationChannel]:
+        """Ensures default delivery channels exist for the workspace."""
+        existing = self.list_channels(workspace_id)
+        if existing:
+            return existing
+        from datetime import datetime, timezone
+        now = datetime.now(timezone.utc).isoformat()
+        defaults = [
+            NotificationChannel(
+                id=f"chan-{uuid.uuid4().hex[:8]}",
+                workspace_id=workspace_id,
+                channel_type=ChannelType.IN_APP,
+                name="In-App Notification Center",
+                enabled=True,
+                config={},
+                created_at=now,
+                updated_at=now,
+            ),
+            NotificationChannel(
+                id=f"chan-{uuid.uuid4().hex[:8]}",
+                workspace_id=workspace_id,
+                channel_type=ChannelType.DESKTOP,
+                name="Desktop System Banner",
+                enabled=True,
+                config={"sound": "Glass", "sound_enabled": True},
+                created_at=now,
+                updated_at=now,
+            ),
+            NotificationChannel(
+                id=f"chan-{uuid.uuid4().hex[:8]}",
+                workspace_id=workspace_id,
+                channel_type=ChannelType.TELEGRAM,
+                name="Telegram Bot",
+                enabled=False,
+                config={"bot_token": "", "chat_id": ""},
+                created_at=now,
+                updated_at=now,
+            ),
+            NotificationChannel(
+                id=f"chan-{uuid.uuid4().hex[:8]}",
+                workspace_id=workspace_id,
+                channel_type=ChannelType.WEBHOOK,
+                name="Outgoing Webhook",
+                enabled=False,
+                config={"url": "", "format": "generic", "secret": ""},
+                created_at=now,
+                updated_at=now,
+            ),
+            NotificationChannel(
+                id=f"chan-{uuid.uuid4().hex[:8]}",
+                workspace_id=workspace_id,
+                channel_type=ChannelType.EMAIL,
+                name="SMTP Email Relay",
+                enabled=False,
+                config={"smtp_host": "", "smtp_port": 587, "smtp_user": "", "smtp_pass": "", "from_addr": "", "to_addrs": []},
+                created_at=now,
+                updated_at=now,
+            ),
+        ]
+        for ch in defaults:
+            self.save_channel(ch)
+        return defaults
+
+    def list_channels(self, workspace_id: str) -> list[NotificationChannel]:
+        """Lists configured channels for a workspace."""
+        conn = self._get_connection()
+        rows = conn.execute(
+            "SELECT * FROM notification_channels WHERE workspace_id = ? ORDER BY channel_type ASC",
+            (workspace_id,),
+        ).fetchall()
+        return [self._row_to_channel(r) for r in rows]
+
+    def get_channel(self, workspace_id: str, channel_type: ChannelType | str) -> NotificationChannel | None:
+        """Retrieves a single channel by workspace and channel type."""
+        ctype = channel_type.value if isinstance(channel_type, ChannelType) else str(channel_type).lower().strip()
+        conn = self._get_connection()
+        row = conn.execute(
+            "SELECT * FROM notification_channels WHERE workspace_id = ? AND channel_type = ?",
+            (workspace_id, ctype),
+        ).fetchone()
+        return self._row_to_channel(row) if row else None
+
+    def save_channel(self, channel: NotificationChannel) -> NotificationChannel:
+        """Inserts or updates a delivery channel configuration."""
+        from datetime import datetime, timezone
+        channel.updated_at = datetime.now(timezone.utc).isoformat()
+        with self._transaction() as cursor:
+            cursor.execute(
+                """
+                INSERT OR REPLACE INTO notification_channels (
+                    id, workspace_id, channel_type, name, enabled, config, created_at, updated_at
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    channel.id,
+                    channel.workspace_id,
+                    channel.channel_type.value if isinstance(channel.channel_type, ChannelType) else str(channel.channel_type),
+                    channel.name,
+                    1 if channel.enabled else 0,
+                    json.dumps(channel.config),
+                    channel.created_at,
+                    channel.updated_at,
+                ),
+            )
+        return channel
+
+    # -------------------------------------------------------------------------
+    # Notification Routing Rules
+    # -------------------------------------------------------------------------
+
+    def ensure_default_rules(self, workspace_id: str) -> list[NotificationRule]:
+        """Ensures default routing rules exist for the workspace."""
+        existing = self.list_rules(workspace_id)
+        if existing:
+            return existing
+        from datetime import datetime, timezone
+        now = datetime.now(timezone.utc).isoformat()
+        defaults = [
+            NotificationRule(
+                id=f"rule-{uuid.uuid4().hex[:8]}",
+                workspace_id=workspace_id,
+                name="Urgent Approvals & Gate Failures",
+                enabled=True,
+                event_types=["approval_required", "task_failed", "action_failed"],
+                min_priority=NotificationPriority.HIGH,
+                channels=[ChannelType.IN_APP, ChannelType.DESKTOP, ChannelType.TELEGRAM, ChannelType.WEBHOOK],
+                quiet_hours_enabled=False,
+                created_at=now,
+            ),
+            NotificationRule(
+                id=f"rule-{uuid.uuid4().hex[:8]}",
+                workspace_id=workspace_id,
+                name="Mission & Task Completions",
+                enabled=True,
+                event_types=["task_completed", "action_completed"],
+                min_priority=NotificationPriority.NORMAL,
+                channels=[ChannelType.IN_APP, ChannelType.DESKTOP],
+                quiet_hours_enabled=False,
+                created_at=now,
+            ),
+            NotificationRule(
+                id=f"rule-{uuid.uuid4().hex[:8]}",
+                workspace_id=workspace_id,
+                name="Proactive Insights & Ambient Alerts",
+                enabled=True,
+                event_types=["insight"],
+                min_priority=NotificationPriority.LOW,
+                channels=[ChannelType.IN_APP],
+                quiet_hours_enabled=False,
+                created_at=now,
+            ),
+        ]
+        for r in defaults:
+            self.save_rule(r)
+        return defaults
+
+    def list_rules(self, workspace_id: str) -> list[NotificationRule]:
+        """Lists routing rules for a workspace."""
+        conn = self._get_connection()
+        rows = conn.execute(
+            "SELECT * FROM notification_rules WHERE workspace_id = ? ORDER BY created_at ASC",
+            (workspace_id,),
+        ).fetchall()
+        return [self._row_to_rule(r) for r in rows]
+
+    def get_rule(self, workspace_id: str, rule_id: str) -> NotificationRule | None:
+        """Retrieves a single routing rule."""
+        conn = self._get_connection()
+        row = conn.execute(
+            "SELECT * FROM notification_rules WHERE workspace_id = ? AND id = ?",
+            (workspace_id, rule_id),
+        ).fetchone()
+        return self._row_to_rule(row) if row else None
+
+    def save_rule(self, rule: NotificationRule) -> NotificationRule:
+        """Inserts or updates a notification rule."""
+        with self._transaction() as cursor:
+            cursor.execute(
+                """
+                INSERT OR REPLACE INTO notification_rules (
+                    id, workspace_id, name, enabled, event_types, min_priority,
+                    channels, quiet_hours_enabled, quiet_hours_start, quiet_hours_end, created_at
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    rule.id,
+                    rule.workspace_id,
+                    rule.name,
+                    1 if rule.enabled else 0,
+                    json.dumps(rule.event_types),
+                    rule.min_priority.value if isinstance(rule.min_priority, NotificationPriority) else str(rule.min_priority),
+                    json.dumps([c.value if isinstance(c, ChannelType) else str(c) for c in rule.channels]),
+                    1 if rule.quiet_hours_enabled else 0,
+                    rule.quiet_hours_start,
+                    rule.quiet_hours_end,
+                    rule.created_at,
+                ),
+            )
+        return rule
+
+    def delete_rule(self, workspace_id: str, rule_id: str) -> bool:
+        """Deletes a routing rule."""
+        with self._transaction() as cursor:
+            cursor.execute("DELETE FROM notification_rules WHERE workspace_id = ? AND id = ?", (workspace_id, rule_id))
+            return cursor.rowcount > 0
+
+    # -------------------------------------------------------------------------
+    # Delivery Receipts
+    # -------------------------------------------------------------------------
+
+    def save_receipt(self, receipt: DeliveryReceipt) -> DeliveryReceipt:
+        """Persists a channel delivery receipt."""
+        with self._transaction() as cursor:
+            cursor.execute(
+                """
+                INSERT OR REPLACE INTO delivery_receipts (
+                    id, notification_id, workspace_id, channel_type, status, detail, latency_ms, timestamp
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    receipt.id,
+                    receipt.notification_id,
+                    receipt.workspace_id,
+                    receipt.channel_type.value if isinstance(receipt.channel_type, ChannelType) else str(receipt.channel_type),
+                    receipt.status.value if isinstance(receipt.status, DeliveryStatus) else str(receipt.status),
+                    receipt.detail,
+                    receipt.latency_ms,
+                    receipt.timestamp,
+                ),
+            )
+        return receipt
+
+    def list_receipts(self, workspace_id: str, limit: int = 50) -> list[DeliveryReceipt]:
+        """Retrieves recent delivery receipts for auditing."""
+        conn = self._get_connection()
+        rows = conn.execute(
+            "SELECT * FROM delivery_receipts WHERE workspace_id = ? ORDER BY timestamp DESC LIMIT ?",
+            (workspace_id, max(1, limit)),
+        ).fetchall()
+        return [self._row_to_receipt(r) for r in rows]
+
+    # -------------------------------------------------------------------------
+    # Executive Briefings
+    # -------------------------------------------------------------------------
+
+    def save_briefing(self, briefing: NotificationBriefing) -> NotificationBriefing:
+        """Persists an executive notification briefing."""
+        with self._transaction() as cursor:
+            cursor.execute(
+                """
+                INSERT OR REPLACE INTO briefings (
+                    id, workspace_id, title, summary, highlights, metrics, action_links, channels_dispatched, created_at
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    briefing.id,
+                    briefing.workspace_id,
+                    briefing.title,
+                    briefing.summary,
+                    json.dumps(briefing.highlights),
+                    json.dumps(briefing.metrics),
+                    json.dumps(briefing.action_links),
+                    json.dumps(briefing.channels_dispatched),
+                    briefing.created_at,
+                ),
+            )
+        return briefing
+
+    def list_briefings(self, workspace_id: str, limit: int = 20) -> list[NotificationBriefing]:
+        """Lists saved executive briefings."""
+        conn = self._get_connection()
+        rows = conn.execute(
+            "SELECT * FROM briefings WHERE workspace_id = ? ORDER BY created_at DESC LIMIT ?",
+            (workspace_id, max(1, limit)),
+        ).fetchall()
+        return [self._row_to_briefing(r) for r in rows]
+
+    def get_briefing(self, briefing_id: str) -> NotificationBriefing | None:
+        """Retrieves a single executive briefing."""
+        conn = self._get_connection()
+        row = conn.execute("SELECT * FROM briefings WHERE id = ?", (briefing_id,)).fetchone()
+        return self._row_to_briefing(row) if row else None
+
+    # -------------------------------------------------------------------------
+    # Row Mappers
+    # -------------------------------------------------------------------------
+
+    def _row_to_channel(self, row: sqlite3.Row) -> NotificationChannel:
+        return NotificationChannel(
+            id=row["id"],
+            workspace_id=row["workspace_id"],
+            channel_type=ChannelType.from_str(row["channel_type"]),
+            name=row["name"],
+            enabled=bool(row["enabled"]),
+            config=json.loads(row["config"]) if row["config"] else {},
+            created_at=row["created_at"],
+            updated_at=row["updated_at"],
+        )
+
+    def _row_to_rule(self, row: sqlite3.Row) -> NotificationRule:
+        channels_raw = json.loads(row["channels"]) if row["channels"] else []
+        return NotificationRule(
+            id=row["id"],
+            workspace_id=row["workspace_id"],
+            name=row["name"],
+            enabled=bool(row["enabled"]),
+            event_types=json.loads(row["event_types"]) if row["event_types"] else ["*"],
+            min_priority=NotificationPriority.from_str(row["min_priority"]),
+            channels=[ChannelType.from_str(c) for c in channels_raw],
+            quiet_hours_enabled=bool(row["quiet_hours_enabled"]),
+            quiet_hours_start=row["quiet_hours_start"] or "22:00",
+            quiet_hours_end=row["quiet_hours_end"] or "08:00",
+            created_at=row["created_at"],
+        )
+
+    def _row_to_receipt(self, row: sqlite3.Row) -> DeliveryReceipt:
+        return DeliveryReceipt(
+            id=row["id"],
+            notification_id=row["notification_id"],
+            workspace_id=row["workspace_id"],
+            channel_type=ChannelType.from_str(row["channel_type"]),
+            status=DeliveryStatus.from_str(row["status"]),
+            detail=row["detail"],
+            latency_ms=float(row["latency_ms"]),
+            timestamp=row["timestamp"],
+        )
+
+    def _row_to_briefing(self, row: sqlite3.Row) -> NotificationBriefing:
+        return NotificationBriefing(
+            id=row["id"],
+            workspace_id=row["workspace_id"],
+            title=row["title"],
+            summary=row["summary"],
+            highlights=json.loads(row["highlights"]) if row["highlights"] else [],
+            metrics=json.loads(row["metrics"]) if row["metrics"] else {},
+            action_links=json.loads(row["action_links"]) if row["action_links"] else [],
+            channels_dispatched=json.loads(row["channels_dispatched"]) if row["channels_dispatched"] else [],
+            created_at=row["created_at"],
+        )
 
     def _row_to_notification(self, row: sqlite3.Row) -> Notification:
         return Notification(

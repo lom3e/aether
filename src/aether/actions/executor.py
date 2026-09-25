@@ -1666,6 +1666,81 @@ class ActionExecutor:
                 ]
             }
 
+        # ---------------------------------------------------------------------
+        # Notification Fabric Execution
+        # ---------------------------------------------------------------------
+        elif action_id.startswith("notifications."):
+            from aether.workspace.workspace import Workspace
+            ws = None
+            try:
+                ws = Workspace.get(ws_id) if hasattr(Workspace, "get") else None
+                if not ws and self.project_path:
+                    ws = Workspace.get_or_init(self.project_path)
+            except Exception:
+                pass
+            if not ws:
+                raise ValueError("Active workspace required for notification fabric actions.")
+            notif_svc = getattr(ws, "notifications", None)
+            if not notif_svc:
+                raise ValueError("Notification service not available on workspace.")
+
+            if action_id == "notifications.send_briefing":
+                briefing = notif_svc.dispatch_briefing(
+                    workspace_id=ws_id,
+                    title=inp.get("title", "Executive Update"),
+                    summary=inp.get("summary", ""),
+                    highlights=inp.get("highlights", []),
+                    metrics=inp.get("metrics", {}),
+                    action_links=inp.get("action_links", []),
+                    channels=inp.get("channels"),
+                )
+                return {"briefing": briefing.to_dict()}
+
+            elif action_id == "notifications.list_channels":
+                channels = notif_svc.get_channels(ws_id)
+                return {"channels": [c.to_dict() for c in channels]}
+
+            elif action_id == "notifications.configure_channel":
+                channel = notif_svc.configure_channel(
+                    workspace_id=ws_id,
+                    channel_type=inp.get("channel_type", "desktop"),
+                    enabled=inp.get("enabled"),
+                    name=inp.get("name"),
+                    config=inp.get("config"),
+                )
+                return {"channel": channel.to_dict()}
+
+            elif action_id == "notifications.test_channel":
+                receipt = notif_svc.test_channel(
+                    workspace_id=ws_id,
+                    channel_type=inp.get("channel_type", "desktop"),
+                )
+                return {"receipt": receipt.to_dict()}
+
+            elif action_id == "notifications.list_rules":
+                rules = notif_svc.get_rules(ws_id)
+                return {"rules": [r.to_dict() for r in rules]}
+
+            elif action_id == "notifications.configure_rule":
+                rule = notif_svc.configure_rule(
+                    workspace_id=ws_id,
+                    name=inp.get("name", "Custom Rule"),
+                    event_types=inp.get("event_types"),
+                    min_priority=inp.get("min_priority"),
+                    channels=inp.get("channels"),
+                    quiet_hours_enabled=inp.get("quiet_hours_enabled"),
+                    quiet_hours_start=inp.get("quiet_hours_start"),
+                    quiet_hours_end=inp.get("quiet_hours_end"),
+                    rule_id=inp.get("rule_id"),
+                )
+                return {"rule": rule.to_dict()}
+
+            elif action_id == "notifications.get_delivery_history":
+                limit = int(inp.get("limit", 50))
+                receipts = notif_svc.get_delivery_history(ws_id, limit=limit)
+                return {"receipts": [r.to_dict() for r in receipts]}
+
         raise ValueError(
             f"Action '{action_id}' is not supported by built-in connectors and has no registered handler."
         )
+

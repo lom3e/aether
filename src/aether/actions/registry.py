@@ -1786,3 +1786,147 @@ class ActionRegistry:
                 },
             )
         )
+
+        # ---------------------------------------------------------------------
+        # Notification Fabric Actions
+        # ---------------------------------------------------------------------
+        self.register(
+            ActionDefinition(
+                id="notifications.send_briefing",
+                name="Send Notification Briefing",
+                description="Dispatches a structured executive briefing across multi-channel notification fabric.",
+                tier=ActionTier.DO,
+                permission_level=ActionPermissionLevel.READ_ONLY,
+                requires_confirmation=False,
+                provider="notifications",
+                input_schema={
+                    "type": "object",
+                    "properties": {
+                        "title": {"type": "string"},
+                        "summary": {"type": "string"},
+                        "highlights": {"type": "array", "items": {"type": "string"}},
+                        "metrics": {"type": "object"},
+                        "channels": {"type": "array", "items": {"type": "string"}},
+                    },
+                    "required": ["title", "summary"],
+                },
+                output_schema={"type": "object"},
+            )
+        )
+
+        self.register(
+            ActionDefinition(
+                id="notifications.list_channels",
+                name="List Notification Channels",
+                description="Lists configured notification channels and their delivery states.",
+                tier=ActionTier.ANSWER,
+                permission_level=ActionPermissionLevel.READ_ONLY,
+                requires_confirmation=False,
+                provider="notifications",
+                input_schema={"type": "object"},
+                output_schema={"type": "object"},
+            )
+        )
+
+        self.register(
+            ActionDefinition(
+                id="notifications.configure_channel",
+                name="Configure Notification Channel",
+                description="Enables, disables, or updates settings for a notification delivery channel.",
+                tier=ActionTier.DO,
+                permission_level=ActionPermissionLevel.LOCAL_MUTATION,
+                requires_confirmation=False,
+                provider="notifications",
+                input_schema={
+                    "type": "object",
+                    "properties": {
+                        "channel_type": {"type": "string"},
+                        "enabled": {"type": "boolean"},
+                        "config": {"type": "object"},
+                    },
+                    "required": ["channel_type"],
+                },
+                output_schema={"type": "object"},
+            )
+        )
+
+        self.register(
+            ActionDefinition(
+                id="notifications.test_channel",
+                name="Test Notification Channel",
+                description="Dispatches a live verification test alert through a specific delivery channel.",
+                tier=ActionTier.DO,
+                permission_level=ActionPermissionLevel.READ_ONLY,
+                requires_confirmation=False,
+                provider="notifications",
+                input_schema={
+                    "type": "object",
+                    "properties": {
+                        "channel_type": {"type": "string"},
+                    },
+                    "required": ["channel_type"],
+                },
+                output_schema={"type": "object"},
+            )
+        )
+
+        self.register(
+            ActionDefinition(
+                id="notifications.list_rules",
+                name="List Notification Rules",
+                description="Lists event routing and priority rules across delivery channels.",
+                tier=ActionTier.ANSWER,
+                permission_level=ActionPermissionLevel.READ_ONLY,
+                requires_confirmation=False,
+                provider="notifications",
+                input_schema={"type": "object"},
+                output_schema={"type": "object"},
+            )
+        )
+
+        self.register(
+            ActionDefinition(
+                id="notifications.configure_rule",
+                name="Configure Notification Rule",
+                description="Creates or modifies a routing rule for events, priorities, and quiet hours.",
+                tier=ActionTier.DO,
+                permission_level=ActionPermissionLevel.LOCAL_MUTATION,
+                requires_confirmation=False,
+                provider="notifications",
+                input_schema={
+                    "type": "object",
+                    "properties": {
+                        "name": {"type": "string"},
+                        "event_types": {"type": "array", "items": {"type": "string"}},
+                        "min_priority": {"type": "string"},
+                        "channels": {"type": "array", "items": {"type": "string"}},
+                        "quiet_hours_enabled": {"type": "boolean"},
+                        "quiet_hours_start": {"type": "string"},
+                        "quiet_hours_end": {"type": "string"},
+                        "rule_id": {"type": "string"},
+                    },
+                    "required": ["name"],
+                },
+                output_schema={"type": "object"},
+            )
+        )
+
+        self.register(
+            ActionDefinition(
+                id="notifications.get_delivery_history",
+                name="Get Notification Delivery History",
+                description="Retrieves delivery receipts and audit logs for recent notifications.",
+                tier=ActionTier.ANSWER,
+                permission_level=ActionPermissionLevel.READ_ONLY,
+                requires_confirmation=False,
+                provider="notifications",
+                input_schema={
+                    "type": "object",
+                    "properties": {
+                        "limit": {"type": "integer"},
+                    },
+                },
+                output_schema={"type": "object"},
+            )
+        )
+

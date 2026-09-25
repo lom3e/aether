@@ -6218,6 +6218,159 @@ async def get_notification_summary_route(request: Request, workspace_id: str | N
 
 
 # ---------------------------------------------------------------------------
+# Multi-Channel Notification Fabric Endpoints (Macro-Step 17)
+# ---------------------------------------------------------------------------
+
+@router.get("/notifications/channels")
+async def list_notification_channels_route(request: Request, workspace_id: str | None = None):
+    ws = getattr(request.app.state, "workspace", None)
+    if not ws:
+        return []
+    ws_id = (workspace_id or getattr(ws, "id", None) or ws.name).strip()
+    channels = ws.notifications.get_channels(ws_id)
+    return [c.to_dict() for c in channels]
+
+
+@router.post("/notifications/channels")
+async def configure_notification_channel_route(request: Request):
+    ws = getattr(request.app.state, "workspace", None)
+    if not ws:
+        raise HTTPException(status_code=503, detail="Workspace not initialized.")
+    body = await request.json()
+    ws_id = (body.get("workspace_id") or getattr(ws, "id", None) or ws.name).strip()
+    channel_type = body.get("channel_type")
+    if not channel_type:
+        raise HTTPException(status_code=400, detail="channel_type is required.")
+    channel = ws.notifications.configure_channel(
+        workspace_id=ws_id,
+        channel_type=channel_type,
+        enabled=body.get("enabled"),
+        name=body.get("name"),
+        config=body.get("config"),
+    )
+    return channel.to_dict()
+
+
+@router.post("/notifications/channels/{channel_type}/test")
+async def dispatch_test_notification_channel_route(request: Request, channel_type: str, workspace_id: str | None = None):
+    ws = getattr(request.app.state, "workspace", None)
+    if not ws:
+        raise HTTPException(status_code=503, detail="Workspace not initialized.")
+    ws_id = (workspace_id or getattr(ws, "id", None) or ws.name).strip()
+    receipt = ws.notifications.test_channel(ws_id, channel_type)
+    return receipt.to_dict()
+
+
+
+@router.get("/notifications/rules")
+async def list_notification_rules_route(request: Request, workspace_id: str | None = None):
+    ws = getattr(request.app.state, "workspace", None)
+    if not ws:
+        return []
+    ws_id = (workspace_id or getattr(ws, "id", None) or ws.name).strip()
+    rules = ws.notifications.get_rules(ws_id)
+    return [r.to_dict() for r in rules]
+
+
+@router.post("/notifications/rules")
+async def configure_notification_rule_route(request: Request):
+    ws = getattr(request.app.state, "workspace", None)
+    if not ws:
+        raise HTTPException(status_code=503, detail="Workspace not initialized.")
+    body = await request.json()
+    ws_id = (body.get("workspace_id") or getattr(ws, "id", None) or ws.name).strip()
+    name = body.get("name")
+    if not name:
+        raise HTTPException(status_code=400, detail="Rule name is required.")
+    rule = ws.notifications.configure_rule(
+        workspace_id=ws_id,
+        name=name,
+        event_types=body.get("event_types"),
+        min_priority=body.get("min_priority"),
+        channels=body.get("channels"),
+        quiet_hours_enabled=body.get("quiet_hours_enabled"),
+        quiet_hours_start=body.get("quiet_hours_start"),
+        quiet_hours_end=body.get("quiet_hours_end"),
+        rule_id=body.get("rule_id"),
+    )
+    return rule.to_dict()
+
+
+@router.delete("/notifications/rules/{rule_id}")
+async def delete_notification_rule_route(request: Request, rule_id: str, workspace_id: str | None = None):
+    ws = getattr(request.app.state, "workspace", None)
+    if not ws:
+        raise HTTPException(status_code=503, detail="Workspace not initialized.")
+    ws_id = (workspace_id or getattr(ws, "id", None) or ws.name).strip()
+    deleted = ws.notifications.delete_rule(ws_id, rule_id)
+    return {"status": "ok" if deleted else "not_found", "rule_id": rule_id}
+
+
+@router.get("/notifications/deliveries")
+async def list_notification_deliveries_route(request: Request, workspace_id: str | None = None, limit: int = 50):
+    ws = getattr(request.app.state, "workspace", None)
+    if not ws:
+        return []
+    ws_id = (workspace_id or getattr(ws, "id", None) or ws.name).strip()
+    receipts = ws.notifications.get_delivery_history(ws_id, limit=limit)
+    return [r.to_dict() for r in receipts]
+
+
+@router.post("/notifications/briefing")
+async def dispatch_notification_briefing_route(request: Request):
+    ws = getattr(request.app.state, "workspace", None)
+    if not ws:
+        raise HTTPException(status_code=503, detail="Workspace not initialized.")
+    body = await request.json()
+    ws_id = (body.get("workspace_id") or getattr(ws, "id", None) or ws.name).strip()
+    title = body.get("title") or "Executive Briefing"
+    summary = body.get("summary") or "Automated workspace status update."
+    briefing = ws.notifications.dispatch_briefing(
+        workspace_id=ws_id,
+        title=title,
+        summary=summary,
+        highlights=body.get("highlights", []),
+        metrics=body.get("metrics", {}),
+        action_links=body.get("action_links", []),
+        channels=body.get("channels"),
+    )
+    return briefing.to_dict()
+
+
+@router.get("/notifications/briefings")
+async def list_notification_briefings_route(request: Request, workspace_id: str | None = None, limit: int = 20):
+    ws = getattr(request.app.state, "workspace", None)
+    if not ws:
+        return []
+    ws_id = (workspace_id or getattr(ws, "id", None) or ws.name).strip()
+    briefings = ws.notifications.list_briefings(ws_id, limit=limit)
+    return [b.to_dict() for b in briefings]
+
+
+@router.post("/notifications/dispatch")
+async def dispatch_custom_notification_route(request: Request):
+    ws = getattr(request.app.state, "workspace", None)
+    if not ws:
+        raise HTTPException(status_code=503, detail="Workspace not initialized.")
+    body = await request.json()
+    ws_id = (body.get("workspace_id") or getattr(ws, "id", None) or ws.name).strip()
+    notif = ws.notifications.notify(
+        workspace_id=ws_id,
+        type=body.get("type", "insight"),
+        title=body.get("title", "Aether Notification"),
+        message=body.get("message", ""),
+        priority=body.get("priority", "normal"),
+        link_view=body.get("link_view"),
+        link_id=body.get("link_id"),
+        action_required=body.get("action_required", False),
+        metadata=body.get("metadata", {}),
+        target_channels=body.get("channels"),
+    )
+    return notif.to_dict()
+
+
+
+# ---------------------------------------------------------------------------
 # Personal Background Tasks Endpoints
 # ---------------------------------------------------------------------------
 

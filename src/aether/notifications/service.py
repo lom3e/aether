@@ -1,6 +1,6 @@
 """
 Service layer for Aether Universal Notification Fabric (Phase D).
-Coordinates real-world notifications, approvals, task completions, and event delivery.
+Coordinates real-world multi-channel notifications, approvals, task completions, and event delivery.
 """
 from __future__ import annotations
 
@@ -9,9 +9,16 @@ import logging
 from typing import Any
 import uuid
 
+from aether.notifications.dispatcher import NotificationDispatcher
 from aether.notifications.models import (
+    ChannelType,
+    DeliveryReceipt,
+    DeliveryStatus,
     Notification,
+    NotificationBriefing,
+    NotificationChannel,
     NotificationPriority,
+    NotificationRule,
     NotificationStatus,
     NotificationType,
 )
@@ -21,7 +28,7 @@ logger = logging.getLogger(__name__)
 
 
 class NotificationService:
-    """Service managing notifications and alerts across Aether."""
+    """Service managing notifications, multi-channel dispatch, and briefings across Aether."""
 
     def __init__(
         self,
@@ -29,11 +36,17 @@ class NotificationService:
         activity_service: Any = None,
         event_hub: Any = None,
         connection_service: Any = None,
+        dispatcher: NotificationDispatcher | None = None,
     ) -> None:
         self.store = store
         self.activity_service = activity_service
         self.event_hub = event_hub
         self.connection_service = connection_service
+        self.dispatcher = dispatcher or NotificationDispatcher(
+            store=self.store,
+            connection_service=self.connection_service,
+            event_hub=self.event_hub,
+        )
 
     def notify(
         self,
@@ -47,8 +60,9 @@ class NotificationService:
         action_required: bool = False,
         action_payload: dict[str, Any] | None = None,
         metadata: dict[str, Any] | None = None,
+        target_channels: list[ChannelType | str] | None = None,
     ) -> Notification:
-        """Emits and persists a real notification."""
+        """Emits, persists, and dispatches a multi-channel notification."""
         notif_type = (
             type if isinstance(type, NotificationType) else NotificationType.from_str(str(type))
         )
@@ -83,7 +97,7 @@ class NotificationService:
         if self.connection_service:
             try:
                 conn = self.connection_service.get_connection(workspace_id, "telegram")
-                if conn and conn.status.value == "connected":
+                if conn and getattr(conn.status, "value", str(conn.status)) == "connected":
                     telegram_connector = self.connection_service.get_telegram_connector(workspace_id)
                     chat_id = telegram_connector._get_default_chat_id()
                     if chat_id:
@@ -102,7 +116,15 @@ class NotificationService:
                                 parse_mode="Markdown",
                             )
             except Exception as e:
-                logger.debug(f"Could not forward notification to Telegram: {e}")
+                logger.debug("Could not forward notification to Telegram connector: %s", e)
+
+        # Dispatch across multi-channel fabric
+        try:
+            receipts = self.dispatcher.dispatch(saved, target_channel_types=target_channels)
+            meta["delivery_count"] = len(receipts)
+        except Exception as exc:
+            logger.warning("Dispatcher error during notify: %s", exc)
+
 
         # Broadcast via Event Hub if available
         if self.event_hub:
@@ -150,6 +172,211 @@ class NotificationService:
             action_payload=action_payload,
             metadata=metadata,
         )
+
+    def dispatch_briefing(
+        self,
+        workspace_id: str,
+        title: str,
+        summary: str,
+        highlights: list[str] | None = None,
+        metrics: dict[str, Any] | None = None,
+        action_links: list[dict[str, str]] | None = None,
+        channels: list[ChannelType | str] | None = None,
+    ) -> NotificationBriefing:
+        """
+        Creates and dispatches an executive notification briefing across specified or default channels.
+        """
+        resolved_highlights = list(highlights or [])
+        resolved_metrics = dict(metrics or {})
+        resolved_actions = list(action_links or [])
+
+        # Format briefing text
+        details = [f"📊 Executive Summary: {summary}"]
+        if resolved_highlights:
+            details.append("Highlights:\n" + "\n".join(f"• {h}" for h in resolved_highlights))
+        if resolved_metrics:
+            details.append("Key Metrics: " + ", ".join(f"{k}: {v}" for k, v in resolved_metrics.items()))
+
+        formatted_msg = "\n\n".join(details)
+
+        # Emit in-app notification and trigger multi-channel dispatch
+        notif = self.notify(
+            workspace_id=workspace_id,
+            type=NotificationType.INSIGHT,
+            title=f"📋 Briefing: {title}",
+            message=formatted_msg,
+            priority=NotificationPriority.NORMAL,
+            metadata={
+                "briefing": True,
+                "metrics": resolved_metrics,
+                "highlights": resolved_highlights,
+                "action_links": resolved_actions,
+            },
+            target_channels=channels,
+        )
+
+        channels_sent: list[str] = []
+        if channels:
+            channels_sent = [
+                c.value if isinstance(c, ChannelType) else str(c)
+                for c in channels
+            ]
+        else:
+            recent_receipts = self.store.list_receipts(workspace_id, limit=10)
+            channels_sent = [
+                r.channel_type.value if hasattr(r.channel_type, "value") else str(r.channel_type)
+                for r in recent_receipts if r.notification_id == notif.id and r.status == DeliveryStatus.SENT
+            ]
+
+        briefing = NotificationBriefing(
+            id=f"brf-{uuid.uuid4().hex[:8]}",
+            workspace_id=workspace_id,
+            title=title,
+            summary=summary,
+            highlights=resolved_highlights,
+            metrics=resolved_metrics,
+            action_links=resolved_actions,
+            channels_dispatched=channels_sent,
+            created_at=datetime.now(timezone.utc).isoformat(),
+        )
+
+        saved_briefing = self.store.save_briefing(briefing)
+
+        if self.event_hub:
+            try:
+                self.event_hub.publish(
+                    workspace_id=workspace_id,
+                    event_type="notification_briefing",
+                    data=saved_briefing.to_dict(),
+                )
+            except Exception:
+                pass
+
+        return saved_briefing
+
+    # -------------------------------------------------------------------------
+    # Channel & Rule Management
+    # -------------------------------------------------------------------------
+
+    def get_channels(self, workspace_id: str) -> list[NotificationChannel]:
+        """Lists configured channels for a workspace."""
+        return self.store.ensure_default_channels(workspace_id)
+
+    def configure_channel(
+        self,
+        workspace_id: str,
+        channel_type: ChannelType | str,
+        enabled: bool | None = None,
+        name: str | None = None,
+        config: dict[str, Any] | None = None,
+    ) -> NotificationChannel:
+        """Enables, disables, or reconfigures a notification delivery channel."""
+        ctype = (
+            channel_type
+            if isinstance(channel_type, ChannelType)
+            else ChannelType.from_str(str(channel_type))
+        )
+        self.store.ensure_default_channels(workspace_id)
+        existing = self.store.get_channel(workspace_id, ctype)
+
+        if not existing:
+            existing = NotificationChannel(
+                id=f"chan-{uuid.uuid4().hex[:8]}",
+                workspace_id=workspace_id,
+                channel_type=ctype,
+                name=name or ctype.value.capitalize(),
+                enabled=True if enabled is None else enabled,
+                config=config or {},
+            )
+        else:
+            if enabled is not None:
+                existing.enabled = enabled
+            if name is not None:
+                existing.name = name
+            if config is not None:
+                existing.config.update(config)
+
+        return self.store.save_channel(existing)
+
+    def test_channel(
+        self,
+        workspace_id: str,
+        channel_type: ChannelType | str,
+    ) -> DeliveryReceipt:
+        """Sends a live test notification through a single channel."""
+        return self.dispatcher.test_channel(workspace_id, channel_type)
+
+    def get_rules(self, workspace_id: str) -> list[NotificationRule]:
+        """Lists routing rules for a workspace."""
+        return self.store.ensure_default_rules(workspace_id)
+
+    def configure_rule(
+        self,
+        workspace_id: str,
+        name: str,
+        event_types: list[str] | None = None,
+        min_priority: str | None = None,
+        channels: list[str] | None = None,
+        quiet_hours_enabled: bool | None = None,
+        quiet_hours_start: str | None = None,
+        quiet_hours_end: str | None = None,
+        rule_id: str | None = None,
+    ) -> NotificationRule:
+        """Creates or updates a notification routing rule."""
+        self.store.ensure_default_rules(workspace_id)
+        existing = self.store.get_rule(workspace_id, rule_id) if rule_id else None
+
+        if not existing:
+            resolved_channels = [ChannelType.from_str(c) for c in (channels or ["in_app", "desktop"])]
+            rule = NotificationRule(
+                id=rule_id or f"rule-{uuid.uuid4().hex[:8]}",
+                workspace_id=workspace_id,
+                name=name,
+                enabled=True,
+                event_types=list(event_types or ["*"]),
+                min_priority=NotificationPriority.from_str(min_priority or "normal"),
+                channels=resolved_channels,
+                quiet_hours_enabled=bool(quiet_hours_enabled) if quiet_hours_enabled is not None else False,
+                quiet_hours_start=quiet_hours_start or "22:00",
+                quiet_hours_end=quiet_hours_end or "08:00",
+            )
+        else:
+            rule = existing
+            rule.name = name
+            if event_types is not None:
+                rule.event_types = event_types
+            if min_priority is not None:
+                rule.min_priority = NotificationPriority.from_str(min_priority)
+            if channels is not None:
+                rule.channels = [ChannelType.from_str(c) for c in channels]
+            if quiet_hours_enabled is not None:
+                rule.quiet_hours_enabled = quiet_hours_enabled
+            if quiet_hours_start is not None:
+                rule.quiet_hours_start = quiet_hours_start
+            if quiet_hours_end is not None:
+                rule.quiet_hours_end = quiet_hours_end
+
+        return self.store.save_rule(rule)
+
+    def delete_rule(self, workspace_id: str, rule_id: str) -> bool:
+        """Removes a notification rule."""
+        return self.store.delete_rule(workspace_id, rule_id)
+
+    def get_delivery_history(self, workspace_id: str, limit: int = 50) -> list[DeliveryReceipt]:
+        """Returns recent channel delivery receipts."""
+        return self.store.list_receipts(workspace_id, limit=limit)
+
+    def list_briefings(self, workspace_id: str, limit: int = 20) -> list[NotificationBriefing]:
+        """Lists executive briefings."""
+        return self.store.list_briefings(workspace_id, limit=limit)
+
+    def get_briefing(self, briefing_id: str) -> NotificationBriefing | None:
+        """Retrieves an executive briefing by ID."""
+        return self.store.get_briefing(briefing_id)
+
+    # -------------------------------------------------------------------------
+    # In-App Notifications API
+    # -------------------------------------------------------------------------
 
     def get_summary(self, workspace_id: str) -> dict[str, Any]:
         """Returns aggregated notification summary including unread and pending approvals."""

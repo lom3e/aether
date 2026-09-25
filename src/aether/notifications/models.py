@@ -116,3 +116,199 @@ class Notification:
             metadata=meta,
             created_at=data.get("created_at") or datetime.now(timezone.utc).isoformat(),
         )
+
+
+class ChannelType(StrEnum):
+    IN_APP = "in_app"
+    DESKTOP = "desktop"
+    TELEGRAM = "telegram"
+    WEBHOOK = "webhook"
+    EMAIL = "email"
+
+    @classmethod
+    def from_str(cls, val: str) -> ChannelType:
+        try:
+            return cls(val.lower().strip())
+        except ValueError:
+            return cls.IN_APP
+
+
+class DeliveryStatus(StrEnum):
+    SENT = "sent"
+    FAILED = "failed"
+    SKIPPED = "skipped"
+    PENDING = "pending"
+
+    @classmethod
+    def from_str(cls, val: str) -> DeliveryStatus:
+        try:
+            return cls(val.lower().strip())
+        except ValueError:
+            return cls.FAILED
+
+
+@dataclass(slots=True)
+class NotificationChannel:
+    """Configuration for a delivery channel in the Notification Fabric."""
+    id: str
+    workspace_id: str
+    channel_type: ChannelType
+    name: str
+    enabled: bool = True
+    config: dict[str, Any] = field(default_factory=dict)
+    created_at: str = field(default_factory=lambda: datetime.now(timezone.utc).isoformat())
+    updated_at: str = field(default_factory=lambda: datetime.now(timezone.utc).isoformat())
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "id": self.id,
+            "workspace_id": self.workspace_id,
+            "channel_type": self.channel_type.value if isinstance(self.channel_type, ChannelType) else str(self.channel_type),
+            "name": self.name,
+            "enabled": self.enabled,
+            "config": self.config,
+            "created_at": self.created_at,
+            "updated_at": self.updated_at,
+        }
+
+    @classmethod
+    def from_dict(cls, data: dict[str, Any]) -> NotificationChannel:
+        return cls(
+            id=data.get("id") or f"chan-{uuid.uuid4().hex[:8]}",
+            workspace_id=data.get("workspace_id", "default"),
+            channel_type=ChannelType.from_str(data.get("channel_type", "in_app")),
+            name=data.get("name", ""),
+            enabled=bool(data.get("enabled", True)),
+            config=dict(data.get("config") or {}),
+            created_at=data.get("created_at") or datetime.now(timezone.utc).isoformat(),
+            updated_at=data.get("updated_at") or datetime.now(timezone.utc).isoformat(),
+        )
+
+
+@dataclass(slots=True)
+class NotificationRule:
+    """Routing and filtering rule for notifications."""
+    id: str
+    workspace_id: str
+    name: str
+    enabled: bool = True
+    event_types: list[str] = field(default_factory=lambda: ["*"])
+    min_priority: NotificationPriority = NotificationPriority.NORMAL
+    channels: list[ChannelType] = field(default_factory=lambda: [ChannelType.IN_APP, ChannelType.DESKTOP])
+    quiet_hours_enabled: bool = False
+    quiet_hours_start: str = "22:00"
+    quiet_hours_end: str = "08:00"
+    created_at: str = field(default_factory=lambda: datetime.now(timezone.utc).isoformat())
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "id": self.id,
+            "workspace_id": self.workspace_id,
+            "name": self.name,
+            "enabled": self.enabled,
+            "event_types": self.event_types,
+            "min_priority": self.min_priority.value if isinstance(self.min_priority, NotificationPriority) else str(self.min_priority),
+            "channels": [c.value if isinstance(c, ChannelType) else str(c) for c in self.channels],
+            "quiet_hours_enabled": self.quiet_hours_enabled,
+            "quiet_hours_start": self.quiet_hours_start,
+            "quiet_hours_end": self.quiet_hours_end,
+            "created_at": self.created_at,
+        }
+
+    @classmethod
+    def from_dict(cls, data: dict[str, Any]) -> NotificationRule:
+        raw_channels = data.get("channels") or ["in_app", "desktop"]
+        channels = [ChannelType.from_str(c) for c in raw_channels]
+        return cls(
+            id=data.get("id") or f"rule-{uuid.uuid4().hex[:8]}",
+            workspace_id=data.get("workspace_id", "default"),
+            name=data.get("name", "Default Rule"),
+            enabled=bool(data.get("enabled", True)),
+            event_types=list(data.get("event_types") or ["*"]),
+            min_priority=NotificationPriority.from_str(data.get("min_priority", "normal")),
+            channels=channels,
+            quiet_hours_enabled=bool(data.get("quiet_hours_enabled", False)),
+            quiet_hours_start=data.get("quiet_hours_start", "22:00"),
+            quiet_hours_end=data.get("quiet_hours_end", "08:00"),
+            created_at=data.get("created_at") or datetime.now(timezone.utc).isoformat(),
+        )
+
+
+@dataclass(slots=True)
+class DeliveryReceipt:
+    """Audit log of a delivery attempt to a specific channel."""
+    id: str
+    notification_id: str
+    workspace_id: str
+    channel_type: ChannelType
+    status: DeliveryStatus
+    detail: str = ""
+    latency_ms: float = 0.0
+    timestamp: str = field(default_factory=lambda: datetime.now(timezone.utc).isoformat())
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "id": self.id,
+            "notification_id": self.notification_id,
+            "workspace_id": self.workspace_id,
+            "channel_type": self.channel_type.value if isinstance(self.channel_type, ChannelType) else str(self.channel_type),
+            "status": self.status.value if isinstance(self.status, DeliveryStatus) else str(self.status),
+            "detail": self.detail,
+            "latency_ms": round(self.latency_ms, 2),
+            "timestamp": self.timestamp,
+        }
+
+    @classmethod
+    def from_dict(cls, data: dict[str, Any]) -> DeliveryReceipt:
+        return cls(
+            id=data.get("id") or f"rcpt-{uuid.uuid4().hex[:10]}",
+            notification_id=data.get("notification_id", ""),
+            workspace_id=data.get("workspace_id", "default"),
+            channel_type=ChannelType.from_str(data.get("channel_type", "in_app")),
+            status=DeliveryStatus.from_str(data.get("status", "sent")),
+            detail=data.get("detail", ""),
+            latency_ms=float(data.get("latency_ms", 0.0)),
+            timestamp=data.get("timestamp") or datetime.now(timezone.utc).isoformat(),
+        )
+
+
+@dataclass(slots=True)
+class NotificationBriefing:
+    """Rich executive briefing summarizing task/mission completion or proactive insights."""
+    id: str
+    workspace_id: str
+    title: str
+    summary: str
+    highlights: list[str] = field(default_factory=list)
+    metrics: dict[str, Any] = field(default_factory=dict)
+    action_links: list[dict[str, str]] = field(default_factory=list)
+    channels_dispatched: list[str] = field(default_factory=list)
+    created_at: str = field(default_factory=lambda: datetime.now(timezone.utc).isoformat())
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "id": self.id,
+            "workspace_id": self.workspace_id,
+            "title": self.title,
+            "summary": self.summary,
+            "highlights": self.highlights,
+            "metrics": self.metrics,
+            "action_links": self.action_links,
+            "channels_dispatched": self.channels_dispatched,
+            "created_at": self.created_at,
+        }
+
+    @classmethod
+    def from_dict(cls, data: dict[str, Any]) -> NotificationBriefing:
+        return cls(
+            id=data.get("id") or f"brf-{uuid.uuid4().hex[:8]}",
+            workspace_id=data.get("workspace_id", "default"),
+            title=data.get("title", ""),
+            summary=data.get("summary", ""),
+            highlights=list(data.get("highlights") or []),
+            metrics=dict(data.get("metrics") or {}),
+            action_links=list(data.get("action_links") or []),
+            channels_dispatched=list(data.get("channels_dispatched") or []),
+            created_at=data.get("created_at") or datetime.now(timezone.utc).isoformat(),
+        )
+

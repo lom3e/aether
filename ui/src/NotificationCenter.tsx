@@ -1,6 +1,8 @@
 import { useState, useEffect, useRef } from 'react';
-import { Bell, Check, Trash2, Shield, CheckCircle2, AlertTriangle, Sparkles } from 'lucide-react';
+import { Bell, Check, Trash2, Shield, CheckCircle2, AlertTriangle, Sparkles, Sliders } from 'lucide-react';
 import { apiUrl } from './api';
+import { NotificationFabricModal } from './NotificationFabricModal';
+
 
 export interface NotificationItem {
   id: string;
@@ -24,7 +26,9 @@ interface NotificationCenterProps {
 
 export function NotificationCenter({ workspaceName, onNavigate }: NotificationCenterProps) {
   const [isOpen, setIsOpen] = useState(false);
+  const [fabricModalOpen, setFabricModalOpen] = useState(false);
   const [notifications, setNotifications] = useState<NotificationItem[]>([]);
+
   const [unreadCount, setUnreadCount] = useState(0);
   const [loading, setLoading] = useState(false);
   const dropdownRef = useRef<HTMLDivElement>(null);
@@ -282,23 +286,41 @@ export function NotificationCenter({ workspaceName, onNavigate }: NotificationCe
                 </span>
               )}
             </div>
-            {unreadCount > 0 && (
+            <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+              {unreadCount > 0 && (
+                <button
+                  type="button"
+                  onClick={handleMarkAllRead}
+                  style={{
+                    background: 'none',
+                    border: 'none',
+                    color: 'hsl(var(--primary))',
+                    fontSize: '12px',
+                    fontWeight: 500,
+                    cursor: 'pointer',
+                    padding: 0,
+                  }}
+                >
+                  Mark all read
+                </button>
+              )}
               <button
                 type="button"
-                onClick={handleMarkAllRead}
+                title="Notification Fabric Channels & Rules"
+                onClick={() => setFabricModalOpen(true)}
                 style={{
                   background: 'none',
                   border: 'none',
-                  color: 'hsl(var(--primary))',
-                  fontSize: '12px',
-                  fontWeight: 500,
+                  color: 'hsl(var(--muted-foreground))',
                   cursor: 'pointer',
-                  padding: 0,
+                  padding: '2px 4px',
+                  display: 'flex',
+                  alignItems: 'center',
                 }}
               >
-                Mark all read
+                <Sliders size={15} />
               </button>
-            )}
+            </div>
           </div>
 
           {/* Body List */}
@@ -407,6 +429,14 @@ export function NotificationCenter({ workspaceName, onNavigate }: NotificationCe
           </div>
         </div>
       )}
+
+      {/* Multi-Channel Notification Fabric Settings Modal */}
+      <NotificationFabricModal
+        workspaceName={workspaceName}
+        isOpen={fabricModalOpen}
+        onClose={() => setFabricModalOpen(false)}
+      />
     </div>
   );
 }
+

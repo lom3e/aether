@@ -933,6 +933,82 @@ class PersonalAgentService:
                 },
             )
 
+        # 3e33. Notification Briefing Dispatch (DO tier)
+        briefing_triggers = [
+            "invia briefing", "notificami quando finisci", "avvisami quando finisci",
+            "send notification briefing", "notify me when done", "invia notifica di riepilogo",
+            "briefing di notifica", "invia una notifica", "invia notifica",
+        ]
+        if any(k in p_lower for k in briefing_triggers):
+            return UserIntent(
+                raw_prompt=effective_prompt,
+                tier=IntentTier.DO,
+                summary="Dispatch multi-channel executive notification briefing",
+                action_id="notifications.send_briefing",
+                action_args={
+                    "title": "Aether Mission Status Briefing",
+                    "summary": f"Executive notification requested by user: '{prompt}'",
+                    "highlights": ["Automated status report", "Multi-channel fabric verified"],
+                },
+            )
+
+        # 3e34. List Notification Channels & Rules (ANSWER tier)
+        channels_list_triggers = [
+            "mostra canali di notifica", "quali canali di notifica", "stato canali notifiche",
+            "list notification channels", "canali notifiche attivi", "canali di notifica",
+            "mostra regole di notifica",
+        ]
+        if any(k in p_lower for k in channels_list_triggers):
+            return UserIntent(
+                raw_prompt=effective_prompt,
+                tier=IntentTier.ANSWER,
+                summary="List configured notification channels and rules",
+                action_id="notifications.list_channels",
+                action_args={},
+            )
+
+        # 3e35. Test Notification Channel (DO tier)
+        test_channel_triggers = [
+            "testa canale", "testa il canale", "test notification channel", "test channel",
+            "testa webhook", "testa telegram", "testa desktop",
+        ]
+        if any(k in p_lower for k in test_channel_triggers) or (
+            ("testa" in p_lower or "test" in p_lower) and ("canale" in p_lower or "notific" in p_lower)
+        ):
+            target_chan = "desktop"
+            if "telegram" in p_lower:
+                target_chan = "telegram"
+            elif "webhook" in p_lower:
+                target_chan = "webhook"
+            elif "email" in p_lower:
+                target_chan = "email"
+            return UserIntent(
+                raw_prompt=effective_prompt,
+                tier=IntentTier.DO,
+                summary=f"Test notification delivery on channel '{target_chan}'",
+                action_id="notifications.test_channel",
+                action_args={"channel_type": target_chan},
+            )
+
+        # 3e36. Configure Notification Channel (DO tier)
+        configure_channel_triggers = [
+            "configura canale", "configura il canale", "attiva notifiche", "disattiva notifiche",
+            "imposta webhook", "configura webhook", "configure notification channel", "imposta canale",
+        ]
+        if any(k in p_lower for k in configure_channel_triggers) or (
+            any(w in p_lower for w in ["configura", "attiva", "disattiva", "imposta", "configure"])
+            and any(w in p_lower for w in ["canale", "notific", "webhook", "telegram", "channel"])
+        ):
+            c_type = "webhook" if "webhook" in p_lower else ("telegram" if "telegram" in p_lower else "desktop")
+            enable_val = not ("disattiva" in p_lower or "disable" in p_lower)
+            return UserIntent(
+                raw_prompt=effective_prompt,
+                tier=IntentTier.DO,
+                summary=f"Configure notification channel '{c_type}' (enabled={enable_val})",
+                action_id="notifications.configure_channel",
+                action_args={"channel_type": c_type, "enabled": enable_val},
+            )
+
 
         # 3e. GitHub issue creation (ACT tier - requires safety confirmation)
         github_issue_triggers = [
