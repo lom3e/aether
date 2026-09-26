@@ -103,7 +103,7 @@ class TelegramConnector(BaseConnector):
     def is_chat_authorized(self, chat_id: str | int) -> bool:
         allowed = self._get_allowed_chat_ids()
         if not allowed:
-            # If no whitelist is specified, all chats are allowed by default
+            # If no whitelist is specified, all chats are allowed by default (tightened in P1.1)
             return True
         return str(chat_id).strip() in allowed
 

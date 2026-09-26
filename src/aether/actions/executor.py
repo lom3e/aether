@@ -175,10 +175,17 @@ class ActionExecutor:
         return self._dispatch_and_run(definition, execution)
 
     def approve(self, execution_id: str, approver: str = "user") -> ActionExecution:
-        """Approves a pending execution and runs it."""
+        """Approves a pending execution and runs it. Idempotent if already approved/completed."""
         execution = self.store.get_execution(execution_id)
         if not execution:
             raise ValueError(f"Execution '{execution_id}' not found")
+
+        # Idempotency: if already approved or running or completed, return existing execution
+        if execution.status in (ActionExecutionStatus.APPROVED, ActionExecutionStatus.SUCCESS, ActionExecutionStatus.RUNNING):
+            return execution
+
+        if execution.status == ActionExecutionStatus.REJECTED:
+            raise ValueError(f"Cannot approve execution '{execution_id}': action was already declined.")
 
         if execution.status != ActionExecutionStatus.PENDING_APPROVAL:
             raise ValueError(f"Cannot approve execution in status '{execution.status}'")
@@ -194,10 +201,17 @@ class ActionExecutor:
         return self._dispatch_and_run(definition, execution)
 
     def reject(self, execution_id: str, reason: str = "User declined") -> ActionExecution:
-        """Rejects a pending execution."""
+        """Rejects a pending execution. Idempotent if already rejected."""
         execution = self.store.get_execution(execution_id)
         if not execution:
             raise ValueError(f"Execution '{execution_id}' not found")
+
+        # Idempotency: if already rejected, return cleanly
+        if execution.status == ActionExecutionStatus.REJECTED:
+            return execution
+
+        if execution.status in (ActionExecutionStatus.APPROVED, ActionExecutionStatus.SUCCESS, ActionExecutionStatus.RUNNING):
+            raise ValueError(f"Cannot decline execution '{execution_id}': action was already approved.")
 
         if execution.status != ActionExecutionStatus.PENDING_APPROVAL:
             raise ValueError(f"Cannot reject execution in status '{execution.status}'")

@@ -374,6 +374,8 @@ class MissionRuntime:
                 raise NotFoundError(f"No execution found for mission {mission_id}.")
 
             if active.status != ExecutionStatus.AWAITING_APPROVAL:
+                if active.status in (ExecutionStatus.RUNNING, ExecutionStatus.COMPLETED):
+                    return active
                 raise ConflictError(f"Execution {active.id} is not awaiting approval.")
 
             pending = active.pending_approval or {}
@@ -529,6 +531,11 @@ class MissionRuntime:
             active = self.store.get_active_execution(mission_id)
             if not active:
                 raise NotFoundError(f"No execution found for mission {mission_id}.")
+
+            if active.status == ExecutionStatus.INTERRUPTED:
+                return active
+            if active.status != ExecutionStatus.AWAITING_APPROVAL:
+                raise ConflictError(f"Execution {active.id} is not awaiting approval.")
 
             pending = active.pending_approval or {}
             target_id = pending.get("id")

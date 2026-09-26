@@ -392,6 +392,7 @@ function MainApp() {
           <Home
             navigate={navigate}
             workspaceName={workspaceName}
+            initialApprovalId={viewParams}
             onNewTask={handleNewConversation}
             onSelectConversation={handleSelectConversation}
             conversations={conversations}
@@ -402,7 +403,13 @@ function MainApp() {
           <Missions navigate={navigate} initialMissionId={viewParams} />
         )}
         {currentView === 'workforce' && <WorkforceHub navigate={navigate} />}
-        {currentView === 'connections' && <Connections navigate={navigate} />}
+        {currentView === 'connections' && (
+          <Connections
+            navigate={navigate}
+            initialExecutionId={viewParams}
+            initialTab={viewParams ? 'actions' : undefined}
+          />
+        )}
         {currentView === 'activity' && <ActivityFeed navigate={navigate} />}
         {currentView === 'chat' && (
           <Chat
@@ -420,7 +427,7 @@ function MainApp() {
         {currentView === 'knowledge' && <Knowledge />}
         {currentView === 'memory' && <WorkforceHub initialTab="memory" navigate={navigate} />}
         {currentView === 'learning' && <WorkforceHub initialTab="learning" navigate={navigate} />}
-        {currentView === 'automations' && <Automations />}
+        {currentView === 'automations' && <Automations initialAutomationId={viewParams} />}
         {currentView === 'workflows' && <WorkflowBuilder navigate={navigate} />}
         {currentView === 'skills' && <WorkforceHub initialTab="skills" navigate={navigate} />}
         {currentView === 'content' && <ContentRepurposing navigate={navigate} />}

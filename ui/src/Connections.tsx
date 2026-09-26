@@ -1,10 +1,12 @@
 import { useState, useEffect, useContext } from 'react';
 import {
   Calendar, Mail, GitBranch, MessageSquare, FileText, CheckCircle2,
-  AlertCircle, ShieldCheck, Settings, Plus, RefreshCw, Clock, Zap, Globe, Send
+  AlertCircle, ShieldCheck, Settings, Plus, RefreshCw, Clock, Zap, Globe, Send,
+  Check, X, Loader2
 } from 'lucide-react';
 import { apiUrl } from './api';
 import { ToastContext } from './toast';
+import { submitApprovalDecision } from './canonicalNotification';
 
 interface ConnectionItem {
   id: string;
@@ -41,8 +43,17 @@ interface ActionExecutionItem {
   error_message?: string;
 }
 
-export function Connections({ navigate: _navigate }: { navigate?: (view: string, params?: any) => void }) {
-  const [activeTab, setActiveTab] = useState<'apps' | 'calendar' | 'actions'>('apps');
+interface ConnectionsProps {
+  navigate?: (view: string, params?: any) => void;
+  initialExecutionId?: string | null;
+  initialTab?: 'apps' | 'calendar' | 'actions';
+}
+
+export function Connections({ navigate: _navigate, initialExecutionId, initialTab }: ConnectionsProps) {
+  const [activeTab, setActiveTab] = useState<'apps' | 'calendar' | 'actions'>(
+    initialTab || (initialExecutionId ? 'actions' : 'apps')
+  );
+  const [actionLoadingId, setActionLoadingId] = useState<string | null>(null);
   const [connections, setConnections] = useState<ConnectionItem[]>([]);
   const [calendarEvents, setCalendarEvents] = useState<CalendarEventItem[]>([]);
   const [executions, setExecutions] = useState<ActionExecutionItem[]>([]);
@@ -208,6 +219,71 @@ export function Connections({ navigate: _navigate }: { navigate?: (view: string,
   useEffect(() => {
     fetchAll();
   }, []);
+
+  useEffect(() => {
+    if (initialTab) {
+      setActiveTab(initialTab);
+    } else if (initialExecutionId) {
+      setActiveTab('actions');
+    }
+  }, [initialTab, initialExecutionId]);
+
+  useEffect(() => {
+    if (activeTab === 'actions' && initialExecutionId && executions.length > 0) {
+      setTimeout(() => {
+        const el = document.getElementById(`exec-card-${initialExecutionId}`);
+        if (el) {
+          el.scrollIntoView({ behavior: 'smooth', block: 'center' });
+        }
+      }, 100);
+    }
+  }, [activeTab, initialExecutionId, executions]);
+
+  const handleApproveAction = async (executionId: string) => {
+    if (actionLoadingId === executionId) return;
+    setActionLoadingId(executionId);
+    try {
+      const res = await submitApprovalDecision({
+        target_type: 'action_execution',
+        target_id: executionId,
+        decision: 'approve',
+        approver: 'user',
+      });
+      if (res.success) {
+        showToast(res.message, res.status === 'already_completed' ? 'info' : 'success');
+        fetchAll();
+      } else {
+        showToast(res.message || 'Failed to approve action execution.', 'error');
+      }
+    } catch (err: any) {
+      showToast(err.message || 'Error approving action.', 'error');
+    } finally {
+      setActionLoadingId(null);
+    }
+  };
+
+  const handleRejectAction = async (executionId: string) => {
+    if (actionLoadingId === executionId) return;
+    setActionLoadingId(executionId);
+    try {
+      const res = await submitApprovalDecision({
+        target_type: 'action_execution',
+        target_id: executionId,
+        decision: 'reject',
+        reason: 'Declined by user',
+      });
+      if (res.success) {
+        showToast(res.message, 'info');
+        fetchAll();
+      } else {
+        showToast(res.message || 'Failed to decline action execution.', 'error');
+      }
+    } catch (err: any) {
+      showToast(err.message || 'Error declining action.', 'error');
+    } finally {
+      setActionLoadingId(null);
+    }
+  };
 
   const openConfigModal = (provider: (typeof availableProviders)[0], existingConn?: ConnectionItem) => {
     setConfigModalProvider(provider);
@@ -1131,9 +1207,11 @@ export function Connections({ navigate: _navigate }: { navigate?: (view: string,
             executions.map(exec => {
               const summary = getActionSummary(exec);
               const detail = getActionDetail(exec);
+              const isTargeted = initialExecutionId === exec.id;
               return (
                 <div
                   key={exec.id}
+                  id={`exec-card-${exec.id}`}
                   className="card"
                   style={{
                     padding: '16px 20px',
@@ -1141,6 +1219,9 @@ export function Connections({ navigate: _navigate }: { navigate?: (view: string,
                     display: 'flex',
                     flexDirection: 'column',
                     gap: '8px',
+                    border: isTargeted ? '2px solid hsl(var(--primary))' : undefined,
+                    boxShadow: isTargeted ? '0 0 16px rgba(99, 102, 241, 0.25)' : undefined,
+                    transition: 'all 0.3s ease',
                   }}
                 >
                   <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
@@ -1210,6 +1291,53 @@ export function Connections({ navigate: _navigate }: { navigate?: (view: string,
                       whiteSpace: 'nowrap',
                     }}>
                       Result: {typeof exec.output_data === 'string' ? exec.output_data : JSON.stringify(exec.output_data).slice(0, 160)}
+                    </div>
+                  )}
+
+                  {exec.status === 'pending_approval' && (
+                    <div style={{ display: 'flex', gap: '8px', marginTop: '8px', justifyContent: 'flex-end', borderTop: '1px solid hsl(var(--border)/0.4)', paddingTop: '10px' }}>
+                      <button
+                        onClick={() => handleRejectAction(exec.id)}
+                        disabled={actionLoadingId === exec.id}
+                        style={{
+                          display: 'inline-flex',
+                          alignItems: 'center',
+                          gap: '6px',
+                          padding: '6px 12px',
+                          borderRadius: '6px',
+                          border: '1px solid hsl(var(--border))',
+                          backgroundColor: 'transparent',
+                          color: '#ef4444',
+                          fontSize: '12px',
+                          fontWeight: 600,
+                          cursor: actionLoadingId === exec.id ? 'not-allowed' : 'pointer',
+                          opacity: actionLoadingId === exec.id ? 0.6 : 1,
+                        }}
+                      >
+                        {actionLoadingId === exec.id ? <Loader2 size={13} className="animate-spin" /> : <X size={13} />}
+                        Decline
+                      </button>
+                      <button
+                        onClick={() => handleApproveAction(exec.id)}
+                        disabled={actionLoadingId === exec.id}
+                        style={{
+                          display: 'inline-flex',
+                          alignItems: 'center',
+                          gap: '6px',
+                          padding: '6px 14px',
+                          borderRadius: '6px',
+                          border: 'none',
+                          backgroundColor: '#10b981',
+                          color: '#ffffff',
+                          fontSize: '12px',
+                          fontWeight: 600,
+                          cursor: actionLoadingId === exec.id ? 'not-allowed' : 'pointer',
+                          opacity: actionLoadingId === exec.id ? 0.6 : 1,
+                        }}
+                      >
+                        {actionLoadingId === exec.id ? <Loader2 size={13} className="animate-spin" /> : <Check size={13} />}
+                        Approve & Run
+                      </button>
                     </div>
                   )}
                 </div>

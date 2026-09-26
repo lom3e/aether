@@ -96,7 +96,11 @@ interface AutomationRun {
   }>;
 }
 
-export function Automations() {
+interface AutomationsProps {
+  initialAutomationId?: string | null;
+}
+
+export function Automations({ initialAutomationId }: AutomationsProps = {}) {
   const { t } = useTranslation();
   const showToast = useContext(ToastContext);
 
@@ -177,6 +181,17 @@ export function Automations() {
     fetchRuns();
     fetchTeamsAndAgents();
   }, [fetchAutomations, fetchSuggestions, fetchRuns, fetchTeamsAndAgents]);
+
+  useEffect(() => {
+    if (!initialAutomationId) return;
+    const timer = setTimeout(() => {
+      const el = document.getElementById(`auto-${initialAutomationId}`) || document.getElementById(`sug-${initialAutomationId}`);
+      if (el) {
+        el.scrollIntoView({ behavior: 'smooth', block: 'center' });
+      }
+    }, 150);
+    return () => clearTimeout(timer);
+  }, [initialAutomationId, automations, suggestions]);
 
   const handleAcceptSuggestion = async (sugId: string) => {
     try {
@@ -445,62 +460,68 @@ export function Automations() {
                 </div>
 
                 <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(320px, 1fr))', gap: '14px' }}>
-                  {suggestions.map((sug) => (
-                    <div
-                      key={sug.id}
-                      style={{
-                        padding: '14px',
-                        borderRadius: '10px',
-                        background: 'hsl(var(--card))',
-                        border: '1px solid hsl(var(--border))',
-                        display: 'flex',
-                        flexDirection: 'column',
-                        justifyContent: 'space-between',
-                        gap: '10px',
-                      }}
-                    >
-                      <div>
-                        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '6px' }}>
-                          <span style={{ fontSize: '13px', fontWeight: 600, color: 'hsl(var(--fg))' }}>{sug.title}</span>
-                          <span className="badge badge-primary" style={{ fontSize: '10.5px' }}>
-                            {sug.evidence_count} evidence
-                          </span>
+                  {suggestions.map((sug) => {
+                    const isTargeted = initialAutomationId === sug.id || initialAutomationId === sug.automation_id;
+                    return (
+                      <div
+                        key={sug.id}
+                        id={`sug-${sug.id}`}
+                        style={{
+                          padding: '14px',
+                          borderRadius: '10px',
+                          background: 'hsl(var(--card))',
+                          border: isTargeted ? '2px solid hsl(var(--primary))' : '1px solid hsl(var(--border))',
+                          boxShadow: isTargeted ? '0 0 16px rgba(99, 102, 241, 0.25)' : undefined,
+                          display: 'flex',
+                          flexDirection: 'column',
+                          justifyContent: 'space-between',
+                          gap: '10px',
+                          transition: 'all 0.3s ease',
+                        }}
+                      >
+                        <div>
+                          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '6px' }}>
+                            <span style={{ fontSize: '13px', fontWeight: 600, color: 'hsl(var(--fg))' }}>{sug.title}</span>
+                            <span className="badge badge-primary" style={{ fontSize: '10.5px' }}>
+                              {sug.evidence_count} evidence
+                            </span>
+                          </div>
+                          <p style={{ fontSize: '11.5px', color: 'hsl(var(--muted-fg))', margin: '0 0 8px', lineHeight: 1.4 }}>
+                            {sug.description}
+                          </p>
+                          {sug.suggested_trigger?.cron && (
+                            <div style={{ fontSize: '11px', color: 'hsl(var(--primary))', fontWeight: 500, display: 'flex', alignItems: 'center', gap: '5px', marginBottom: '8px' }}>
+                              <Clock size={12} /> Schedule: {sug.suggested_trigger.cron}
+                            </div>
+                          )}
+                          {sug.suggested_steps && sug.suggested_steps.length > 0 && (
+                            <div style={{ fontSize: '10.5px', color: 'hsl(var(--muted-fg))', background: 'hsl(var(--muted)/0.3)', padding: '6px 8px', borderRadius: '6px' }}>
+                              <strong>Pipeline:</strong> {sug.suggested_steps.map((st) => `${st.agent_name || 'Agent'}: ${st.name}`).join(' → ')}
+                            </div>
+                          )}
                         </div>
-                        <p style={{ fontSize: '11.5px', color: 'hsl(var(--muted-fg))', margin: '0 0 8px', lineHeight: 1.4 }}>
-                          {sug.description}
-                        </p>
-                        {sug.suggested_trigger?.cron && (
-                          <div style={{ fontSize: '11px', color: 'hsl(var(--primary))', fontWeight: 500, display: 'flex', alignItems: 'center', gap: '5px', marginBottom: '8px' }}>
-                            <Clock size={12} /> Schedule: {sug.suggested_trigger.cron}
-                          </div>
-                        )}
-                        {sug.suggested_steps && sug.suggested_steps.length > 0 && (
-                          <div style={{ fontSize: '10.5px', color: 'hsl(var(--muted-fg))', background: 'hsl(var(--muted)/0.3)', padding: '6px 8px', borderRadius: '6px' }}>
-                            <strong>Pipeline:</strong> {sug.suggested_steps.map((st) => `${st.agent_name || 'Agent'}: ${st.name}`).join(' → ')}
-                          </div>
-                        )}
-                      </div>
 
-                      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'flex-end', gap: '8px', paddingTop: '8px', borderTop: '1px solid hsl(var(--border)/0.5)' }}>
-                        <button
-                          type="button"
-                          className="btn btn-ghost"
-                          style={{ padding: '4px 10px', fontSize: '11px' }}
-                          onClick={() => handleDismissSuggestion(sug.id)}
-                        >
-                          Dismiss
-                        </button>
-                        <button
-                          type="button"
-                          className="btn btn-primary"
-                          style={{ padding: '4px 12px', fontSize: '11px', display: 'flex', alignItems: 'center', gap: '5px' }}
-                          onClick={() => handleAcceptSuggestion(sug.id)}
-                        >
-                          <Check size={12} /> Accept & Create
-                        </button>
+                        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'flex-end', gap: '8px', paddingTop: '8px', borderTop: '1px solid hsl(var(--border)/0.5)' }}>
+                          <button
+                            type="button"
+                            className="btn btn-ghost"
+                            style={{ padding: '4px 10px', fontSize: '11px' }}
+                            onClick={() => handleDismissSuggestion(sug.id)}
+                          >
+                            Dismiss
+                          </button>
+                          <button
+                            type="button"
+                            className="btn btn-primary"
+                            style={{ padding: '4px 12px', fontSize: '11px', display: 'flex', alignItems: 'center', gap: '5px' }}
+                            onClick={() => handleAcceptSuggestion(sug.id)}
+                          >
+                            <Check size={12} /> Accept & Create
+                          </button>
+                        </div>
                       </div>
-                    </div>
-                  ))}
+                    );
+                  })}
                 </div>
               </div>
             )}
@@ -509,9 +530,11 @@ export function Automations() {
               <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(340px, 1fr))', gap: '20px' }}>
                 {automations.map((auto) => {
                   const isRunning = runningIds.has(auto.id);
+                  const isTargeted = initialAutomationId === auto.id;
                   return (
                     <div
                       key={auto.id}
+                      id={`auto-${auto.id}`}
                       className="card card-interactive"
                       style={{
                         padding: '20px',
@@ -519,6 +542,9 @@ export function Automations() {
                         flexDirection: 'column',
                         height: '100%',
                         opacity: auto.enabled ? 1 : 0.72,
+                        border: isTargeted ? '2px solid hsl(var(--primary))' : undefined,
+                        boxShadow: isTargeted ? '0 0 16px rgba(99, 102, 241, 0.25)' : undefined,
+                        transition: 'all 0.3s ease',
                       }}
                     >
                       {/* Top row: Name + Toggle Switch */}

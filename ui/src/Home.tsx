@@ -2,7 +2,7 @@ import { useState, useEffect, useContext, useRef } from 'react';
 import {
   Sparkles, Send, CheckCircle2, Clock, AlertTriangle, ArrowRight,
   Plus, Calendar, FileText, Users, Activity, Check, X, Shield, RefreshCw,
-  Mic, MicOff, Volume2, VolumeX, ExternalLink
+  Mic, MicOff, Volume2, VolumeX, ExternalLink, Loader2
 } from 'lucide-react';
 import { apiUrl } from './api';
 import { useTranslation } from './i18n';
@@ -10,10 +10,12 @@ import { ToastContext } from './toast';
 import { AutoArchitectModal } from './AutoArchitectModal';
 import { TopHeader } from './TopHeader';
 import { NotificationCenter } from './NotificationCenter';
+import { submitApprovalDecision } from './canonicalNotification';
 
 interface HomeProps {
   navigate: (view: string, params?: any) => void;
   workspaceName: string;
+  initialApprovalId?: string | null;
   onNewTask?: () => void;
   onSelectConversation?: (id: string) => void;
   conversations?: any[];
@@ -42,11 +44,13 @@ interface PersonalMsg {
 export function Home({
   navigate,
   workspaceName,
+  initialApprovalId,
   onNewTask,
   onOpenWorkspaceModal,
 }: HomeProps) {
   const [promptInput, setPromptInput] = useState('');
   const [isSubmitting, setIsSubmitting] = useState(false);
+  const [actionLoading, setActionLoading] = useState<string | null>(null);
   const [currentSessionId, setCurrentSessionId] = useState<string | null>(null);
   const [messages, setMessages] = useState<PersonalMsg[]>([]);
   const [overview, setOverview] = useState<any>({
@@ -333,15 +337,31 @@ export function Home({
     }
   };
 
+  useEffect(() => {
+    if (initialApprovalId && overview.pending_approvals?.length > 0) {
+      setTimeout(() => {
+        const el = document.getElementById(`approval-card-${initialApprovalId}`);
+        if (el) {
+          el.scrollIntoView({ behavior: 'smooth', block: 'center' });
+        }
+      }, 300);
+    }
+  }, [initialApprovalId, overview.pending_approvals]);
+
   const handleApproveAction = async (executionId: string) => {
+    if (actionLoading === executionId) return;
+    setActionLoading(executionId);
     try {
-      const res = await fetch(apiUrl(`/api/actions/executions/${executionId}/approve`), {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ approver: 'user' }),
+      const res = await submitApprovalDecision({
+        target_type: 'action_execution',
+        target_id: executionId,
+        decision: 'approve',
+        approver: 'user',
+        workspaceName,
       });
-      if (res.ok) {
-        showToast('Action confirmed and executed.', 'success');
+
+      if (res.success) {
+        showToast(res.message, res.status === 'already_completed' ? 'info' : 'success');
         fetchOverview();
         // Update local message step status
         setMessages(prev => prev.map(msg => {
@@ -353,21 +373,30 @@ export function Home({
           }
           return msg;
         }));
+      } else {
+        showToast(res.message, 'error');
       }
-    } catch {
-      showToast('Error approving action.', 'error');
+    } catch (err: any) {
+      showToast(err.message || 'Error approving action.', 'error');
+    } finally {
+      setActionLoading(null);
     }
   };
 
   const handleRejectAction = async (executionId: string) => {
+    if (actionLoading === executionId) return;
+    setActionLoading(executionId);
     try {
-      const res = await fetch(apiUrl(`/api/actions/executions/${executionId}/reject`), {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ reason: 'Declined by user' }),
+      const res = await submitApprovalDecision({
+        target_type: 'action_execution',
+        target_id: executionId,
+        decision: 'reject',
+        reason: 'Declined by user',
+        workspaceName,
       });
-      if (res.ok) {
-        showToast('Action declined.', 'info');
+
+      if (res.success) {
+        showToast(res.message, 'info');
         fetchOverview();
         setMessages(prev => prev.map(msg => {
           if (msg.action_execution_id === executionId) {
@@ -378,9 +407,13 @@ export function Home({
           }
           return msg;
         }));
+      } else {
+        showToast(res.message, 'error');
       }
-    } catch {
-      showToast('Error declining action.', 'error');
+    } catch (err: any) {
+      showToast(err.message || 'Error declining action.', 'error');
+    } finally {
+      setActionLoading(null);
     }
   };
 
@@ -609,17 +642,35 @@ export function Home({
                     <div style={{ display: 'flex', gap: '8px' }}>
                       <button
                         className="btn btn-ghost"
+                        disabled={actionLoading === msg.action_execution_id}
                         onClick={() => handleRejectAction(msg.action_execution_id!)}
-                        style={{ fontSize: '12px', padding: '4px 10px', color: 'hsl(var(--destructive))' }}
+                        style={{
+                          fontSize: '12px',
+                          padding: '4px 10px',
+                          color: 'hsl(var(--destructive))',
+                          opacity: actionLoading === msg.action_execution_id ? 0.6 : 1,
+                        }}
                       >
                         <X size={13} style={{ marginRight: '4px' }} /> Decline
                       </button>
                       <button
                         className="btn btn-primary"
+                        disabled={actionLoading === msg.action_execution_id}
                         onClick={() => handleApproveAction(msg.action_execution_id!)}
-                        style={{ fontSize: '12px', padding: '4px 14px', backgroundColor: '#10b981', borderColor: '#10b981' }}
+                        style={{
+                          fontSize: '12px',
+                          padding: '4px 14px',
+                          backgroundColor: '#10b981',
+                          borderColor: '#10b981',
+                          opacity: actionLoading === msg.action_execution_id ? 0.6 : 1,
+                        }}
                       >
-                        <Check size={13} style={{ marginRight: '4px' }} /> Approve
+                        {actionLoading === msg.action_execution_id ? (
+                          <Loader2 size={13} className="animate-spin" style={{ marginRight: '4px' }} />
+                        ) : (
+                          <Check size={13} style={{ marginRight: '4px' }} />
+                        )}
+                        {actionLoading === msg.action_execution_id ? 'Approving...' : 'Approve'}
                       </button>
                     </div>
                   </div>
@@ -709,71 +760,90 @@ export function Home({
               </h2>
             </div>
             <div style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
-              {overview.pending_approvals.map((appr: any) => (
-                <div
-                  key={appr.execution_id}
-                  className="card"
-                  style={{
-                    padding: '16px 20px',
-                    borderRadius: '12px',
-                    border: '1px solid #f59e0b50',
-                    backgroundColor: '#f59e0b08',
-                    display: 'flex',
-                    justifyContent: 'space-between',
-                    alignItems: 'center',
-                  }}
-                >
-                  <div style={{ flex: 1, marginRight: '16px' }}>
-                    <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-                      <span style={{ fontSize: '11px', fontWeight: 700, padding: '2px 8px', borderRadius: '4px', backgroundColor: '#f59e0b20', color: '#f59e0b', textTransform: 'uppercase' }}>
-                        Action Requires Approval
-                      </span>
-                      <span style={{ fontWeight: 600, fontSize: '15px' }}>{appr.human_summary || appr.action_name}</span>
+              {overview.pending_approvals.map((appr: any) => {
+                const isTargeted = initialApprovalId === appr.execution_id;
+                const isLoading = actionLoading === appr.execution_id;
+                return (
+                  <div
+                    key={appr.execution_id}
+                    id={`approval-card-${appr.execution_id}`}
+                    className="card"
+                    style={{
+                      padding: '16px 20px',
+                      borderRadius: '12px',
+                      border: isTargeted ? '2px solid #f59e0b' : '1px solid #f59e0b50',
+                      boxShadow: isTargeted ? '0 0 16px rgba(245, 158, 11, 0.3)' : undefined,
+                      backgroundColor: isTargeted ? '#f59e0b14' : '#f59e0b08',
+                      display: 'flex',
+                      justifyContent: 'space-between',
+                      alignItems: 'center',
+                      transition: 'all 0.3s ease',
+                    }}
+                  >
+                    <div style={{ flex: 1, marginRight: '16px' }}>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                        <span style={{ fontSize: '11px', fontWeight: 700, padding: '2px 8px', borderRadius: '4px', backgroundColor: '#f59e0b20', color: '#f59e0b', textTransform: 'uppercase' }}>
+                          Action Requires Approval
+                        </span>
+                        <span style={{ fontWeight: 600, fontSize: '15px' }}>{appr.human_summary || appr.action_name}</span>
+                      </div>
+                      {appr.action_id === 'email.send' && (
+                        <div style={{ fontSize: '13px', color: 'hsl(var(--fg)/0.85)', marginTop: '6px', padding: '8px 12px', backgroundColor: 'hsl(var(--muted)/0.3)', borderRadius: '6px' }}>
+                          <div><strong>To:</strong> {appr.input_data?.to}</div>
+                          <div><strong>Subject:</strong> {appr.input_data?.subject}</div>
+                          {appr.input_data?.body && <div style={{ marginTop: '4px', whiteSpace: 'pre-wrap', color: 'hsl(var(--muted-fg))' }}>{appr.input_data.body}</div>}
+                        </div>
+                      )}
+                      {appr.action_id === 'github.create_issue' && (
+                        <div style={{ fontSize: '13px', color: 'hsl(var(--fg)/0.85)', marginTop: '6px', padding: '8px 12px', backgroundColor: 'hsl(var(--muted)/0.3)', borderRadius: '6px' }}>
+                          <div><strong>Repo:</strong> {appr.input_data?.owner ? `${appr.input_data.owner}/${appr.input_data.repository}` : (appr.input_data?.repository || 'repository')}</div>
+                          <div><strong>Title:</strong> {appr.input_data?.title}</div>
+                          {appr.input_data?.body && <div style={{ marginTop: '4px', whiteSpace: 'pre-wrap', color: 'hsl(var(--muted-fg))' }}>{appr.input_data.body}</div>}
+                        </div>
+                      )}
+                      {appr.action_id === 'slack.send_message' && (
+                        <div style={{ fontSize: '13px', color: 'hsl(var(--fg)/0.85)', marginTop: '6px', padding: '8px 12px', backgroundColor: 'hsl(var(--muted)/0.3)', borderRadius: '6px' }}>
+                          <div><strong>Channel:</strong> {appr.input_data?.channel || '#general'}</div>
+                          {appr.input_data?.text && <div style={{ marginTop: '4px', whiteSpace: 'pre-wrap', color: 'hsl(var(--muted-fg))' }}>{appr.input_data.text}</div>}
+                        </div>
+                      )}
+                      {appr.action_id === 'calendar.create_event' && (
+                        <div style={{ fontSize: '13px', color: 'hsl(var(--muted-fg))', marginTop: '4px' }}>
+                          {appr.input_data?.start_time ? `Time: ${appr.input_data.start_time}` : ''} {appr.input_data?.location ? `• Location: ${appr.input_data.location}` : ''}
+                        </div>
+                      )}
                     </div>
-                    {appr.action_id === 'email.send' && (
-                      <div style={{ fontSize: '13px', color: 'hsl(var(--fg)/0.85)', marginTop: '6px', padding: '8px 12px', backgroundColor: 'hsl(var(--muted)/0.3)', borderRadius: '6px' }}>
-                        <div><strong>To:</strong> {appr.input_data?.to}</div>
-                        <div><strong>Subject:</strong> {appr.input_data?.subject}</div>
-                        {appr.input_data?.body && <div style={{ marginTop: '4px', whiteSpace: 'pre-wrap', color: 'hsl(var(--muted-fg))' }}>{appr.input_data.body}</div>}
-                      </div>
-                    )}
-                    {appr.action_id === 'github.create_issue' && (
-                      <div style={{ fontSize: '13px', color: 'hsl(var(--fg)/0.85)', marginTop: '6px', padding: '8px 12px', backgroundColor: 'hsl(var(--muted)/0.3)', borderRadius: '6px' }}>
-                        <div><strong>Repo:</strong> {appr.input_data?.owner ? `${appr.input_data.owner}/${appr.input_data.repository}` : (appr.input_data?.repository || 'repository')}</div>
-                        <div><strong>Title:</strong> {appr.input_data?.title}</div>
-                        {appr.input_data?.body && <div style={{ marginTop: '4px', whiteSpace: 'pre-wrap', color: 'hsl(var(--muted-fg))' }}>{appr.input_data.body}</div>}
-                      </div>
-                    )}
-                    {appr.action_id === 'slack.send_message' && (
-                      <div style={{ fontSize: '13px', color: 'hsl(var(--fg)/0.85)', marginTop: '6px', padding: '8px 12px', backgroundColor: 'hsl(var(--muted)/0.3)', borderRadius: '6px' }}>
-                        <div><strong>Channel:</strong> {appr.input_data?.channel || '#general'}</div>
-                        {appr.input_data?.text && <div style={{ marginTop: '4px', whiteSpace: 'pre-wrap', color: 'hsl(var(--muted-fg))' }}>{appr.input_data.text}</div>}
-                      </div>
-                    )}
-                    {appr.action_id === 'calendar.create_event' && (
-                      <div style={{ fontSize: '13px', color: 'hsl(var(--muted-fg))', marginTop: '4px' }}>
-                        {appr.input_data?.start_time ? `Time: ${appr.input_data.start_time}` : ''} {appr.input_data?.location ? `• Location: ${appr.input_data.location}` : ''}
-                      </div>
-                    )}
+                    <div style={{ display: 'flex', gap: '8px', alignItems: 'center' }}>
+                      <button
+                        className="btn btn-ghost"
+                        disabled={isLoading}
+                        onClick={() => handleRejectAction(appr.execution_id)}
+                        style={{ fontSize: '12px', padding: '6px 12px', color: 'hsl(var(--destructive))', opacity: isLoading ? 0.6 : 1 }}
+                      >
+                        Decline
+                      </button>
+                      <button
+                        className="btn btn-primary"
+                        disabled={isLoading}
+                        onClick={() => handleApproveAction(appr.execution_id)}
+                        style={{
+                          fontSize: '12px',
+                          padding: '6px 16px',
+                          backgroundColor: '#10b981',
+                          borderColor: '#10b981',
+                          display: 'flex',
+                          alignItems: 'center',
+                          gap: '6px',
+                          opacity: isLoading ? 0.6 : 1,
+                        }}
+                      >
+                        {isLoading && <Loader2 size={13} className="animate-spin" />}
+                        {isLoading ? 'Approving...' : 'Approve'}
+                      </button>
+                    </div>
                   </div>
-                  <div style={{ display: 'flex', gap: '8px' }}>
-                    <button
-                      className="btn btn-ghost"
-                      onClick={() => handleRejectAction(appr.execution_id)}
-                      style={{ fontSize: '12px', padding: '6px 12px', color: 'hsl(var(--destructive))' }}
-                    >
-                      Decline
-                    </button>
-                    <button
-                      className="btn btn-primary"
-                      onClick={() => handleApproveAction(appr.execution_id)}
-                      style={{ fontSize: '12px', padding: '6px 16px', backgroundColor: '#10b981', borderColor: '#10b981' }}
-                    >
-                      Approve
-                    </button>
-                  </div>
-                </div>
-              ))}
+                );
+              })}
             </div>
           </div>
         )}

@@ -4119,14 +4119,25 @@ async def approve_mission_route(request: Request, mission_id: str, payload: Miss
     try:
         execution = await runtime.approve_gate(mission_id, notes=notes)
         mission = runtime.store.get_mission(mission_id)
+        ws = getattr(request.app.state, "workspace", None)
+        if ws:
+            _mark_approval_notification_done(ws, mission_id)
         return {
             "execution": execution.to_dict(),
             "mission": mission.to_dict() if mission else None,
+            "status": "approved",
         }
     except NotFoundError as e:
         raise HTTPException(status_code=404, detail=str(e))
     except ConflictError as e:
-        raise HTTPException(status_code=409, detail=str(e))
+        active = runtime.store.get_active_execution(mission_id)
+        mission = runtime.store.get_mission(mission_id)
+        return {
+            "execution": active.to_dict() if active else None,
+            "mission": mission.to_dict() if mission else None,
+            "status": "already_completed",
+            "message": str(e),
+        }
     except ValueError as e:
         raise HTTPException(status_code=422, detail=str(e))
     except Exception as e:
@@ -4141,14 +4152,25 @@ async def reject_mission_route(request: Request, mission_id: str, payload: Missi
     try:
         execution = await runtime.reject_gate(mission_id, feedback=feedback)
         mission = runtime.store.get_mission(mission_id)
+        ws = getattr(request.app.state, "workspace", None)
+        if ws:
+            _mark_approval_notification_done(ws, mission_id)
         return {
             "execution": execution.to_dict(),
             "mission": mission.to_dict() if mission else None,
+            "status": "rejected",
         }
     except NotFoundError as e:
         raise HTTPException(status_code=404, detail=str(e))
     except ConflictError as e:
-        raise HTTPException(status_code=409, detail=str(e))
+        active = runtime.store.get_active_execution(mission_id)
+        mission = runtime.store.get_mission(mission_id)
+        return {
+            "execution": active.to_dict() if active else None,
+            "mission": mission.to_dict() if mission else None,
+            "status": "already_completed",
+            "message": str(e),
+        }
     except ValueError as e:
         raise HTTPException(status_code=422, detail=str(e))
     except Exception as e:
@@ -5744,6 +5766,14 @@ class RejectActionPayload(BaseModel):
     reason: str = "User declined"
 
 
+class CanonicalApprovalPayload(BaseModel):
+    target_type: str | None = None
+    approver: str = "user"
+    reason: str | None = None
+    notes: str | None = None
+    workspace_id: str | None = None
+
+
 class ConnectPayload(BaseModel):
     provider: str
     account_name: str = "Connected Account"
@@ -5994,6 +6024,421 @@ async def get_action_execution_route(request: Request, execution_id: str):
     return execution.to_dict()
 
 
+def _mark_approval_notification_done(ws: Any, *target_ids: str) -> None:
+    if not ws:
+        return
+    notif_svc = getattr(ws, "notifications", None) or getattr(ws, "notification_service", None)
+    if not notif_svc or not hasattr(notif_svc, "store"):
+        return
+    try:
+        store = notif_svc.store
+        ws_name = getattr(ws, "name", "default")
+        unread_list = store.list(ws_name, unread_only=True, limit=100)
+        target_set = {str(t).strip() for t in target_ids if t and str(t).strip()}
+        for notif in unread_list:
+            notif_tid = str(notif.target_id or "").strip()
+            notif_lid = str(notif.link_id or "").strip()
+            notif_meta_eid = str((notif.metadata or {}).get("execution_id") or "").strip()
+            if notif.id in target_set or notif_tid in target_set or notif_lid in target_set or notif_meta_eid in target_set:
+                store.mark_as_read(notif.id)
+    except Exception as e:
+        logger.debug("Failed to auto-mark approval notification as read: %s", e)
+
+
+async def _handle_canonical_approval(
+    request: Request,
+    target_id: str,
+    decision: str,
+    payload: CanonicalApprovalPayload,
+) -> dict[str, Any]:
+    ws = getattr(request.app.state, "workspace", None)
+    if not ws:
+        raise HTTPException(status_code=503, detail="Workspace not initialized.")
+
+    clean_target_id = target_id.strip()
+    target_type = (payload.target_type or "").strip().lower()
+
+    # 0. Check if target_id is actually a notification_id
+    notif_match = None
+    if hasattr(ws, "notifications") and ws.notifications:
+        try:
+            notif_match = ws.notifications.store.get(clean_target_id)
+            if notif_match:
+                if not target_type and notif_match.target_type:
+                    target_type = str(notif_match.target_type).lower().strip()
+                if notif_match.target_id:
+                    clean_target_id = notif_match.target_id
+        except Exception:
+            pass
+
+    # 1. Action Execution
+    if target_type in ("action_execution", "action") or (
+        not target_type and hasattr(ws, "action_store") and ws.action_store and ws.action_store.get_execution(clean_target_id)
+    ):
+        exec_obj = ws.action_store.get_execution(clean_target_id)
+        if not exec_obj:
+            raise HTTPException(status_code=404, detail=f"Action execution '{clean_target_id}' not found.")
+
+        try:
+            was_already_decided = (
+                exec_obj.status.value in ("success", "approved")
+                if decision == "approve"
+                else (exec_obj.status.value == "rejected")
+            )
+
+            if decision == "approve":
+                res = ws.actions.approve(clean_target_id, approver=payload.approver)
+                status_res = "already_completed" if was_already_decided else "approved"
+                msg = "Action was already approved and completed." if was_already_decided else "Action approved and executed."
+            else:
+                reason = payload.reason or payload.notes or "Declined by user"
+                res = ws.actions.reject(clean_target_id, reason=reason)
+                status_res = "already_completed" if was_already_decided else "rejected"
+                msg = "Action was already declined." if was_already_decided else "Action declined."
+
+            _mark_approval_notification_done(ws, clean_target_id)
+
+            return {
+                "success": True,
+                "status": status_res,
+                "target_type": "action_execution",
+                "target_id": clean_target_id,
+                "message": msg,
+                "entity": res.to_dict(),
+            }
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail=str(exc))
+        except Exception as exc:
+            raise HTTPException(status_code=500, detail=f"Action approval error: {exc}")
+
+    # 2. Mission Gate
+    from aether.missions.runtime import NotFoundError, ConflictError
+    if target_type in ("mission", "missions") or (
+        not target_type and hasattr(ws, "mission_store") and ws.mission_store and (
+            ws.mission_store.get_mission(clean_target_id) or ws.mission_store.get_active_execution(clean_target_id)
+        )
+    ):
+        runtime = _resolve_mission_runtime(request)
+        mission_id = clean_target_id
+        if hasattr(runtime.store, "get_execution"):
+            exec_record = runtime.store.get_execution(clean_target_id)
+            if exec_record and hasattr(exec_record, "mission_id"):
+                mission_id = exec_record.mission_id
+
+        try:
+            if decision == "approve":
+                notes = payload.notes or payload.reason
+                res_exec = await runtime.approve_gate(mission_id, notes=notes)
+                status_res = "already_completed" if res_exec.status.value in ("running", "completed") and not res_exec.pending_approval else "approved"
+                msg = "Mission gate approved and resumed."
+            else:
+                feedback = payload.reason or payload.notes or "Rejected by user"
+                res_exec = await runtime.reject_gate(mission_id, feedback=feedback)
+                status_res = "already_completed" if res_exec.status.value == "interrupted" else "rejected"
+                msg = "Mission gate rejected."
+
+            mission_obj = runtime.store.get_mission(mission_id)
+            _mark_approval_notification_done(ws, clean_target_id, mission_id)
+
+            return {
+                "success": True,
+                "status": status_res,
+                "target_type": "mission",
+                "target_id": mission_id,
+                "message": msg,
+                "entity": {
+                    "execution": res_exec.to_dict() if res_exec else None,
+                    "mission": mission_obj.to_dict() if mission_obj else None,
+                },
+            }
+        except NotFoundError as exc:
+            raise HTTPException(status_code=404, detail=str(exc))
+        except ConflictError as exc:
+            return {
+                "success": True,
+                "status": "already_completed",
+                "target_type": "mission",
+                "target_id": mission_id,
+                "message": str(exc),
+            }
+        except Exception as exc:
+            raise HTTPException(status_code=500, detail=f"Mission gate approval error: {exc}")
+
+    # 3. Automation Draft / Suggestion
+    if target_type in ("automation", "automations") or (
+        not target_type and hasattr(ws, "automations") and ws.automations and (
+            ws.automations.get_automation(clean_target_id) or hasattr(ws.automations, "get_suggestion")
+        )
+    ):
+        try:
+            # Check if it's a suggestion
+            auto = ws.automations.accept_suggestion(clean_target_id) if decision == "approve" else ws.automations.dismiss_suggestion(clean_target_id)
+            if auto is not None:
+                _mark_approval_notification_done(ws, clean_target_id)
+                return {
+                    "success": True,
+                    "status": "approved" if decision == "approve" else "rejected",
+                    "target_type": "automation",
+                    "target_id": clean_target_id,
+                    "message": "Automation suggestion accepted and scheduled." if decision == "approve" else "Automation suggestion dismissed.",
+                    "entity": auto.to_dict() if hasattr(auto, "to_dict") else auto,
+                }
+
+            auto_obj = ws.automations.get_automation(clean_target_id)
+            if auto_obj:
+                if decision == "approve":
+                    auto_obj.enabled = True
+                    auto_obj.requires_approval = False
+                    ws.automations.update_automation(auto_obj)
+                    msg = f"Automation '{auto_obj.name}' approved and activated."
+                else:
+                    auto_obj.enabled = False
+                    ws.automations.update_automation(auto_obj)
+                    msg = f"Automation '{auto_obj.name}' rejected and disabled."
+
+                _mark_approval_notification_done(ws, clean_target_id)
+                return {
+                    "success": True,
+                    "status": "approved" if decision == "approve" else "rejected",
+                    "target_type": "automation",
+                    "target_id": clean_target_id,
+                    "message": msg,
+                    "entity": auto_obj.to_dict(),
+                }
+        except Exception as exc:
+            raise HTTPException(status_code=500, detail=f"Automation approval error: {exc}")
+
+    # 4. Deliverable Review
+    if target_type in ("deliverable", "deliverables") or (
+        not target_type and hasattr(ws, "mission_store") and ws.mission_store and hasattr(ws.mission_store, "list_missions")
+    ):
+        deliv = None
+        mission_id = None
+        if hasattr(ws.mission_store, "get_deliverable"):
+            deliv = ws.mission_store.get_deliverable(clean_target_id)
+        if not deliv and hasattr(ws.mission_store, "list_missions"):
+            for m in ws.mission_store.list_missions():
+                for d in ws.mission_store.list_deliverables(m.id):
+                    if d.id == clean_target_id:
+                        deliv = d
+                        mission_id = m.id
+                        break
+                if deliv:
+                    break
+
+        if deliv:
+            m_id = mission_id or deliv.mission_id
+            if decision == "approve":
+                deliv.status = "verified"
+                deliv.metadata = dict(deliv.metadata or {})
+                deliv.metadata["approved_by"] = payload.approver
+                deliv.metadata["human_override"] = True
+                msg = f"Deliverable '{deliv.name}' verified and approved."
+            else:
+                deliv.status = "rejected"
+                deliv.metadata = dict(deliv.metadata or {})
+                deliv.metadata["rejection_reason"] = payload.reason or "Declined by user"
+                msg = f"Deliverable '{deliv.name}' rejected."
+
+            ws.mission_store.add_deliverable(m_id, deliv)
+            _mark_approval_notification_done(ws, clean_target_id, m_id)
+
+            return {
+                "success": True,
+                "status": "approved" if decision == "approve" else "rejected",
+                "target_type": "deliverable",
+                "target_id": clean_target_id,
+                "message": msg,
+                "entity": deliv.to_dict(),
+            }
+
+    # 5. Autonomy Goal Approval
+    if target_type in ("autonomy_goal", "goal") or (
+        not target_type and hasattr(ws, "autonomy_store") and ws.autonomy_store and ws.autonomy_store.get_goal(clean_target_id)
+    ):
+        orchestrator = getattr(ws, "autonomy_orchestrator", None)
+        if not orchestrator:
+            raise HTTPException(status_code=503, detail="Autonomy orchestrator not available.")
+        try:
+            goal = orchestrator.approve_and_resume(clean_target_id, approved=(decision == "approve"))
+            _mark_approval_notification_done(ws, clean_target_id)
+            return {
+                "success": True,
+                "status": "approved" if decision == "approve" else "rejected",
+                "target_type": "autonomy_goal",
+                "target_id": clean_target_id,
+                "message": f"Autonomous goal {'approved and resumed' if decision == 'approve' else 'rejected'}.",
+                "entity": goal.to_dict(),
+            }
+        except ValueError as ve:
+            raise HTTPException(status_code=404, detail=str(ve))
+
+    raise HTTPException(status_code=404, detail=f"Approval target '{clean_target_id}' could not be resolved to any supported entity.")
+
+
+async def _get_canonical_approval_details(request: Request, target_id: str) -> dict[str, Any]:
+    ws = getattr(request.app.state, "workspace", None)
+    if not ws:
+        raise HTTPException(status_code=503, detail="Workspace not initialized.")
+
+    clean_tid = target_id.strip()
+
+    # 1. Action Execution
+    if hasattr(ws, "action_store") and ws.action_store:
+        exec_obj = ws.action_store.get_execution(clean_tid)
+        if exec_obj:
+            is_pending = exec_obj.status.value == "pending_approval"
+            action_def = ws.actions.registry.get(exec_obj.action_id) if hasattr(ws, "actions") and hasattr(ws.actions, "registry") else None
+            action_name = action_def.name if action_def else exec_obj.action_id
+            return {
+                "target_id": clean_tid,
+                "target_type": "action_execution",
+                "status": exec_obj.status.value,
+                "is_pending": is_pending,
+                "title": f"Action Approval: {action_name}",
+                "summary": f"Execution of {action_name} requires review before running.",
+                "open_target": {"view": "connections", "params": clean_tid, "target_type": "action_execution"},
+                "approve_action": {
+                    "label": "Approve",
+                    "action": "approve",
+                    "endpoint": f"/api/approvals/{clean_tid}/approve",
+                    "method": "POST",
+                    "target_type": "action_execution",
+                    "target_id": clean_tid,
+                },
+                "reject_action": {
+                    "label": "Decline",
+                    "action": "reject",
+                    "endpoint": f"/api/approvals/{clean_tid}/reject",
+                    "method": "POST",
+                    "target_type": "action_execution",
+                    "target_id": clean_tid,
+                },
+                "entity": exec_obj.to_dict(),
+            }
+
+    # 2. Mission
+    if hasattr(ws, "mission_store") and ws.mission_store:
+        mission = ws.mission_store.get_mission(clean_tid)
+        if mission:
+            runtime = _resolve_mission_runtime(request)
+            active_exec = runtime.store.get_active_execution(clean_tid)
+            is_pending = bool(active_exec and active_exec.status.value == "awaiting_approval")
+            pending_data = active_exec.pending_approval if active_exec else None
+            return {
+                "target_id": clean_tid,
+                "target_type": "mission",
+                "status": active_exec.status.value if active_exec else mission.status.value,
+                "is_pending": is_pending,
+                "title": f"Mission Gate: {mission.title}",
+                "summary": (pending_data.get("prompt") if pending_data else None) or f"Mission '{mission.title}' is awaiting review.",
+                "open_target": {"view": "missions", "params": clean_tid, "target_type": "mission"},
+                "approve_action": {
+                    "label": "Approve",
+                    "action": "approve",
+                    "endpoint": f"/api/approvals/{clean_tid}/approve",
+                    "method": "POST",
+                    "target_type": "mission",
+                    "target_id": clean_tid,
+                },
+                "reject_action": {
+                    "label": "Reject",
+                    "action": "reject",
+                    "endpoint": f"/api/approvals/{clean_tid}/reject",
+                    "method": "POST",
+                    "target_type": "mission",
+                    "target_id": clean_tid,
+                },
+                "entity": {
+                    "mission": mission.to_dict(),
+                    "active_execution": active_exec.to_dict() if active_exec else None,
+                },
+            }
+
+    # 3. Automation
+    if hasattr(ws, "automations") and ws.automations:
+        auto = ws.automations.get_automation(clean_tid)
+        if auto:
+            return {
+                "target_id": clean_tid,
+                "target_type": "automation",
+                "status": "pending_approval" if getattr(auto, "requires_approval", False) and not auto.enabled else "active" if auto.enabled else "disabled",
+                "is_pending": bool(getattr(auto, "requires_approval", False) and not auto.enabled),
+                "title": f"Automation Review: {auto.name}",
+                "summary": f"Automation '{auto.name}' requires confirmation.",
+                "open_target": {"view": "automations", "params": clean_tid, "target_type": "automation"},
+                "approve_action": {
+                    "label": "Approve",
+                    "action": "approve",
+                    "endpoint": f"/api/approvals/{clean_tid}/approve",
+                    "method": "POST",
+                    "target_type": "automation",
+                    "target_id": clean_tid,
+                },
+                "reject_action": {
+                    "label": "Reject",
+                    "action": "reject",
+                    "endpoint": f"/api/approvals/{clean_tid}/reject",
+                    "method": "POST",
+                    "target_type": "automation",
+                    "target_id": clean_tid,
+                },
+                "entity": auto.to_dict(),
+            }
+
+    # 4. Deliverable
+    if hasattr(ws, "mission_store") and ws.mission_store and hasattr(ws.mission_store, "list_missions"):
+        for m in ws.mission_store.list_missions():
+            for d in ws.mission_store.list_deliverables(m.id):
+                if d.id == clean_tid:
+                    is_pending = d.status in ("draft", "awaiting_review")
+                    return {
+                        "target_id": clean_tid,
+                        "target_type": "deliverable",
+                        "status": d.status,
+                        "is_pending": is_pending,
+                        "title": f"Deliverable Review: {d.name}",
+                        "summary": f"Deliverable '{d.name}' for mission '{m.title}' is ready for review.",
+                        "open_target": {"view": "missions", "params": m.id, "target_type": "deliverable"},
+                        "approve_action": {
+                            "label": "Approve",
+                            "action": "approve",
+                            "endpoint": f"/api/approvals/{clean_tid}/approve",
+                            "method": "POST",
+                            "target_type": "deliverable",
+                            "target_id": clean_tid,
+                        },
+                        "reject_action": {
+                            "label": "Reject",
+                            "action": "reject",
+                            "endpoint": f"/api/approvals/{clean_tid}/reject",
+                            "method": "POST",
+                            "target_type": "deliverable",
+                            "target_id": clean_tid,
+                        },
+                        "entity": d.to_dict(),
+                    }
+
+    # 5. Check Notification
+    if hasattr(ws, "notifications") and ws.notifications:
+        notif = ws.notifications.store.get(clean_tid)
+        if notif:
+            return {
+                "target_id": clean_tid,
+                "target_type": str(notif.target_type or "approval"),
+                "status": notif.status.value,
+                "is_pending": notif.action_required and notif.status.value == "unread",
+                "title": notif.title,
+                "summary": notif.message,
+                "open_target": notif.open_target,
+                "approve_action": notif.approve_action,
+                "reject_action": notif.reject_action,
+                "entity": notif.to_dict(),
+            }
+
+    raise HTTPException(status_code=404, detail=f"Approval target '{clean_tid}' not found.")
+
+
 @router.post("/actions/executions/{execution_id}/approve")
 async def approve_action_execution_route(
     request: Request,
@@ -6005,6 +6450,7 @@ async def approve_action_execution_route(
         raise HTTPException(status_code=503, detail="Workspace not initialized.")
     try:
         execution = ws.actions.approve(execution_id, approver=payload.approver)
+        _mark_approval_notification_done(ws, execution_id)
         return execution.to_dict()
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc))
@@ -6021,9 +6467,40 @@ async def reject_action_execution_route(
         raise HTTPException(status_code=503, detail="Workspace not initialized.")
     try:
         execution = ws.actions.reject(execution_id, reason=payload.reason)
+        _mark_approval_notification_done(ws, execution_id)
         return execution.to_dict()
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc))
+
+
+# ---------------------------------------------------------------------------
+# Canonical Approvals & Review Lifecycle (Macro-pass P0.4)
+# ---------------------------------------------------------------------------
+
+@router.get("/approvals/{target_id}")
+async def get_approval_status_route(request: Request, target_id: str):
+    """Retrieves current status and review metadata for an approval target."""
+    return await _get_canonical_approval_details(request, target_id)
+
+
+@router.post("/approvals/{target_id}/approve")
+async def approve_canonical_target_route(
+    request: Request,
+    target_id: str,
+    payload: CanonicalApprovalPayload = CanonicalApprovalPayload(),
+):
+    """Canonical polymorphic endpoint to approve a pending review."""
+    return await _handle_canonical_approval(request, target_id, "approve", payload)
+
+
+@router.post("/approvals/{target_id}/reject")
+async def reject_canonical_target_route(
+    request: Request,
+    target_id: str,
+    payload: CanonicalApprovalPayload = CanonicalApprovalPayload(),
+):
+    """Canonical polymorphic endpoint to reject a pending review."""
+    return await _handle_canonical_approval(request, target_id, "reject", payload)
 
 
 # ---------------------------------------------------------------------------

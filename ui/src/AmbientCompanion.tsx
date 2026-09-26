@@ -29,7 +29,7 @@ import {
 } from "lucide-react";
 import { apiUrl, getSessionToken } from "./api";
 import { hideCompanion, showMainWindow } from "./desktop";
-import { resolveCanonicalTarget } from "./canonicalNotification";
+import { resolveCanonicalTarget, submitApprovalDecision } from "./canonicalNotification";
 import { ToastContext } from "./toast";
 
 interface AmbientCompanionProps {
@@ -126,6 +126,7 @@ export function AmbientCompanion({
   const [backgroundTasks, setBackgroundTasks] = useState<BackgroundTask[]>([]);
   const [unreadNotifications, setUnreadNotifications] = useState<NotificationItem[]>([]);
   const [unreadCount, setUnreadCount] = useState<number>(0);
+  const [actionLoading, setActionLoading] = useState<string | null>(null);
 
   // Progressive UI Modes & Tabs
   const [surfaceMode, setSurfaceMode] = useState<"orb" | "hud" | "expanded">("hud");
@@ -562,40 +563,54 @@ export function AmbientCompanion({
 
   // 6. Action Layer Approvals (Human-friendly non-technical confirmation)
   const handleApproveAction = async (executionId: string) => {
+    if (actionLoading === executionId) return;
+    setActionLoading(executionId);
     try {
-      const res = await fetch(apiUrl(`/api/actions/executions/${executionId}/approve`), {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ approver: "user" }),
+      const res = await submitApprovalDecision({
+        target_type: "action_execution",
+        target_id: executionId,
+        decision: "approve",
+        approver: "user",
+        workspaceName: activeWorkspace || propWorkspaceName,
       });
-      if (res.ok) {
-        showToast("Action approved and executing.", "success");
+
+      if (res.success) {
+        showToast(res.message, res.status === "already_completed" ? "info" : "success");
         setPendingApprovals(prev => prev.filter(a => (a.execution_id || a.id) !== executionId));
         fetchOverview();
       } else {
-        showToast("Failed to approve action.", "error");
+        showToast(res.message, "error");
       }
-    } catch {
-      showToast("Network error while approving action.", "error");
+    } catch (err: any) {
+      showToast(err.message || "Network error while approving action.", "error");
+    } finally {
+      setActionLoading(null);
     }
   };
 
   const handleRejectAction = async (executionId: string) => {
+    if (actionLoading === executionId) return;
+    setActionLoading(executionId);
     try {
-      const res = await fetch(apiUrl(`/api/actions/executions/${executionId}/reject`), {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ reason: "Declined by user via Companion" }),
+      const res = await submitApprovalDecision({
+        target_type: "action_execution",
+        target_id: executionId,
+        decision: "reject",
+        reason: "Declined by user via Companion",
+        workspaceName: activeWorkspace || propWorkspaceName,
       });
-      if (res.ok) {
-        showToast("Action declined.", "info");
+
+      if (res.success) {
+        showToast(res.message, "info");
         setPendingApprovals(prev => prev.filter(a => (a.execution_id || a.id) !== executionId));
         fetchOverview();
       } else {
-        showToast("Failed to decline action.", "error");
+        showToast(res.message, "error");
       }
-    } catch {
-      showToast("Network error while declining action.", "error");
+    } catch (err: any) {
+      showToast(err.message || "Network error while declining action.", "error");
+    } finally {
+      setActionLoading(null);
     }
   };
 
@@ -1838,6 +1853,7 @@ export function AmbientCompanion({
                   <div style={{ display: "flex", gap: "8px", marginTop: "4px" }}>
                     <button
                       onClick={() => handleApproveAction(approvalId)}
+                      disabled={actionLoading === approvalId}
                       data-testid={`approve-btn-${approvalId}`}
                       style={{
                         flex: 1,
@@ -1848,18 +1864,24 @@ export function AmbientCompanion({
                         border: "none",
                         backgroundColor: "#38bdf8",
                         color: "#0f172a",
-                        cursor: "pointer",
+                        cursor: actionLoading === approvalId ? "not-allowed" : "pointer",
+                        opacity: actionLoading === approvalId ? 0.6 : 1,
                         display: "flex",
                         alignItems: "center",
                         justifyContent: "center",
                         gap: "4px",
                       }}
                     >
-                      <Check size={13} />
-                      <span>Approve</span>
+                      {actionLoading === approvalId ? (
+                        <Loader2 size={13} className="animate-spin" />
+                      ) : (
+                        <Check size={13} />
+                      )}
+                      <span>{actionLoading === approvalId ? "Approving..." : "Approve"}</span>
                     </button>
                     <button
                       onClick={() => handleRejectAction(approvalId)}
+                      disabled={actionLoading === approvalId}
                       data-testid={`reject-btn-${approvalId}`}
                       style={{
                         padding: "6px 12px",
@@ -1869,10 +1891,11 @@ export function AmbientCompanion({
                         border: "1px solid rgba(255, 255, 255, 0.12)",
                         backgroundColor: "rgba(255, 255, 255, 0.05)",
                         color: "rgba(255, 255, 255, 0.75)",
-                        cursor: "pointer",
+                        cursor: actionLoading === approvalId ? "not-allowed" : "pointer",
+                        opacity: actionLoading === approvalId ? 0.6 : 1,
                       }}
                     >
-                      Not now
+                      {actionLoading === approvalId ? "..." : "Not now"}
                     </button>
                   </div>
                 </div>

@@ -1,8 +1,9 @@
 import { useState, useEffect, useRef } from 'react';
-import { Bell, Check, Trash2, Shield, CheckCircle2, AlertTriangle, Sparkles, Sliders } from 'lucide-react';
+import { Bell, Check, Trash2, Shield, CheckCircle2, AlertTriangle, Sparkles, Sliders, Loader2 } from 'lucide-react';
 import { apiUrl } from './api';
 import { NotificationFabricModal } from './NotificationFabricModal';
-import { resolveCanonicalTarget } from './canonicalNotification';
+import { resolveCanonicalTarget, submitApprovalDecision } from './canonicalNotification';
+import { useToast } from './toast';
 
 export interface NotificationItem {
   id: string;
@@ -19,6 +20,9 @@ export interface NotificationItem {
   deep_link?: string;
   primary_action?: any;
   secondary_action?: any;
+  open_target?: any;
+  approve_action?: any;
+  reject_action?: any;
   action_required: boolean;
   metadata?: Record<string, any>;
   created_at: string;
@@ -30,9 +34,11 @@ interface NotificationCenterProps {
 }
 
 export function NotificationCenter({ workspaceName, onNavigate }: NotificationCenterProps) {
+  const showToast = useToast();
   const [isOpen, setIsOpen] = useState(false);
   const [fabricModalOpen, setFabricModalOpen] = useState(false);
   const [notifications, setNotifications] = useState<NotificationItem[]>([]);
+  const [actionLoadingId, setActionLoadingId] = useState<string | null>(null);
 
   const [unreadCount, setUnreadCount] = useState(0);
   const [loading, setLoading] = useState(false);
@@ -146,41 +152,73 @@ export function NotificationCenter({ workspaceName, onNavigate }: NotificationCe
 
   const handleInlineApprove = async (notif: NotificationItem, e: React.MouseEvent) => {
     e.stopPropagation();
+    if (actionLoadingId === notif.id) return;
+    setActionLoadingId(notif.id);
     try {
-      const endpoint = (notif.link_view === 'missions' && notif.link_id)
-        ? `/api/missions/${notif.link_id}/approve`
-        : `/api/actions/executions/${notif.metadata?.execution_id || notif.link_id}/approve`;
-      const res = await fetch(apiUrl(endpoint), {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ approver: 'User' }),
+      const targetType = notif.target_type || (notif.link_view === 'missions' ? 'mission' : notif.link_view === 'automations' ? 'automation' : 'action_execution');
+      const targetId = notif.target_id || notif.link_id || notif.metadata?.execution_id || notif.id;
+      const customEndpoint = notif.approve_action?.endpoint || notif.primary_action?.endpoint;
+
+      const res = await submitApprovalDecision({
+        target_type: targetType,
+        target_id: targetId,
+        notification_id: notif.id,
+        decision: 'approve',
+        approver: 'User',
+        workspaceName,
+        endpoint: customEndpoint,
       });
-      if (res.ok) {
-        await handleMarkAsRead(notif.id);
+
+      if (res.success) {
+        showToast(res.message, res.status === 'already_completed' ? 'info' : 'success');
+        setNotifications(prev =>
+          prev.map(n => (n.id === notif.id ? { ...n, status: 'read', action_required: false } : n))
+        );
+        setUnreadCount(prev => Math.max(0, prev - 1));
         fetchNotifications();
+      } else {
+        showToast(res.message, 'error');
       }
-    } catch (err) {
-      console.error('Failed to approve from notification', err);
+    } catch (err: any) {
+      showToast(err.message || 'Error executing approval.', 'error');
+    } finally {
+      setActionLoadingId(null);
     }
   };
 
   const handleInlineReject = async (notif: NotificationItem, e: React.MouseEvent) => {
     e.stopPropagation();
+    if (actionLoadingId === notif.id) return;
+    setActionLoadingId(notif.id);
     try {
-      const endpoint = (notif.link_view === 'missions' && notif.link_id)
-        ? `/api/missions/${notif.link_id}/reject`
-        : `/api/actions/executions/${notif.metadata?.execution_id || notif.link_id}/reject`;
-      const res = await fetch(apiUrl(endpoint), {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ reason: 'Rejected from Notification Center' }),
+      const targetType = notif.target_type || (notif.link_view === 'missions' ? 'mission' : notif.link_view === 'automations' ? 'automation' : 'action_execution');
+      const targetId = notif.target_id || notif.link_id || notif.metadata?.execution_id || notif.id;
+      const customEndpoint = notif.reject_action?.endpoint || notif.secondary_action?.endpoint;
+
+      const res = await submitApprovalDecision({
+        target_type: targetType,
+        target_id: targetId,
+        notification_id: notif.id,
+        decision: 'reject',
+        reason: 'Declined from Notification Center',
+        workspaceName,
+        endpoint: customEndpoint,
       });
-      if (res.ok) {
-        await handleMarkAsRead(notif.id);
+
+      if (res.success) {
+        showToast(res.message, 'info');
+        setNotifications(prev =>
+          prev.map(n => (n.id === notif.id ? { ...n, status: 'read', action_required: false } : n))
+        );
+        setUnreadCount(prev => Math.max(0, prev - 1));
         fetchNotifications();
+      } else {
+        showToast(res.message, 'error');
       }
-    } catch (err) {
-      console.error('Failed to reject from notification', err);
+    } catch (err: any) {
+      showToast(err.message || 'Error declining review.', 'error');
+    } finally {
+      setActionLoadingId(null);
     }
   };
 
@@ -383,18 +421,36 @@ export function NotificationCenter({ workspaceName, onNavigate }: NotificationCe
                         <button
                           type="button"
                           className="btn btn-primary"
-                          style={{ padding: '3px 10px', fontSize: '11px', display: 'flex', alignItems: 'center', gap: '4px' }}
+                          disabled={actionLoadingId === item.id}
+                          style={{
+                            padding: '3px 10px',
+                            fontSize: '11px',
+                            display: 'flex',
+                            alignItems: 'center',
+                            gap: '4px',
+                            opacity: actionLoadingId === item.id ? 0.6 : 1,
+                          }}
                           onClick={(e) => handleInlineApprove(item, e)}
                         >
-                          <Check size={11} /> Approve
+                          {actionLoadingId === item.id ? (
+                            <Loader2 size={11} className="animate-spin" />
+                          ) : (
+                            <Check size={11} />
+                          )}
+                          {actionLoadingId === item.id ? 'Approving...' : 'Approve'}
                         </button>
                         <button
                           type="button"
                           className="btn btn-ghost text-rose-500 hover:bg-rose-500/10"
-                          style={{ padding: '3px 8px', fontSize: '11px' }}
+                          disabled={actionLoadingId === item.id}
+                          style={{
+                            padding: '3px 8px',
+                            fontSize: '11px',
+                            opacity: actionLoadingId === item.id ? 0.6 : 1,
+                          }}
                           onClick={(e) => handleInlineReject(item, e)}
                         >
-                          Reject
+                          {actionLoadingId === item.id ? '...' : 'Decline'}
                         </button>
                       </div>
                     )}

@@ -1369,7 +1369,7 @@ class PersonalAgentService:
             step_prep = PersonalStep(
                 id=f"step-{uuid.uuid4().hex[:8]}",
                 title=f"Prepared action: {action_name}",
-                status="completed",
+                status="running",
                 category="action",
                 details={"action_id": intent.action_id, "args": intent.action_args},
             )
@@ -1379,6 +1379,7 @@ class PersonalAgentService:
             action_execution_id = runtime_res.metadata.get("action_execution_id")
 
             if runtime_res.status == ExecutionStatus.WAITING_FOR_APPROVAL:
+                step_prep.status = "completed"
                 step_appr = PersonalStep(
                     id=f"step-{uuid.uuid4().hex[:8]}",
                     title="Awaiting your approval",
@@ -1396,23 +1397,73 @@ class PersonalAgentService:
                     )
 
                 if self.notification_service and action_execution_id:
+                    is_auto = (intent.action_id == "automations.create_draft")
+                    target_type = "automation" if is_auto else "action_execution"
+                    link_view = "automations" if is_auto else "home"
                     notif_msg = (
                         f"Aether drafted automation '{intent.action_args.get('automation', {}).get('name', 'New Automation')}'. Review and confirm to schedule."
-                        if intent.action_id == "automations.create_draft"
+                        if is_auto
                         else f"Aether is ready to {action_name.lower()} '{intent.action_args.get('title', '')}'. Review and confirm to execute."
                     )
+                    open_target = {
+                        "view": link_view,
+                        "params": action_execution_id,
+                        "target_type": target_type,
+                    }
+                    approve_action = {
+                        "label": "Approve",
+                        "action": "approve",
+                        "endpoint": f"/api/approvals/{action_execution_id}/approve",
+                        "method": "POST",
+                        "target_type": target_type,
+                        "target_id": action_execution_id,
+                    }
+                    reject_action = {
+                        "label": "Decline",
+                        "action": "reject",
+                        "endpoint": f"/api/approvals/{action_execution_id}/reject",
+                        "method": "POST",
+                        "target_type": target_type,
+                        "target_id": action_execution_id,
+                    }
                     self.notification_service.notify(
                         workspace_id=workspace_id,
                         type=NotificationType.APPROVAL_REQUIRED,
                         title=f"Approval needed: {action_name}",
                         message=notif_msg,
                         priority=NotificationPriority.HIGH,
-                        link_view="automations" if intent.action_id == "automations.create_draft" else "home",
+                        link_view=link_view,
                         link_id=action_execution_id,
                         action_required=True,
-                        metadata={"execution_id": action_execution_id, "action_id": intent.action_id},
+                        target_type=target_type,
+                        target_id=action_execution_id,
+                        deep_link=f"aether://{target_type}/{action_execution_id}",
+                        open_target=open_target,
+                        approve_action=approve_action,
+                        reject_action=reject_action,
+                        primary_action=approve_action,
+                        secondary_action=reject_action,
+                        metadata={
+                            "execution_id": action_execution_id,
+                            "action_id": intent.action_id,
+                            "target_type": target_type,
+                            "target_id": action_execution_id,
+                        },
                     )
+            elif runtime_res.status == ExecutionStatus.FAILED:
+                step_prep.status = "failed"
+                steps.append(
+                    PersonalStep(
+                        id=f"step-{uuid.uuid4().hex[:8]}",
+                        title="Action execution failed",
+                        status="failed",
+                        category="action",
+                        details={"error": runtime_res.error},
+                    )
+                )
+                response_text = runtime_res.error or f"Action **{action_name}** failed during execution."
             else:
+                step_prep.status = "completed"
                 steps.append(
                     PersonalStep(
                         id=f"step-{uuid.uuid4().hex[:8]}",
@@ -1434,23 +1485,27 @@ class PersonalAgentService:
                     ]
                     response_text = "\n".join(lines)
                 else:
-                    response_text = runtime_res.output or f"Done! I've successfully executed **{action_name}**."
+                    response_text = runtime_res.output or f"Action **{action_name}** executed successfully."
 
         elif intent.tier == IntentTier.DO and intent.action_id:
             action_def = self.action_executor.registry.get(intent.action_id) if self.action_executor else None
             action_name = action_def.name if action_def else intent.action_id
 
-            steps.append(
-                PersonalStep(
-                    id=f"step-{uuid.uuid4().hex[:8]}",
-                    title=f"Executing: {action_name}",
-                    status="completed",
-                    category="action",
-                )
+            step_exec = PersonalStep(
+                id=f"step-{uuid.uuid4().hex[:8]}",
+                title=f"Executing: {action_name}",
+                status="running",
+                category="action",
             )
+            steps.append(step_exec)
 
             runtime_res = self.runtime.execute(exec_request)
             action_execution_id = runtime_res.metadata.get("action_execution_id")
+
+            if runtime_res.status == ExecutionStatus.FAILED:
+                step_exec.status = "failed"
+            else:
+                step_exec.status = "completed"
 
             if intent.action_id == "missions.dry_run":
                 report_data = runtime_res.metadata.get("action_result") or {}

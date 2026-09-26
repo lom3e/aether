@@ -29,6 +29,27 @@ export interface TargetResolutionResult {
   reason?: string;
 }
 
+export interface ApprovalDecisionOptions {
+  target_type?: string;
+  target_id?: string;
+  notification_id?: string;
+  decision: 'approve' | 'reject';
+  reason?: string;
+  notes?: string;
+  approver?: string;
+  workspaceName?: string;
+  endpoint?: string;
+}
+
+export interface ApprovalDecisionResult {
+  success: boolean;
+  status: 'approved' | 'rejected' | 'already_completed' | 'expired' | 'unauthorized' | 'failed';
+  message: string;
+  target_type?: string;
+  target_id?: string;
+  entity?: any;
+}
+
 /**
  * Validates and maps a canonical notification target (or raw notification payload)
  * to an internal application view and parameter payload.
@@ -40,6 +61,15 @@ export function resolveCanonicalTarget(raw: any): TargetResolutionResult {
       params: null,
       valid: false,
       reason: 'Notification target payload is missing or invalid.',
+    };
+  }
+
+  // 0. Canonical open_target object resolution (highest priority)
+  if (raw.open_target && typeof raw.open_target === 'object' && raw.open_target.view) {
+    return {
+      view: raw.open_target.view,
+      params: raw.open_target.params !== undefined ? raw.open_target.params : (raw.target_id || raw.link_id || null),
+      valid: true,
     };
   }
 
@@ -187,5 +217,145 @@ export async function acknowledgeNotificationReceipt(
     });
   } catch (err) {
     console.debug('Failed to acknowledge notification receipt:', err);
+  }
+}
+
+/**
+ * Submits an approval decision (approve/reject) to the canonical backend approval router,
+ * handling idempotency, error feedback, notification state, and optimistic status updates.
+ */
+export async function submitApprovalDecision(
+  options: ApprovalDecisionOptions
+): Promise<ApprovalDecisionResult> {
+  const {
+    target_type,
+    target_id,
+    notification_id,
+    decision,
+    reason,
+    notes,
+    approver = 'user',
+    workspaceName,
+    endpoint: customEndpoint,
+  } = options;
+
+  const tid = (target_id || notification_id || '').trim();
+  if (!tid) {
+    return {
+      success: false,
+      status: 'failed',
+      message: 'Missing target ID for approval action.',
+    };
+  }
+
+  // Determine endpoint
+  let endpoint = customEndpoint;
+  if (!endpoint) {
+    if (target_type === 'mission' && target_id) {
+      endpoint = `/api/missions/${encodeURIComponent(target_id)}/${decision}`;
+    } else if (target_type === 'action_execution' && target_id) {
+      endpoint = `/api/actions/executions/${encodeURIComponent(target_id)}/${decision}`;
+    } else {
+      endpoint = `/api/approvals/${encodeURIComponent(tid)}/${decision}`;
+    }
+  }
+
+  try {
+    const token =
+      (typeof window !== 'undefined' && (window as any).__AETHER_SESSION_TOKEN__) || '';
+    const headers: Record<string, string> = {
+      'Content-Type': 'application/json',
+    };
+    if (token) {
+      headers['X-Aether-Session-Token'] = token;
+    }
+
+    const bodyPayload: Record<string, any> = {
+      target_type: target_type || undefined,
+      approver,
+      reason: reason || undefined,
+      notes: notes || reason || undefined,
+      workspace_id: workspaceName || undefined,
+    };
+
+    const res = await fetch(apiUrl(endpoint), {
+      method: 'POST',
+      headers,
+      body: JSON.stringify(bodyPayload),
+    });
+
+    if (res.status === 401 || res.status === 403) {
+      return {
+        success: false,
+        status: 'unauthorized',
+        target_type,
+        target_id: tid,
+        message: 'You are not authorized to decide on this review.',
+      };
+    }
+
+    if (res.status === 404) {
+      const errData = await res.json().catch(() => ({}));
+      return {
+        success: false,
+        status: 'failed',
+        target_type,
+        target_id: tid,
+        message: errData.detail || `Review target '${tid}' was not found.`,
+      };
+    }
+
+    if (res.status === 409) {
+      const errData = await res.json().catch(() => ({}));
+      return {
+        success: true,
+        status: 'already_completed',
+        target_type,
+        target_id: tid,
+        message: errData.detail || 'This action has already been reviewed.',
+      };
+    }
+
+    if (!res.ok) {
+      const errData = await res.json().catch(() => ({}));
+      return {
+        success: false,
+        status: 'failed',
+        target_type,
+        target_id: tid,
+        message: errData.detail || `Approval decision failed (${res.status}).`,
+      };
+    }
+
+    const data = await res.json().catch(() => ({}));
+    const status = (data.status || (decision === 'approve' ? 'approved' : 'rejected')) as any;
+    const defaultMsg =
+      status === 'already_completed'
+        ? 'This review was already completed.'
+        : decision === 'approve'
+        ? 'Review approved and executed.'
+        : 'Review declined.';
+
+    // If an associated notification ID is present, acknowledge it as displayed/read
+    if (notification_id) {
+      acknowledgeNotificationReceipt(notification_id, 'displayed', { workspaceName });
+    }
+
+    return {
+      success: true,
+      status,
+      target_type: data.target_type || target_type,
+      target_id: data.target_id || tid,
+      message: data.message || defaultMsg,
+      entity: data.entity || data.execution || data.mission,
+    };
+  } catch (err: any) {
+    return {
+      success: false,
+      status: 'failed',
+      target_type,
+      target_id: tid,
+      message: err.message || 'Network error while submitting approval decision.',
+    };
   }
 }

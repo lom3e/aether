@@ -97,6 +97,9 @@ class Notification:
     deep_link: str | None = None
     primary_action: dict[str, Any] | str | None = None
     secondary_action: dict[str, Any] | str | None = None
+    open_target: dict[str, Any] | None = None
+    approve_action: dict[str, Any] | None = None
+    reject_action: dict[str, Any] | None = None
     metadata: dict[str, Any] = field(default_factory=dict)
     created_at: str = field(default_factory=lambda: datetime.now(timezone.utc).isoformat())
 
@@ -156,6 +159,50 @@ class Notification:
             tt_str = self.target_type.value if hasattr(self.target_type, "value") else str(self.target_type)
             self.deep_link = f"aether://{tt_str}/{self.target_id}"
 
+        # Canonicalize open_target for deterministic navigation
+        resolved_tid = self.target_id or self.link_id
+        tt_val = self.target_type.value if hasattr(self.target_type, "value") else (str(self.target_type) if self.target_type else "")
+        if not self.open_target and (self.link_view or resolved_tid or tt_val):
+            self.open_target = {
+                "view": self.link_view or "home",
+                "params": resolved_tid,
+                "target_type": tt_val or "view",
+                "deep_link": self.deep_link,
+            }
+
+        # Canonicalize approval actions if action is required
+        if self.action_required or self.type == NotificationType.APPROVAL_REQUIRED:
+            approval_tid = resolved_tid or self.id
+            approval_tt = tt_val or "action_execution"
+            if not self.approve_action:
+                if isinstance(self.primary_action, dict):
+                    self.approve_action = dict(self.primary_action)
+                else:
+                    self.approve_action = {
+                        "label": "Approve",
+                        "action": "approve",
+                        "endpoint": f"/api/approvals/{approval_tid}/approve",
+                        "method": "POST",
+                        "target_type": approval_tt,
+                        "target_id": approval_tid,
+                    }
+            if not self.reject_action:
+                if isinstance(self.secondary_action, dict):
+                    self.reject_action = dict(self.secondary_action)
+                else:
+                    self.reject_action = {
+                        "label": "Decline",
+                        "action": "reject",
+                        "endpoint": f"/api/approvals/{approval_tid}/reject",
+                        "method": "POST",
+                        "target_type": approval_tt,
+                        "target_id": approval_tid,
+                    }
+            if not self.primary_action:
+                self.primary_action = self.approve_action
+            if not self.secondary_action:
+                self.secondary_action = self.reject_action
+
     @property
     def body(self) -> str:
         return self.message
@@ -204,6 +251,9 @@ class Notification:
             "deep_link": self.deep_link,
             "primary_action": self.primary_action,
             "secondary_action": self.secondary_action,
+            "open_target": self.open_target,
+            "approve_action": self.approve_action,
+            "reject_action": self.reject_action,
             "action_payload": self.action_payload,
             "metadata": self.metadata,
             "created_at": self.created_at,
@@ -236,6 +286,9 @@ class Notification:
             deep_link=data.get("deep_link"),
             primary_action=data.get("primary_action"),
             secondary_action=data.get("secondary_action"),
+            open_target=data.get("open_target"),
+            approve_action=data.get("approve_action"),
+            reject_action=data.get("reject_action"),
             metadata=meta,
             created_at=data.get("created_at") or datetime.now(timezone.utc).isoformat(),
         )
