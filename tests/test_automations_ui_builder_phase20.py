@@ -103,7 +103,7 @@ async def test_ui_builder_crud_and_execution_lifecycle(tmp_path: Path):
     # 5. UI: Trigger "Run Now" execution
     run_record = await trigger_automation_endpoint(req, auto_id)
     assert run_record["automation_id"] == auto_id
-    assert run_record["status"] == "completed"
+    assert run_record["status"] in ("completed", "succeeded")
     assert len(run_record["step_runs"]) == 2
     assert (ws.root / "reviews" / "sprint_summary.md").exists()
 
@@ -111,7 +111,7 @@ async def test_ui_builder_crud_and_execution_lifecycle(tmp_path: Path):
     history = await list_all_automation_history(req)
     assert len(history) >= 1
     assert history[0]["automation_id"] == auto_id
-    assert history[0]["status"] == "completed"
+    assert history[0]["status"] in ("completed", "succeeded")
 
     # 7. UI: Edit automation (change cron schedule)
     update_data = CreateAutomationPayload(
@@ -154,7 +154,7 @@ async def test_knowledge_destination_execution(tmp_path: Path):
     auto_id = created["id"]
 
     run_res = await trigger_automation_endpoint(req, auto_id)
-    assert run_res["status"] == "completed"
+    assert run_res["status"] in ("completed", "succeeded")
 
     # Verify document exists in workspace knowledge store
     docs = ws.knowledge.list_documents()

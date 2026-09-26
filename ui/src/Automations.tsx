@@ -18,6 +18,10 @@ interface TriggerConfig {
   watch_path?: string;
   watch_pattern?: string;
   watch_events?: string[];
+  http_url?: string;
+  http_method?: string;
+  github_owner?: string;
+  github_repo?: string;
   webhook_secret?: string;
   webhook_slug?: string;
 }
@@ -55,6 +59,27 @@ interface Automation {
   last_run_at?: string;
   last_run_status?: string;
   next_run_at?: string;
+  runtime_status?: string;
+  last_started_at?: string;
+  last_finished_at?: string;
+  last_error?: string;
+  retry_count?: number;
+}
+
+interface SchedulerHealth {
+  healthy: boolean;
+  running: boolean;
+  uptime_seconds: number;
+  tick_interval_seconds?: number;
+  tick_count?: number;
+  last_tick_at?: string;
+  max_concurrent_runs?: number;
+  active_runs_count?: number;
+  active_runs?: string[];
+  automations_count?: number;
+  active_automations_count?: number;
+  watchers_count?: number;
+  watchers_healthy?: boolean;
 }
 
 interface AutomationSuggestion {
@@ -111,6 +136,7 @@ export function Automations({ initialAutomationId }: AutomationsProps = {}) {
   const [loading, setLoading] = useState(true);
   const [activeTab, setActiveTab] = useState<'workflows' | 'history'>('workflows');
   const [runningIds, setRunningIds] = useState<Set<string>>(new Set());
+  const [schedulerHealth, setSchedulerHealth] = useState<SchedulerHealth | null>(null);
 
   // Builder Modal State
   const [isBuilderOpen, setIsBuilderOpen] = useState(false);
@@ -130,6 +156,13 @@ export function Automations({ initialAutomationId }: AutomationsProps = {}) {
   const [aiPrompt, setAiPrompt] = useState('');
   const [aiLoading, setAiLoading] = useState(false);
   const [aiProposal, setAiProposal] = useState<{ proposal: string; automation: any; recurrence_text?: string } | null>(null);
+
+  const fetchSchedulerHealth = useCallback(() => {
+    fetch(apiUrl('/api/automations/scheduler/health'))
+      .then((res) => res.json())
+      .then((data) => setSchedulerHealth(data))
+      .catch((err) => console.error('Failed to load scheduler health', err));
+  }, []);
 
   const fetchAutomations = useCallback(() => {
     setLoading(true);
@@ -180,7 +213,8 @@ export function Automations({ initialAutomationId }: AutomationsProps = {}) {
     fetchSuggestions();
     fetchRuns();
     fetchTeamsAndAgents();
-  }, [fetchAutomations, fetchSuggestions, fetchRuns, fetchTeamsAndAgents]);
+    fetchSchedulerHealth();
+  }, [fetchAutomations, fetchSuggestions, fetchRuns, fetchTeamsAndAgents, fetchSchedulerHealth]);
 
   useEffect(() => {
     if (!initialAutomationId) return;
@@ -403,6 +437,39 @@ export function Automations({ initialAutomationId }: AutomationsProps = {}) {
               </div>
             </div>
           </div>
+
+          <div className="card" style={{ padding: '16px 20px', display: 'flex', alignItems: 'center', gap: '14px' }}>
+            <div style={{
+              width: '40px',
+              height: '40px',
+              borderRadius: '10px',
+              backgroundColor: schedulerHealth?.running ? 'hsl(var(--success)/0.12)' : 'hsl(var(--muted)/0.3)',
+              color: schedulerHealth?.running ? 'hsl(var(--success))' : 'hsl(var(--muted-fg))',
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+            }}>
+              <Clock size={20} />
+            </div>
+            <div>
+              <div style={{ fontSize: '12px', color: 'hsl(var(--muted-fg))', fontWeight: 500 }}>Scheduler Engine</div>
+              <div style={{ fontSize: '14px', fontWeight: 700, color: 'hsl(var(--fg))', display: 'flex', alignItems: 'center', gap: '6px' }}>
+                <span style={{
+                  display: 'inline-block',
+                  width: '8px',
+                  height: '8px',
+                  borderRadius: '50%',
+                  backgroundColor: schedulerHealth?.running ? 'hsl(var(--success))' : 'hsl(var(--muted-fg))',
+                }} />
+                {schedulerHealth?.running ? 'Active & Healthy' : 'Offline'}
+                {schedulerHealth?.watchers_count ? (
+                  <span style={{ fontSize: '11px', fontWeight: 400, color: 'hsl(var(--muted-fg))' }}>
+                    ({schedulerHealth.watchers_count} watchers)
+                  </span>
+                ) : null}
+              </div>
+            </div>
+          </div>
         </div>
 
         {/* View Switcher Tabs */}
@@ -547,16 +614,11 @@ export function Automations({ initialAutomationId }: AutomationsProps = {}) {
                         transition: 'all 0.3s ease',
                       }}
                     >
-                      {/* Top row: Name + Toggle Switch */}
+                      {/* Top row: Name + Status & Toggle */}
                       <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', marginBottom: '10px' }}>
                         <div>
                           <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
                             <h3 style={{ fontSize: '15px', fontWeight: 600, margin: 0, color: 'hsl(var(--fg))' }}>{auto.name}</h3>
-                            {auto.is_draft && (
-                              <span className="badge" style={{ background: 'hsl(var(--warning)/0.15)', color: 'hsl(var(--warning))', fontSize: '10.5px', fontWeight: 600 }}>
-                                Draft
-                              </span>
-                            )}
                           </div>
                           {auto.description && (
                             <p style={{ fontSize: '12px', color: 'hsl(var(--muted-fg))', margin: '4px 0 0', lineHeight: 1.4 }}>
@@ -564,15 +626,44 @@ export function Automations({ initialAutomationId }: AutomationsProps = {}) {
                             </p>
                           )}
                         </div>
-                        <Tooltip content={auto.enabled ? 'Click to disable' : 'Click to enable'}>
-                          <button
-                            className={`badge ${auto.enabled ? 'badge-success' : 'badge-default'}`}
-                            style={{ cursor: 'pointer', border: 'none', padding: '4px 10px', fontSize: '11px', fontWeight: 600 }}
-                            onClick={() => handleToggle(auto)}
-                          >
-                            {auto.enabled ? t('statusEnabled') : t('statusDisabled')}
-                          </button>
-                        </Tooltip>
+
+                        <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+                          {auto.runtime_status === 'running' || isRunning ? (
+                            <span className="badge" style={{ background: 'hsl(var(--primary)/0.18)', color: 'hsl(var(--primary))', fontSize: '11px', fontWeight: 600, display: 'inline-flex', alignItems: 'center', gap: '4px' }}>
+                              <RefreshCw size={10} className="animate-spin" /> Running
+                            </span>
+                          ) : auto.runtime_status === 'waiting_approval' ? (
+                            <span className="badge" style={{ background: 'hsl(var(--warning)/0.2)', color: 'hsl(var(--warning))', fontSize: '11px', fontWeight: 600 }}>
+                              Waiting Approval
+                            </span>
+                          ) : auto.runtime_status === 'error' ? (
+                            <span className="badge" style={{ background: 'hsl(var(--error)/0.18)', color: 'hsl(var(--error))', fontSize: '11px', fontWeight: 600 }}>
+                              Error
+                            </span>
+                          ) : auto.is_draft ? (
+                            <span className="badge" style={{ background: 'hsl(var(--warning)/0.15)', color: 'hsl(var(--warning))', fontSize: '11px', fontWeight: 600 }}>
+                              Draft
+                            </span>
+                          ) : auto.enabled ? (
+                            <span className="badge badge-success" style={{ fontSize: '11px', fontWeight: 600 }}>
+                              Active
+                            </span>
+                          ) : (
+                            <span className="badge" style={{ background: 'hsl(var(--muted))', color: 'hsl(var(--muted-fg))', fontSize: '11px', fontWeight: 600 }}>
+                              Paused
+                            </span>
+                          )}
+
+                          <Tooltip content={auto.enabled ? 'Click to pause/disable' : 'Click to activate'}>
+                            <button
+                              className="btn btn-ghost"
+                              style={{ padding: '2px 8px', fontSize: '11px', borderRadius: '4px' }}
+                              onClick={() => handleToggle(auto)}
+                            >
+                              {auto.enabled ? 'Pause' : 'Activate'}
+                            </button>
+                          </Tooltip>
+                        </div>
                       </div>
 
                       {/* Badges Strip: Trigger & Team */}
@@ -585,6 +676,16 @@ export function Automations({ initialAutomationId }: AutomationsProps = {}) {
                         {auto.trigger.type === 'file_watcher' && (
                           <span className="badge" style={{ fontSize: '11px', background: 'hsl(var(--secondary)/0.15)', color: 'hsl(var(--primary))' }}>
                             <Folder size={11} /> Watch: {auto.trigger.watch_pattern || '*.*'}
+                          </span>
+                        )}
+                        {(auto.trigger.type === 'http_watcher' || auto.trigger.http_url) && (
+                          <span className="badge" style={{ fontSize: '11px', background: 'hsl(var(--secondary)/0.15)', color: 'hsl(var(--primary))' }}>
+                            <Globe size={11} /> HTTP: {auto.trigger.http_url ? (auto.trigger.http_url.length > 25 ? auto.trigger.http_url.slice(0, 25) + '...' : auto.trigger.http_url) : 'Polling'}
+                          </span>
+                        )}
+                        {(auto.trigger.type === 'github_watcher' || (auto.trigger.github_owner && auto.trigger.github_repo)) && (
+                          <span className="badge" style={{ fontSize: '11px', background: 'hsl(var(--secondary)/0.15)', color: 'hsl(var(--primary))' }}>
+                            <Layers size={11} /> GitHub: {auto.trigger.github_owner}/{auto.trigger.github_repo}
                           </span>
                         )}
                         {auto.trigger.type === 'webhook' && (
@@ -614,7 +715,7 @@ export function Automations({ initialAutomationId }: AutomationsProps = {}) {
                       </div>
 
                       {/* Pipeline Steps Sequence */}
-                      <div style={{ marginBottom: '16px', background: 'hsl(var(--muted)/0.3)', padding: '10px 12px', borderRadius: '8px', border: '1px solid hsl(var(--border)/0.5)' }}>
+                      <div style={{ marginBottom: '14px', background: 'hsl(var(--muted)/0.3)', padding: '10px 12px', borderRadius: '8px', border: '1px solid hsl(var(--border)/0.5)' }}>
                         <div style={{ fontSize: '10px', fontWeight: 600, color: 'hsl(var(--muted-fg))', textTransform: 'uppercase', letterSpacing: '0.05em', marginBottom: '6px' }}>
                           Pipeline ({auto.steps.length} {auto.steps.length === 1 ? t('stepSingular') : t('stepPlural')})
                         </div>
@@ -632,7 +733,7 @@ export function Automations({ initialAutomationId }: AutomationsProps = {}) {
 
                       {/* Output Destination Info */}
                       {auto.output_destination && (
-                        <div style={{ fontSize: '11px', color: 'hsl(var(--muted-fg))', display: 'flex', alignItems: 'center', gap: '6px', marginBottom: '14px' }}>
+                        <div style={{ fontSize: '11px', color: 'hsl(var(--muted-fg))', display: 'flex', alignItems: 'center', gap: '6px', marginBottom: '10px' }}>
                           {auto.output_destination.type === 'file' && (
                             <>
                               <FileText size={12} className="text-primary" />
@@ -654,13 +755,42 @@ export function Automations({ initialAutomationId }: AutomationsProps = {}) {
                         </div>
                       )}
 
+                      {/* Next Run Info */}
+                      {auto.next_run_at && (
+                        <div style={{ fontSize: '11px', color: 'hsl(var(--primary))', display: 'flex', alignItems: 'center', gap: '5px', marginBottom: '6px' }}>
+                          <Clock size={11} /> Next: {new Date(auto.next_run_at).toLocaleString([], { dateStyle: 'short', timeStyle: 'short' })}
+                        </div>
+                      )}
+
+                      {/* Last Error Info */}
+                      {auto.last_error && (
+                        <div
+                          style={{
+                            fontSize: '11px',
+                            color: 'hsl(var(--error))',
+                            display: 'flex',
+                            alignItems: 'center',
+                            gap: '5px',
+                            marginBottom: '6px',
+                            background: 'hsl(var(--error)/0.08)',
+                            padding: '4px 8px',
+                            borderRadius: '6px',
+                          }}
+                          title={auto.last_error}
+                        >
+                          <AlertCircle size={12} /> {auto.last_error.length > 50 ? auto.last_error.slice(0, 50) + '...' : auto.last_error}
+                        </div>
+                      )}
+
                       {/* Last Execution Info */}
                       <div style={{ marginTop: 'auto', paddingTop: '12px', borderTop: '1px solid hsl(var(--border)/0.4)', display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
                         <div style={{ fontSize: '11px', color: 'hsl(var(--muted-fg))' }}>
                           {auto.last_run_status ? (
                             <span style={{ display: 'inline-flex', alignItems: 'center', gap: '4px' }}>
-                              {auto.last_run_status === 'completed' ? (
+                              {['completed', 'succeeded'].includes(auto.last_run_status) ? (
                                 <CheckCircle2 size={12} className="text-success" />
+                              ) : auto.last_run_status === 'waiting_approval' ? (
+                                <Clock size={12} className="text-warning" />
                               ) : (
                                 <AlertCircle size={12} className="text-error" />
                               )}

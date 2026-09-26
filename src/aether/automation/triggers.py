@@ -6,6 +6,7 @@ Zero external dependencies.
 from __future__ import annotations
 
 import fnmatch
+import json
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any
@@ -200,3 +201,90 @@ class TriggerEvaluator:
             return False, []
 
         return len(detected_files) > 0, detected_files
+
+    @classmethod
+    def validate_trigger(cls, trigger: TriggerConfig) -> tuple[bool, str | None]:
+        """
+        Validates trigger configuration. Returns (is_valid, error_message).
+        """
+        trig_type = trigger.type.value if hasattr(trigger.type, "value") else str(trigger.type)
+
+        if trig_type in (TriggerType.SCHEDULE.value, TriggerType.INTERVAL.value, "schedule", "interval"):
+            if not trigger.cron and (trigger.interval_seconds is None or trigger.interval_seconds <= 0):
+                return False, "Schedule trigger requires either a valid cron expression or interval_seconds > 0"
+            if trigger.cron:
+                try:
+                    CronExpression(trigger.cron)
+                except Exception as exc:
+                    return False, f"Invalid cron expression: {exc}"
+
+        elif trig_type == TriggerType.FILE_WATCHER.value or trig_type == "file_watcher":
+            if not trigger.watch_events:
+                return False, "File watcher requires at least one event type (created or modified)"
+
+        elif trig_type == TriggerType.HTTP_WATCHER.value or trig_type in ("http_watcher", "http_poll"):
+            if not trigger.http_url or not (trigger.http_url.startswith("http://") or trigger.http_url.startswith("https://")):
+                return False, "HTTP watcher requires a valid http:// or https:// URL"
+
+        elif trig_type == TriggerType.GITHUB_WATCHER.value or trig_type in ("github_watcher", "github_repo"):
+            if not trigger.github_owner or not trigger.github_repo:
+                return False, "GitHub watcher requires both repository owner and repo name"
+
+        return True, None
+
+    @classmethod
+    def compute_fingerprint(cls, automation_id: str, trigger_type: str, payload: Any = None) -> str:
+        """
+        Computes a deterministic idempotency fingerprint for an event trigger.
+        """
+        import hashlib
+        now_dt = datetime.now(timezone.utc)
+
+        if trigger_type in ("schedule", "interval"):
+            # Round down to the current minute
+            minute_bucket = now_dt.strftime("%Y-%m-%d-%H-%M")
+            return f"sched:{automation_id}:{minute_bucket}"
+
+        if trigger_type == "file_watcher":
+            files = []
+            if isinstance(payload, dict) and "detected_files" in payload:
+                for f in payload["detected_files"]:
+                    p = f.get("path") or f.get("relative_path")
+                    mtime = f.get("mtime") or f.get("modified_at")
+                    files.append(f"{p}:{mtime}")
+            summary = ",".join(sorted(files)) if files else str(now_dt.timestamp())
+            h = hashlib.sha256(summary.encode("utf-8")).hexdigest()[:16]
+            return f"file:{automation_id}:{h}"
+
+        if trigger_type in ("http_watcher", "http_poll"):
+            h = payload.get("content_hash") if isinstance(payload, dict) else ""
+            status = payload.get("status_code") if isinstance(payload, dict) else ""
+            return f"http:{automation_id}:{h or status or int(now_dt.timestamp())}"
+
+        if trigger_type in ("github_watcher", "github_repo"):
+            sha = payload.get("latest_commit") if isinstance(payload, dict) else ""
+            return f"github:{automation_id}:{sha or int(now_dt.timestamp())}"
+
+        if trigger_type == "webhook":
+            payload_str = json.dumps(payload, sort_keys=True, default=str) if payload else ""
+            h = hashlib.sha256(payload_str.encode("utf-8")).hexdigest()[:16]
+            return f"webhook:{automation_id}:{h}"
+
+        if trigger_type == "manual":
+            # Bucket by 2 seconds to guard against rapid double clicks
+            bucket = int(now_dt.timestamp() // 2)
+            return f"manual:{automation_id}:{bucket}"
+
+        # Default fallback: hash payload if present, or bucket by 2 seconds
+        if payload:
+            payload_str = json.dumps(payload, sort_keys=True, default=str)
+            h = hashlib.sha256(payload_str.encode("utf-8")).hexdigest()[:16]
+            return f"{trigger_type}:{automation_id}:{h}"
+
+        bucket = int(now_dt.timestamp() // 2)
+        return f"{trigger_type}:{automation_id}:{bucket}"
+
+
+validate_trigger = TriggerEvaluator.validate_trigger
+compute_fingerprint = TriggerEvaluator.compute_fingerprint
+

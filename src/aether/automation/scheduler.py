@@ -6,6 +6,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import time
 from datetime import datetime, timezone
 from typing import Any
 
@@ -18,7 +19,7 @@ logger = logging.getLogger(__name__)
 
 
 class AutomationScheduler:
-    """Manages the background evaluation loop and job execution for Workspace automations."""
+    """Manages the background evaluation loop, health telemetry, and job execution for Workspace automations."""
 
     def __init__(
         self,
@@ -38,16 +39,50 @@ class AutomationScheduler:
         self._stop_event = asyncio.Event()
         self._active_runs: set[str] = set()  # Set of automation IDs currently running
         self._last_file_check: datetime = datetime.now(timezone.utc)
+        self._start_time: float | None = None
+        self._last_tick_at: datetime | None = None
+        self._tick_count: int = 0
 
     @property
     def is_running(self) -> bool:
         return self._running_task is not None and not self._running_task.done()
+
+    def health(self) -> dict[str, Any]:
+        """Provides real-time health and diagnostic metrics of the scheduler and active watchers."""
+        uptime = (time.time() - self._start_time) if (self.is_running and self._start_time) else 0.0
+        watchers_status = self.watcher_manager.get_watchers_status()
+        watchers_healthy = all(w.get("status") in ("healthy", "paused") for w in watchers_status) if watchers_status else True
+
+        automations_count = 0
+        active_automations_count = 0
+        if hasattr(self.workspace, "automations"):
+            autos = self.workspace.automations.list_automations()
+            automations_count = len(autos)
+            active_automations_count = len([a for a in autos if a.enabled and not a.is_draft])
+
+        return {
+            "healthy": self.is_running and watchers_healthy,
+            "running": self.is_running,
+            "uptime_seconds": round(uptime, 2),
+            "tick_interval_seconds": self.tick_interval,
+            "tick_count": self._tick_count,
+            "last_tick_at": self._last_tick_at.isoformat() if self._last_tick_at else None,
+            "max_concurrent_runs": self.max_concurrent_runs,
+            "active_runs_count": len(self._active_runs),
+            "active_runs": list(self._active_runs),
+            "automations_count": automations_count,
+            "active_automations_count": active_automations_count,
+            "watchers_count": len(watchers_status),
+            "watchers_healthy": watchers_healthy,
+            "watchers": watchers_status,
+        }
 
     def start(self) -> None:
         """Starts the background scheduler loop."""
         if self.is_running:
             return
         self._stop_event.clear()
+        self._start_time = time.time()
         self._running_task = asyncio.create_task(self._loop(), name="aether-automation-scheduler")
         logger.info("AutomationScheduler started with tick interval %.1fs", self.tick_interval)
 
@@ -63,7 +98,13 @@ class AutomationScheduler:
             except (asyncio.CancelledError, Exception):
                 pass
             self._running_task = None
+        self._start_time = None
         logger.info("AutomationScheduler stopped")
+
+    async def restart(self) -> None:
+        """Restarts the scheduler loop cleanly."""
+        await self.stop()
+        self.start()
 
     async def _loop(self) -> None:
         """Main evaluation loop."""
@@ -85,12 +126,22 @@ class AutomationScheduler:
         if not hasattr(self.workspace, "automations"):
             return []
 
-        automations = self.workspace.automations.list_automations()
         now = datetime.now(timezone.utc)
+        self._last_tick_at = now
+        self._tick_count += 1
+
+        automations = self.workspace.automations.list_automations()
         triggered_runs: list[AutomationRunRecord] = []
 
         for auto in automations:
-            if not auto.enabled:
+            # If disabled or draft, clean next_run_at and skip evaluation
+            if not auto.enabled or auto.is_draft:
+                if auto.next_run_at is not None:
+                    auto.next_run_at = None
+                    try:
+                        self.workspace.automations.save_automation(auto)
+                    except Exception:
+                        pass
                 continue
 
             # Prevent overlapping runs for the same automation
@@ -136,11 +187,9 @@ class AutomationScheduler:
             if is_due:
                 # Launch execution in background task
                 self._active_runs.add(auto.id)
-                task = asyncio.create_task(
+                asyncio.create_task(
                     self._run_wrapper(auto, trigger_type_str, trigger_payload)
                 )
-                # For synchronous tick reporting
-                # We also track it
                 triggered_runs.append(
                     AutomationRunRecord(
                         automation_id=auto.id,
@@ -191,7 +240,15 @@ class AutomationScheduler:
         automation_id: str,
         payload: dict[str, Any] | None = None,
     ) -> AutomationRunRecord | None:
-        """Manually triggers an automation immediately."""
+        """Manually triggers an automation immediately, guarding against rapid concurrent double-triggers."""
+        if automation_id in self._active_runs:
+            logger.info("Automation %s is already running; skipping redundant manual trigger.", automation_id)
+            if hasattr(self.workspace, "automations"):
+                runs = self.workspace.automations.list_runs(automation_id=automation_id, limit=1)
+                if runs:
+                    return runs[0]
+            return None
+
         auto = self.workspace.automations.get_automation(automation_id)
         if not auto:
             return None

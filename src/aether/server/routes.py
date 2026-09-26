@@ -2536,7 +2536,20 @@ async def list_automations(request: Request):
     if not ws:
         return []
     autos = ws.automations.list_automations()
-    return [a.to_dict() for a in autos]
+    scheduler = getattr(request.app.state, "scheduler", None)
+    active_runs = set(scheduler._active_runs) if scheduler else set()
+    scheduler_running = scheduler.is_running if scheduler else False
+
+    result = []
+    for a in autos:
+        is_running = a.id in active_runs
+        a.runtime_status = a.compute_runtime_status(is_running=is_running)
+        # If scheduler is stopped or automation is disabled/draft, clear next_run_at from response
+        res_dict = a.to_dict()
+        if not scheduler_running or not a.enabled or a.is_draft:
+            res_dict["next_run_at"] = None
+        result.append(res_dict)
+    return result
 
 
 @router.post("/automations")
@@ -2559,6 +2572,42 @@ async def list_all_automation_history(request: Request, limit: int = 50):
         return []
     runs = ws.automations.list_runs(limit=limit)
     return [r.to_dict() for r in runs]
+
+
+@router.get("/automations/scheduler/health")
+async def get_automation_scheduler_health(request: Request):
+    """Provides real-time health and diagnostic metrics of the background scheduler and active watchers."""
+    scheduler = getattr(request.app.state, "scheduler", None)
+    if scheduler:
+        return scheduler.health()
+    return {
+        "healthy": False,
+        "running": False,
+        "uptime_seconds": 0.0,
+        "message": "AutomationScheduler is not running",
+        "watchers_count": 0,
+        "watchers_healthy": False,
+        "watchers": [],
+    }
+
+
+@router.post("/automations/scheduler/restart")
+async def restart_automation_scheduler(request: Request):
+    """Restarts the background automation scheduler."""
+    scheduler = getattr(request.app.state, "scheduler", None)
+    if not scheduler:
+        raise HTTPException(status_code=400, detail="Scheduler not initialized")
+    await scheduler.restart()
+    return {"status": "ok", "health": scheduler.health()}
+
+
+@router.get("/automations/watchers")
+async def list_automation_watchers(request: Request):
+    """Returns real-time status and diagnostics of all active watchers."""
+    scheduler = getattr(request.app.state, "scheduler", None)
+    if scheduler and hasattr(scheduler, "watcher_manager"):
+        return scheduler.watcher_manager.get_watchers_status()
+    return []
 
 
 @router.get("/automations/{automation_id}")

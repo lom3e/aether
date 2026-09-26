@@ -145,6 +145,11 @@ async def startup_event():
 
         # Start Automation Scheduler
         try:
+            if hasattr(ws, "automations"):
+                recovered_runs = ws.automations.recover_interrupted_runs()
+                if recovered_runs:
+                    print(f"AutomationStore recovered {recovered_runs} interrupted run(s) on startup.")
+
             from aether.automation.scheduler import AutomationScheduler
             scheduler = AutomationScheduler(
                 workspace=ws,

@@ -178,7 +178,7 @@ def test_automation_store_crud(tmp_path: Path):
 
     loaded_run = store.get_run(run.run_id)
     assert loaded_run is not None
-    assert loaded_run.status == RunStatus.COMPLETED
+    assert loaded_run.status in (RunStatus.COMPLETED, RunStatus.SUCCEEDED)
     assert loaded_run.output_result.startswith("# Sprint 42")
     assert loaded_run.duration_seconds == 1.23
 
@@ -218,7 +218,7 @@ async def test_automation_engine_execution(tmp_path: Path):
         trigger_payload={"topic": "Microservices"},
     )
 
-    assert run.status == RunStatus.COMPLETED
+    assert run.status in (RunStatus.COMPLETED, RunStatus.SUCCEEDED)
     assert run.output_result is not None
     assert len(run.step_runs) == 2
     assert (ws.root / "docs" / "output.md").exists()
@@ -253,7 +253,7 @@ async def test_automation_scheduler_tick_and_trigger(tmp_path: Path):
     # Trigger manual execution immediately
     manual_run = await scheduler.trigger_now(auto.id, {"text": "Manual Run"})
     assert manual_run is not None
-    assert manual_run.status == RunStatus.COMPLETED
+    assert manual_run.status in (RunStatus.COMPLETED, RunStatus.SUCCEEDED)
 
     # Start and stop lifecycle
     scheduler.start()
@@ -312,7 +312,7 @@ async def test_automations_rest_api_endpoints(tmp_path: Path):
     # 6. POST /api/automations/{id}/run
     run_res = await trigger_automation_endpoint(req, auto_id)
     assert run_res["automation_id"] == auto_id
-    assert run_res["status"] == "completed"
+    assert run_res["status"] in ("completed", "succeeded")
 
     # 7. GET /api/automations/history
     history = await list_all_automation_history(req)

@@ -80,6 +80,20 @@ class AutomationStore:
                 conn.execute("ALTER TABLE automations ADD COLUMN human_schedule TEXT;")
             if "metadata_json" not in columns:
                 conn.execute("ALTER TABLE automations ADD COLUMN metadata_json TEXT DEFAULT '{}';")
+            if "runtime_status" not in columns:
+                conn.execute("ALTER TABLE automations ADD COLUMN runtime_status TEXT DEFAULT 'active';")
+            if "last_started_at" not in columns:
+                conn.execute("ALTER TABLE automations ADD COLUMN last_started_at TEXT;")
+            if "last_finished_at" not in columns:
+                conn.execute("ALTER TABLE automations ADD COLUMN last_finished_at TEXT;")
+            if "last_error" not in columns:
+                conn.execute("ALTER TABLE automations ADD COLUMN last_error TEXT;")
+            if "retry_count" not in columns:
+                conn.execute("ALTER TABLE automations ADD COLUMN retry_count INTEGER DEFAULT 0;")
+            if "retry_config_json" not in columns:
+                conn.execute("ALTER TABLE automations ADD COLUMN retry_config_json TEXT DEFAULT '{}';")
+            if "last_fingerprint" not in columns:
+                conn.execute("ALTER TABLE automations ADD COLUMN last_fingerprint TEXT;")
 
             # 2. Automation Runs History Table
             conn.execute(
@@ -97,16 +111,32 @@ class AutomationStore:
                     output_result TEXT,
                     error TEXT,
                     step_runs_json TEXT NOT NULL DEFAULT '[]',
+                    trigger_fingerprint TEXT,
+                    retry_count INTEGER DEFAULT 0,
+                    is_retryable INTEGER DEFAULT 0,
                     FOREIGN KEY (automation_id) REFERENCES automations(id) ON DELETE CASCADE
                 );
                 """
             )
+            # Check existing columns in automation_runs for forward migration
+            run_cursor = conn.execute("PRAGMA table_info(automation_runs);")
+            run_cols = {row[1] for row in run_cursor.fetchall()}
+            if "trigger_fingerprint" not in run_cols:
+                conn.execute("ALTER TABLE automation_runs ADD COLUMN trigger_fingerprint TEXT;")
+            if "retry_count" not in run_cols:
+                conn.execute("ALTER TABLE automation_runs ADD COLUMN retry_count INTEGER DEFAULT 0;")
+            if "is_retryable" not in run_cols:
+                conn.execute("ALTER TABLE automation_runs ADD COLUMN is_retryable INTEGER DEFAULT 0;")
+
             # Indices for quick lookup
             conn.execute(
                 "CREATE INDEX IF NOT EXISTS idx_automation_runs_auto_id ON automation_runs(automation_id);"
             )
             conn.execute(
                 "CREATE INDEX IF NOT EXISTS idx_automation_runs_started ON automation_runs(started_at DESC);"
+            )
+            conn.execute(
+                "CREATE INDEX IF NOT EXISTS idx_automation_runs_fingerprint ON automation_runs(trigger_fingerprint);"
             )
 
             # 3. Automation Suggestions Table
@@ -132,52 +162,70 @@ class AutomationStore:
                 "CREATE INDEX IF NOT EXISTS idx_suggestions_status ON automation_suggestions(status);"
             )
 
+    def _row_to_automation(self, r: tuple) -> AutomationDefinition:
+        trigger_data = json.loads(r[5]) if r[5] else {}
+        steps_data = json.loads(r[6]) if r[6] else []
+        out_data = json.loads(r[7]) if r[7] else None
+        meta_data = json.loads(r[16]) if len(r) > 16 and r[16] else {}
+
+        retry_cfg = {}
+        if len(r) > 22 and r[22]:
+            try:
+                retry_cfg = json.loads(r[22])
+            except Exception:
+                retry_cfg = {}
+
+        return AutomationDefinition(
+            id=r[0],
+            name=r[1],
+            description=r[2],
+            enabled=bool(r[3]),
+            team_name=r[4],
+            trigger=TriggerConfig.from_dict(trigger_data),
+            steps=[PipelineStep.from_dict(s) for s in steps_data],
+            output_destination=OutputDestination.from_dict(out_data) if out_data else None,
+            created_at=r[8],
+            updated_at=r[9],
+            last_run_at=r[10],
+            last_run_status=r[11],
+            next_run_at=r[12],
+            is_draft=bool(r[13]) if len(r) > 13 else False,
+            requires_approval=bool(r[14]) if len(r) > 14 else False,
+            human_schedule=r[15] if len(r) > 15 else None,
+            metadata=meta_data,
+            runtime_status=r[17] if len(r) > 17 and r[17] else ("active" if bool(r[3]) else "disabled"),
+            last_started_at=r[18] if len(r) > 18 else None,
+            last_finished_at=r[19] if len(r) > 19 else None,
+            last_error=r[20] if len(r) > 20 else None,
+            retry_count=int(r[21]) if len(r) > 21 and r[21] is not None else 0,
+            retry_config=retry_cfg or {
+                "max_retries": 3,
+                "backoff_base": 2,
+                "retryable_errors": ["timeout", "502", "503", "504", "rate_limit", "429", "connection_error"],
+            },
+            last_fingerprint=r[23] if len(r) > 23 else None,
+        )
+
     def list_automations(self) -> list[AutomationDefinition]:
         with self._get_connection() as conn:
             cursor = conn.execute(
                 "SELECT id, name, description, enabled, team_name, trigger_json, steps_json, "
                 "output_destination_json, created_at, updated_at, last_run_at, last_run_status, next_run_at, "
-                "is_draft, requires_approval, human_schedule, metadata_json "
+                "is_draft, requires_approval, human_schedule, metadata_json, "
+                "runtime_status, last_started_at, last_finished_at, last_error, retry_count, retry_config_json, last_fingerprint "
                 "FROM automations ORDER BY created_at ASC;"
             )
             rows = cursor.fetchall()
 
-        res: list[AutomationDefinition] = []
-        for r in rows:
-            trigger_data = json.loads(r[5]) if r[5] else {}
-            steps_data = json.loads(r[6]) if r[6] else []
-            out_data = json.loads(r[7]) if r[7] else None
-            meta_data = json.loads(r[16]) if len(r) > 16 and r[16] else {}
-
-            res.append(
-                AutomationDefinition(
-                    id=r[0],
-                    name=r[1],
-                    description=r[2],
-                    enabled=bool(r[3]),
-                    team_name=r[4],
-                    trigger=TriggerConfig.from_dict(trigger_data),
-                    steps=[PipelineStep.from_dict(s) for s in steps_data],
-                    output_destination=OutputDestination.from_dict(out_data) if out_data else None,
-                    created_at=r[8],
-                    updated_at=r[9],
-                    last_run_at=r[10],
-                    last_run_status=r[11],
-                    next_run_at=r[12],
-                    is_draft=bool(r[13]) if len(r) > 13 else False,
-                    requires_approval=bool(r[14]) if len(r) > 14 else False,
-                    human_schedule=r[15] if len(r) > 15 else None,
-                    metadata=meta_data,
-                )
-            )
-        return res
+        return [self._row_to_automation(r) for r in rows]
 
     def get_automation(self, automation_id: str) -> AutomationDefinition | None:
         with self._get_connection() as conn:
             cursor = conn.execute(
                 "SELECT id, name, description, enabled, team_name, trigger_json, steps_json, "
                 "output_destination_json, created_at, updated_at, last_run_at, last_run_status, next_run_at, "
-                "is_draft, requires_approval, human_schedule, metadata_json "
+                "is_draft, requires_approval, human_schedule, metadata_json, "
+                "runtime_status, last_started_at, last_finished_at, last_error, retry_count, retry_config_json, last_fingerprint "
                 "FROM automations WHERE id = ?;",
                 (automation_id,),
             )
@@ -185,31 +233,7 @@ class AutomationStore:
 
         if not row:
             return None
-
-        trigger_data = json.loads(row[5]) if row[5] else {}
-        steps_data = json.loads(row[6]) if row[6] else []
-        out_data = json.loads(row[7]) if row[7] else None
-        meta_data = json.loads(row[16]) if len(row) > 16 and row[16] else {}
-
-        return AutomationDefinition(
-            id=row[0],
-            name=row[1],
-            description=row[2],
-            enabled=bool(row[3]),
-            team_name=row[4],
-            trigger=TriggerConfig.from_dict(trigger_data),
-            steps=[PipelineStep.from_dict(s) for s in steps_data],
-            output_destination=OutputDestination.from_dict(out_data) if out_data else None,
-            created_at=row[8],
-            updated_at=row[9],
-            last_run_at=row[10],
-            last_run_status=row[11],
-            next_run_at=row[12],
-            is_draft=bool(row[13]) if len(row) > 13 else False,
-            requires_approval=bool(row[14]) if len(row) > 14 else False,
-            human_schedule=row[15] if len(row) > 15 else None,
-            metadata=meta_data,
-        )
+        return self._row_to_automation(row)
 
     def save_automation(self, auto: AutomationDefinition) -> AutomationDefinition:
         now = datetime.now(timezone.utc).isoformat()
@@ -223,8 +247,9 @@ class AutomationStore:
                 INSERT INTO automations (
                     id, name, description, enabled, team_name, trigger_json, steps_json,
                     output_destination_json, created_at, updated_at, last_run_at, last_run_status, next_run_at,
-                    is_draft, requires_approval, human_schedule, metadata_json
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    is_draft, requires_approval, human_schedule, metadata_json,
+                    runtime_status, last_started_at, last_finished_at, last_error, retry_count, retry_config_json, last_fingerprint
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 ON CONFLICT(id) DO UPDATE SET
                     name = excluded.name,
                     description = excluded.description,
@@ -240,7 +265,14 @@ class AutomationStore:
                     is_draft = excluded.is_draft,
                     requires_approval = excluded.requires_approval,
                     human_schedule = excluded.human_schedule,
-                    metadata_json = excluded.metadata_json;
+                    metadata_json = excluded.metadata_json,
+                    runtime_status = excluded.runtime_status,
+                    last_started_at = excluded.last_started_at,
+                    last_finished_at = excluded.last_finished_at,
+                    last_error = excluded.last_error,
+                    retry_count = excluded.retry_count,
+                    retry_config_json = excluded.retry_config_json,
+                    last_fingerprint = excluded.last_fingerprint;
                 """,
                 (
                     auto.id,
@@ -260,6 +292,13 @@ class AutomationStore:
                     1 if auto.requires_approval else 0,
                     auto.human_schedule,
                     json.dumps(auto.metadata or {}),
+                    auto.runtime_status or ("active" if auto.enabled else "disabled"),
+                    auto.last_started_at,
+                    auto.last_finished_at,
+                    auto.last_error,
+                    auto.retry_count,
+                    json.dumps(auto.retry_config or {}),
+                    auto.last_fingerprint,
                 ),
             )
         return auto
@@ -276,7 +315,41 @@ class AutomationStore:
         auto.enabled = enabled
         if enabled:
             auto.is_draft = False
+            auto.runtime_status = "active"
+        else:
+            auto.runtime_status = "disabled"
+            auto.next_run_at = None
         return self.save_automation(auto)
+
+    def _row_to_run_record(self, r: tuple) -> AutomationRunRecord:
+        in_payload = json.loads(r[8]) if r[8] else {}
+        step_runs = json.loads(r[11]) if r[11] else []
+        raw_status = r[4]
+        try:
+            status = RunStatus(raw_status)
+        except ValueError:
+            if raw_status in ("success", "ok"):
+                status = RunStatus.SUCCEEDED
+            else:
+                status = RunStatus.QUEUED
+
+        return AutomationRunRecord(
+            run_id=r[0],
+            automation_id=r[1],
+            automation_name=r[2],
+            trigger_type=r[3],
+            status=status,
+            started_at=r[5],
+            completed_at=r[6],
+            duration_seconds=r[7],
+            input_payload=in_payload,
+            output_result=r[9],
+            error=r[10],
+            step_runs=step_runs,
+            trigger_fingerprint=r[12] if len(r) > 12 else None,
+            retry_count=int(r[13]) if len(r) > 13 and r[13] is not None else 0,
+            is_retryable=bool(r[14]) if len(r) > 14 and r[14] is not None else False,
+        )
 
     def record_run_started(self, run: AutomationRunRecord) -> None:
         with self._get_connection() as conn:
@@ -285,8 +358,12 @@ class AutomationStore:
                 INSERT INTO automation_runs (
                     run_id, automation_id, automation_name, trigger_type, status,
                     started_at, completed_at, duration_seconds, input_payload_json,
-                    output_result, error, step_runs_json
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?);
+                    output_result, error, step_runs_json, trigger_fingerprint, retry_count, is_retryable
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                ON CONFLICT(run_id) DO UPDATE SET
+                    status = excluded.status,
+                    error = excluded.error,
+                    completed_at = excluded.completed_at;
                 """,
                 (
                     run.run_id,
@@ -301,6 +378,9 @@ class AutomationStore:
                     run.output_result,
                     run.error,
                     json.dumps(run.step_runs),
+                    run.trigger_fingerprint,
+                    run.retry_count,
+                    1 if run.is_retryable else 0,
                 ),
             )
 
@@ -308,11 +388,13 @@ class AutomationStore:
         self,
         run_id: str,
         status: RunStatus,
-        output_result: str | None,
-        error: str | None,
-        step_runs: list[dict[str, Any]],
+        output_result: str | None = None,
+        error: str | None = None,
+        step_runs: list[dict[str, Any]] | None = None,
         completed_at: str | None = None,
         duration_seconds: float | None = None,
+        retry_count: int = 0,
+        is_retryable: bool = False,
     ) -> None:
         comp_time = completed_at or datetime.now(timezone.utc).isoformat()
         with self._get_connection() as conn:
@@ -320,16 +402,18 @@ class AutomationStore:
                 """
                 UPDATE automation_runs
                 SET status = ?, output_result = ?, error = ?, step_runs_json = ?,
-                    completed_at = ?, duration_seconds = ?
+                    completed_at = ?, duration_seconds = ?, retry_count = ?, is_retryable = ?
                 WHERE run_id = ?;
                 """,
                 (
                     status.value if isinstance(status, RunStatus) else status,
                     output_result,
                     error,
-                    json.dumps(step_runs),
+                    json.dumps(step_runs or []),
                     comp_time,
                     duration_seconds,
+                    retry_count,
+                    1 if is_retryable else 0,
                     run_id,
                 ),
             )
@@ -337,7 +421,8 @@ class AutomationStore:
     def list_runs(self, automation_id: str | None = None, limit: int = 50) -> list[AutomationRunRecord]:
         query = (
             "SELECT run_id, automation_id, automation_name, trigger_type, status, "
-            "started_at, completed_at, duration_seconds, input_payload_json, output_result, error, step_runs_json "
+            "started_at, completed_at, duration_seconds, input_payload_json, output_result, error, step_runs_json, "
+            "trigger_fingerprint, retry_count, is_retryable "
             "FROM automation_runs "
         )
         params: list[Any] = []
@@ -351,33 +436,14 @@ class AutomationStore:
             cursor = conn.execute(query, tuple(params))
             rows = cursor.fetchall()
 
-        runs: list[AutomationRunRecord] = []
-        for r in rows:
-            in_payload = json.loads(r[8]) if r[8] else {}
-            step_runs = json.loads(r[11]) if r[11] else []
-            runs.append(
-                AutomationRunRecord(
-                    run_id=r[0],
-                    automation_id=r[1],
-                    automation_name=r[2],
-                    trigger_type=r[3],
-                    status=RunStatus(r[4]) if r[4] in [s.value for s in RunStatus] else RunStatus.PENDING,
-                    started_at=r[5],
-                    completed_at=r[6],
-                    duration_seconds=r[7],
-                    input_payload=in_payload,
-                    output_result=r[9],
-                    error=r[10],
-                    step_runs=step_runs,
-                )
-            )
-        return runs
+        return [self._row_to_run_record(r) for r in rows]
 
     def get_run(self, run_id: str) -> AutomationRunRecord | None:
         with self._get_connection() as conn:
             cursor = conn.execute(
                 "SELECT run_id, automation_id, automation_name, trigger_type, status, "
-                "started_at, completed_at, duration_seconds, input_payload_json, output_result, error, step_runs_json "
+                "started_at, completed_at, duration_seconds, input_payload_json, output_result, error, step_runs_json, "
+                "trigger_fingerprint, retry_count, is_retryable "
                 "FROM automation_runs WHERE run_id = ?;",
                 (run_id,),
             )
@@ -385,21 +451,41 @@ class AutomationStore:
 
         if not row:
             return None
+        return self._row_to_run_record(row)
 
-        return AutomationRunRecord(
-            run_id=row[0],
-            automation_id=row[1],
-            automation_name=row[2],
-            trigger_type=row[3],
-            status=RunStatus(row[4]) if row[4] in [s.value for s in RunStatus] else RunStatus.PENDING,
-            started_at=row[5],
-            completed_at=row[6],
-            duration_seconds=row[7],
-            input_payload=json.loads(row[8]) if row[8] else {},
-            output_result=row[9],
-            error=row[10],
-            step_runs=json.loads(row[11]) if row[11] else [],
-        )
+    def get_last_run_by_fingerprint(self, fingerprint: str) -> AutomationRunRecord | None:
+        if not fingerprint:
+            return None
+        with self._get_connection() as conn:
+            cursor = conn.execute(
+                "SELECT run_id, automation_id, automation_name, trigger_type, status, "
+                "started_at, completed_at, duration_seconds, input_payload_json, output_result, error, step_runs_json, "
+                "trigger_fingerprint, retry_count, is_retryable "
+                "FROM automation_runs WHERE trigger_fingerprint = ? ORDER BY started_at DESC LIMIT 1;",
+                (fingerprint,),
+            )
+            row = cursor.fetchone()
+        if not row:
+            return None
+        return self._row_to_run_record(row)
+
+    def recover_interrupted_runs(self) -> int:
+        """
+        Marks any runs left in running, queued, or pending status as failed due to restart.
+        """
+        now = datetime.now(timezone.utc).isoformat()
+        with self._get_connection() as conn:
+            cursor = conn.execute(
+                """
+                UPDATE automation_runs
+                SET status = 'failed',
+                    error = 'Execution interrupted by system shutdown/restart',
+                    completed_at = ?
+                WHERE status IN ('running', 'queued', 'pending');
+                """,
+                (now,),
+            )
+            return cursor.rowcount
 
     # ---------------------------------------------------------------------------
     # Automation Suggestions

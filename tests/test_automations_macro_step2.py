@@ -140,7 +140,7 @@ def test_companion_automation_intent_and_approval(tmp_path: Path):
     # Approve the action execution
     exec_id = pending[0]["execution_id"]
     approved_exec = service.action_executor.approve(exec_id)
-    assert approved_exec.status.value in ("approved", "success")
+    assert approved_exec.status.value in ("approved", "success", "succeeded")
 
 
 # ---------------------------------------------------------------------------
@@ -217,7 +217,7 @@ async def test_webhook_automation_lifecycle(tmp_path: Path):
 
     res = await webhook_automation_endpoint(valid_req, "github-push")
     assert res["status"] == "ok"
-    assert res["run_status"] == "completed"
+    assert res["run_status"] in ("completed", "succeeded")
 
     # Verify run record in store
     runs = ws.automations.list_runs(automation_id=auto.id)
@@ -403,7 +403,7 @@ async def test_truthful_execution_and_notifications(tmp_path: Path):
     ws.automations.save_automation(auto)
 
     run = await engine.execute_automation(auto, trigger_type="manual")
-    assert run.status == RunStatus.COMPLETED
+    assert run.status in (RunStatus.SUCCEEDED, RunStatus.COMPLETED, "succeeded", "completed")
     assert run.output_result is not None
     assert "[Simulated execution" not in run.output_result
 
