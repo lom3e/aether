@@ -103,8 +103,8 @@ class TelegramConnector(BaseConnector):
     def is_chat_authorized(self, chat_id: str | int) -> bool:
         allowed = self._get_allowed_chat_ids()
         if not allowed:
-            # If no whitelist is specified, all chats are allowed by default (tightened in P1.1)
-            return True
+            # Finding 16 & Macro-pass P1.1: Deny by default if whitelist is empty
+            return False
         return str(chat_id).strip() in allowed
 
     def verify(self, auth_metadata: dict[str, Any] | None = None, live_check: bool = False) -> tuple[bool, str]:
@@ -130,8 +130,14 @@ class TelegramConnector(BaseConnector):
                         username = bot_info.get("username", "UnknownBot")
                         return True, f"Telegram Bot @{username} verified successfully."
                     return False, f"Telegram error: {data.get('description', 'Unknown error')}"
+            except urllib.error.HTTPError as exc:
+                if exc.code in (401, 404):
+                    return False, f"Telegram bot token authentication failed (HTTP {exc.code}): invalid token or bot not found."
+                return False, f"Telegram API HTTP error (HTTP {exc.code}): {exc.reason}"
+            except (urllib.error.URLError, TimeoutError, OSError) as exc:
+                return False, f"Failed to contact Telegram API: {exc}"
             except Exception as e:
-                return False, f"Failed to contact Telegram API: {e}"
+                return False, f"Telegram live verification failed: {e}"
 
         return True, "Telegram Bot Token format verified."
 

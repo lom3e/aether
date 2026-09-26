@@ -25,6 +25,7 @@ from aether.github.models import (
     GitHubAuthError,
     GitHubIntegrationError,
     GitHubNotFoundError,
+    GitHubRateLimitError,
     GitHubValidationError,
 )
 
@@ -137,8 +138,10 @@ class GitHubConnector(BaseConnector):
                 user_data = self.client.get_authenticated_user(token=token)
                 login = user_data.get("login") or "user"
                 return True, f"GitHub authentication verified for @{login}."
+            except GitHubRateLimitError as exc:
+                return False, f"GitHub rate limit exceeded: {exc}"
             except GitHubAuthError as exc:
-                return False, str(exc)
+                return False, f"GitHub authentication failed: {exc}"
             except Exception as exc:
                 return False, f"GitHub live verification failed: {exc}"
 

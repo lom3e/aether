@@ -9,6 +9,7 @@ from datetime import datetime, timezone
 import json
 import logging
 import urllib.error
+import urllib.parse
 import urllib.request
 from typing import Any
 
@@ -99,19 +100,57 @@ class SlackConnector(BaseConnector):
             try:
                 req = urllib.request.Request(
                     f"{self.DEFAULT_API_BASE}/auth.test",
-                    headers={"Authorization": f"Bearer {bot_token}"},
+                    headers={"Authorization": f"Bearer {bot_token}", "User-Agent": "Aether/1.0"},
                     method="POST",
                 )
-                with urllib.request.urlopen(req, timeout=5.0) as resp:
+                with urllib.request.urlopen(req, timeout=7.0) as resp:
                     data = json.loads(resp.read().decode("utf-8"))
                     if data.get("ok"):
                         user = data.get("user") or "bot"
                         team = data.get("team") or "workspace"
-                        return True, f"Slack bot authenticated as @{user} in team '{team}'."
+                        msg = f"Slack bot authenticated as @{user} in workspace '{team}'."
+                        default_chan = str(meta.get("default_channel") or "").strip()
+                        if default_chan:
+                            clean_chan = default_chan.lstrip("#")
+                            try:
+                                c_req = urllib.request.Request(
+                                    f"{self.DEFAULT_API_BASE}/conversations.info?channel={urllib.parse.quote(clean_chan)}",
+                                    headers={"Authorization": f"Bearer {bot_token}", "User-Agent": "Aether/1.0"},
+                                    method="GET",
+                                )
+                                with urllib.request.urlopen(c_req, timeout=5.0) as c_resp:
+                                    c_data = json.loads(c_resp.read().decode("utf-8"))
+                                    if c_data.get("ok"):
+                                        c_name = c_data.get("channel", {}).get("name") or clean_chan
+                                        msg += f" Verified channel #{c_name}."
+                            except Exception:
+                                pass
+                        return True, msg
                     else:
-                        return False, f"Slack authentication failed: {data.get('error', 'unknown error')}"
+                        err = data.get("error", "unknown_error")
+                        if err == "invalid_auth":
+                            return False, "Slack authentication failed: Invalid or expired token (invalid_auth)."
+                        elif err == "token_revoked":
+                            return False, "Slack authentication failed: Token has been revoked (token_revoked)."
+                        elif err == "account_inactive":
+                            return False, "Slack authentication failed: Workspace account is inactive (account_inactive)."
+                        elif err == "missing_scope":
+                            return False, f"Slack token lacks required scopes (missing_scope: {data.get('needed', '')})."
+                        elif err == "not_authed":
+                            return False, "Slack authentication failed: No authentication token provided (not_authed)."
+                        elif err == "ratelimited":
+                            return False, "Slack API rate limit exceeded (ratelimited)."
+                        return False, f"Slack authentication failed: {err}"
+            except urllib.error.HTTPError as exc:
+                if exc.code in (401, 403):
+                    return False, f"Slack API authentication failed (HTTP {exc.code}): {exc.reason}"
+                elif exc.code == 429:
+                    return False, "Slack API rate limit exceeded (HTTP 429)."
+                return False, f"Slack API error (HTTP {exc.code}): {exc.reason}"
+            except (urllib.error.URLError, TimeoutError, OSError) as exc:
+                return False, f"Could not reach Slack API: {exc}"
             except Exception as exc:
-                return False, f"Slack live verification error: {type(exc).__name__}"
+                return False, f"Slack live verification error: {type(exc).__name__} - {exc}"
 
         return True, "Slack credentials format verified."
 

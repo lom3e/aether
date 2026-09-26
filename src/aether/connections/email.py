@@ -10,6 +10,8 @@ import email.utils
 from email.message import EmailMessage
 import logging
 import smtplib
+import socket
+import ssl
 from typing import Any
 
 from aether.connections.base import (
@@ -78,18 +80,43 @@ class EmailConnector(BaseConnector):
             ),
             CredentialRequirement(
                 key="use_tls",
-                label="Use TLS",
-                description="Enable STARTTLS encryption.",
+                label="Use STARTTLS",
+                description="Enable STARTTLS encryption (typically port 587).",
                 required=False,
                 secret=False,
                 default=True,
+            ),
+            CredentialRequirement(
+                key="use_ssl",
+                label="Use Direct SSL",
+                description="Enable direct SSL/TLS encryption (typically port 465).",
+                required=False,
+                secret=False,
+                default=False,
+            ),
+            CredentialRequirement(
+                key="sender_address",
+                label="Sender Address / Name",
+                description="Optional custom sender address or display name.",
+                required=False,
+                secret=False,
+            ),
+            CredentialRequirement(
+                key="test_recipient",
+                label="Test Recipient",
+                description="Optional email address to send a test message during live verification.",
+                required=False,
+                secret=False,
             ),
         ]
 
     def _get_config(self, params: dict[str, Any] | None = None) -> dict[str, Any]:
         merged = dict(self._auth_metadata)
         if params:
-            for k in ("username", "password", "smtp_host", "smtp_port", "use_tls", "from_addr"):
+            for k in (
+                "username", "password", "smtp_host", "smtp_port",
+                "use_tls", "use_ssl", "sender_address", "from_addr", "test_recipient",
+            ):
                 if k in params and params[k] is not None:
                     merged[k] = params[k]
         return merged
@@ -99,8 +126,15 @@ class EmailConnector(BaseConnector):
         username = str(meta.get("username") or meta.get("email") or "").strip()
         password = str(meta.get("password") or meta.get("app_password") or meta.get("token") or "").strip()
         host = str(meta.get("smtp_host") or "").strip()
-        port = int(meta.get("smtp_port") or 587)
+        try:
+            port = int(meta.get("smtp_port") or 587)
+        except (ValueError, TypeError):
+            return False, "SMTP Port must be a valid integer."
+        if port <= 0 or port > 65535:
+            return False, "SMTP Port must be between 1 and 65535."
+
         use_tls = bool(meta.get("use_tls", True))
+        use_ssl = bool(meta.get("use_ssl", False)) or port == 465
 
         if not username:
             return False, "Email address or username is required."
@@ -112,28 +146,56 @@ class EmailConnector(BaseConnector):
         # Perform live connection check if requested
         if live_check or meta.get("live_check"):
             try:
-                if port == 465:
-                    server = smtplib.SMTP_SSL(host, port, timeout=5.0)
+                if use_ssl:
+                    server = smtplib.SMTP_SSL(host, port, timeout=7.0)
                 else:
-                    server = smtplib.SMTP(host, port, timeout=5.0)
+                    server = smtplib.SMTP(host, port, timeout=7.0)
                 try:
                     server.ehlo()
-                    if use_tls and port != 465:
+                    if use_tls and not use_ssl:
                         server.starttls()
                         server.ehlo()
                     server.login(username, password)
-                    return True, f"SMTP authentication verified successfully for {username}."
+
+                    # Optional test recipient verification
+                    test_recipient = str(meta.get("test_recipient") or "").strip()
+                    if test_recipient:
+                        sender = str(meta.get("sender_address") or meta.get("from_addr") or username).strip()
+                        msg = EmailMessage()
+                        msg["From"] = sender
+                        msg["To"] = test_recipient
+                        msg["Subject"] = "Aether Verification Test"
+                        msg["Date"] = email.utils.formatdate(localtime=True)
+                        msg.set_content("This is an automated test message from Aether to verify SMTP credentials.")
+                        server.send_message(msg)
+                        return True, f"SMTP connection verified and test email delivered to {test_recipient}."
+
+                    return True, f"SMTP authentication verified successfully for {username} via {host}:{port}."
                 finally:
                     try:
                         server.quit()
                     except Exception:
                         pass
-            except smtplib.SMTPAuthenticationError as exc:
+            except socket.gaierror as exc:
+                return False, f"SMTP DNS resolution failed for host '{host}': {exc}"
+            except (TimeoutError, socket.timeout):
+                return False, f"SMTP connection timed out connecting to '{host}:{port}'."
+            except ssl.SSLError as exc:
+                return False, f"SMTP SSL/TLS handshake failed on '{host}:{port}': {exc}"
+            except smtplib.SMTPNotSupportedError as exc:
+                return False, f"SMTP STARTTLS is not supported by '{host}': {exc}"
+            except smtplib.SMTPAuthenticationError:
                 return False, "SMTP authentication failed: Invalid username or app password."
-            except smtplib.SMTPConnectError as exc:
-                return False, f"Could not connect to SMTP server '{host}:{port}'."
+            except (smtplib.SMTPConnectError, ConnectionRefusedError):
+                return False, f"Could not connect to SMTP server '{host}:{port}': server unavailable or connection refused."
+            except smtplib.SMTPServerDisconnected as exc:
+                return False, f"SMTP server disconnected unexpectedly: {exc}"
+            except smtplib.SMTPRecipientsRefused as exc:
+                return False, f"SMTP test recipient refused by server: {exc}"
+            except smtplib.SMTPException as exc:
+                return False, f"SMTP error: {exc}"
             except Exception as exc:
-                return False, f"SMTP verification error: {type(exc).__name__}"
+                return False, f"SMTP verification error: {type(exc).__name__} - {exc}"
 
         return True, "Email SMTP credentials format verified."
 
@@ -171,6 +233,8 @@ class EmailConnector(BaseConnector):
         host = str(cfg.get("smtp_host") or "smtp.gmail.com").strip()
         port = int(cfg.get("smtp_port") or 587)
         use_tls = bool(cfg.get("use_tls", True))
+        use_ssl = bool(cfg.get("use_ssl", False)) or port == 465
+        default_sender = str(cfg.get("sender_address") or username).strip()
 
         if not username or not password:
             raise ConnectorConfigurationError(
@@ -180,7 +244,7 @@ class EmailConnector(BaseConnector):
 
         # Build message
         msg = EmailMessage()
-        sender = from_addr or username
+        sender = from_addr or default_sender
         msg["From"] = sender
 
         to_addrs = [t.strip() for t in (to if isinstance(to, list) else to.split(",")) if t.strip()]
@@ -207,13 +271,13 @@ class EmailConnector(BaseConnector):
             msg.add_alternative(html_body, subtype="html")
 
         try:
-            if port == 465:
+            if use_ssl:
                 server = smtplib.SMTP_SSL(host, port, timeout=15.0)
             else:
                 server = smtplib.SMTP(host, port, timeout=15.0)
             try:
                 server.ehlo()
-                if use_tls and port != 465:
+                if use_tls and not use_ssl:
                     server.starttls()
                     server.ehlo()
                 server.login(username, password)

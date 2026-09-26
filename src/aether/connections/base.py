@@ -113,6 +113,15 @@ class BaseConnector(ABC):
     """
 
     @property
+    def auth_metadata(self) -> dict[str, Any]:
+        """Access connector authentication and configuration metadata."""
+        return getattr(self, "_auth_metadata", {})
+
+    @auth_metadata.setter
+    def auth_metadata(self, val: dict[str, Any]) -> None:
+        self._auth_metadata = dict(val or {})
+
+    @property
     @abstractmethod
     def provider(self) -> str:
         """Unique provider identifier (e.g. 'github', 'email', 'slack', 'http', 'calendar')."""

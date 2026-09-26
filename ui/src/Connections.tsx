@@ -96,17 +96,28 @@ export function Connections({ navigate: _navigate, initialExecutionId, initialTa
   const [githubToken, setGithubToken] = useState('');
   const [slackToken, setSlackToken] = useState('');
   const [slackWebhook, setSlackWebhook] = useState('');
+  const [slackDefaultChannel, setSlackDefaultChannel] = useState('');
   const [emailUser, setEmailUser] = useState('');
   const [emailPass, setEmailPass] = useState('');
   const [emailHost, setEmailHost] = useState('smtp.gmail.com');
   const [emailPort, setEmailPort] = useState('587');
+  const [emailUseTls, setEmailUseTls] = useState(true);
+  const [emailUseSsl, setEmailUseSsl] = useState(false);
+  const [emailSenderAddr, setEmailSenderAddr] = useState('');
+  const [emailTestRecipient, setEmailTestRecipient] = useState('');
   const [httpBaseUrl, setHttpBaseUrl] = useState('');
   const [httpAuthType, setHttpAuthType] = useState('none');
   const [httpToken, setHttpToken] = useState('');
   const [notionToken, setNotionToken] = useState('');
+  const [notionDbId, setNotionDbId] = useState('');
   const [telegramBotToken, setTelegramBotToken] = useState('');
   const [telegramDefaultChatId, setTelegramDefaultChatId] = useState('');
   const [telegramAllowedChats, setTelegramAllowedChats] = useState('');
+  const [openapiSpecUrl, setOpenapiSpecUrl] = useState('');
+  const [openapiSpecPath, setOpenapiSpecPath] = useState('');
+  const [openapiBaseUrl, setOpenapiBaseUrl] = useState('');
+  const [openapiAuthType, setOpenapiAuthType] = useState('none');
+  const [openapiToken, setOpenapiToken] = useState('');
   const [testingCreds, setTestingCreds] = useState(false);
   const [savingCreds, setSavingCreds] = useState(false);
   const [testResult, setTestResult] = useState<{ valid: boolean; message: string } | null>(null);
@@ -191,6 +202,16 @@ export function Connections({ navigate: _navigate, initialExecutionId, initialTa
       description: 'Read and sync project documentation and database tables.',
       capabilitiesText: 'Can read and synchronize workspace pages and databases',
       color: '#000000',
+      builtIn: false,
+      isOAuth: false,
+    },
+    {
+      id: 'openapi',
+      name: 'OpenAPI 3.x',
+      icon: Zap,
+      description: 'Parse OpenAPI specifications to dynamically discover and execute operations.',
+      capabilitiesText: 'Can discover endpoints, validate schemas, and execute API actions dynamically',
+      color: '#8B5CF6',
       builtIn: false,
       isOAuth: false,
     },
@@ -293,17 +314,28 @@ export function Connections({ navigate: _navigate, initialExecutionId, initialTa
     setGithubToken('');
     setSlackToken('');
     setSlackWebhook('');
+    setSlackDefaultChannel('');
     setEmailUser('');
     setEmailPass('');
     setEmailHost('smtp.gmail.com');
     setEmailPort('587');
+    setEmailUseTls(true);
+    setEmailUseSsl(false);
+    setEmailSenderAddr('');
+    setEmailTestRecipient('');
     setHttpBaseUrl('');
     setHttpAuthType('none');
     setHttpToken('');
     setNotionToken('');
+    setNotionDbId('');
     setTelegramBotToken('');
     setTelegramDefaultChatId('');
     setTelegramAllowedChats('');
+    setOpenapiSpecUrl('');
+    setOpenapiSpecPath('');
+    setOpenapiBaseUrl('');
+    setOpenapiAuthType('none');
+    setOpenapiToken('');
 
     if (existingConn?.auth_metadata) {
       const meta = existingConn.auth_metadata;
@@ -312,10 +344,26 @@ export function Connections({ navigate: _navigate, initialExecutionId, initialTa
         if (meta.username) setEmailUser(meta.username);
         if (meta.smtp_host) setEmailHost(meta.smtp_host);
         if (meta.smtp_port) setEmailPort(String(meta.smtp_port));
+        if (meta.use_tls !== undefined) setEmailUseTls(Boolean(meta.use_tls));
+        if (meta.use_ssl !== undefined) setEmailUseSsl(Boolean(meta.use_ssl));
+        if (meta.sender_address) setEmailSenderAddr(meta.sender_address);
+        if (meta.test_recipient) setEmailTestRecipient(meta.test_recipient);
+      }
+      if (provider.id === 'slack') {
+        if (meta.default_channel) setSlackDefaultChannel(meta.default_channel);
       }
       if (provider.id === 'http') {
         if (meta.base_url) setHttpBaseUrl(meta.base_url);
         if (meta.auth_type) setHttpAuthType(meta.auth_type);
+      }
+      if (provider.id === 'notion') {
+        if (meta.default_database_id) setNotionDbId(meta.default_database_id);
+      }
+      if (provider.id === 'openapi') {
+        if (meta.spec_url) setOpenapiSpecUrl(meta.spec_url);
+        if (meta.spec_path) setOpenapiSpecPath(meta.spec_path);
+        if (meta.base_url) setOpenapiBaseUrl(meta.base_url);
+        if (meta.auth_type) setOpenapiAuthType(meta.auth_type);
       }
       if (provider.id === 'telegram') {
         if (meta.default_chat_id) setTelegramDefaultChatId(String(meta.default_chat_id));
@@ -372,6 +420,18 @@ export function Connections({ navigate: _navigate, initialExecutionId, initialTa
         return `Create event "${input.title || 'Event'}"${input.start_time ? ` at ${input.start_time}` : ''}`;
       case 'http.request':
         return `${(input.method || 'GET').toUpperCase()} ${input.url || input.endpoint || ''}`;
+      case 'notion.search':
+        return `Search Notion: "${input.query || ''}"`;
+      case 'notion.create_page':
+        return `Create Notion page: "${input.title || ''}"`;
+      case 'notion.get_page':
+        return `Get Notion page: ${input.page_id || ''}`;
+      case 'notion.get_me':
+        return `Check Notion bot info`;
+      case 'openapi.execute_tool':
+        return `Execute API tool: ${input.tool_name || input.operation_id || ''}`;
+      case 'openapi.list_tools':
+        return `List OpenAPI operations`;
       default:
         if (input.title) return String(input.title);
         if (input.name) return String(input.name);
@@ -393,6 +453,13 @@ export function Connections({ navigate: _navigate, initialExecutionId, initialTa
     if (exec.action_id === 'telegram.send_message' && input.text) {
       return input.text.length > 80 ? input.text.slice(0, 80) + '...' : input.text;
     }
+    if (exec.action_id === 'notion.create_page' && input.content) {
+      return input.content.length > 80 ? input.content.slice(0, 80) + '...' : input.content;
+    }
+    if (exec.action_id === 'openapi.execute_tool' && input.parameters) {
+      const pStr = typeof input.parameters === 'string' ? input.parameters : JSON.stringify(input.parameters);
+      return pStr.length > 80 ? pStr.slice(0, 80) + '...' : pStr;
+    }
     return null;
   };
 
@@ -404,12 +471,17 @@ export function Connections({ navigate: _navigate, initialExecutionId, initialTa
     if (providerId === 'slack') {
       if (slackToken.trim()) meta.bot_token = slackToken.trim();
       if (slackWebhook.trim()) meta.webhook_url = slackWebhook.trim();
+      if (slackDefaultChannel.trim()) meta.default_channel = slackDefaultChannel.trim();
     }
     if (providerId === 'email') {
       if (emailUser.trim()) meta.username = emailUser.trim();
       if (emailPass.trim()) meta.password = emailPass.trim();
       if (emailHost.trim()) meta.smtp_host = emailHost.trim();
       if (emailPort.trim()) meta.smtp_port = parseInt(emailPort.trim(), 10) || 587;
+      meta.use_tls = emailUseTls;
+      meta.use_ssl = emailUseSsl;
+      if (emailSenderAddr.trim()) meta.sender_address = emailSenderAddr.trim();
+      if (emailTestRecipient.trim()) meta.test_recipient = emailTestRecipient.trim();
     }
     if (providerId === 'telegram') {
       if (telegramBotToken.trim()) meta.bot_token = telegramBotToken.trim();
@@ -423,6 +495,14 @@ export function Connections({ navigate: _navigate, initialExecutionId, initialTa
     }
     if (providerId === 'notion') {
       if (notionToken.trim()) meta.token = notionToken.trim();
+      if (notionDbId.trim()) meta.default_database_id = notionDbId.trim();
+    }
+    if (providerId === 'openapi') {
+      if (openapiSpecUrl.trim()) meta.spec_url = openapiSpecUrl.trim();
+      if (openapiSpecPath.trim()) meta.spec_path = openapiSpecPath.trim();
+      if (openapiBaseUrl.trim()) meta.base_url = openapiBaseUrl.trim();
+      if (openapiAuthType.trim()) meta.auth_type = openapiAuthType.trim();
+      if (openapiToken.trim()) meta.token = openapiToken.trim();
     }
     return meta;
   };
@@ -1527,6 +1607,17 @@ export function Connections({ navigate: _navigate, initialExecutionId, initialTa
                       style={{ width: '100%' }}
                     />
                   </div>
+                  <div>
+                    <label style={{ fontSize: '12px', fontWeight: 600, display: 'block', marginBottom: '4px' }}>Default Channel (Optional)</label>
+                    <input
+                      type="text"
+                      className="input"
+                      placeholder="e.g. #general"
+                      value={slackDefaultChannel}
+                      onChange={e => { setSlackDefaultChannel(e.target.value); setTestResult(null); }}
+                      style={{ width: '100%' }}
+                    />
+                  </div>
                 </>
               )}
 
@@ -1579,6 +1670,46 @@ export function Connections({ navigate: _navigate, initialExecutionId, initialTa
                         style={{ width: '100%' }}
                       />
                     </div>
+                  </div>
+                  <div style={{ display: 'flex', gap: '16px', alignItems: 'center', marginTop: '2px' }}>
+                    <label style={{ fontSize: '12px', display: 'flex', alignItems: 'center', gap: '6px', cursor: 'pointer' }}>
+                      <input
+                        type="checkbox"
+                        checked={emailUseTls}
+                        onChange={e => { setEmailUseTls(e.target.checked); setTestResult(null); }}
+                      />
+                      <span>Use STARTTLS</span>
+                    </label>
+                    <label style={{ fontSize: '12px', display: 'flex', alignItems: 'center', gap: '6px', cursor: 'pointer' }}>
+                      <input
+                        type="checkbox"
+                        checked={emailUseSsl}
+                        onChange={e => { setEmailUseSsl(e.target.checked); setTestResult(null); }}
+                      />
+                      <span>Direct SSL (Port 465)</span>
+                    </label>
+                  </div>
+                  <div>
+                    <label style={{ fontSize: '12px', fontWeight: 600, display: 'block', marginBottom: '4px' }}>Sender Address / Name (Optional)</label>
+                    <input
+                      type="text"
+                      className="input"
+                      placeholder="e.g. Aether Assistant <assistant@example.com>"
+                      value={emailSenderAddr}
+                      onChange={e => { setEmailSenderAddr(e.target.value); setTestResult(null); }}
+                      style={{ width: '100%' }}
+                    />
+                  </div>
+                  <div>
+                    <label style={{ fontSize: '12px', fontWeight: 600, display: 'block', marginBottom: '4px' }}>Test Recipient (Optional)</label>
+                    <input
+                      type="email"
+                      className="input"
+                      placeholder="Send live verification test message to this email"
+                      value={emailTestRecipient}
+                      onChange={e => { setEmailTestRecipient(e.target.value); setTestResult(null); }}
+                      style={{ width: '100%' }}
+                    />
                   </div>
                 </>
               )}
@@ -1678,21 +1809,111 @@ export function Connections({ navigate: _navigate, initialExecutionId, initialTa
               )}
 
               {configModalProvider.id === 'notion' && (
-                <div>
-                  <label style={{ fontSize: '12px', fontWeight: 600, display: 'block', marginBottom: '4px' }}>Integration Token</label>
-                  <input
-                    type="password"
-                    className="input"
-                    required={!isConfigured}
-                    placeholder={isConfigured ? '•••••••••••••••• (leave blank to keep current)' : 'secret_xxxxxxxxxxxxxxxxxxxxxxxxxxxxx'}
-                    value={notionToken}
-                    onChange={e => { setNotionToken(e.target.value); setTestResult(null); }}
-                    style={{ width: '100%' }}
-                  />
-                  <div style={{ fontSize: '11px', color: 'hsl(var(--muted-fg))', marginTop: '4px' }}>
-                    Internal integration token with read/write database permissions.
+                <>
+                  <div>
+                    <label style={{ fontSize: '12px', fontWeight: 600, display: 'block', marginBottom: '4px' }}>Integration Token</label>
+                    <input
+                      type="password"
+                      className="input"
+                      required={!isConfigured}
+                      placeholder={isConfigured ? '•••••••••••••••• (leave blank to keep current)' : 'secret_xxxxxxxxxxxxxxxxxxxxxxxxxxxxx'}
+                      value={notionToken}
+                      onChange={e => { setNotionToken(e.target.value); setTestResult(null); }}
+                      style={{ width: '100%' }}
+                    />
+                    <div style={{ fontSize: '11px', color: 'hsl(var(--muted-fg))', marginTop: '4px' }}>
+                      Internal integration secret token (starts with secret_ or ntn_).
+                    </div>
                   </div>
-                </div>
+                  <div>
+                    <label style={{ fontSize: '12px', fontWeight: 600, display: 'block', marginBottom: '4px' }}>Default Database ID (Optional)</label>
+                    <input
+                      type="text"
+                      className="input"
+                      placeholder="e.g. 1a2b3c4d5e6f7a8b9c0d1e2f3a4b5c6d"
+                      value={notionDbId}
+                      onChange={e => { setNotionDbId(e.target.value); setTestResult(null); }}
+                      style={{ width: '100%' }}
+                    />
+                    <div style={{ fontSize: '11px', color: 'hsl(var(--muted-fg))', marginTop: '4px' }}>
+                      UUID of the default Notion database to create or search records.
+                    </div>
+                  </div>
+                </>
+              )}
+
+              {configModalProvider.id === 'openapi' && (
+                <>
+                  <div>
+                    <label style={{ fontSize: '12px', fontWeight: 600, display: 'block', marginBottom: '4px' }}>Specification URL (Optional)</label>
+                    <input
+                      type="url"
+                      className="input"
+                      placeholder="https://api.example.com/openapi.json"
+                      value={openapiSpecUrl}
+                      onChange={e => { setOpenapiSpecUrl(e.target.value); setTestResult(null); }}
+                      style={{ width: '100%' }}
+                    />
+                    <div style={{ fontSize: '11px', color: 'hsl(var(--muted-fg))', marginTop: '4px' }}>
+                      Remote URL pointing to OpenAPI 3.x / Swagger JSON or YAML.
+                    </div>
+                  </div>
+                  <div>
+                    <label style={{ fontSize: '12px', fontWeight: 600, display: 'block', marginBottom: '4px' }}>Local File Path (Optional)</label>
+                    <input
+                      type="text"
+                      className="input"
+                      placeholder="/path/to/spec.json or docs/api.yaml"
+                      value={openapiSpecPath}
+                      onChange={e => { setOpenapiSpecPath(e.target.value); setTestResult(null); }}
+                      style={{ width: '100%' }}
+                    />
+                    <div style={{ fontSize: '11px', color: 'hsl(var(--muted-fg))', marginTop: '4px' }}>
+                      Absolute or workspace-relative path to local OpenAPI schema.
+                    </div>
+                  </div>
+                  <div>
+                    <label style={{ fontSize: '12px', fontWeight: 600, display: 'block', marginBottom: '4px' }}>API Server Base URL (Optional)</label>
+                    <input
+                      type="url"
+                      className="input"
+                      placeholder="https://api.example.com/v1"
+                      value={openapiBaseUrl}
+                      onChange={e => { setOpenapiBaseUrl(e.target.value); setTestResult(null); }}
+                      style={{ width: '100%' }}
+                    />
+                    <div style={{ fontSize: '11px', color: 'hsl(var(--muted-fg))', marginTop: '4px' }}>
+                      Overrides server URL defined in the OpenAPI specification.
+                    </div>
+                  </div>
+                  <div>
+                    <label style={{ fontSize: '12px', fontWeight: 600, display: 'block', marginBottom: '4px' }}>Authentication Type</label>
+                    <select
+                      className="input"
+                      value={openapiAuthType}
+                      onChange={e => { setOpenapiAuthType(e.target.value); setTestResult(null); }}
+                      style={{ width: '100%' }}
+                    >
+                      <option value="none">No Auth (Public)</option>
+                      <option value="bearer">Bearer Token</option>
+                      <option value="api_key">API Key (X-API-Key header)</option>
+                      <option value="basic">Basic Auth</option>
+                    </select>
+                  </div>
+                  {openapiAuthType !== 'none' && (
+                    <div>
+                      <label style={{ fontSize: '12px', fontWeight: 600, display: 'block', marginBottom: '4px' }}>Token / API Key</label>
+                      <input
+                        type="password"
+                        className="input"
+                        placeholder={isConfigured ? '•••••••••••••••• (leave blank to keep current)' : 'Secret token or key'}
+                        value={openapiToken}
+                        onChange={e => { setOpenapiToken(e.target.value); setTestResult(null); }}
+                        style={{ width: '100%' }}
+                      />
+                    </div>
+                  )}
+                </>
               )}
 
               <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginTop: '14px', paddingTop: '14px', borderTop: '1px solid hsl(var(--border))' }}>

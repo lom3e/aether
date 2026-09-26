@@ -29,6 +29,11 @@ class GitHubValidationError(GitHubIntegrationError):
     pass
 
 
+class GitHubRateLimitError(GitHubIntegrationError):
+    """Raised when GitHub API rate limit is exceeded (HTTP 429 or 403 rate limit)."""
+    pass
+
+
 _OWNER_REPO_REGEX = re.compile(r"^[a-zA-Z0-9_.-]+$")
 
 

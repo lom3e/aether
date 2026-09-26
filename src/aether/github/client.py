@@ -14,6 +14,7 @@ from aether.github.models import (
     GitHubAuthError,
     GitHubIntegrationError,
     GitHubNotFoundError,
+    GitHubRateLimitError,
     GitHubRepository,
     GitHubValidationError,
 )
@@ -86,6 +87,29 @@ class GitHubRepositoryClient:
             with urllib.request.urlopen(req, timeout=self.timeout) as response:
                 payload = json.loads(response.read().decode("utf-8"))
         except urllib.error.HTTPError as exc:
+            err_body = ""
+            try:
+                err_data = json.loads(exc.read().decode("utf-8"))
+                err_body = err_data.get("message", "")
+            except Exception:
+                pass
+
+            is_rate_limit = exc.code == 429 or (
+                exc.code == 403 and (
+                    getattr(exc, "headers", None) and exc.headers.get("x-ratelimit-remaining") == "0"
+                    or "rate limit" in err_body.lower()
+                    or "rate limit" in str(getattr(exc, "reason", "")).lower()
+                )
+            )
+            if is_rate_limit:
+                msg = f"GitHub API rate limit exceeded (HTTP {exc.code})."
+                reset_ts = exc.headers.get("x-ratelimit-reset") if getattr(exc, "headers", None) else None
+                if reset_ts:
+                    msg += f" Resets at Unix timestamp {reset_ts}."
+                if err_body:
+                    msg += f" GitHub: {err_body}"
+                raise GitHubRateLimitError(msg) from None
+
             if exc.code in (401, 403):
                 raise GitHubAuthError(
                     f"GitHub authentication failed or access forbidden for '{clean_owner}/{clean_repo}'. "
@@ -167,6 +191,22 @@ class GitHubRepositoryClient:
                 err_body = err_data.get("message", "")
             except Exception:
                 pass
+
+            is_rate_limit = exc.code == 429 or (
+                exc.code == 403 and (
+                    getattr(exc, "headers", None) and exc.headers.get("x-ratelimit-remaining") == "0"
+                    or "rate limit" in err_body.lower()
+                    or "rate limit" in str(getattr(exc, "reason", "")).lower()
+                )
+            )
+            if is_rate_limit:
+                msg = f"GitHub API rate limit exceeded (HTTP {exc.code})."
+                reset_ts = exc.headers.get("x-ratelimit-reset") if getattr(exc, "headers", None) else None
+                if reset_ts:
+                    msg += f" Resets at Unix timestamp {reset_ts}."
+                if err_body:
+                    msg += f" GitHub: {err_body}"
+                raise GitHubRateLimitError(msg) from None
 
             if exc.code in (401, 403):
                 msg = f"GitHub authentication failed (HTTP {exc.code}). Verify Personal Access Token permissions."

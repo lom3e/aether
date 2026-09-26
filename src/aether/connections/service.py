@@ -22,6 +22,8 @@ from aether.connections.github import GitHubConnector
 from aether.connections.google_calendar import GoogleCalendarConnector
 from aether.connections.http import HttpConnector
 from aether.connections.models import CalendarEvent, Connection, ConnectionStatus
+from aether.connections.notion import NotionConnector
+from aether.connections.openapi import OpenAPIConnector
 from aether.connections.slack import SlackConnector
 from aether.connections.telegram import TelegramConnector
 from aether.connections.store import ConnectionStore
@@ -164,6 +166,10 @@ class ConnectionService:
             ]
         elif p == "telegram":
             return ["telegram.send_message", "telegram.send_approval", "telegram.verify"]
+        elif p == "notion":
+            return ["notion.get_me", "notion.search", "notion.get_page", "notion.create_page"]
+        elif p == "openapi":
+            return ["openapi.list_tools", "openapi.execute_tool", "openapi.inspect_spec"]
         return [f"{p}.read", f"{p}.write"]
 
     def save_connection(self, connection: Connection) -> Connection:
@@ -186,6 +192,13 @@ class ConnectionService:
         conn_id = existing.id if existing else f"conn-{uuid.uuid4().hex[:10]}"
         now_iso = datetime.now(timezone.utc).isoformat()
         auth_meta = dict(auth_metadata or {})
+
+        # Merge with existing credentials if updating with partial / blank values
+        if existing and existing.auth_metadata:
+            for k, v in existing.auth_metadata.items():
+                val = auth_meta.get(k)
+                if val is None or val == "" or (isinstance(val, str) and (val.startswith("••") or "..." in val)):
+                    auth_meta[k] = v
 
         # Truthful status determination
         if p == "calendar":
@@ -516,6 +529,18 @@ class ConnectionService:
             store=self.store,
         )
 
+    def get_notion_connector(self, workspace_id: str) -> NotionConnector:
+        """Returns NotionConnector configured with the workspace's credentials."""
+        conn = self.store.get_connection_by_provider(workspace_id, "notion")
+        meta = conn.auth_metadata if conn else {}
+        return NotionConnector(auth_metadata=meta)
+
+    def get_openapi_connector(self, workspace_id: str) -> OpenAPIConnector:
+        """Returns OpenAPIConnector configured with the workspace's credentials."""
+        conn = self.store.get_connection_by_provider(workspace_id, "openapi")
+        meta = conn.auth_metadata if conn else {}
+        return OpenAPIConnector(auth_metadata=meta)
+
     def get_connector(self, workspace_id: str, provider: str) -> BaseConnector | None:
         """Generic connector resolver."""
         p = provider.lower().strip()
@@ -533,6 +558,10 @@ class ConnectionService:
             return self.get_calendar_connector(workspace_id)
         elif p == "google_calendar":
             return self.get_google_calendar_connector(workspace_id)
+        elif p == "notion":
+            return self.get_notion_connector(workspace_id)
+        elif p == "openapi":
+            return self.get_openapi_connector(workspace_id)
         return None
 
 
@@ -569,35 +598,10 @@ def verify_credentials(
         )
 
     elif prov == "notion":
-        token = str(meta.get("token") or meta.get("api_key") or "").strip()
-        if not token:
-            return False, "Notion Integration Token is required."
-        if not (token.startswith("secret_") or token.startswith("ntn_") or len(token) >= 20):
-            return False, "Invalid Notion token format. Must start with 'secret_' or 'ntn_'."
-        if live_check:
-            import urllib.error
-            import urllib.request
-            req = urllib.request.Request(
-                "https://api.notion.com/v1/users/me",
-                headers={
-                    "Authorization": f"Bearer {token}",
-                    "Notion-Version": "2022-06-28",
-                    "User-Agent": "Aether/1.0",
-                },
-                method="GET",
-            )
-            try:
-                with urllib.request.urlopen(req, timeout=5.0) as resp:
-                    if resp.status == 200:
-                        return True, "Notion API live check succeeded."
-                    return False, f"Notion API live check failed: HTTP {resp.status}"
-            except urllib.error.HTTPError as exc:
-                if exc.code in (401, 403):
-                    return False, "Notion authentication failed: invalid or unauthorized token."
-                return False, f"Notion API returned HTTP {exc.code}."
-            except Exception as exc:
-                return False, f"Notion API unreachable: {exc}"
-        return True, "Notion integration token format verified."
+        return NotionConnector(auth_metadata=meta).verify(meta, live_check=live_check)
+
+    elif prov == "openapi":
+        return OpenAPIConnector(auth_metadata=meta).verify(meta, live_check=live_check)
 
     else:
         if not meta or not any(str(v).strip() for v in meta.values()):

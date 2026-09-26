@@ -626,6 +626,82 @@ class ActionRegistry:
             )
         )
 
+        # Notion Actions (Macro-pass P1.1)
+        self.register(
+            ActionDefinition(
+                id="notion.search",
+                name="Search Notion",
+                description="Searches pages and databases in the connected Notion workspace.",
+                tier=ActionTier.ANSWER,
+                permission_level=ActionPermissionLevel.READ_ONLY,
+                requires_confirmation=False,
+                provider="notion",
+                input_schema={
+                    "type": "object",
+                    "properties": {
+                        "query": {"type": "string", "description": "Search term"},
+                        "filter_type": {"type": "string", "enum": ["page", "database"]},
+                        "page_size": {"type": "integer", "default": 10},
+                    },
+                },
+                output_schema={"type": "object", "properties": {"results": {"type": "array"}}},
+            )
+        )
+        self.register(
+            ActionDefinition(
+                id="notion.get_page",
+                name="Get Notion Page",
+                description="Retrieves page properties and content from Notion.",
+                tier=ActionTier.ANSWER,
+                permission_level=ActionPermissionLevel.READ_ONLY,
+                requires_confirmation=False,
+                provider="notion",
+                input_schema={
+                    "type": "object",
+                    "properties": {
+                        "page_id": {"type": "string", "description": "Notion page UUID"},
+                    },
+                    "required": ["page_id"],
+                },
+                output_schema={"type": "object"},
+            )
+        )
+        self.register(
+            ActionDefinition(
+                id="notion.create_page",
+                name="Create Notion Page",
+                description="Creates a new page in a Notion database or under a parent page.",
+                tier=ActionTier.ACT,
+                permission_level=ActionPermissionLevel.EXTERNAL_MUTATION,
+                requires_confirmation=True,
+                provider="notion",
+                input_schema={
+                    "type": "object",
+                    "properties": {
+                        "title": {"type": "string", "description": "Title of the page"},
+                        "parent_database_id": {"type": "string"},
+                        "parent_page_id": {"type": "string"},
+                        "content": {"type": "string"},
+                    },
+                    "required": ["title"],
+                },
+                output_schema={"type": "object", "properties": {"id": {"type": "string"}}},
+            )
+        )
+        self.register(
+            ActionDefinition(
+                id="notion.get_me",
+                name="Get Notion Identity",
+                description="Retrieves the authenticated bot and workspace identity from Notion.",
+                tier=ActionTier.ANSWER,
+                permission_level=ActionPermissionLevel.READ_ONLY,
+                requires_confirmation=False,
+                provider="notion",
+                input_schema={"type": "object"},
+                output_schema={"type": "object"},
+            )
+        )
+
         # Knowledge Base Actions
         self.register(
             ActionDefinition(

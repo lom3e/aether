@@ -9,6 +9,7 @@ import base64
 from datetime import datetime, timezone
 import json
 import logging
+import socket
 import urllib.error
 import urllib.parse
 import urllib.request
@@ -112,6 +113,8 @@ class HttpConnector(BaseConnector):
             parsed = urllib.parse.urlparse(base_url)
             if parsed.scheme not in ("http", "https"):
                 return False, f"Invalid base URL scheme: '{parsed.scheme}'. Must be http or https."
+            if not parsed.netloc:
+                return False, f"Invalid base URL: '{base_url}' must contain a valid domain or host."
 
         token = ""
         key = ""
@@ -134,25 +137,49 @@ class HttpConnector(BaseConnector):
             if not user or not password:
                 return False, "Username and password required for Basic auth."
 
-        if (live_check or meta.get("live_check")) and base_url:
+        if live_check or meta.get("live_check"):
+            if not base_url:
+                return False, "Base URL is required to perform live connectivity check."
+
             try:
                 headers = {"User-Agent": "Aether/1.0"}
                 if auth_type == "bearer" and token:
                     headers["Authorization"] = f"Bearer {token}"
                 elif auth_type == "api_key" and key:
-                    headers["X-API-Key"] = key
+                    header_name = str(meta.get("header_name") or "X-API-Key").strip()
+                    headers[header_name] = key
                 elif auth_type == "basic" and user and password:
-                    import base64
                     encoded = base64.b64encode(f"{user}:{password}".encode("utf-8")).decode("ascii")
                     headers["Authorization"] = f"Basic {encoded}"
+
                 req = urllib.request.Request(base_url, headers=headers, method="GET")
                 try:
                     with urllib.request.urlopen(req, timeout=5.0) as resp:
-                        return True, f"HTTP endpoint verified reachable (HTTP {resp.status})."
+                        if 200 <= resp.status < 400:
+                            return True, f"HTTP endpoint verified reachable (HTTP {resp.status})."
+                        return False, f"HTTP endpoint returned unexpected status code {resp.status}."
                 except urllib.error.HTTPError as exc:
                     if exc.code in (401, 403):
                         return False, f"HTTP authentication failed (HTTP {exc.code}): {exc.reason}"
-                    return True, f"HTTP endpoint reachable (HTTP {exc.code})."
+                    elif exc.code == 404:
+                        return False, f"HTTP endpoint not found (HTTP 404): {exc.reason}"
+                    elif exc.code == 429:
+                        return False, f"HTTP rate limit exceeded (HTTP 429): {exc.reason}"
+                    elif 500 <= exc.code < 600:
+                        return False, f"HTTP server error (HTTP {exc.code}): {exc.reason}"
+                    else:
+                        return False, f"HTTP request failed (HTTP {exc.code}): {exc.reason}"
+            except (TimeoutError, socket.timeout):
+                return False, f"HTTP connection timed out connecting to '{base_url}'."
+            except socket.gaierror as exc:
+                return False, f"HTTP DNS resolution failed for '{base_url}': {exc}"
+            except urllib.error.URLError as exc:
+                reason = getattr(exc, "reason", None)
+                if isinstance(reason, socket.gaierror):
+                    return False, f"HTTP DNS resolution failed for '{base_url}': {reason}"
+                elif isinstance(reason, (TimeoutError, socket.timeout)):
+                    return False, f"HTTP connection timed out connecting to '{base_url}'."
+                return False, f"Could not reach HTTP endpoint '{base_url}': {reason or exc}"
             except Exception as exc:
                 return False, f"Could not reach HTTP endpoint '{base_url}': {exc}"
 
@@ -332,3 +359,8 @@ class HttpConnector(BaseConnector):
             provider=self.provider,
             data=resp,
         )
+
+
+# Backward-compatible and naming-convention alias
+HTTPConnector = HttpConnector
+

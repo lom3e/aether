@@ -206,9 +206,9 @@ def test_telegram_connector_chat_authorization():
     assert c_restricted.is_chat_authorized("222")
     assert not c_restricted.is_chat_authorized(444)
 
-    # No whitelist specified -> default is permissive
+    # No whitelist specified -> default is denied for security (Finding 16 & P1.1)
     c_open = TelegramConnector(auth_metadata={"bot_token": token})
-    assert c_open.is_chat_authorized(99999)
+    assert not c_open.is_chat_authorized(99999)
 
 
 def test_telegram_bridge_start_welcome(mock_telegram_server):

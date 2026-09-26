@@ -10,6 +10,7 @@ import logging
 from pathlib import Path
 import re
 from typing import Any
+import urllib.parse
 
 import yaml
 
@@ -19,7 +20,18 @@ from aether.actions.models import (
     ActionTier,
 )
 from aether.actions.registry import ActionRegistry
+from aether.connections.base import (
+    BaseConnector,
+    ConnectorAuthError,
+    ConnectorConfigurationError,
+    ConnectorError,
+    ConnectorHealth,
+    ConnectorNotFoundError,
+    ConnectorResult,
+    CredentialRequirement,
+)
 from aether.connections.http import HttpConnector
+from aether.connections.models import ConnectionStatus
 from aether.tools.base import Tool, ToolExecutionContext
 from aether.tools.registry import ToolRegistry
 
@@ -302,3 +314,210 @@ class OpenAPIToolGenerator:
                 action_registry.register(action_def, handler=lambda inp, ws_id, target_tool=t: json.loads(target_tool.execute(inp)))
 
         return tools
+
+
+class OpenAPIConnector(BaseConnector):
+    """
+    OpenAPI 3.x connector executing dynamically generated API operations.
+    """
+
+    def __init__(self, auth_metadata: dict[str, Any] | None = None) -> None:
+        self._auth_metadata = dict(auth_metadata or {})
+        self._tools: list[OpenAPITool] | None = None
+
+    @property
+    def provider(self) -> str:
+        return "openapi"
+
+    @property
+    def capabilities(self) -> list[str]:
+        return [
+            "openapi.list_tools",
+            "openapi.execute_tool",
+            "openapi.inspect_spec",
+        ]
+
+    @property
+    def credential_requirements(self) -> list[CredentialRequirement]:
+        return [
+            CredentialRequirement(
+                key="spec_url",
+                label="OpenAPI Spec URL",
+                description="URL to the OpenAPI JSON or YAML specification.",
+                required=False,
+                secret=False,
+            ),
+            CredentialRequirement(
+                key="spec_path",
+                label="Local Spec Path",
+                description="Local filesystem path to the OpenAPI specification file.",
+                required=False,
+                secret=False,
+            ),
+            CredentialRequirement(
+                key="base_url",
+                label="Base URL Override",
+                description="Optional override for the API base server URL.",
+                required=False,
+                secret=False,
+            ),
+            CredentialRequirement(
+                key="auth_type",
+                label="Authentication Type",
+                description="none, bearer, api_key, basic",
+                required=False,
+                secret=False,
+                options=["none", "bearer", "api_key", "basic"],
+                default="none",
+            ),
+            CredentialRequirement(
+                key="token",
+                label="API Token / Key",
+                description="Bearer token or API key for authentication.",
+                required=False,
+                secret=True,
+            ),
+        ]
+
+    def _resolve_spec(self, meta: dict[str, Any]) -> dict[str, Any] | None:
+        spec_content = meta.get("spec_content")
+        if spec_content:
+            return OpenAPIToolGenerator.load_spec(spec_content)
+        spec_path = meta.get("spec_path")
+        if spec_path:
+            return OpenAPIToolGenerator.load_spec(spec_path)
+        spec_url = meta.get("spec_url")
+        if spec_url:
+            http = HttpConnector(auth_metadata=meta)
+            res = http.request("GET", spec_url)
+            content = res.get("data")
+            if isinstance(content, dict):
+                return content
+            elif isinstance(content, str):
+                return OpenAPIToolGenerator.load_spec(content)
+        return None
+
+    def verify(self, auth_metadata: dict[str, Any] | None = None, live_check: bool = False) -> tuple[bool, str]:
+        meta = auth_metadata or self._auth_metadata
+        spec_url = str(meta.get("spec_url") or "").strip()
+        spec_path = str(meta.get("spec_path") or "").strip()
+        spec_content = meta.get("spec_content")
+        base_url = str(meta.get("base_url") or "").strip()
+
+        if not spec_url and not spec_path and not spec_content and not base_url:
+            return False, "OpenAPI Spec URL, local file path, or base URL is required."
+
+        if spec_url:
+            parsed = urllib.parse.urlparse(spec_url)
+            if parsed.scheme not in ("http", "https") or not parsed.netloc:
+                return False, f"Invalid OpenAPI Spec URL: '{spec_url}'."
+
+        if spec_path and not Path(spec_path).exists():
+            return False, f"OpenAPI Spec file not found at path '{spec_path}'."
+
+        if live_check or meta.get("live_check"):
+            try:
+                spec = self._resolve_spec(meta)
+                if not spec and base_url:
+                    http = HttpConnector(auth_metadata=meta)
+                    return http.verify(live_check=True)
+                if not spec:
+                    return False, "Could not load or parse OpenAPI specification."
+                tools = OpenAPIToolGenerator.generate_tools(
+                    spec,
+                    base_url=base_url or None,
+                    auth_metadata=meta,
+                )
+                title = spec.get("info", {}).get("title", "API")
+                version = spec.get("info", {}).get("version", "1.0")
+                return True, f"OpenAPI specification '{title} v{version}' verified ({len(tools)} operations discovered)."
+            except Exception as exc:
+                return False, f"OpenAPI verification failed: {exc}"
+
+        return True, "OpenAPI connector configuration format verified."
+
+    def get_health(self) -> ConnectorHealth:
+        valid, msg = self.verify(live_check=True)
+        return ConnectorHealth(
+            healthy=valid,
+            status=ConnectionStatus.VERIFIED if valid else ConnectionStatus.VERIFICATION_FAILED,
+            message=msg,
+        )
+
+    def get_tools(self) -> list[OpenAPITool]:
+        if self._tools is None:
+            spec = self._resolve_spec(self._auth_metadata)
+            if not spec:
+                raise ConnectorConfigurationError("No valid OpenAPI specification provided.", provider=self.provider)
+            base_url = self._auth_metadata.get("base_url")
+            self._tools = OpenAPIToolGenerator.generate_tools(
+                spec,
+                base_url=base_url,
+                auth_metadata=self._auth_metadata,
+            )
+        return self._tools
+
+    def execute(self, operation: str, params: dict[str, Any]) -> ConnectorResult:
+        clean_op = operation.lower().strip()
+        try:
+            if clean_op in ("openapi.list_tools", "list_tools"):
+                tools = self.get_tools()
+                tool_list = [
+                    {
+                        "name": t.name,
+                        "description": t.description,
+                        "method": t.method,
+                        "path": t.path,
+                        "requires_confirmation": t.requires_confirmation,
+                    }
+                    for t in tools
+                ]
+                return ConnectorResult(success=True, operation=operation, provider=self.provider, data={"tools": tool_list})
+
+            elif clean_op in ("openapi.inspect_spec", "inspect_spec"):
+                spec = self._resolve_spec(self._auth_metadata) or {}
+                info = spec.get("info", {})
+                return ConnectorResult(
+                    success=True,
+                    operation=operation,
+                    provider=self.provider,
+                    data={
+                        "title": info.get("title", "OpenAPI"),
+                        "version": info.get("version", "unknown"),
+                        "description": info.get("description", ""),
+                        "endpoints_count": len(spec.get("paths", {})),
+                    },
+                )
+
+            elif clean_op in ("openapi.execute_tool", "execute_tool"):
+                tool_name = str(params.get("tool_name") or params.get("name") or "").strip()
+                tools = self.get_tools()
+                target_tool = next((t for t in tools if t.name == tool_name), None)
+                if not target_tool:
+                    raise ConnectorNotFoundError(f"OpenAPI tool '{tool_name}' not found.", provider=self.provider)
+                input_data = params.get("parameters") or params.get("input_data") or params.get("input") or {}
+                raw_out = target_tool.execute(input_data)
+                try:
+                    parsed_out = json.loads(raw_out)
+                except Exception:
+                    parsed_out = raw_out
+                return ConnectorResult(success=True, operation=operation, provider=self.provider, data=parsed_out)
+
+            else:
+                target_name = clean_op.replace("openapi.", "")
+                tools = self.get_tools()
+                target_tool = next((t for t in tools if t.name == target_name or t.name == clean_op), None)
+                if target_tool:
+                    raw_out = target_tool.execute(params)
+                    try:
+                        parsed_out = json.loads(raw_out)
+                    except Exception:
+                        parsed_out = raw_out
+                    return ConnectorResult(success=True, operation=operation, provider=self.provider, data=parsed_out)
+                raise ConnectorError(f"Unsupported OpenAPI operation: '{operation}'", provider=self.provider)
+
+        except ConnectorError:
+            raise
+        except Exception as exc:
+            raise ConnectorError(f"OpenAPI operation '{operation}' failed: {exc}", provider=self.provider) from None
+

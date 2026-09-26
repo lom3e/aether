@@ -363,6 +363,12 @@ class ActionExecutor:
                 "telegram", ws_id, action_id, inp, lambda: self.connection_service.get_telegram_connector(ws_id)
             )
 
+        # 3c. Notion connector actions (Macro-pass P1.1)
+        elif action_id.startswith("notion."):
+            return self._run_provider_connector(
+                "notion", ws_id, action_id, inp, lambda: self.connection_service.get_notion_connector(ws_id)
+            )
+
         # 4. HTTP connector actions
         elif action_id.startswith("http."):
             if not self.connection_service:
