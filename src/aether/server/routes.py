@@ -6803,15 +6803,44 @@ async def dispatch_custom_notification_route(request: Request):
         workspace_id=ws_id,
         type=body.get("type", "insight"),
         title=body.get("title", "Aether Notification"),
-        message=body.get("message", ""),
-        priority=body.get("priority", "normal"),
+        message=body.get("message", body.get("body", "")),
+        priority=body.get("priority", body.get("severity", "normal")),
         link_view=body.get("link_view"),
         link_id=body.get("link_id"),
-        action_required=body.get("action_required", False),
+        action_required=body.get("action_required", body.get("requires_action", False)),
+        target_type=body.get("target_type"),
+        target_id=body.get("target_id"),
+        deep_link=body.get("deep_link"),
+        primary_action=body.get("primary_action"),
+        secondary_action=body.get("secondary_action"),
         metadata=body.get("metadata", {}),
         target_channels=body.get("channels"),
+        notification_id=body.get("id", body.get("notification_id")),
     )
     return notif.to_dict()
+
+
+@router.post("/notifications/{notification_id}/receipt")
+async def update_notification_receipt_route(request: Request, notification_id: str):
+    """Allows client surfaces to acknowledge actual delivery/display status."""
+    ws = getattr(request.app.state, "workspace", None)
+    if not ws:
+        raise HTTPException(status_code=503, detail="Workspace not initialized.")
+    body = await request.json()
+    ws_id = (body.get("workspace_id") or getattr(ws, "id", None) or ws.name).strip()
+    channel_type = body.get("channel_type", "desktop")
+    status = body.get("status", "displayed")
+    detail = body.get("detail")
+    receipt = ws.notifications.update_delivery_receipt(
+        workspace_id=ws_id,
+        notification_id=notification_id,
+        channel_type=channel_type,
+        status=status,
+        detail=detail,
+    )
+    if not receipt:
+        return {"status": "ok", "recorded": False, "notification_id": notification_id}
+    return {"status": "ok", "recorded": True, "receipt": receipt.to_dict()}
 
 
 

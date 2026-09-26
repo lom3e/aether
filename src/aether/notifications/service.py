@@ -53,7 +53,7 @@ class NotificationService:
         workspace_id: str,
         type: NotificationType | str,
         title: str,
-        message: str,
+        message: str = "",
         priority: NotificationPriority | str = NotificationPriority.NORMAL,
         link_view: str | None = None,
         link_id: str | None = None,
@@ -61,32 +61,50 @@ class NotificationService:
         action_payload: dict[str, Any] | None = None,
         metadata: dict[str, Any] | None = None,
         target_channels: list[ChannelType | str] | None = None,
+        target_type: str | Any | None = None,
+        target_id: str | None = None,
+        deep_link: str | None = None,
+        primary_action: dict[str, Any] | str | None = None,
+        secondary_action: dict[str, Any] | str | None = None,
+        body: str | None = None,
+        severity: NotificationPriority | str | None = None,
+        requires_action: bool | None = None,
+        notification_id: str | None = None,
     ) -> Notification:
         """Emits, persists, and dispatches a multi-channel notification."""
         notif_type = (
             type if isinstance(type, NotificationType) else NotificationType.from_str(str(type))
         )
+        resolved_prio = severity if severity is not None else priority
         notif_priority = (
-            priority
-            if isinstance(priority, NotificationPriority)
-            else NotificationPriority.from_str(str(priority))
+            resolved_prio
+            if isinstance(resolved_prio, NotificationPriority)
+            else NotificationPriority.from_str(str(resolved_prio))
         )
+        msg = body if (body is not None and not message) else message
+        act_req = requires_action if requires_action is not None else action_required
+        nid = notification_id or f"notif-{uuid.uuid4().hex[:12]}"
 
         meta = dict(metadata or {})
         if action_payload:
             meta["action_payload"] = action_payload
 
         notification = Notification(
-            id=f"notif-{uuid.uuid4().hex[:12]}",
+            id=nid,
             workspace_id=workspace_id,
             type=notif_type,
             title=title,
-            message=message,
+            message=msg,
             priority=notif_priority,
             status=NotificationStatus.UNREAD,
             link_view=link_view,
             link_id=link_id,
-            action_required=action_required,
+            action_required=act_req,
+            target_type=target_type,
+            target_id=target_id,
+            deep_link=deep_link,
+            primary_action=primary_action,
+            secondary_action=secondary_action,
             metadata=meta,
             created_at=datetime.now(timezone.utc).isoformat(),
         )
@@ -152,6 +170,12 @@ class NotificationService:
         link_view: str = "activity",
         link_id: str | None = None,
         metadata: dict[str, Any] | None = None,
+        target_type: str | NotificationTargetType | None = None,
+        target_id: str | None = None,
+        deep_link: str | None = None,
+        primary_action: dict[str, Any] | str | None = None,
+        secondary_action: dict[str, Any] | str | None = None,
+        **kwargs: Any,
     ) -> Notification:
         """Convenience method to dispatch a safety approval notification with structured action payload."""
         action_payload = {
@@ -160,6 +184,8 @@ class NotificationService:
             "prompt": prompt,
             "risk_tier": risk_tier,
         }
+        p_act = primary_action or {"label": "Approve", "action": "approve", "target_id": execution_id}
+        s_act = secondary_action or {"label": "Reject", "action": "reject", "target_id": execution_id}
         return self.notify(
             workspace_id=workspace_id,
             type=NotificationType.APPROVAL_REQUIRED,
@@ -170,7 +196,13 @@ class NotificationService:
             link_id=link_id or execution_id,
             action_required=True,
             action_payload=action_payload,
+            target_type=target_type or "approval",
+            target_id=target_id or execution_id,
+            deep_link=deep_link,
+            primary_action=p_act,
+            secondary_action=s_act,
             metadata=metadata,
+            **kwargs,
         )
 
     def dispatch_briefing(
@@ -439,6 +471,29 @@ class NotificationService:
                 data={"id": notification_id, "status": "dismissed"},
             )
         return success
+
+    def update_delivery_receipt(
+        self,
+        workspace_id: str,
+        notification_id: str,
+        channel_type: ChannelType | str,
+        status: DeliveryStatus | str,
+        detail: str | None = None,
+    ) -> DeliveryReceipt | None:
+        """Updates delivery receipt state with real feedback from client surfaces."""
+        receipt = self.store.update_receipt_status(
+            notification_id=notification_id,
+            channel_type=channel_type,
+            status=status,
+            detail=detail,
+        )
+        if receipt and self.event_hub:
+            self.event_hub.publish(
+                workspace_id=workspace_id,
+                event_type="delivery_receipt_update",
+                data=receipt.to_dict(),
+            )
+        return receipt
 
     def get_unread_count(self, workspace_id: str) -> int:
         """Returns the number of unread notifications."""

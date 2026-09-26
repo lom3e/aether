@@ -5,6 +5,7 @@ Provides thread-safe WAL storage, indexing, and state management.
 from __future__ import annotations
 
 from contextlib import contextmanager
+from datetime import datetime, timezone
 import json
 import logging
 from pathlib import Path
@@ -85,11 +86,21 @@ class NotificationStore:
                     link_view TEXT,
                     link_id TEXT,
                     action_required INTEGER NOT NULL DEFAULT 0,
+                    target_type TEXT,
+                    target_id TEXT,
+                    deep_link TEXT,
+                    primary_action TEXT,
+                    secondary_action TEXT,
                     metadata TEXT,
                     created_at TEXT NOT NULL
                 );
                 """
             )
+            for col in ("target_type", "target_id", "deep_link", "primary_action", "secondary_action"):
+                try:
+                    cursor.execute(f"ALTER TABLE notifications ADD COLUMN {col} TEXT;")
+                except sqlite3.OperationalError:
+                    pass
             cursor.execute(
                 "CREATE INDEX IF NOT EXISTS idx_notif_ws_status ON notifications(workspace_id, status, created_at DESC);"
             )
@@ -174,13 +185,30 @@ class NotificationStore:
 
     def save(self, notification: Notification) -> Notification:
         """Inserts or updates a notification."""
+        t_type = (
+            notification.target_type.value
+            if hasattr(notification.target_type, "value")
+            else (str(notification.target_type) if notification.target_type else None)
+        )
+        p_act = (
+            json.dumps(notification.primary_action)
+            if isinstance(notification.primary_action, dict)
+            else (str(notification.primary_action) if notification.primary_action else None)
+        )
+        s_act = (
+            json.dumps(notification.secondary_action)
+            if isinstance(notification.secondary_action, dict)
+            else (str(notification.secondary_action) if notification.secondary_action else None)
+        )
         with self._transaction() as cursor:
             cursor.execute(
                 """
                 INSERT OR REPLACE INTO notifications (
                     id, workspace_id, type, title, message, priority,
-                    status, link_view, link_id, action_required, metadata, created_at
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    status, link_view, link_id, action_required,
+                    target_type, target_id, deep_link, primary_action, secondary_action,
+                    metadata, created_at
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 (
                     notification.id,
@@ -193,6 +221,11 @@ class NotificationStore:
                     notification.link_view,
                     notification.link_id,
                     1 if notification.action_required else 0,
+                    t_type,
+                    notification.target_id,
+                    notification.deep_link,
+                    p_act,
+                    s_act,
                     json.dumps(notification.metadata),
                     notification.created_at,
                 ),
@@ -516,6 +549,54 @@ class NotificationStore:
         ).fetchall()
         return [self._row_to_receipt(r) for r in rows]
 
+    def get_delivery_receipts(self, notification_id: str) -> list[DeliveryReceipt]:
+        """Retrieves delivery receipts for a specific notification."""
+        conn = self._get_connection()
+        rows = conn.execute(
+            "SELECT * FROM delivery_receipts WHERE notification_id = ? ORDER BY timestamp DESC",
+            (notification_id,),
+        ).fetchall()
+        return [self._row_to_receipt(r) for r in rows]
+
+    def update_receipt_status(
+        self,
+        notification_id: str,
+        channel_type: ChannelType | str,
+        status: DeliveryStatus | str,
+        detail: str | None = None,
+    ) -> DeliveryReceipt | None:
+        """Updates the status and optional detail of an existing delivery receipt."""
+        c_type = channel_type.value if isinstance(channel_type, ChannelType) else str(channel_type)
+        s_val = status.value if isinstance(status, DeliveryStatus) else str(status)
+        now = datetime.now(timezone.utc).isoformat()
+        with self._transaction() as cursor:
+            if detail is not None:
+                cursor.execute(
+                    """
+                    UPDATE delivery_receipts
+                    SET status = ?, detail = ?, timestamp = ?
+                    WHERE notification_id = ? AND channel_type = ?
+                    """,
+                    (s_val, detail, now, notification_id, c_type),
+                )
+            else:
+                cursor.execute(
+                    """
+                    UPDATE delivery_receipts
+                    SET status = ?, timestamp = ?
+                    WHERE notification_id = ? AND channel_type = ?
+                    """,
+                    (s_val, now, notification_id, c_type),
+                )
+            if cursor.rowcount > 0:
+                conn = self._get_connection()
+                row = conn.execute(
+                    "SELECT * FROM delivery_receipts WHERE notification_id = ? AND channel_type = ?",
+                    (notification_id, c_type),
+                ).fetchone()
+                return self._row_to_receipt(row) if row else None
+        return None
+
     # -------------------------------------------------------------------------
     # Executive Briefings
     # -------------------------------------------------------------------------
@@ -616,6 +697,21 @@ class NotificationStore:
         )
 
     def _row_to_notification(self, row: sqlite3.Row) -> Notification:
+        keys = row.keys()
+        primary_act = None
+        if "primary_action" in keys and row["primary_action"]:
+            try:
+                primary_act = json.loads(row["primary_action"])
+            except Exception:
+                primary_act = row["primary_action"]
+
+        secondary_act = None
+        if "secondary_action" in keys and row["secondary_action"]:
+            try:
+                secondary_act = json.loads(row["secondary_action"])
+            except Exception:
+                secondary_act = row["secondary_action"]
+
         return Notification(
             id=row["id"],
             workspace_id=row["workspace_id"],
@@ -627,6 +723,11 @@ class NotificationStore:
             link_view=row["link_view"],
             link_id=row["link_id"],
             action_required=bool(row["action_required"]),
+            target_type=row["target_type"] if "target_type" in keys else None,
+            target_id=row["target_id"] if "target_id" in keys else None,
+            deep_link=row["deep_link"] if "deep_link" in keys else None,
+            primary_action=primary_act,
+            secondary_action=secondary_act,
             metadata=json.loads(row["metadata"]) if row["metadata"] else {},
             created_at=row["created_at"],
         )

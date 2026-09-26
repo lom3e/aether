@@ -29,8 +29,12 @@ def temp_store(tmp_path):
 
 
 class MockEventHub:
-    def __init__(self):
+    def __init__(self, subscribers: int = 1):
         self.published = []
+        self._subscribers = subscribers
+
+    def subscriber_count(self, workspace_id: str) -> int:
+        return self._subscribers
 
     def publish(self, workspace_id: str, event_type: str, data: dict):
         self.published.append({
@@ -46,7 +50,7 @@ def test_deliver_desktop_with_event_hub_bypasses_osascript(temp_store):
     must route through Event Hub/SSE directly and NEVER spawn osascript,
     guaranteeing the official app icon and no file picker dialog.
     """
-    event_hub = MockEventHub()
+    event_hub = MockEventHub(subscribers=1)
     dispatcher = NotificationDispatcher(store=temp_store, event_hub=event_hub)
     channel = NotificationChannel(
         id="chan-desktop-test",
@@ -69,7 +73,8 @@ def test_deliver_desktop_with_event_hub_bypasses_osascript(temp_store):
         # subprocess.run must NOT be called because event_hub is present
         mock_subproc.assert_not_called()
 
-    assert status == DeliveryStatus.SENT
+    # Truthful P0.3 receipt status: DISPATCHED to client surface (not prematurely SENT)
+    assert status == DeliveryStatus.DISPATCHED
     assert "Event Hub" in detail
 
 
@@ -125,7 +130,7 @@ def test_test_channel_publishes_to_event_hub(temp_store):
     dispatcher = NotificationDispatcher(store=temp_store, event_hub=event_hub)
 
     receipt = dispatcher.test_channel(workspace_id="ws-test", channel_type=ChannelType.DESKTOP)
-    assert receipt.status == DeliveryStatus.SENT
+    assert receipt.status == DeliveryStatus.DISPATCHED
     assert receipt.channel_type == ChannelType.DESKTOP
 
     # Check that Event Hub received the notification event

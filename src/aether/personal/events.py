@@ -38,7 +38,11 @@ class PersonalEventHub:
                 self._subscribers[workspace_id].discard(queue)
                 if not self._subscribers[workspace_id]:
                     del self._subscribers[workspace_id]
-        logger.debug(f"Client unsubscribed from SSE stream for workspace: {workspace_id}")
+
+    def subscriber_count(self, workspace_id: str) -> int:
+        """Returns the number of active subscriber queues for a workspace."""
+        with self._lock:
+            return len(self._subscribers.get(workspace_id, []))
 
     def publish(self, workspace_id: str, event_type: str, data: dict[str, Any]) -> int:
         """Publishes an event to all subscribers of a workspace."""

@@ -28,7 +28,8 @@ import {
   ArrowUpRight,
 } from "lucide-react";
 import { apiUrl, getSessionToken } from "./api";
-import { hideCompanion, showMainWindow, notifyDesktop } from "./desktop";
+import { hideCompanion, showMainWindow } from "./desktop";
+import { resolveCanonicalTarget } from "./canonicalNotification";
 import { ToastContext } from "./toast";
 
 interface AmbientCompanionProps {
@@ -434,24 +435,7 @@ export function AmbientCompanion({
         fetchOverview();
       });
 
-      eventSource.addEventListener("notification", (e: MessageEvent) => {
-        try {
-          const data = JSON.parse(e.data);
-          if (data && data.title) {
-            notifyDesktop(data.title, {
-              id: data.id,
-              body: data.message || "Aether Notification",
-              link_view: data.link_view,
-              link_id: data.link_id,
-              sound: data.metadata?.sound || "Glass",
-              onClick: () => {
-                showMainWindow();
-              },
-            });
-          }
-        } catch {
-          // ignore
-        }
+      eventSource.addEventListener("notification", () => {
         fetchOverview();
         fetchUnreadNotifications();
       });
@@ -2014,6 +1998,20 @@ export function AmbientCompanion({
         {unreadNotifications.length > 0 && !lastUserPrompt && !latestResponse && pendingApprovals.length === 0 && (
           <div
             data-testid="companion-notifications-card"
+            onClick={async () => {
+              const notif = unreadNotifications[0];
+              await showMainWindow();
+              if (notif) {
+                const resolved = resolveCanonicalTarget(notif);
+                if (typeof window !== "undefined") {
+                  window.dispatchEvent(
+                    new CustomEvent("aether:navigate", {
+                      detail: { view: resolved.view, id: resolved.params },
+                    })
+                  );
+                }
+              }
+            }}
             style={{
               padding: "8px 12px",
               borderRadius: "10px",
@@ -2022,6 +2020,7 @@ export function AmbientCompanion({
               display: "flex",
               alignItems: "center",
               gap: "8px",
+              cursor: "pointer",
             }}
           >
             <Bell size={12} color="#38bdf8" style={{ flexShrink: 0 }} />

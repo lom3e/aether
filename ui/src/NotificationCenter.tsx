@@ -2,7 +2,7 @@ import { useState, useEffect, useRef } from 'react';
 import { Bell, Check, Trash2, Shield, CheckCircle2, AlertTriangle, Sparkles, Sliders } from 'lucide-react';
 import { apiUrl } from './api';
 import { NotificationFabricModal } from './NotificationFabricModal';
-
+import { resolveCanonicalTarget } from './canonicalNotification';
 
 export interface NotificationItem {
   id: string;
@@ -14,6 +14,11 @@ export interface NotificationItem {
   status: string;
   link_view?: string;
   link_id?: string;
+  target_type?: string;
+  target_id?: string;
+  deep_link?: string;
+  primary_action?: any;
+  secondary_action?: any;
   action_required: boolean;
   metadata?: Record<string, any>;
   created_at: string;
@@ -183,8 +188,9 @@ export function NotificationCenter({ workspaceName, onNavigate }: NotificationCe
     if (notif.status === 'unread') {
       handleMarkAsRead(notif.id);
     }
-    if (notif.link_view && onNavigate) {
-      onNavigate(notif.link_view, notif.link_id);
+    if (onNavigate) {
+      const resolved = resolveCanonicalTarget(notif);
+      onNavigate(resolved.view, resolved.params);
       setIsOpen(false);
     }
   };
@@ -346,7 +352,7 @@ export function NotificationCenter({ workspaceName, onNavigate }: NotificationCe
                     alignItems: 'flex-start',
                     gap: '12px',
                     borderBottom: '1px solid hsl(var(--border)/0.4)',
-                    cursor: item.link_view ? 'pointer' : 'default',
+                    cursor: (item.link_view || item.target_type || item.deep_link) ? 'pointer' : 'default',
                     backgroundColor: item.status === 'unread' ? 'hsl(var(--primary)/0.04)' : 'transparent',
                     transition: 'background 0.15s ease',
                   }}

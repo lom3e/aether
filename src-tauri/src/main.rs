@@ -7,7 +7,7 @@ use std::path::{Path, PathBuf};
 use std::process::{Child, Command, Stdio};
 use std::sync::{Arc, Mutex};
 use std::thread;
-use std::time::{Duration, Instant};
+use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 use rand::distributions::Alphanumeric;
 use rand::Rng;
@@ -20,6 +20,17 @@ use tauri_plugin_global_shortcut::{GlobalShortcutExt, Shortcut, ShortcutState};
 use tauri_plugin_notification::NotificationExt;
 
 #[derive(Clone, Deserialize, Serialize, Debug)]
+pub struct CanonicalNotificationTarget {
+    pub notification_id: Option<String>,
+    pub target_type: Option<String>,
+    pub target_id: Option<String>,
+    pub view: String,
+    pub id: Option<String>,
+    pub deep_link: Option<String>,
+    pub created_at: u64,
+}
+
+#[derive(Clone, Deserialize, Serialize, Debug)]
 pub struct DesktopNotificationPayload {
     pub id: Option<String>,
     pub title: String,
@@ -27,6 +38,40 @@ pub struct DesktopNotificationPayload {
     pub sound: Option<String>,
     pub link_view: Option<String>,
     pub link_id: Option<String>,
+    pub target_type: Option<String>,
+    pub target_id: Option<String>,
+    pub deep_link: Option<String>,
+    pub source: Option<String>,
+}
+
+fn get_target_file_path(data_dir: &Path) -> PathBuf {
+    data_dir.join("pending_notification_target.json")
+}
+
+fn persist_target_to_file(data_dir: &Path, target: &CanonicalNotificationTarget) {
+    let path = get_target_file_path(data_dir);
+    if let Ok(json) = serde_json::to_string_pretty(target) {
+        let _ = std::fs::write(path, json);
+    }
+}
+
+fn clear_target_file(data_dir: &Path) {
+    let path = get_target_file_path(data_dir);
+    if path.exists() {
+        let _ = std::fs::remove_file(path);
+    }
+}
+
+fn read_persisted_target(data_dir: &Path) -> Option<CanonicalNotificationTarget> {
+    let path = get_target_file_path(data_dir);
+    if path.exists() {
+        if let Ok(contents) = std::fs::read_to_string(&path) {
+            if let Ok(target) = serde_json::from_str::<CanonicalNotificationTarget>(&contents) {
+                return Some(target);
+            }
+        }
+    }
+    None
 }
 
 #[allow(dead_code)]
@@ -36,7 +81,8 @@ struct RuntimeState {
     child: Arc<Mutex<Option<Child>>>,
     notifications_muted: Arc<AtomicBool>,
     recent_notifications: Arc<Mutex<HashMap<String, Instant>>>,
-    last_notification_target: Arc<Mutex<Option<(String, Option<String>)>>>,
+    pending_targets: Arc<Mutex<Vec<CanonicalNotificationTarget>>>,
+    data_dir: PathBuf,
 }
 
 #[derive(Serialize)]
@@ -115,11 +161,19 @@ fn send_desktop_notification(
         return Ok(false);
     }
 
-    // 2. Deduplication check (10-second window based on ID or title+body)
+    // 2. Deduplication check (30-second window based on ID or canonical content)
     let dedup_key = payload
         .id
         .clone()
-        .unwrap_or_else(|| format!("{}:{}", payload.title, payload.body.as_deref().unwrap_or("")));
+        .unwrap_or_else(|| {
+            format!(
+                "{}:{}:{}:{}",
+                payload.title,
+                payload.body.as_deref().unwrap_or(""),
+                payload.target_type.as_deref().unwrap_or(""),
+                payload.target_id.as_deref().unwrap_or("")
+            )
+        });
 
     {
         let mut recent = state
@@ -127,11 +181,11 @@ fn send_desktop_notification(
             .lock()
             .map_err(|e| format!("Lock error: {}", e))?;
         let now = Instant::now();
-        // Prune entries older than 30 seconds
-        recent.retain(|_, time| now.duration_since(*time) < Duration::from_secs(30));
+        // Prune entries older than 60 seconds
+        recent.retain(|_, time| now.duration_since(*time) < Duration::from_secs(60));
 
         if let Some(last_time) = recent.get(&dedup_key) {
-            if now.duration_since(*last_time) < Duration::from_secs(10) {
+            if now.duration_since(*last_time) < Duration::from_secs(30) {
                 println!("[Aether Desktop] Duplicate notification suppressed: {}", dedup_key);
                 return Ok(false);
             }
@@ -139,12 +193,44 @@ fn send_desktop_notification(
         recent.insert(dedup_key, now);
     }
 
-    // 3. Record navigation target if provided
-    if let Some(ref view) = payload.link_view {
-        if let Ok(mut target) = state.last_notification_target.lock() {
-            *target = Some((view.clone(), payload.link_id.clone()));
-        }
+    // 3. Resolve and record canonical target
+    let (canonical_view, canonical_id) = match payload.target_type.as_deref() {
+        Some("mission") => ("missions".to_string(), payload.target_id.clone().or_else(|| payload.link_id.clone())),
+        Some("approval") => ("missions".to_string(), payload.target_id.clone().or_else(|| payload.link_id.clone())),
+        Some("action_execution") => ("connections".to_string(), payload.target_id.clone().or_else(|| payload.link_id.clone())),
+        Some("automation") => ("automations".to_string(), payload.target_id.clone().or_else(|| payload.link_id.clone())),
+        Some("deliverable") => ("missions".to_string(), payload.target_id.clone().or_else(|| payload.link_id.clone())),
+        Some("task") => ("home".to_string(), payload.target_id.clone().or_else(|| payload.link_id.clone())),
+        Some("connection") => ("connections".to_string(), payload.target_id.clone().or_else(|| payload.link_id.clone())),
+        Some("chat") => ("chat".to_string(), payload.target_id.clone().or_else(|| payload.link_id.clone())),
+        Some("settings") => ("settings".to_string(), None),
+        Some("view") => (
+            payload.target_id.clone().unwrap_or_else(|| payload.link_view.clone().unwrap_or_else(|| "home".to_string())),
+            payload.link_id.clone()
+        ),
+        _ => (
+            payload.link_view.clone().unwrap_or_else(|| "home".to_string()),
+            payload.link_id.clone().or_else(|| payload.target_id.clone())
+        )
+    };
+
+    let canonical_target = CanonicalNotificationTarget {
+        notification_id: payload.id.clone(),
+        target_type: payload.target_type.clone(),
+        target_id: payload.target_id.clone().or_else(|| payload.link_id.clone()),
+        view: canonical_view,
+        id: canonical_id,
+        deep_link: payload.deep_link.clone(),
+        created_at: SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_secs(),
+    };
+
+    if let Ok(mut pending) = state.pending_targets.lock() {
+        pending.push(canonical_target.clone());
     }
+    persist_target_to_file(&state.data_dir, &canonical_target);
 
     // 4. Send native OS notification via tauri-plugin-notification
     let mut builder = app.notification().builder();
@@ -172,12 +258,26 @@ fn send_desktop_notification(
 }
 
 #[tauri::command]
-fn consume_notification_target(state: State<RuntimeState>) -> Option<(String, Option<String>)> {
-    if let Ok(mut target) = state.last_notification_target.lock() {
-        target.take()
-    } else {
-        None
+fn consume_notification_target(state: State<RuntimeState>) -> Option<CanonicalNotificationTarget> {
+    let mut target = None;
+    if let Ok(mut pending) = state.pending_targets.lock() {
+        target = pending.pop();
     }
+    if target.is_none() {
+        target = read_persisted_target(&state.data_dir);
+    }
+    clear_target_file(&state.data_dir);
+
+    if let Some(ref t) = target {
+        let now = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_secs();
+        if now.saturating_sub(t.created_at) > 900 {
+            return None;
+        }
+    }
+    target
 }
 
 #[tauri::command]
@@ -338,7 +438,7 @@ fn generate_session_token() -> String {
         .collect()
 }
 
-fn spawn_backend_and_handshake() -> Result<(Child, u16, String), String> {
+fn spawn_backend_and_handshake() -> Result<(Child, u16, String, PathBuf), String> {
     let exe_path = std::env::current_exe().unwrap_or_else(|_| PathBuf::from("."));
     let is_app_bundle = exe_path.to_string_lossy().contains(".app/Contents/MacOS");
     let data_dir = get_data_directory(is_app_bundle);
@@ -405,6 +505,10 @@ fn spawn_backend_and_handshake() -> Result<(Child, u16, String), String> {
 
     cmd.env("PYTHONUNBUFFERED", "1");
     cmd.env("AETHER_SESSION_TOKEN", &token);
+    cmd.env("AETHER_DESKTOP_RUNTIME", "1");
+    if is_app_bundle {
+        cmd.env("AETHER_APP_BUNDLE", "1");
+    }
     cmd.stdout(Stdio::piped());
     cmd.stderr(Stdio::piped());
 
@@ -481,7 +585,7 @@ fn spawn_backend_and_handshake() -> Result<(Child, u16, String), String> {
     }
 
     println!("[Aether Desktop] Backend successfully passed readiness probe.");
-    Ok((child, port, token_clone))
+    Ok((child, port, token_clone, data_dir))
 }
 
 fn graceful_shutdown(port: u16, token: &str, child_lock: &Arc<Mutex<Option<Child>>>) {
@@ -609,7 +713,7 @@ pub fn show_main_window_action(app: &AppHandle) {
 }
 
 fn main() {
-    let (child, port, token) = match spawn_backend_and_handshake() {
+    let (child, port, token, data_dir) = match spawn_backend_and_handshake() {
         Ok(res) => res,
         Err(err) => {
             eprintln!("[Aether Desktop ERROR] {}", err);
@@ -643,7 +747,19 @@ fn main() {
     let notifications_muted_for_state = Arc::clone(&notifications_muted);
     let notifications_muted_for_tray = Arc::clone(&notifications_muted);
     let recent_notifications = Arc::new(Mutex::new(HashMap::new()));
-    let last_notification_target = Arc::new(Mutex::new(None));
+    let pending_targets = Arc::new(Mutex::new(Vec::new()));
+
+    if let Some(saved) = read_persisted_target(&data_dir) {
+        let now = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_secs();
+        if now.saturating_sub(saved.created_at) <= 900 {
+            pending_targets.lock().unwrap().push(saved);
+        } else {
+            clear_target_file(&data_dir);
+        }
+    }
 
     let app = tauri::Builder::default()
         .plugin(tauri_plugin_notification::init())
@@ -653,7 +769,8 @@ fn main() {
             child: Arc::clone(&child_arc),
             notifications_muted: notifications_muted_for_state,
             recent_notifications,
-            last_notification_target,
+            pending_targets,
+            data_dir,
         })
         .invoke_handler(tauri::generate_handler![
             get_runtime_info,
@@ -813,12 +930,29 @@ fn main() {
             println!("[Aether Desktop] macOS Reopen event (has_visible_windows={}). Focusing main window...", has_visible_windows);
             show_main_window_action(&app_handle);
             if let Some(state) = app_handle.try_state::<RuntimeState>() {
-                if let Ok(mut target_guard) = state.last_notification_target.lock() {
-                    if let Some((view, id)) = target_guard.take() {
-                        println!("[Aether Desktop] Dispatched notification target navigation on reopen: view={}, id={:?}", view, id);
+                let mut target = None;
+                if let Ok(mut pending) = state.pending_targets.lock() {
+                    target = pending.pop();
+                }
+                if target.is_none() {
+                    target = read_persisted_target(&state.data_dir);
+                }
+                clear_target_file(&state.data_dir);
+
+                if let Some(t) = target {
+                    let now = SystemTime::now()
+                        .duration_since(UNIX_EPOCH)
+                        .unwrap_or_default()
+                        .as_secs();
+                    if now.saturating_sub(t.created_at) <= 900 {
+                        println!("[Aether Desktop] Dispatched notification target navigation on reopen: view={}, id={:?}", t.view, t.id);
                         let _ = app_handle.emit("navigate_view", serde_json::json!({
-                            "view": view,
-                            "id": id,
+                            "notification_id": t.notification_id,
+                            "target_type": t.target_type,
+                            "target_id": t.target_id,
+                            "view": t.view,
+                            "id": t.id,
+                            "deep_link": t.deep_link,
                         }));
                     }
                 }

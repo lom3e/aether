@@ -296,25 +296,38 @@ class NotificationDispatcher:
         channel: NotificationChannel,
         notification: Notification,
     ) -> tuple[DeliveryStatus, str]:
-        """Sends native OS desktop notification."""
+        """Sends native OS desktop notification or dispatches to desktop client."""
         title = (notification.title or "Aether").strip()
         message = (notification.message or "").strip()
         sound_enabled = channel.config.get("sound_enabled", True)
         sound_name = channel.config.get("sound", "Glass") if sound_enabled else None
 
-        # 1. When running with Event Hub (Aether Desktop app runtime),
-        # notification is dispatched directly to the desktop frontend via SSE/Tauri IPC.
-        # This completely avoids executing osascript, ensuring the official Aether app icon,
-        # correct sound, and direct in-app focus/navigation without any file picker dialog.
+        # 1. When running with Event Hub (Aether Desktop app runtime or SSE server),
+        # notification is dispatched to desktop subscribers for native presentation by the desktop owner.
         if self.event_hub is not None:
-            return DeliveryStatus.SENT, "Delivered to native desktop surface via Event Hub"
+            sub_count = 0
+            if hasattr(self.event_hub, "subscriber_count"):
+                sub_count = self.event_hub.subscriber_count(notification.workspace_id)
+            elif hasattr(self.event_hub, "_subscribers"):
+                sub_count = len(getattr(self.event_hub, "_subscribers", {}).get(notification.workspace_id, []))
 
+            if sub_count > 0:
+                return DeliveryStatus.DISPATCHED, f"Dispatched to {sub_count} active desktop subscriber(s) via Event Hub"
+            return DeliveryStatus.QUEUED, "Queued in Event Hub; no active desktop subscribers connected"
+
+        # 2. Strict packaged/desktop runtime guard: NEVER execute osascript in packaged desktop app!
+        is_desktop_runtime = os.getenv("AETHER_DESKTOP_RUNTIME") == "1" or os.getenv("AETHER_APP_BUNDLE") == "1"
+        if is_desktop_runtime:
+            return DeliveryStatus.SKIPPED, "Desktop notifications managed directly by Tauri runtime; osascript disabled in packaged mode"
+
+        # 3. macOS development/headless fallback (when event_hub is None and not desktop runtime)
         if sys.platform == "darwin":
+            if os.getenv("AETHER_DISABLE_DEV_OSASCRIPT") == "1":
+                return DeliveryStatus.SKIPPED, "AppleScript fallback disabled via environment"
+
             # Sanitize quotes for AppleScript
             clean_title = title.replace("\\", "\\\\").replace('"', '\\"').replace("'", "’")
             clean_msg = message.replace("\\", "\\\\").replace('"', '\\"').replace("'", "’")
-            # Target System Events specifically so macOS never attributes this to Script Editor
-            # nor opens an open-file dialog on banner click.
             script = f'tell application "System Events" to display notification "{clean_msg}" with title "{clean_title}" subtitle "Aether Notification Fabric"'
             if sound_name:
                 script += f' sound name "{sound_name}"'
@@ -344,7 +357,7 @@ class NotificationDispatcher:
             return DeliveryStatus.SKIPPED, "notify-send utility not installed on Linux"
 
         elif sys.platform == "win32":
-            return DeliveryStatus.SENT, "Windows notification queued"
+            return DeliveryStatus.QUEUED, "Windows notification queued"
 
         return DeliveryStatus.SKIPPED, f"Desktop notifications not supported on platform {sys.platform}"
 

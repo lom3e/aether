@@ -19,6 +19,7 @@ import { LanguageProvider } from './i18n';
 import { ThemeProvider } from './theme';
 import { apiUrl } from './api';
 import { isCompanionSurface, isTauri, notifyDesktop, consumeNotificationTarget } from './desktop';
+import { resolveCanonicalTarget } from './canonicalNotification';
 import { listen } from '@tauri-apps/api/event';
 import { AmbientCompanion } from './AmbientCompanion';
 import { WorkflowBuilder } from './WorkflowBuilder';
@@ -197,10 +198,14 @@ function MainApp() {
   useEffect(() => {
     let unlisten: (() => void) | undefined;
     if (isTauri()) {
-      listen<{ view: string; id?: string }>('navigate_view', (event) => {
+      listen<any>('navigate_view', (event) => {
         console.log('[Aether App] navigate_view from Tauri:', event.payload);
-        if (event.payload && event.payload.view) {
-          navigate(event.payload.view, event.payload.id || null);
+        if (event.payload) {
+          const resolved = resolveCanonicalTarget(event.payload);
+          if (!resolved.valid && resolved.reason) {
+            showToast(resolved.reason, 'info');
+          }
+          navigate(resolved.view, resolved.params);
         }
       }).then((fn) => {
         unlisten = fn;
@@ -209,34 +214,42 @@ function MainApp() {
     return () => {
       if (unlisten) unlisten();
     };
-  }, [navigate]);
+  }, [navigate, showToast]);
 
   // Check and consume pending notification target on window focus
   useEffect(() => {
     const checkPending = async () => {
       const target = await consumeNotificationTarget();
-      if (target && target.view) {
+      if (target) {
         console.log('[Aether App] Consumed pending notification target:', target);
-        navigate(target.view, target.id);
+        const resolved = resolveCanonicalTarget(target);
+        if (!resolved.valid && resolved.reason) {
+          showToast(resolved.reason, 'info');
+        }
+        navigate(resolved.view, resolved.params);
       }
     };
     window.addEventListener('focus', checkPending);
     checkPending();
     return () => window.removeEventListener('focus', checkPending);
-  }, [navigate]);
+  }, [navigate, showToast]);
 
   // Listen for DOM custom navigation events (web fallback)
   useEffect(() => {
     const handleCustomNav = (e: any) => {
-      if (e.detail && e.detail.view) {
-        navigate(e.detail.view, e.detail.id || null);
+      if (e.detail) {
+        const resolved = resolveCanonicalTarget(e.detail);
+        if (!resolved.valid && resolved.reason) {
+          showToast(resolved.reason, 'info');
+        }
+        navigate(resolved.view, resolved.params);
       }
     };
     window.addEventListener('aether:navigate', handleCustomNav);
     return () => window.removeEventListener('aether:navigate', handleCustomNav);
-  }, [navigate]);
+  }, [navigate, showToast]);
 
-  // Global SSE subscription for notifications
+  // Global SSE subscription for notifications (Single Delivery Owner for desktop notifications)
   useEffect(() => {
     if (!workspaceName) return;
     let eventSource: EventSource | null = null;
@@ -260,11 +273,17 @@ function MainApp() {
               body: notif.message,
               link_view: notif.link_view,
               link_id: notif.link_id,
+              target_type: notif.target_type,
+              target_id: notif.target_id,
+              deep_link: notif.deep_link,
+              workspaceName,
               sound: notif.metadata?.sound || 'Glass',
               onClick: () => {
-                if (notif.link_view) {
-                  navigate(notif.link_view, notif.link_id);
+                const resolved = resolveCanonicalTarget(notif);
+                if (!resolved.valid && resolved.reason) {
+                  showToast(resolved.reason, 'info');
                 }
+                navigate(resolved.view, resolved.params);
               },
             });
           }

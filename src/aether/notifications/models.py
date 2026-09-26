@@ -27,6 +27,29 @@ class NotificationType(StrEnum):
             return cls.INSIGHT
 
 
+class NotificationTargetType(StrEnum):
+    MISSION = "mission"
+    ACTION_EXECUTION = "action_execution"
+    AUTOMATION = "automation"
+    DELIVERABLE = "deliverable"
+    APPROVAL = "approval"
+    TASK = "task"
+    CONNECTION = "connection"
+    CHAT = "chat"
+    SETTINGS = "settings"
+    VIEW = "view"
+
+    @classmethod
+    def from_str(cls, val: str | None) -> NotificationTargetType | None:
+        if not val:
+            return None
+        clean = val.lower().strip()
+        try:
+            return cls(clean)
+        except ValueError:
+            return None
+
+
 class NotificationPriority(StrEnum):
     HIGH = "high"       # Urgent approvals, destructive action confirmations
     NORMAL = "normal"   # Task completions, action results
@@ -34,8 +57,11 @@ class NotificationPriority(StrEnum):
 
     @classmethod
     def from_str(cls, val: str) -> NotificationPriority:
+        v = val.lower().strip()
+        if v in ("urgent", "critical"):
+            return cls.HIGH
         try:
-            return cls(val.lower().strip())
+            return cls(v)
         except ValueError:
             return cls.NORMAL
 
@@ -53,9 +79,9 @@ class NotificationStatus(StrEnum):
             return cls.UNREAD
 
 
-@dataclass(slots=True)
+@dataclass
 class Notification:
-    """A real-world notification item in Aether."""
+    """Canonical notification model for Aether with deterministic target routing."""
     id: str
     workspace_id: str
     type: NotificationType
@@ -66,8 +92,85 @@ class Notification:
     link_view: str | None = None   # Target UI view: 'home', 'work', 'connections', 'activity'
     link_id: str | None = None     # Target entity ID (execution_id, mission_id, task_id)
     action_required: bool = False  # True if waiting for user decision (Approve/Decline)
+    target_type: str | NotificationTargetType | None = None
+    target_id: str | None = None
+    deep_link: str | None = None
+    primary_action: dict[str, Any] | str | None = None
+    secondary_action: dict[str, Any] | str | None = None
     metadata: dict[str, Any] = field(default_factory=dict)
     created_at: str = field(default_factory=lambda: datetime.now(timezone.utc).isoformat())
+
+    def __post_init__(self) -> None:
+        # 1. Normalize target_type and link_view for seamless interoperability
+        if not self.target_type and self.link_view:
+            lv = self.link_view.lower().strip()
+            if lv in ("missions", "work"):
+                self.target_type = NotificationTargetType.MISSION
+            elif lv == "automations":
+                self.target_type = NotificationTargetType.AUTOMATION
+            elif lv in ("activity", "connections"):
+                self.target_type = NotificationTargetType.ACTION_EXECUTION
+            elif lv == "chat":
+                self.target_type = NotificationTargetType.CHAT
+            elif lv == "settings":
+                self.target_type = NotificationTargetType.SETTINGS
+            elif self.action_required:
+                self.target_type = NotificationTargetType.APPROVAL
+            else:
+                self.target_type = NotificationTargetType.VIEW
+                if not self.target_id:
+                    self.target_id = lv
+
+        if not self.target_id and self.link_id:
+            self.target_id = self.link_id
+
+        if self.target_type and not isinstance(self.target_type, NotificationTargetType):
+            try:
+                self.target_type = NotificationTargetType(str(self.target_type).lower().strip())
+            except ValueError:
+                pass
+
+        if not self.link_view and self.target_type:
+            tt = self.target_type.value if hasattr(self.target_type, "value") else str(self.target_type).lower().strip()
+            if tt in (NotificationTargetType.MISSION.value, NotificationTargetType.DELIVERABLE.value, NotificationTargetType.APPROVAL.value):
+                self.link_view = "missions"
+            elif tt == NotificationTargetType.AUTOMATION.value:
+                self.link_view = "automations"
+            elif tt in (NotificationTargetType.ACTION_EXECUTION.value, NotificationTargetType.CONNECTION.value):
+                self.link_view = "connections"
+            elif tt == NotificationTargetType.TASK.value:
+                self.link_view = "home"
+            elif tt == NotificationTargetType.CHAT.value:
+                self.link_view = "chat"
+            elif tt == NotificationTargetType.SETTINGS.value:
+                self.link_view = "settings"
+            elif tt == NotificationTargetType.VIEW.value:
+                self.link_view = self.target_id or "home"
+            else:
+                self.link_view = tt
+
+        if not self.link_id and self.target_id:
+            self.link_id = self.target_id
+
+        if not self.deep_link and self.target_type and self.target_id:
+            tt_str = self.target_type.value if hasattr(self.target_type, "value") else str(self.target_type)
+            self.deep_link = f"aether://{tt_str}/{self.target_id}"
+
+    @property
+    def body(self) -> str:
+        return self.message
+
+    @property
+    def severity(self) -> NotificationPriority:
+        return self.priority
+
+    @property
+    def requires_action(self) -> bool:
+        return self.action_required
+
+    @property
+    def notification_id(self) -> str:
+        return self.id
 
     @property
     def action_payload(self) -> dict[str, Any] | None:
@@ -83,15 +186,24 @@ class Notification:
     def to_dict(self) -> dict[str, Any]:
         return {
             "id": self.id,
+            "notification_id": self.id,
             "workspace_id": self.workspace_id,
             "type": self.type.value if isinstance(self.type, NotificationType) else str(self.type),
             "title": self.title,
             "message": self.message,
+            "body": self.message,
             "priority": self.priority.value if isinstance(self.priority, NotificationPriority) else str(self.priority),
+            "severity": self.priority.value if isinstance(self.priority, NotificationPriority) else str(self.priority),
             "status": self.status.value if isinstance(self.status, NotificationStatus) else str(self.status),
             "link_view": self.link_view,
             "link_id": self.link_id,
             "action_required": self.action_required,
+            "requires_action": self.action_required,
+            "target_type": self.target_type.value if isinstance(self.target_type, NotificationTargetType) else (str(self.target_type) if self.target_type else None),
+            "target_id": self.target_id,
+            "deep_link": self.deep_link,
+            "primary_action": self.primary_action,
+            "secondary_action": self.secondary_action,
             "action_payload": self.action_payload,
             "metadata": self.metadata,
             "created_at": self.created_at,
@@ -102,17 +214,28 @@ class Notification:
         meta = dict(data.get("metadata") or {})
         if "action_payload" in data and data["action_payload"] and "action_payload" not in meta:
             meta["action_payload"] = data["action_payload"]
+
+        nid = data.get("id") or data.get("notification_id") or f"notif-{uuid.uuid4().hex[:12]}"
+        msg = data.get("message") or data.get("body") or ""
+        prio_val = data.get("priority") or data.get("severity") or "normal"
+        act_req = bool(data.get("action_required", data.get("requires_action", False)))
+
         return cls(
-            id=data.get("id") or f"notif-{uuid.uuid4().hex[:12]}",
+            id=nid,
             workspace_id=data.get("workspace_id", "default"),
             type=NotificationType.from_str(data.get("type", "insight")),
             title=data.get("title", ""),
-            message=data.get("message", ""),
-            priority=NotificationPriority.from_str(data.get("priority", "normal")),
+            message=msg,
+            priority=NotificationPriority.from_str(prio_val),
             status=NotificationStatus.from_str(data.get("status", "unread")),
             link_view=data.get("link_view"),
             link_id=data.get("link_id"),
-            action_required=bool(data.get("action_required", False)),
+            action_required=act_req,
+            target_type=data.get("target_type"),
+            target_id=data.get("target_id"),
+            deep_link=data.get("deep_link"),
+            primary_action=data.get("primary_action"),
+            secondary_action=data.get("secondary_action"),
             metadata=meta,
             created_at=data.get("created_at") or datetime.now(timezone.utc).isoformat(),
         )
@@ -134,6 +257,10 @@ class ChannelType(StrEnum):
 
 
 class DeliveryStatus(StrEnum):
+    QUEUED = "queued"
+    DISPATCHED = "dispatched"
+    DELIVERED_TO_CLIENT = "delivered_to_client"
+    DISPLAYED = "displayed"
     SENT = "sent"
     FAILED = "failed"
     SKIPPED = "skipped"
