@@ -153,7 +153,8 @@ class ActionExecutor:
             can_auto_run = not requires_gate or self.safety_policy.can_auto_approve(definition, auto_approve, workspace_id=workspace_id)
 
         if requires_gate and not can_auto_run:
-            execution.status = ActionExecutionStatus.PENDING_APPROVAL
+            execution.status = ActionExecutionStatus.WAITING_APPROVAL
+            execution.metadata["requires_approval"] = True
             self.store.save_execution(execution)
             if self.activity_service:
                 self.activity_service.log(
@@ -161,12 +162,17 @@ class ActionExecutor:
                     title=f"Approval needed: {definition.name}",
                     description=f"Action '{definition.name}' requires confirmation before proceeding.",
                     category=ActivityCategory.ACTION,
-                    status=ActivityStatus.PENDING_APPROVAL,
+                    status=ActivityStatus.WAITING_APPROVAL,
                     link_view="home",
                     link_id=execution.id,
                     metadata={"action_id": action_id, "execution_id": execution.id, "provider": definition.provider},
                 )
             return execution
+
+        if auto_approve or (requires_gate and can_auto_run):
+            execution.metadata["auto_approved"] = True
+            if not execution.approved_by:
+                execution.approved_by = "safety_policy"
 
         # Direct execution
         execution.status = ActionExecutionStatus.RUNNING
@@ -181,20 +187,23 @@ class ActionExecutor:
             raise ValueError(f"Execution '{execution_id}' not found")
 
         # Idempotency: if already approved or running or completed, return existing execution
-        if execution.status in (ActionExecutionStatus.APPROVED, ActionExecutionStatus.SUCCESS, ActionExecutionStatus.RUNNING):
+        if execution.status in (ActionExecutionStatus.APPROVED, ActionExecutionStatus.SUCCEEDED, ActionExecutionStatus.RUNNING):
             return execution
 
-        if execution.status == ActionExecutionStatus.REJECTED:
-            raise ValueError(f"Cannot approve execution '{execution_id}': action was already declined.")
+        if execution.status in (ActionExecutionStatus.REJECTED, ActionExecutionStatus.CANCELLED, ActionExecutionStatus.EXPIRED):
+            raise ValueError(f"Cannot approve execution '{execution_id}': action was already declined / {execution.status.value}.")
 
-        if execution.status != ActionExecutionStatus.PENDING_APPROVAL:
-            raise ValueError(f"Cannot approve execution in status '{execution.status}'")
+        if execution.status == ActionExecutionStatus.FAILED:
+            raise ValueError(f"Cannot approve execution '{execution_id}': action has already failed.")
+
+        if execution.status not in (ActionExecutionStatus.WAITING_APPROVAL, ActionExecutionStatus.PENDING_APPROVAL):
+            raise ValueError(f"Cannot approve execution in status '{execution.status.value}'")
 
         definition = self.registry.get(execution.action_id)
         if not definition:
             raise ValueError(f"Action '{execution.action_id}' not found")
 
-        execution.status = ActionExecutionStatus.APPROVED
+        execution.transition_to(ActionExecutionStatus.APPROVED)
         execution.approved_by = approver
         self.store.save_execution(execution)
 
@@ -210,16 +219,19 @@ class ActionExecutor:
         if execution.status == ActionExecutionStatus.REJECTED:
             return execution
 
-        if execution.status in (ActionExecutionStatus.APPROVED, ActionExecutionStatus.SUCCESS, ActionExecutionStatus.RUNNING):
+        if execution.is_terminal():
+            raise ValueError(f"Cannot decline execution '{execution_id}': action was already approved and is in terminal state '{execution.status.value}'.")
+
+        if execution.status in (ActionExecutionStatus.APPROVED, ActionExecutionStatus.RUNNING):
             raise ValueError(f"Cannot decline execution '{execution_id}': action was already approved.")
 
-        if execution.status != ActionExecutionStatus.PENDING_APPROVAL:
-            raise ValueError(f"Cannot reject execution in status '{execution.status}'")
+        if execution.status not in (ActionExecutionStatus.WAITING_APPROVAL, ActionExecutionStatus.PENDING_APPROVAL):
+            raise ValueError(f"Cannot reject execution in status '{execution.status.value}'")
 
         definition = self.registry.get(execution.action_id)
         action_name = definition.name if definition else execution.action_id
 
-        execution.status = ActionExecutionStatus.REJECTED
+        execution.transition_to(ActionExecutionStatus.REJECTED)
         execution.rejection_reason = reason
         execution.completed_at = datetime.now(timezone.utc).isoformat()
         self.store.save_execution(execution)
@@ -230,7 +242,7 @@ class ActionExecutor:
                 title=f"Declined: {action_name}",
                 description=f"Action was declined ({reason}).",
                 category=ActivityCategory.ACTION,
-                status=ActivityStatus.FAILED,
+                status=ActivityStatus.REJECTED,
                 link_view="home",
                 link_id=execution.id,
                 metadata={"action_id": execution.action_id, "execution_id": execution.id},
@@ -247,6 +259,13 @@ class ActionExecutor:
         execution: ActionExecution,
     ) -> ActionExecution:
         """Dispatches action execution to handler or built-in connectors."""
+        if execution.is_terminal():
+            return execution
+
+        if execution.status != ActionExecutionStatus.RUNNING:
+            execution.transition_to(ActionExecutionStatus.RUNNING)
+            self.store.save_execution(execution)
+
         try:
             handler = self.registry.get_handler(definition.id)
             if handler is not None:
@@ -254,15 +273,25 @@ class ActionExecutor:
             else:
                 result = self._execute_builtin_action(definition, execution)
 
-            execution.status = ActionExecutionStatus.SUCCESS
+            # Validate real success vs failure
+            if isinstance(result, dict) and (result.get("success") is False or "error" in result):
+                err_msg = str(result.get("error") or "Action returned an unsuccessful result.")
+                raise RuntimeError(err_msg)
+
+            execution.transition_to(ActionExecutionStatus.SUCCEEDED)
             execution.output_data = result or {}
             execution.completed_at = datetime.now(timezone.utc).isoformat()
             self.store.save_execution(execution)
 
             if self.activity_service:
+                act_title = (
+                    f"Auto-approved & Executed: {definition.name}"
+                    if execution.metadata.get("auto_approved")
+                    else f"Completed: {definition.name}"
+                )
                 self.activity_service.log(
                     workspace_id=execution.workspace_id,
-                    title=f"Completed: {definition.name}",
+                    title=act_title,
                     description=f"Successfully executed '{definition.name}'.",
                     category=ActivityCategory.ACTION,
                     status=ActivityStatus.COMPLETED,
@@ -273,12 +302,18 @@ class ActionExecutor:
 
         except Exception as e:
             logger.exception(f"Action execution {execution.id} failed: {e}")
-            execution.status = ActionExecutionStatus.FAILED
+            execution.transition_to(ActionExecutionStatus.FAILED)
             # Mask potential secrets from error message
             safe_err = str(e)
-            for secret_term in ("token", "key", "password", "secret"):
-                if secret_term in safe_err.lower() and len(safe_err) > 80:
-                    safe_err = safe_err[:80] + "..."
+            if execution.input_data and isinstance(execution.input_data, dict):
+                for k, v in execution.input_data.items():
+                    if isinstance(v, str) and len(v) >= 4:
+                        if any(s in k.lower() for s in ("token", "key", "secret", "password", "auth", "credential", "bearer", "private")):
+                            safe_err = safe_err.replace(v, "[REDACTED]")
+            import re
+            safe_err = re.sub(r'(?i)(token|key|password|secret|bearer)\s*[:=]\s*([^\s,;]+)', r'\1=[REDACTED]', safe_err)
+            safe_err = re.sub(r'(?i)token\s+([a-zA-Z0-9_\-\.]+)', r'token [REDACTED]', safe_err)
+
             execution.error_message = safe_err
             execution.completed_at = datetime.now(timezone.utc).isoformat()
             self.store.save_execution(execution)
@@ -319,9 +354,11 @@ class ActionExecutor:
         connector = get_connector_fn()
         try:
             res = connector.execute(action_id, input_data)
+            if hasattr(res, "success") and not res.success:
+                raise RuntimeError(res.error or f"Connector operation '{action_id}' failed.")
             if hasattr(self.connection_service, "record_operation_success"):
                 self.connection_service.record_operation_success(workspace_id, provider, action_id)
-            return res.data
+            return res.data if hasattr(res, "data") else (res if isinstance(res, dict) else {})
         except Exception as exc:
             err_str = str(exc).lower()
             is_auth = any(t in err_str for t in ("401", "403", "unauthorized", "bad credentials", "invalid token", "auth failed", "authentication failed"))

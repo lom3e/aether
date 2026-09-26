@@ -1368,7 +1368,7 @@ class PersonalAgentService:
 
             step_prep = PersonalStep(
                 id=f"step-{uuid.uuid4().hex[:8]}",
-                title=f"Prepared action: {action_name}",
+                title=f"Preparing action: {action_name}",
                 status="running",
                 category="action",
                 details={"action_id": intent.action_id, "args": intent.action_args},
@@ -1383,7 +1383,7 @@ class PersonalAgentService:
                 step_appr = PersonalStep(
                     id=f"step-{uuid.uuid4().hex[:8]}",
                     title="Awaiting your approval",
-                    status="pending_approval",
+                    status="waiting_approval",
                     category="action",
                     details={"execution_id": action_execution_id},
                 )
@@ -1502,87 +1502,97 @@ class PersonalAgentService:
             runtime_res = self.runtime.execute(exec_request)
             action_execution_id = runtime_res.metadata.get("action_execution_id")
 
-            if runtime_res.status == ExecutionStatus.FAILED:
+            if runtime_res.status == ExecutionStatus.FAILED or not runtime_res.success:
                 step_exec.status = "failed"
+                response_text = runtime_res.error or f"Action **{action_name}** failed during execution."
+                steps.append(
+                    PersonalStep(
+                        id=f"step-{uuid.uuid4().hex[:8]}",
+                        title="Execution failed",
+                        status="failed",
+                        category="action",
+                        details={"error": runtime_res.error},
+                    )
+                )
             else:
                 step_exec.status = "completed"
 
-            if intent.action_id == "missions.dry_run":
-                report_data = runtime_res.metadata.get("action_result") or {}
-                score = report_data.get("readiness_score", 100)
-                risk = str(report_data.get("risk_tier", "low")).upper()
-                ready_txt = "READY" if report_data.get("ready") else "NEEDS ATTENTION"
-                duration = report_data.get("estimated_duration_seconds", 0)
+                if intent.action_id == "missions.dry_run":
+                    report_data = runtime_res.metadata.get("action_result") or {}
+                    score = report_data.get("readiness_score", 100)
+                    risk = str(report_data.get("risk_tier", "low")).upper()
+                    ready_txt = "READY" if report_data.get("ready") else "NEEDS ATTENTION"
+                    duration = report_data.get("estimated_duration_seconds", 0)
 
-                lines = [
-                    f"### 🛡️ Mission Pre-flight Inspection: {report_data.get('title', 'Proposed Mission')}",
-                    f"- **Status:** `{ready_txt}` (Readiness Score: **{score}/100**)",
-                    f"- **Risk Tier:** `{risk}` | **Estimated Execution:** ~{duration}s",
-                    f"- **Total Milestones:** {report_data.get('total_milestones', 0)}",
-                    "",
-                ]
+                    lines = [
+                        f"### 🛡️ Mission Pre-flight Inspection: {report_data.get('title', 'Proposed Mission')}",
+                        f"- **Status:** `{ready_txt}` (Readiness Score: **{score}/100**)",
+                        f"- **Risk Tier:** `{risk}` | **Estimated Execution:** ~{duration}s",
+                        f"- **Total Milestones:** {report_data.get('total_milestones', 0)}",
+                        "",
+                    ]
 
-                previews = report_data.get("milestone_previews", [])
-                if previews:
-                    lines.append("#### Milestone Path & Required Workforce")
-                    for p in previews:
-                        agent_badge = p.get('assigned_agent') or 'Coordinator'
-                        tools_txt = ", ".join(p.get("required_tools", [])) or "none"
-                        lines.append(f"- **{p.get('title')}** (`{agent_badge}`) — Risk: `{p.get('risk_level')}` | Tools: `{tools_txt}`")
+                    previews = report_data.get("milestone_previews", [])
+                    if previews:
+                        lines.append("#### Milestone Path & Required Workforce")
+                        for p in previews:
+                            agent_badge = p.get('assigned_agent') or 'Coordinator'
+                            tools_txt = ", ".join(p.get("required_tools", [])) or "none"
+                            lines.append(f"- **{p.get('title')}** (`{agent_badge}`) — Risk: `{p.get('risk_level')}` | Tools: `{tools_txt}`")
+                        lines.append("")
+
+                    conns = report_data.get("required_connectors", [])
+                    if conns:
+                        lines.append("#### External Connector Readiness")
+                        for c in conns:
+                            status_icon = "✓" if c.get("connected") else "⚠️"
+                            lines.append(f"- {status_icon} **{str(c.get('provider')).capitalize()}**: `{c.get('status')}`")
+                        lines.append("")
+
+                    recs = report_data.get("recommendations", [])
+                    if recs:
+                        lines.append("#### Recommendations & Safety Gates")
+                        for r in recs:
+                            lines.append(f"- {r}")
+                        lines.append("")
+
+                    lines.append("Pre-flight analysis complete. Would you like to proceed with launching this mission?")
+                    response_text = "\n".join(lines)
+                elif intent.action_id == "connections.sync":
+                    res_data = runtime_res.metadata.get("action_result") or {}
+                    total_synced = res_data.get("total_items_synced", 0)
+                    synced_list = res_data.get("synced", [])
+
+                    lines = [
+                        "### 🔄 External Connections Synchronized",
+                        f"- **Total Items Ingested:** {total_synced}",
+                        "",
+                        "#### Synchronized Services",
+                    ]
+                    for item in synced_list:
+                        prov = str(item.get("provider", "")).capitalize()
+                        status = item.get("status", "synced")
+                        count = item.get("items_synced", 0)
+                        summary = item.get("summary", "")
+                        lines.append(f"- **{prov}:** `{status.upper()}` ({count} items) — {summary}")
+
                     lines.append("")
+                    lines.append("All external entities have been merged into persistent workforce memory and knowledge.")
+                    response_text = "\n".join(lines)
+                else:
+                    target = intent.action_args.get("filename", "item")
+                    response_text = runtime_res.output or f"I've taken care of it! **{target}** has been created in your workspace."
 
-                conns = report_data.get("required_connectors", [])
-                if conns:
-                    lines.append("#### External Connector Readiness")
-                    for c in conns:
-                        status_icon = "✓" if c.get("connected") else "⚠️"
-                        lines.append(f"- {status_icon} **{str(c.get('provider')).capitalize()}**: `{c.get('status')}`")
-                    lines.append("")
-
-                recs = report_data.get("recommendations", [])
-                if recs:
-                    lines.append("#### Recommendations & Safety Gates")
-                    for r in recs:
-                        lines.append(f"- {r}")
-                    lines.append("")
-
-                lines.append("Pre-flight analysis complete. Would you like to proceed with launching this mission?")
-                response_text = "\n".join(lines)
-            elif intent.action_id == "connections.sync":
-                res_data = runtime_res.metadata.get("action_result") or {}
-                total_synced = res_data.get("total_items_synced", 0)
-                synced_list = res_data.get("synced", [])
-
-                lines = [
-                    "### 🔄 External Connections Synchronized",
-                    f"- **Total Items Ingested:** {total_synced}",
-                    "",
-                    "#### Synchronized Services",
-                ]
-                for item in synced_list:
-                    prov = str(item.get("provider", "")).capitalize()
-                    status = item.get("status", "synced")
-                    count = item.get("items_synced", 0)
-                    summary = item.get("summary", "")
-                    lines.append(f"- **{prov}:** `{status.upper()}` ({count} items) — {summary}")
-
-                lines.append("")
-                lines.append("All external entities have been merged into persistent workforce memory and knowledge.")
-                response_text = "\n".join(lines)
-            else:
-                target = intent.action_args.get("filename", "item")
-                response_text = runtime_res.output or f"I've taken care of it! **{target}** has been created in your workspace."
-
-                if self.notification_service and action_execution_id:
-                    self.notification_service.notify(
-                        workspace_id=workspace_id,
-                        type=NotificationType.ACTION_COMPLETED,
-                        title=f"Document Created: {target}",
-                        message=f"Document {target} was created successfully.",
-                        priority=NotificationPriority.LOW,
-                        link_view="home",
-                        link_id=action_execution_id,
-                    )
+                    if self.notification_service and action_execution_id:
+                        self.notification_service.notify(
+                            workspace_id=workspace_id,
+                            type=NotificationType.ACTION_COMPLETED,
+                            title=f"Document Created: {target}",
+                            message=f"Document {target} was created successfully.",
+                            priority=NotificationPriority.LOW,
+                            link_view="home",
+                            link_id=action_execution_id,
+                        )
 
         elif intent.tier == IntentTier.DELEGATE:
             if intent.action_id == "autonomy.take_care_of_it":
@@ -1677,6 +1687,11 @@ class PersonalAgentService:
                             if deliverables:
                                 for d in deliverables:
                                     if isinstance(d, dict) and d.get("path"):
+                                        from pathlib import Path
+                                        deliv_p = Path(d["path"])
+                                        if not deliv_p.is_absolute() and hasattr(self.workspace, "root") and self.workspace.root:
+                                            deliv_p = Path(self.workspace.root) / deliv_p
+                                        is_verified_on_disk = deliv_p.exists() and deliv_p.is_file()
                                         self.mission_store.add_deliverable(
                                             mission_id=mission_id,
                                             deliverable=Deliverable(
@@ -1686,7 +1701,7 @@ class PersonalAgentService:
                                                 name=d.get("name", "deliverable"),
                                                 path=d.get("path", ""),
                                                 type=d.get("type", "document"),
-                                                status="verified",
+                                                status="verified" if is_verified_on_disk else "draft",
                                             ),
                                         )
                         except Exception as me:

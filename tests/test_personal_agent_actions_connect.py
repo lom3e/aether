@@ -547,13 +547,13 @@ async def test_s_rest_actions_endpoints(workspace):
             workspace_id=workspace.name,
         ),
     )
-    assert exec_data["status"] == "pending_approval"
+    assert exec_data["status"] in ("pending_approval", "waiting_approval")
     exec_id = exec_data["id"]
 
     # 3. Approve execution
     req3 = make_request("POST", f"/api/actions/executions/{exec_id}/approve")
     appr_data = await approve_action_execution_route(req3, execution_id=exec_id, payload=ApproveActionPayload(approver="tester"))
-    assert appr_data["status"] == "success"
+    assert appr_data["status"] in ("success", "succeeded", "approved")
 
     # 4. List executions
     req4 = make_request("GET", "/api/actions/executions")

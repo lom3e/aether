@@ -178,8 +178,8 @@ export function ActivityFeed({ activities, isLive = false, taskStatus = 'complet
                     fontWeight: 600,
                     padding: '3px 10px',
                     borderRadius: '12px',
-                    backgroundColor: evt.status === 'completed' ? '#10b98115' : evt.status === 'pending_approval' ? '#f59e0b15' : '#ef444415',
-                    color: evt.status === 'completed' ? '#10b981' : evt.status === 'pending_approval' ? '#f59e0b' : '#ef4444',
+                    backgroundColor: (evt.status === 'completed' || evt.status === 'succeeded') ? '#10b98115' : (evt.status === 'pending_approval' || evt.status === 'waiting_approval') ? '#f59e0b15' : (evt.status === 'in_progress' || evt.status === 'running') ? '#3b82f615' : '#ef444415',
+                    color: (evt.status === 'completed' || evt.status === 'succeeded') ? '#10b981' : (evt.status === 'pending_approval' || evt.status === 'waiting_approval') ? '#f59e0b' : (evt.status === 'in_progress' || evt.status === 'running') ? '#3b82f6' : '#ef4444',
                     textTransform: 'capitalize',
                     whiteSpace: 'nowrap',
                   }}>

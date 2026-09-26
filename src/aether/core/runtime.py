@@ -7,6 +7,7 @@ import re
 from typing import Any, Callable
 from uuid import uuid4
 
+from aether.actions.models import ActionExecutionStatus
 from aether.agents.agent import Agent
 from aether.agents.lifecycle import AgentLifecycleState
 from aether.core.context import prepare_execution_context
@@ -264,17 +265,36 @@ class Runtime:
                 input_data=action_args,
                 auto_approve=True,
             )
+            if execution.status == ActionExecutionStatus.FAILED:
+                return ExecutionResult(
+                    success=False,
+                    status=ExecutionStatus.FAILED,
+                    error=execution.error_message or f"Action '{action_id}' failed during execution.",
+                    execution_id=request.id,
+                    metadata={
+                        "action_execution_id": execution.id,
+                        "action_id": action_id,
+                        "action_result": execution.output_data or {},
+                    },
+                )
+
             target = action_args.get("filename", "item")
             output_msg = f"I've taken care of it! **{target}** has been created in your workspace."
 
-            # Register created deliverable/artifact
+            # Register created deliverable/artifact only if verified on disk
             artifacts = []
             if execution.output_data and execution.output_data.get("path"):
-                artifacts.append({
-                    "name": target,
-                    "path": execution.output_data.get("path"),
-                    "type": "file",
-                })
+                from pathlib import Path
+                p = execution.output_data.get("path")
+                file_path = Path(p)
+                if not file_path.is_absolute() and hasattr(self.workspace, "root") and self.workspace.root:
+                    file_path = Path(self.workspace.root) / file_path
+                if file_path.exists():
+                    artifacts.append({
+                        "name": target,
+                        "path": str(file_path),
+                        "type": "file",
+                    })
 
             return ExecutionResult(
                 success=True,
@@ -322,7 +342,7 @@ class Runtime:
         )
 
         from aether.actions.models import ActionExecutionStatus
-        if execution.status == ActionExecutionStatus.PENDING_APPROVAL:
+        if execution.status in (ActionExecutionStatus.WAITING_APPROVAL, ActionExecutionStatus.PENDING_APPROVAL):
             if action_id == "email.send":
                 target_desc = f"Send email to **{action_args.get('to', '')}**\n\nSubject: {action_args.get('subject', '')}\n\n{action_args.get('body', '')}"
             elif action_id == "slack.send_message":
@@ -357,6 +377,31 @@ class Runtime:
                     "action_id": action_id,
                     "action_name": action_name,
                     "approval_description": target_desc,
+                },
+            )
+        elif execution.status == ActionExecutionStatus.FAILED:
+            return ExecutionResult(
+                success=False,
+                status=ExecutionStatus.FAILED,
+                error=execution.error_message or f"Action '{action_name}' failed during execution.",
+                execution_id=request.id,
+                metadata={
+                    "action_execution_id": execution.id,
+                    "action_id": action_id,
+                    "action_name": action_name,
+                    "action_result": execution.output_data or {},
+                },
+            )
+        elif execution.status in (ActionExecutionStatus.REJECTED, ActionExecutionStatus.CANCELLED):
+            return ExecutionResult(
+                success=False,
+                status=ExecutionStatus.CANCELLED,
+                error=execution.rejection_reason or f"Action '{action_name}' was declined.",
+                execution_id=request.id,
+                metadata={
+                    "action_execution_id": execution.id,
+                    "action_id": action_id,
+                    "action_name": action_name,
                 },
             )
 

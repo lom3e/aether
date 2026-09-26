@@ -368,7 +368,7 @@ export function Home({
           if (msg.action_execution_id === executionId) {
             return {
               ...msg,
-              steps: msg.steps.map(s => s.status === 'pending_approval' ? { ...s, status: 'completed', title: 'Action approved & executed' } : s),
+              steps: msg.steps.map(s => (s.status === 'pending_approval' || s.status === 'waiting_approval') ? { ...s, status: 'completed', title: 'Action approved & executed' } : s),
             };
           }
           return msg;
@@ -402,7 +402,7 @@ export function Home({
           if (msg.action_execution_id === executionId) {
             return {
               ...msg,
-              steps: msg.steps.map(s => s.status === 'pending_approval' ? { ...s, status: 'failed', title: 'Action declined' } : s),
+              steps: msg.steps.map(s => (s.status === 'pending_approval' || s.status === 'waiting_approval') ? { ...s, status: 'failed', title: 'Action declined' } : s),
             };
           }
           return msg;
@@ -615,12 +615,12 @@ export function Home({
                       <div key={st.id} style={{ display: 'flex', alignItems: 'center', gap: '8px', fontSize: '12px' }}>
                         {st.status === 'completed' ? (
                           <CheckCircle2 size={14} color="#10b981" />
-                        ) : st.status === 'pending_approval' ? (
+                        ) : (st.status === 'pending_approval' || st.status === 'waiting_approval') ? (
                           <AlertTriangle size={14} color="#f59e0b" />
                         ) : (
                           <Clock size={14} color="hsl(var(--primary))" />
                         )}
-                        <span style={{ fontWeight: 500, color: st.status === 'pending_approval' ? '#f59e0b' : 'hsl(var(--fg))' }}>
+                        <span style={{ fontWeight: 500, color: (st.status === 'pending_approval' || st.status === 'waiting_approval') ? '#f59e0b' : 'hsl(var(--fg))' }}>
                           {st.title}
                         </span>
                       </div>
@@ -633,7 +633,7 @@ export function Home({
                 </div>
 
                 {/* Pending Approval Action Card in Message */}
-                {msg.action_execution_id && msg.steps.some(s => s.status === 'pending_approval') && (
+                {msg.action_execution_id && msg.steps.some(s => s.status === 'pending_approval' || s.status === 'waiting_approval') && (
                   <div style={{ marginTop: '14px', padding: '12px 16px', borderRadius: '10px', backgroundColor: '#f59e0b10', border: '1px solid #f59e0b40', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
                     <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
                       <Shield size={16} color="#f59e0b" />

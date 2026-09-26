@@ -102,8 +102,7 @@ class PolicyService:
                 return False, "Autopilot Tier 2: sensitive state mutations require human clearance."
             # External mutations requiring confirmation
             if permission_level == ActionPermissionLevel.EXTERNAL_MUTATION and requires_confirmation:
-                if not auto_approve_requested:
-                    return False, "Autopilot Tier 2 (Supervised): external mutations require confirmation."
+                return False, "Autopilot Tier 2 (Supervised): external mutations require operator confirmation."
             if requires_confirmation and not auto_approve_requested:
                 return False, "Action requires safety confirmation under Supervised tier."
             return True, "Approved under Tier 2 (Supervised)."

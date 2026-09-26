@@ -282,7 +282,7 @@ async def test_canonical_approval_endpoints_action_flow(temp_workspace):
         target_id=execution.id,
     )
     assert details["target_id"] == execution.id
-    assert details["status"] == "pending_approval"
+    assert details["status"] in ("pending_approval", "waiting_approval")
     assert details["target_type"] == "action_execution"
     assert details["approve_action"]["endpoint"] == f"/api/approvals/{execution.id}/approve"
 

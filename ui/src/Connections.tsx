@@ -1336,8 +1336,8 @@ export function Connections({ navigate: _navigate, initialExecutionId, initialTa
                         fontWeight: 600,
                         padding: '3px 10px',
                         borderRadius: '10px',
-                        backgroundColor: exec.status === 'success' ? '#10b98115' : exec.status === 'pending_approval' ? '#f59e0b15' : '#ef444415',
-                        color: exec.status === 'success' ? '#10b981' : exec.status === 'pending_approval' ? '#f59e0b' : '#ef4444',
+                        backgroundColor: (exec.status === 'success' || exec.status === 'succeeded') ? '#10b98115' : (exec.status === 'pending_approval' || exec.status === 'waiting_approval') ? '#f59e0b15' : (exec.status === 'running' || exec.status === 'queued') ? '#3b82f615' : '#ef444415',
+                        color: (exec.status === 'success' || exec.status === 'succeeded') ? '#10b981' : (exec.status === 'pending_approval' || exec.status === 'waiting_approval') ? '#f59e0b' : (exec.status === 'running' || exec.status === 'queued') ? '#3b82f6' : '#ef4444',
                       }}>
                         {exec.status.toUpperCase()}
                       </span>
@@ -1358,7 +1358,7 @@ export function Connections({ navigate: _navigate, initialExecutionId, initialTa
                     </div>
                   )}
 
-                  {exec.status === 'success' && exec.output_data && (
+                  {(exec.status === 'success' || exec.status === 'succeeded') && exec.output_data && (
                     <div style={{
                       fontSize: '12px',
                       color: 'hsl(var(--muted-fg))',
@@ -1374,7 +1374,7 @@ export function Connections({ navigate: _navigate, initialExecutionId, initialTa
                     </div>
                   )}
 
-                  {exec.status === 'pending_approval' && (
+                  {(exec.status === 'pending_approval' || exec.status === 'waiting_approval') && (
                     <div style={{ display: 'flex', gap: '8px', marginTop: '8px', justifyContent: 'flex-end', borderTop: '1px solid hsl(var(--border)/0.4)', paddingTop: '10px' }}>
                       <button
                         onClick={() => handleRejectAction(exec.id)}

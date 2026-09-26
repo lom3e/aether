@@ -6080,10 +6080,11 @@ async def _handle_canonical_approval(
             raise HTTPException(status_code=404, detail=f"Action execution '{clean_target_id}' not found.")
 
         try:
+            status_val = str(exec_obj.status.value if hasattr(exec_obj.status, "value") else exec_obj.status).lower()
             was_already_decided = (
-                exec_obj.status.value in ("success", "approved")
+                status_val in ("success", "succeeded", "completed", "approved")
                 if decision == "approve"
-                else (exec_obj.status.value == "rejected")
+                else (status_val in ("rejected", "declined"))
             )
 
             if decision == "approve":
@@ -6209,16 +6210,17 @@ async def _handle_canonical_approval(
             raise HTTPException(status_code=500, detail=f"Automation approval error: {exc}")
 
     # 4. Deliverable Review
+    m_store = getattr(ws, "missions", None) or getattr(ws, "mission_store", None)
     if target_type in ("deliverable", "deliverables") or (
-        not target_type and hasattr(ws, "mission_store") and ws.mission_store and hasattr(ws.mission_store, "list_missions")
+        not target_type and m_store and hasattr(m_store, "list_missions")
     ):
         deliv = None
         mission_id = None
-        if hasattr(ws.mission_store, "get_deliverable"):
-            deliv = ws.mission_store.get_deliverable(clean_target_id)
-        if not deliv and hasattr(ws.mission_store, "list_missions"):
-            for m in ws.mission_store.list_missions():
-                for d in ws.mission_store.list_deliverables(m.id):
+        if m_store and hasattr(m_store, "get_deliverable"):
+            deliv = m_store.get_deliverable(clean_target_id)
+        if not deliv and m_store and hasattr(m_store, "list_missions"):
+            for m in m_store.list_missions():
+                for d in m_store.list_deliverables(m.id):
                     if d.id == clean_target_id:
                         deliv = d
                         mission_id = m.id
@@ -6229,6 +6231,16 @@ async def _handle_canonical_approval(
         if deliv:
             m_id = mission_id or deliv.mission_id
             if decision == "approve":
+                if deliv.path:
+                    from pathlib import Path
+                    deliv_path = Path(deliv.path)
+                    if not deliv_path.is_absolute() and hasattr(ws, "root") and ws.root:
+                        deliv_path = Path(ws.root) / deliv_path
+                    if not deliv_path.exists() or not deliv_path.is_file():
+                        raise HTTPException(
+                            status_code=400,
+                            detail=f"Cannot approve deliverable '{deliv.name}': file does not exist on disk at '{deliv.path}'.",
+                        )
                 deliv.status = "verified"
                 deliv.metadata = dict(deliv.metadata or {})
                 deliv.metadata["approved_by"] = payload.approver
@@ -6240,7 +6252,7 @@ async def _handle_canonical_approval(
                 deliv.metadata["rejection_reason"] = payload.reason or "Declined by user"
                 msg = f"Deliverable '{deliv.name}' rejected."
 
-            ws.mission_store.add_deliverable(m_id, deliv)
+            m_store.add_deliverable(m_id, deliv)
             _mark_approval_notification_done(ws, clean_target_id, m_id)
 
             return {

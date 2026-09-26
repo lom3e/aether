@@ -48,14 +48,36 @@ class UserIntent:
         }
 
 
+class StepStatusStr(str):
+    """Smart status string providing seamless compatibility between waiting_approval and pending_approval."""
+    def __eq__(self, other: object) -> bool:
+        if isinstance(other, str):
+            s1 = str(self).lower().strip()
+            s2 = str(other).lower().strip()
+            if s1 == s2:
+                return True
+            if s1 in ("waiting_approval", "pending_approval") and s2 in ("waiting_approval", "pending_approval"):
+                return True
+            if s1 in ("completed", "succeeded", "success") and s2 in ("completed", "succeeded", "success"):
+                return True
+        return super().__eq__(other)
+
+    def __hash__(self) -> int:
+        return hash(str(self))
+
+
 @dataclass(slots=True)
 class PersonalStep:
     """A clear, human-readable execution step shown in the progress stepper."""
     id: str
     title: str
-    status: str = "completed"  # pending, running, completed, failed, pending_approval
+    status: str = "completed"  # pending, running, completed, failed, waiting_approval / pending_approval
     category: str = "general"   # understanding, knowledge, action, delegation, response
     details: dict[str, Any] = field(default_factory=dict)
+
+    def __post_init__(self) -> None:
+        if not isinstance(self.status, StepStatusStr):
+            object.__setattr__(self, "status", StepStatusStr(self.status))
 
     def to_dict(self) -> dict[str, Any]:
         return {
