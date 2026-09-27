@@ -1,12 +1,14 @@
-import { useState, useEffect, useContext } from 'react';
+import { useState, useEffect, useContext, useMemo } from 'react';
 import {
   Calendar, Mail, GitBranch, MessageSquare, FileText, CheckCircle2,
   AlertCircle, ShieldCheck, Settings, Plus, RefreshCw, Clock, Zap, Globe, Send,
-  Check, X, Loader2
+  Check, X, Loader2, Search, ChevronDown, ChevronUp, AlertTriangle, Shield,
+  Lock, Trash2
 } from 'lucide-react';
 import { apiUrl } from './api';
 import { ToastContext } from './toast';
 import { submitApprovalDecision } from './canonicalNotification';
+import { useTranslation } from './i18n';
 
 interface ConnectionItem {
   id: string;
@@ -49,10 +51,32 @@ interface ConnectionsProps {
   initialTab?: 'apps' | 'calendar' | 'actions';
 }
 
+type CategoryType = 'all' | 'productivity' | 'dev' | 'communication';
+
+interface ProviderDefinition {
+  id: string;
+  name: string;
+  icon: any;
+  category: 'productivity' | 'dev' | 'communication';
+  description: string;
+  capabilitiesText: string;
+  capabilitiesList: string[];
+  color: string;
+  builtIn: boolean;
+  isOAuth: boolean;
+}
+
 export function Connections({ navigate: _navigate, initialExecutionId, initialTab }: ConnectionsProps) {
+  const { t } = useTranslation();
+  const showToast = useContext(ToastContext);
+
   const [activeTab, setActiveTab] = useState<'apps' | 'calendar' | 'actions'>(
     initialTab || (initialExecutionId ? 'actions' : 'apps')
   );
+  const [categoryFilter, setCategoryFilter] = useState<CategoryType>('all');
+  const [searchQuery, setSearchQuery] = useState('');
+  const [actionStatusFilter, setActionStatusFilter] = useState<string>('all');
+
   const [actionLoadingId, setActionLoadingId] = useState<string | null>(null);
   const [connections, setConnections] = useState<ConnectionItem[]>([]);
   const [calendarEvents, setCalendarEvents] = useState<CalendarEventItem[]>([]);
@@ -62,7 +86,15 @@ export function Connections({ navigate: _navigate, initialExecutionId, initialTa
   const [verifyingProvider, setVerifyingProvider] = useState<string | null>(null);
   const [syncingAll, setSyncingAll] = useState(false);
 
-  // Google Calendar States (Macro-pass P0.2)
+  // Manage Connection Drawer / Modal
+  const [manageProvider, setManageProvider] = useState<ProviderDefinition | null>(null);
+  const [showTechDetails, setShowTechDetails] = useState(false);
+
+  // Disconnect Confirmation Modal
+  const [disconnectTarget, setDisconnectTarget] = useState<{ id: string; name: string } | null>(null);
+  const [disconnecting, setDisconnecting] = useState(false);
+
+  // Google Calendar States
   const [googleCalendarEvents, setGoogleCalendarEvents] = useState<CalendarEventItem[]>([]);
   const [selectedScheduleSource, setSelectedScheduleSource] = useState<'local' | 'google'>('local');
   const [isGoogleModalOpen, setIsGoogleModalOpen] = useState(false);
@@ -82,15 +114,7 @@ export function Connections({ navigate: _navigate, initialExecutionId, initialTa
   const [creatingEvent, setCreatingEvent] = useState(false);
 
   // Config Modal State
-  const [configModalProvider, setConfigModalProvider] = useState<{
-    id: string;
-    name: string;
-    icon: any;
-    description: string;
-    capabilitiesText: string;
-    color: string;
-    builtIn: boolean;
-  } | null>(null);
+  const [configModalProvider, setConfigModalProvider] = useState<ProviderDefinition | null>(null);
   const [isConfigured, setIsConfigured] = useState(false);
   const [credAccountName, setCredAccountName] = useState('');
   const [githubToken, setGithubToken] = useState('');
@@ -122,15 +146,20 @@ export function Connections({ navigate: _navigate, initialExecutionId, initialTa
   const [savingCreds, setSavingCreds] = useState(false);
   const [testResult, setTestResult] = useState<{ valid: boolean; message: string } | null>(null);
 
-  const showToast = useContext(ToastContext);
-
-  const availableProviders = [
+  const availableProviders: ProviderDefinition[] = [
     {
       id: 'calendar',
       name: 'Aether Calendar (Local)',
       icon: Calendar,
+      category: 'productivity',
       description: 'Built-in local workspace schedule and event storage with zero external dependencies.',
       capabilitiesText: 'Can view schedule, list local events, and record meetings directly in workspace storage',
+      capabilitiesList: [
+        'Inspect workspace schedules & appointments',
+        'Record meetings directly in local SQLite storage',
+        'Zero cloud or external network dependencies',
+        'Offline calendar event querying & indexing',
+      ],
       color: '#06b6d4',
       builtIn: true,
       isOAuth: false,
@@ -139,69 +168,50 @@ export function Connections({ navigate: _navigate, initialExecutionId, initialTa
       id: 'google_calendar',
       name: 'Google Calendar',
       icon: Calendar,
+      category: 'productivity',
       description: 'Real Google Calendar integration via OAuth 2.0 PKCE. Reads calendars, syncs meetings, and schedules events.',
       capabilitiesText: 'Can read Google calendars and create or update events via official Google Calendar APIs',
+      capabilitiesList: [
+        'Read personal and organizational calendars',
+        'Schedule and coordinate new meetings',
+        'Update and cancel events with confirmation',
+        'Bidirectional sync into workspace memory',
+      ],
       color: '#4285F4',
       builtIn: false,
       isOAuth: true,
     },
     {
-      id: 'github',
-      name: 'GitHub',
-      icon: GitBranch,
-      description: 'Access repositories, codebases, commits, and pull requests.',
-      capabilitiesText: 'Can read repositories, create issues, and open pull requests',
-      color: '#2dba4e',
-      builtIn: false,
-      isOAuth: false,
-    },
-    {
-      id: 'email',
-      name: 'Email / Gmail',
-      icon: Mail,
-      description: 'Read incoming briefs, prepare summaries, and draft outbound messages.',
-      capabilitiesText: 'Can draft and dispatch emails via SMTP with explicit user approval',
-      color: '#EA4335',
-      builtIn: false,
-      isOAuth: false,
-    },
-    {
-      id: 'slack',
-      name: 'Slack',
-      icon: MessageSquare,
-      description: 'Receive notifications and post status reports in team channels.',
-      capabilitiesText: 'Can post messages and status updates to Slack channels with confirmation',
-      color: '#4A154B',
-      builtIn: false,
-      isOAuth: false,
-    },
-    {
-      id: 'telegram',
-      name: 'Telegram Bot',
-      icon: Send,
-      description: 'Mobile companion, real-time alerts, remote task delegation, and inline approvals.',
-      capabilitiesText: 'Can receive mobile commands, dispatch notifications, and handle interactive approvals',
-      color: '#229ED9',
-      builtIn: false,
-      isOAuth: false,
-    },
-    {
-      id: 'http',
-      name: 'Generic HTTP / API',
-      icon: Globe,
-      description: 'Interact with external REST endpoints and Web APIs with security policies.',
-      capabilitiesText: 'Can perform authenticated HTTP operations (GET, POST, PUT, DELETE)',
-      color: '#6366f1',
-      builtIn: false,
-      isOAuth: false,
-    },
-    {
       id: 'notion',
       name: 'Notion',
       icon: FileText,
-      description: 'Read and sync project documentation and database tables.',
+      category: 'productivity',
+      description: 'Read and sync project documentation, deliverable specs, and workspace database tables.',
       capabilitiesText: 'Can read and synchronize workspace pages and databases',
+      capabilitiesList: [
+        'Search workspace pages & documents',
+        'Read databases, schema properties, and entries',
+        'Export verified deliverables directly to Notion pages',
+        'Sync specifications into workspace knowledge',
+      ],
       color: '#000000',
+      builtIn: false,
+      isOAuth: false,
+    },
+    {
+      id: 'github',
+      name: 'GitHub',
+      icon: GitBranch,
+      category: 'dev',
+      description: 'Access repositories, codebases, commits, pull requests, and automated review workflows.',
+      capabilitiesText: 'Can read repositories, create issues, and open pull requests',
+      capabilitiesList: [
+        'Inspect repositories, files, and tree structure',
+        'List and inspect git branches',
+        'Create, update, and comment on issues',
+        'Open pull requests with automated summaries',
+      ],
+      color: '#2dba4e',
       builtIn: false,
       isOAuth: false,
     },
@@ -209,9 +219,84 @@ export function Connections({ navigate: _navigate, initialExecutionId, initialTa
       id: 'openapi',
       name: 'OpenAPI 3.x',
       icon: Zap,
-      description: 'Parse OpenAPI specifications to dynamically discover and execute operations.',
+      category: 'dev',
+      description: 'Parse OpenAPI specifications to dynamically discover, validate, and execute REST operations.',
       capabilitiesText: 'Can discover endpoints, validate schemas, and execute API actions dynamically',
+      capabilitiesList: [
+        'Dynamically discover API tools and operations',
+        'Validate input schemas against spec definitions',
+        'Execute authenticated REST operations',
+        'Support remote URLs and local schema files',
+      ],
       color: '#8B5CF6',
+      builtIn: false,
+      isOAuth: false,
+    },
+    {
+      id: 'http',
+      name: 'Generic HTTP / API',
+      icon: Globe,
+      category: 'dev',
+      description: 'Interact with external REST endpoints and Web APIs with security policies and header authentication.',
+      capabilitiesText: 'Can perform authenticated HTTP operations (GET, POST, PUT, DELETE)',
+      capabilitiesList: [
+        'Authenticated HTTP requests (GET, POST, PUT, DELETE)',
+        'Bearer Token, API Key, and Basic Auth authentication',
+        'Custom header configuration',
+        'Safe execution with confirmation gating',
+      ],
+      color: '#6366f1',
+      builtIn: false,
+      isOAuth: false,
+    },
+    {
+      id: 'slack',
+      name: 'Slack',
+      icon: MessageSquare,
+      category: 'communication',
+      description: 'Receive notifications, post operational status reports, and notify channels with bot or webhook.',
+      capabilitiesText: 'Can post messages and status updates to Slack channels with confirmation',
+      capabilitiesList: [
+        'Post status briefs and updates to team channels',
+        'Send direct operational alerts',
+        'Support Bot User OAuth tokens & Incoming Webhooks',
+        'Configurable default destination channel',
+      ],
+      color: '#4A154B',
+      builtIn: false,
+      isOAuth: false,
+    },
+    {
+      id: 'email',
+      name: 'Email / SMTP',
+      icon: Mail,
+      category: 'communication',
+      description: 'Draft briefs, prepare automated summaries, and dispatch outbound messages via secure SMTP.',
+      capabilitiesText: 'Can draft and dispatch emails via SMTP with explicit user approval',
+      capabilitiesList: [
+        'Draft and send structured outbound emails',
+        'STARTTLS and direct SSL/TLS encryption support',
+        'Custom sender addresses and display aliases',
+        'Supervised dispatch with explicit confirmation',
+      ],
+      color: '#EA4335',
+      builtIn: false,
+      isOAuth: false,
+    },
+    {
+      id: 'telegram',
+      name: 'Telegram Bot',
+      icon: Send,
+      category: 'communication',
+      description: 'Mobile companion, real-time alerts, remote task delegation, and inline interactive approvals.',
+      capabilitiesText: 'Can receive mobile commands, dispatch notifications, and handle interactive approvals',
+      capabilitiesList: [
+        'Direct push alerts to mobile devices',
+        'Interactive inline approval buttons',
+        'Authorized chat ID whitelist enforcement',
+        'Remote companion command execution',
+      ],
+      color: '#229ED9',
       builtIn: false,
       isOAuth: false,
     },
@@ -271,7 +356,7 @@ export function Connections({ navigate: _navigate, initialExecutionId, initialTa
         approver: 'user',
       });
       if (res.success) {
-        showToast(res.message, res.status === 'already_completed' ? 'info' : 'success');
+        showToast(res.message || t('connActionApproved'), res.status === 'already_completed' ? 'info' : 'success');
         fetchAll();
       } else {
         showToast(res.message || 'Failed to approve action execution.', 'error');
@@ -294,7 +379,7 @@ export function Connections({ navigate: _navigate, initialExecutionId, initialTa
         reason: 'Declined by user',
       });
       if (res.success) {
-        showToast(res.message, 'info');
+        showToast(res.message || t('connActionDeclined'), 'info');
         fetchAll();
       } else {
         showToast(res.message || 'Failed to decline action execution.', 'error');
@@ -306,7 +391,7 @@ export function Connections({ navigate: _navigate, initialExecutionId, initialTa
     }
   };
 
-  const openConfigModal = (provider: (typeof availableProviders)[0], existingConn?: ConnectionItem) => {
+  const openConfigModal = (provider: ProviderDefinition, existingConn?: ConnectionItem) => {
     setConfigModalProvider(provider);
     setCredAccountName(existingConn?.account_name || `Personal ${provider.name}`);
     setIsConfigured(Boolean(existingConn && existingConn.status !== 'not_configured' && existingConn.status !== 'disconnected'));
@@ -339,7 +424,6 @@ export function Connections({ navigate: _navigate, initialExecutionId, initialTa
 
     if (existingConn?.auth_metadata) {
       const meta = existingConn.auth_metadata;
-      // Populate non-secret configuration parameters
       if (provider.id === 'email') {
         if (meta.username) setEmailUser(meta.username);
         if (meta.smtp_host) setEmailHost(meta.smtp_host);
@@ -371,7 +455,6 @@ export function Connections({ navigate: _navigate, initialExecutionId, initialTa
           setTelegramAllowedChats(Array.isArray(meta.allowed_chat_ids) ? meta.allowed_chat_ids.join(', ') : String(meta.allowed_chat_ids));
         }
       }
-      // Sensitive fields (token, password, secret) remain blank to prevent leakage
     }
   };
 
@@ -395,6 +478,37 @@ export function Connections({ navigate: _navigate, initialExecutionId, initialTa
     } finally {
       setVerifyingProvider(null);
     }
+  };
+
+  const diagnoseError = (rawErr?: string) => {
+    if (!rawErr) return null;
+    const errLow = rawErr.toLowerCase();
+    if (errLow.includes('401') || errLow.includes('unauthorized') || errLow.includes('invalid token') || errLow.includes('bad credentials') || errLow.includes('invalid_grant') || errLow.includes('password') || errLow.includes('authentication')) {
+      return {
+        title: t('connErrAuth'),
+        desc: t('connErrAuthDesc'),
+        raw: rawErr,
+      };
+    }
+    if (errLow.includes('403') || errLow.includes('forbidden') || errLow.includes('scope') || errLow.includes('permission') || errLow.includes('denied')) {
+      return {
+        title: t('connErrPerm'),
+        desc: t('connErrPermDesc'),
+        raw: rawErr,
+      };
+    }
+    if (errLow.includes('refused') || errLow.includes('timeout') || errLow.includes('timed out') || errLow.includes('unreachable') || errLow.includes('dns') || errLow.includes('network')) {
+      return {
+        title: t('connErrNet'),
+        desc: t('connErrNetDesc'),
+        raw: rawErr,
+      };
+    }
+    return {
+      title: t('connErrConfig'),
+      desc: t('connErrConfigDesc'),
+      raw: rawErr,
+    };
   };
 
   const getActionSummary = (exec: ActionExecutionItem) => {
@@ -588,17 +702,25 @@ export function Connections({ navigate: _navigate, initialExecutionId, initialTa
     }
   };
 
-  const handleDisconnect = async (provider: string) => {
+  const confirmDisconnect = async () => {
+    if (!disconnectTarget) return;
+    setDisconnecting(true);
     try {
-      const res = await fetch(apiUrl(`/api/connections/${provider}/disconnect`), {
+      const res = await fetch(apiUrl(`/api/connections/${disconnectTarget.id}/disconnect`), {
         method: 'POST',
       });
       if (res.ok) {
-        showToast(`Disconnected ${provider}.`, 'info');
+        showToast(`Disconnected ${disconnectTarget.name}.`, 'info');
+        setDisconnectTarget(null);
+        setManageProvider(null);
         fetchAll();
+      } else {
+        showToast('Failed to disconnect service.', 'error');
       }
     } catch (e) {
       showToast('Failed to disconnect service.', 'error');
+    } finally {
+      setDisconnecting(false);
     }
   };
 
@@ -660,7 +782,6 @@ export function Connections({ navigate: _navigate, initialExecutionId, initialTa
       }
       setGoogleState(data.state || '');
 
-      // Open popup
       const width = 600;
       const height = 720;
       const left = window.screenX + (window.outerWidth - width) / 2;
@@ -687,7 +808,6 @@ export function Connections({ navigate: _navigate, initialExecutionId, initialTa
       };
       window.addEventListener('message', messageHandler);
 
-      // Poll for popup closure
       const pollTimer = setInterval(() => {
         if (!popup || popup.closed) {
           clearInterval(pollTimer);
@@ -805,197 +925,391 @@ export function Connections({ navigate: _navigate, initialExecutionId, initialTa
     }
   };
 
+  // Grouping and Filtering
+  const filteredProviders = useMemo(() => {
+    return availableProviders.filter(p => {
+      if (categoryFilter !== 'all' && p.category !== categoryFilter) return false;
+      if (searchQuery.trim()) {
+        const query = searchQuery.toLowerCase().trim();
+        const conn = connections.find(c => c.provider === p.id);
+        const nameMatch = p.name.toLowerCase().includes(query);
+        const descMatch = p.description.toLowerCase().includes(query);
+        const accountMatch = conn?.account_name?.toLowerCase().includes(query);
+        const capMatch = p.capabilitiesList.some(cap => cap.toLowerCase().includes(query));
+        if (!nameMatch && !descMatch && !accountMatch && !capMatch) return false;
+      }
+      return true;
+    });
+  }, [availableProviders, categoryFilter, searchQuery, connections]);
+
+  const verifiedProviders = useMemo(() => {
+    return filteredProviders.filter(p => {
+      const conn = connections.find(c => c.provider === p.id);
+      return conn && (conn.status === 'verified' || conn.status === 'connected');
+    });
+  }, [filteredProviders, connections]);
+
+  const attentionProviders = useMemo(() => {
+    return filteredProviders.filter(p => {
+      const conn = connections.find(c => c.provider === p.id);
+      if (!conn) return false;
+      return (
+        conn.status === 'configured' ||
+        conn.status === 'verification_failed' ||
+        conn.status === 'error' ||
+        conn.status === 'verification_required' ||
+        conn.status === 'needs_auth'
+      );
+    });
+  }, [filteredProviders, connections]);
+
+  const availableToConnectProviders = useMemo(() => {
+    return filteredProviders.filter(p => {
+      const conn = connections.find(c => c.provider === p.id);
+      return !conn || conn.status === 'not_configured' || conn.status === 'disconnected';
+    });
+  }, [filteredProviders, connections]);
+
+  // Overall metric counts across all providers
+  const totalVerifiedCount = connections.filter(c => c.status === 'verified' || c.status === 'connected').length;
+  const totalAttentionCount = connections.filter(c =>
+    c.status === 'configured' ||
+    c.status === 'verification_failed' ||
+    c.status === 'error' ||
+    c.status === 'verification_required' ||
+    c.status === 'needs_auth'
+  ).length;
+  const totalAvailableCount = availableProviders.length - totalVerifiedCount - totalAttentionCount;
+
+  // Filtered executions
+  const filteredExecutions = useMemo(() => {
+    if (actionStatusFilter === 'all') return executions;
+    if (actionStatusFilter === 'pending') {
+      return executions.filter(e => e.status === 'pending_approval' || e.status === 'waiting_approval');
+    }
+    if (actionStatusFilter === 'succeeded') {
+      return executions.filter(e => e.status === 'success' || e.status === 'succeeded');
+    }
+    if (actionStatusFilter === 'failed') {
+      return executions.filter(e => e.status === 'failed' || e.status === 'error');
+    }
+    return executions;
+  }, [executions, actionStatusFilter]);
+
+  // Manage Connection Details
+  const activeManageConn = manageProvider ? connections.find(c => c.provider === manageProvider.id) : null;
+  const manageRecentExecutions = manageProvider
+    ? executions.filter(e => e.action_id.startsWith(manageProvider.id) || (manageProvider.id === 'google_calendar' && e.action_id.startsWith('calendar.'))).slice(0, 5)
+    : [];
+
   return (
-    <div style={{ padding: '28px', maxWidth: '1080px', margin: '0 auto' }}>
+    <div style={{ padding: '28px', maxWidth: '1120px', margin: '0 auto' }}>
       {/* Header */}
-      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: '24px' }}>
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: '24px', flexWrap: 'wrap', gap: '16px' }}>
         <div>
           <h1 style={{ fontSize: '24px', fontWeight: 700, margin: '0 0 6px', color: 'hsl(var(--fg))' }}>
-            Connections & Integrations
+            {t('connHeaderTitle')}
           </h1>
-          <p style={{ margin: 0, fontSize: '14px', color: 'hsl(var(--muted-fg))' }}>
-            Connect your external tools to allow Aether to take real operational actions with safety confirmation.
+          <p style={{ margin: 0, fontSize: '14px', color: 'hsl(var(--muted-fg))', maxWidth: '640px', lineHeight: 1.5 }}>
+            {t('connHeaderSubtitle')}
           </p>
         </div>
-        <div style={{ display: 'flex', gap: '8px' }}>
+        <div style={{ display: 'flex', gap: '10px', alignItems: 'center' }}>
           <button
-            className="btn btn-ghost"
+            className="btn btn-secondary"
             onClick={fetchAll}
             disabled={loading}
             style={{ display: 'flex', alignItems: 'center', gap: '6px', fontSize: '13px' }}
           >
-            <RefreshCw size={14} className={loading ? 'animate-spin' : ''} /> Refresh
+            <RefreshCw size={14} className={loading ? 'animate-spin' : ''} /> {t('connRefresh')}
           </button>
+          <button
+            className="btn btn-primary"
+            onClick={handleSyncAll}
+            disabled={syncingAll}
+            style={{ display: 'flex', alignItems: 'center', gap: '6px', fontSize: '13px' }}
+            title="Sync all connected external tools into workspace memory and knowledge"
+          >
+            <RefreshCw size={14} className={syncingAll ? 'animate-spin' : ''} />
+            {syncingAll ? t('connSyncing') : t('connSyncAll')}
+          </button>
+        </div>
+      </div>
+
+      {/* Summary KPI Banner */}
+      <div style={{
+        display: 'grid',
+        gridTemplateColumns: 'repeat(auto-fit, minmax(210px, 1fr))',
+        gap: '14px',
+        marginBottom: '24px'
+      }}>
+        <div className="card" style={{ padding: '16px 20px', borderRadius: '12px', display: 'flex', alignItems: 'center', gap: '14px' }}>
+          <div style={{ width: '42px', height: '42px', borderRadius: '10px', backgroundColor: 'hsl(var(--primary)/0.1)', color: 'hsl(var(--primary))', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+            <Zap size={22} />
+          </div>
+          <div>
+            <div style={{ fontSize: '20px', fontWeight: 700, color: 'hsl(var(--fg))' }}>{availableProviders.length}</div>
+            <div style={{ fontSize: '12px', color: 'hsl(var(--muted-fg))', fontWeight: 500 }}>{t('connTotalServices')}</div>
+          </div>
+        </div>
+
+        <div className="card" style={{ padding: '16px 20px', borderRadius: '12px', display: 'flex', alignItems: 'center', gap: '14px', borderLeft: '4px solid #10b981' }}>
+          <div style={{ width: '42px', height: '42px', borderRadius: '10px', backgroundColor: '#10b98115', color: '#10b981', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+            <CheckCircle2 size={22} />
+          </div>
+          <div>
+            <div style={{ fontSize: '20px', fontWeight: 700, color: 'hsl(var(--fg))' }}>{totalVerifiedCount}</div>
+            <div style={{ fontSize: '12px', color: 'hsl(var(--muted-fg))', fontWeight: 500 }}>{t('connVerifiedCount')}</div>
+          </div>
+        </div>
+
+        <div className="card" style={{ padding: '16px 20px', borderRadius: '12px', display: 'flex', alignItems: 'center', gap: '14px', borderLeft: totalAttentionCount > 0 ? '4px solid #f59e0b' : undefined }}>
+          <div style={{ width: '42px', height: '42px', borderRadius: '10px', backgroundColor: '#f59e0b15', color: '#f59e0b', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+            <AlertCircle size={22} />
+          </div>
+          <div>
+            <div style={{ fontSize: '20px', fontWeight: 700, color: 'hsl(var(--fg))' }}>{totalAttentionCount}</div>
+            <div style={{ fontSize: '12px', color: 'hsl(var(--muted-fg))', fontWeight: 500 }}>{t('connNeedsAttentionCount')}</div>
+          </div>
+        </div>
+
+        <div className="card" style={{ padding: '16px 20px', borderRadius: '12px', display: 'flex', alignItems: 'center', gap: '14px' }}>
+          <div style={{ width: '42px', height: '42px', borderRadius: '10px', backgroundColor: 'hsl(var(--muted)/0.4)', color: 'hsl(var(--muted-fg))', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+            <Plus size={22} />
+          </div>
+          <div>
+            <div style={{ fontSize: '20px', fontWeight: 700, color: 'hsl(var(--fg))' }}>{totalAvailableCount}</div>
+            <div style={{ fontSize: '12px', color: 'hsl(var(--muted-fg))', fontWeight: 500 }}>{t('connAvailableCount')}</div>
+          </div>
         </div>
       </div>
 
       {/* Navigation Tabs */}
-      <div style={{ display: 'flex', gap: '6px', borderBottom: '1px solid hsl(var(--border))', marginBottom: '24px' }}>
+      <div style={{ display: 'flex', gap: '8px', borderBottom: '1px solid hsl(var(--border))', marginBottom: '24px', flexWrap: 'wrap' }}>
         <button
           className={`btn btn-ghost ${activeTab === 'apps' ? 'active' : ''}`}
           onClick={() => setActiveTab('apps')}
-          style={{ borderBottom: activeTab === 'apps' ? '2px solid hsl(var(--primary))' : 'none', borderRadius: 0, padding: '8px 16px', fontWeight: 600 }}
+          style={{
+            borderBottom: activeTab === 'apps' ? '2px solid hsl(var(--primary))' : 'none',
+            borderRadius: 0,
+            padding: '10px 18px',
+            fontWeight: 600,
+            fontSize: '14px',
+            color: activeTab === 'apps' ? 'hsl(var(--primary))' : undefined
+          }}
         >
-          Connected Apps ({connections.filter(c => c.status === 'verified' || c.status === 'connected' || c.status === 'configured').length})
+          {t('connTabConnectedApps')} ({totalVerifiedCount + totalAttentionCount})
         </button>
         <button
           className={`btn btn-ghost ${activeTab === 'calendar' ? 'active' : ''}`}
           onClick={() => setActiveTab('calendar')}
-          style={{ borderBottom: activeTab === 'calendar' ? '2px solid hsl(var(--primary))' : 'none', borderRadius: 0, padding: '8px 16px', fontWeight: 600 }}
+          style={{
+            borderBottom: activeTab === 'calendar' ? '2px solid hsl(var(--primary))' : 'none',
+            borderRadius: 0,
+            padding: '10px 18px',
+            fontWeight: 600,
+            fontSize: '14px',
+            color: activeTab === 'calendar' ? 'hsl(var(--primary))' : undefined
+          }}
         >
-          Calendar Schedule ({calendarEvents.length})
+          {t('connTabCalendarSchedule')} ({calendarEvents.length + googleCalendarEvents.length})
         </button>
         <button
           className={`btn btn-ghost ${activeTab === 'actions' ? 'active' : ''}`}
           onClick={() => setActiveTab('actions')}
-          style={{ borderBottom: activeTab === 'actions' ? '2px solid hsl(var(--primary))' : 'none', borderRadius: 0, padding: '8px 16px', fontWeight: 600 }}
+          style={{
+            borderBottom: activeTab === 'actions' ? '2px solid hsl(var(--primary))' : 'none',
+            borderRadius: 0,
+            padding: '10px 18px',
+            fontWeight: 600,
+            fontSize: '14px',
+            color: activeTab === 'actions' ? 'hsl(var(--primary))' : undefined
+          }}
         >
-          Action Log ({executions.length})
+          {t('connTabActionLog')} ({executions.length})
         </button>
-        <div style={{ marginLeft: 'auto', display: 'flex', alignItems: 'center' }}>
-          <button
-            className="btn btn-secondary"
-            onClick={handleSyncAll}
-            disabled={syncingAll}
-            style={{ display: 'flex', alignItems: 'center', gap: '6px', fontSize: '12px', padding: '6px 12px' }}
-            title="Sync all connected external tools into workspace memory and knowledge"
-          >
-            <RefreshCw size={12} className={syncingAll ? 'animate-spin' : ''} />
-            {syncingAll ? 'Syncing...' : 'Sync All'}
-          </button>
-        </div>
       </div>
 
-      {/* Tab 1: Apps Grid */}
+      {/* TAB 1: CONNECTED APPS */}
       {activeTab === 'apps' && (
-        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(320px, 1fr))', gap: '16px' }}>
-          {availableProviders.map(p => {
-            const conn = connections.find(c => c.provider === p.id);
-            const status = conn?.status;
-            const isVerified = status === 'verified' || status === 'connected';
-            const isConfiguredStatus = status === 'configured';
-            const isVerificationFailed = status === 'verification_failed' || status === 'error';
-            const isVerificationRequired = status === 'verification_required' || status === 'needs_auth';
-            const isDisconnected = status === 'disconnected';
-            const Icon = p.icon;
+        <div style={{ display: 'flex', flexDirection: 'column', gap: '28px' }}>
+          {/* Controls: Categories & Search */}
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '14px' }}>
+            <div style={{ display: 'flex', gap: '6px', flexWrap: 'wrap' }}>
+              {(['all', 'productivity', 'dev', 'communication'] as CategoryType[]).map(cat => {
+                const label = cat === 'all' ? t('connFilterAll')
+                  : cat === 'productivity' ? t('connFilterProductivity')
+                  : cat === 'dev' ? t('connFilterDev')
+                  : t('connFilterComm');
+                const isSelected = categoryFilter === cat;
+                return (
+                  <button
+                    key={cat}
+                    onClick={() => setCategoryFilter(cat)}
+                    style={{
+                      padding: '6px 14px',
+                      borderRadius: '20px',
+                      fontSize: '12px',
+                      fontWeight: 600,
+                      cursor: 'pointer',
+                      border: isSelected ? '1px solid hsl(var(--primary))' : '1px solid hsl(var(--border))',
+                      backgroundColor: isSelected ? 'hsl(var(--primary)/0.12)' : 'transparent',
+                      color: isSelected ? 'hsl(var(--primary))' : 'hsl(var(--muted-fg))',
+                      transition: 'all 0.15s ease',
+                    }}
+                  >
+                    {label}
+                  </button>
+                );
+              })}
+            </div>
 
-            return (
-              <div
-                key={p.id}
-                className="card"
-                style={{
-                  padding: '20px',
-                  borderRadius: '12px',
-                  border: isVerified
-                    ? '1px solid hsl(var(--primary)/0.4)'
-                    : isConfiguredStatus
-                    ? '1px solid #38bdf840'
-                    : isVerificationFailed
-                    ? '1px solid #ef444440'
-                    : '1px solid hsl(var(--border))',
-                  display: 'flex',
-                  flexDirection: 'column',
-                  justifyContent: 'space-between',
-                  gap: '16px',
-                }}
-              >
-                <div>
-                  <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '12px' }}>
-                    <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
-                      <div style={{
-                        width: '38px',
-                        height: '38px',
-                        borderRadius: '10px',
-                        backgroundColor: `${p.color}15`,
+            <div style={{ position: 'relative', width: '280px' }}>
+              <Search size={14} style={{ position: 'absolute', left: '12px', top: '50%', transform: 'translateY(-50%)', color: 'hsl(var(--muted-fg))' }} />
+              <input
+                type="text"
+                className="input"
+                placeholder={t('connSearchPlaceholder')}
+                value={searchQuery}
+                onChange={e => setSearchQuery(e.target.value)}
+                style={{ width: '100%', paddingLeft: '34px', fontSize: '13px', borderRadius: '8px' }}
+              />
+            </div>
+          </div>
+
+          {/* Section 1: Verified & Operational */}
+          {verifiedProviders.length > 0 && (
+            <div>
+              <div style={{ marginBottom: '14px' }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                  <span style={{ width: '8px', height: '8px', borderRadius: '50%', backgroundColor: '#10b981' }} />
+                  <h2 style={{ fontSize: '16px', fontWeight: 700, margin: 0, color: 'hsl(var(--fg))' }}>
+                    {t('connSecVerified')} ({verifiedProviders.length})
+                  </h2>
+                </div>
+                <p style={{ margin: '3px 0 0 16px', fontSize: '13px', color: 'hsl(var(--muted-fg))' }}>
+                  {t('connSecVerifiedDesc')}
+                </p>
+              </div>
+
+              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(340px, 1fr))', gap: '16px' }}>
+                {verifiedProviders.map(p => {
+                  const conn = connections.find(c => c.provider === p.id);
+                  const Icon = p.icon;
+                  const isGoogle = p.id === 'google_calendar';
+                  const isLocalCal = p.id === 'calendar';
+
+                  return (
+                    <div
+                      key={p.id}
+                      className="card"
+                      style={{
+                        padding: '20px',
+                        borderRadius: '12px',
+                        border: '1px solid #10b98140',
+                        borderLeft: '4px solid #10b981',
                         display: 'flex',
-                        alignItems: 'center',
-                        justifyContent: 'center',
-                        color: p.color,
-                      }}>
-                        <Icon size={20} />
-                      </div>
+                        flexDirection: 'column',
+                        justifyContent: 'space-between',
+                        gap: '16px',
+                        backgroundColor: 'hsl(var(--card))',
+                        boxShadow: '0 2px 8px rgba(0, 0, 0, 0.04)',
+                      }}
+                    >
                       <div>
-                        <div style={{ fontWeight: 600, fontSize: '15px' }}>{p.name}</div>
-                        <div style={{ fontSize: '12px', color: 'hsl(var(--muted-fg))' }}>
-                          {conn ? conn.account_name : (p.builtIn ? 'Local Workspace Engine' : 'Not configured')}
+                        {/* Provider Header */}
+                        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '12px' }}>
+                          <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+                            <div style={{
+                              width: '40px',
+                              height: '40px',
+                              borderRadius: '10px',
+                              backgroundColor: `${p.color}15`,
+                              display: 'flex',
+                              alignItems: 'center',
+                              justifyContent: 'center',
+                              color: p.color,
+                            }}>
+                              <Icon size={20} />
+                            </div>
+                            <div>
+                              <div style={{ fontWeight: 600, fontSize: '15px', color: 'hsl(var(--fg))' }}>{p.name}</div>
+                              <div style={{ fontSize: '12px', color: 'hsl(var(--muted-fg))', fontWeight: 500 }}>
+                                {conn?.account_name || 'Active Account'}
+                              </div>
+                            </div>
+                          </div>
+
+                          <span style={{
+                            display: 'inline-flex',
+                            alignItems: 'center',
+                            gap: '4px',
+                            fontSize: '11px',
+                            color: '#10b981',
+                            fontWeight: 600,
+                            backgroundColor: '#10b98115',
+                            padding: '4px 10px',
+                            borderRadius: '12px',
+                          }}>
+                            <CheckCircle2 size={13} /> {isGoogle ? t('connStatusConnectedVerified') : t('connStatusVerified')}
+                          </span>
+                        </div>
+
+                        {/* Description */}
+                        <p style={{ fontSize: '13px', color: 'hsl(var(--muted-fg))', margin: '0 0 12px', lineHeight: 1.45 }}>
+                          {p.description}
+                        </p>
+
+                        {/* Key Capabilities Chips */}
+                        <div style={{ display: 'flex', flexWrap: 'wrap', gap: '5px', marginBottom: '12px' }}>
+                          {p.capabilitiesList.slice(0, 3).map((cap, i) => (
+                            <span
+                              key={i}
+                              style={{
+                                fontSize: '11px',
+                                backgroundColor: 'hsl(var(--muted)/0.4)',
+                                color: 'hsl(var(--fg))',
+                                padding: '2px 8px',
+                                borderRadius: '4px',
+                                display: 'inline-flex',
+                                alignItems: 'center',
+                                gap: '3px',
+                              }}
+                            >
+                              <Check size={10} style={{ color: '#10b981' }} /> {cap}
+                            </span>
+                          ))}
+                        </div>
+
+                        {/* Live Metadata Badges */}
+                        <div style={{ display: 'flex', flexDirection: 'column', gap: '4px', fontSize: '11px', color: 'hsl(var(--muted-fg))' }}>
+                          {isGoogle && conn?.auth_metadata && (
+                            <div style={{ color: '#4285F4', display: 'flex', alignItems: 'center', gap: '4px', fontWeight: 500 }}>
+                              <Calendar size={11} /> {t('connPrimaryCalendar')}: {conn.auth_metadata.selected_calendar_summary || conn.auth_metadata.selected_calendar_id || 'Primary'}
+                            </div>
+                          )}
+                          {conn?.last_verified_at && (
+                            <div style={{ display: 'flex', alignItems: 'center', gap: '4px', color: '#10b981' }}>
+                              <ShieldCheck size={11} /> {t('connLastVerified')}: {new Date(conn.last_verified_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', month: 'short', day: 'numeric' })}
+                              {conn.verification_method ? ` (${conn.verification_method})` : ''}
+                            </div>
+                          )}
+                          {conn?.last_synced_at && (
+                            <div style={{ display: 'flex', alignItems: 'center', gap: '4px' }}>
+                              <Clock size={11} /> {t('connLastSynced')}: {new Date(conn.last_synced_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', month: 'short', day: 'numeric' })}
+                            </div>
+                          )}
+                          {conn?.last_successful_operation && (
+                            <div style={{ display: 'flex', alignItems: 'center', gap: '4px' }}>
+                              <Zap size={11} /> {t('connLastOp')}: {conn.last_successful_operation}
+                            </div>
+                          )}
                         </div>
                       </div>
-                    </div>
-                    {p.id === 'google_calendar' && (googleAuthPending || verifyingProvider === 'google_calendar') ? (
-                      <span style={{ display: 'flex', alignItems: 'center', gap: '4px', fontSize: '12px', color: '#f59e0b', fontWeight: 600 }}>
-                        <RefreshCw size={14} className="animate-spin" /> Verifica in corso
-                      </span>
-                    ) : p.id === 'google_calendar' && isVerificationFailed ? (
-                      <span style={{ display: 'flex', alignItems: 'center', gap: '4px', fontSize: '12px', color: '#ef4444', fontWeight: 600 }}>
-                        <AlertCircle size={14} /> Authorization Failed
-                      </span>
-                    ) : isVerified ? (
-                      <span style={{ display: 'flex', alignItems: 'center', gap: '4px', fontSize: '12px', color: '#10b981', fontWeight: 600 }}>
-                        <CheckCircle2 size={14} /> {p.id === 'google_calendar' ? 'Connected & Verified' : 'Verified'}
-                      </span>
-                    ) : isConfiguredStatus ? (
-                      <span style={{ display: 'flex', alignItems: 'center', gap: '4px', fontSize: '12px', color: '#38bdf8', fontWeight: 600 }}>
-                        <ShieldCheck size={14} /> Configured
-                      </span>
-                    ) : isVerificationFailed ? (
-                      <span style={{ display: 'flex', alignItems: 'center', gap: '4px', fontSize: '12px', color: '#ef4444', fontWeight: 600 }}>
-                        <AlertCircle size={14} /> Verification Failed
-                      </span>
-                    ) : isVerificationRequired ? (
-                      <span style={{ display: 'flex', alignItems: 'center', gap: '4px', fontSize: '12px', color: '#f59e0b', fontWeight: 600 }}>
-                        <AlertCircle size={14} /> Needs Auth
-                      </span>
-                    ) : isDisconnected ? (
-                      <span style={{ fontSize: '12px', color: 'hsl(var(--muted-fg))' }}>
-                        Disconnected
-                      </span>
-                    ) : (
-                      <span style={{ fontSize: '12px', color: 'hsl(var(--muted-fg))' }}>
-                        {p.builtIn ? 'Ready (Local)' : 'Not configured'}
-                      </span>
-                    )}
-                  </div>
-                  <p style={{ fontSize: '13px', color: 'hsl(var(--muted-fg))', margin: 0, lineHeight: 1.4 }}>
-                    {p.description}
-                  </p>
-                  {p.id === 'google_calendar' && conn && isVerified && (
-                    <div style={{ fontSize: '11px', color: '#4285F4', display: 'flex', alignItems: 'center', gap: '4px', marginTop: '6px', fontWeight: 500 }}>
-                      <Calendar size={11} /> Calendar: {conn.auth_metadata?.selected_calendar_summary || conn.auth_metadata?.selected_calendar_id || 'Primary'}
-                    </div>
-                  )}
-                  {conn?.last_verified_at && (
-                    <div style={{ fontSize: '11px', color: '#10b981', display: 'flex', alignItems: 'center', gap: '4px', marginTop: '6px' }}>
-                      <CheckCircle2 size={11} /> Verified: {new Date(conn.last_verified_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', month: 'short', day: 'numeric' })}
-                      {conn.verification_method ? ` (${conn.verification_method})` : ''}
-                    </div>
-                  )}
-                  {conn?.last_successful_operation && (
-                    <div style={{ fontSize: '11px', color: 'hsl(var(--muted-fg))', display: 'flex', alignItems: 'center', gap: '4px', marginTop: '3px' }}>
-                      <Zap size={11} /> Last Op: {conn.last_successful_operation}
-                    </div>
-                  )}
-                  {isVerificationFailed && conn?.last_verification_error && (
-                    <div style={{ fontSize: '11px', color: '#ef4444', marginTop: '5px', lineHeight: 1.3 }}>
-                      {conn.last_verification_error}
-                    </div>
-                  )}
-                  {isConfiguredStatus && (
-                    <div style={{ fontSize: '11px', color: '#38bdf8', marginTop: '5px' }}>
-                      Credentials saved. Live probe pending.
-                    </div>
-                  )}
-                  {conn?.last_synced_at && (
-                    <div style={{ fontSize: '11px', color: 'hsl(var(--muted-fg))', display: 'flex', alignItems: 'center', gap: '4px', marginTop: '4px' }}>
-                      <Clock size={11} /> Last synced: {new Date(conn.last_synced_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', month: 'short', day: 'numeric' })}
-                    </div>
-                  )}
-                </div>
 
-                <div style={{ display: 'flex', justifyContent: 'flex-end', flexWrap: 'wrap', gap: '8px', borderTop: '1px solid hsl(var(--border)/0.5)', paddingTop: '14px' }}>
-                  {p.id === 'calendar' ? (
-                    <>
-                      {isVerified ? (
-                        <>
+                      {/* Primary Actions */}
+                      <div style={{ display: 'flex', justifyContent: 'flex-end', flexWrap: 'wrap', gap: '8px', borderTop: '1px solid hsl(var(--border)/0.5)', paddingTop: '14px' }}>
+                        {isLocalCal ? (
                           <button
                             className="btn btn-secondary"
                             onClick={() => {
@@ -1004,40 +1318,39 @@ export function Connections({ navigate: _navigate, initialExecutionId, initialTa
                             }}
                             style={{ fontSize: '12px', padding: '6px 12px' }}
                           >
-                            View Schedule
+                            {t('connViewSchedule')}
                           </button>
-                          <button
-                            className="btn btn-ghost"
-                            onClick={() => handleDisconnect(p.id)}
-                            style={{ fontSize: '12px', padding: '6px 12px', color: 'hsl(var(--destructive))' }}
-                          >
-                            Disconnect
-                          </button>
-                        </>
-                      ) : (
-                        <button
-                          className="btn btn-primary"
-                          onClick={handleConnectCalendar}
-                          style={{ fontSize: '12px', padding: '6px 14px' }}
-                        >
-                          Initialize Calendar
-                        </button>
-                      )}
-                    </>
-                  ) : p.id === 'google_calendar' ? (
-                    <>
-                      {isVerified ? (
-                        <>
-                          <button
-                            className="btn btn-secondary"
-                            onClick={() => {
-                              setSelectedScheduleSource('google');
-                              setActiveTab('calendar');
-                            }}
-                            style={{ fontSize: '12px', padding: '6px 12px' }}
-                          >
-                            View Schedule
-                          </button>
+                        ) : isGoogle ? (
+                          <>
+                            <button
+                              className="btn btn-secondary"
+                              onClick={() => {
+                                setSelectedScheduleSource('google');
+                                setActiveTab('calendar');
+                              }}
+                              style={{ fontSize: '12px', padding: '6px 12px' }}
+                            >
+                              {t('connViewSchedule')}
+                            </button>
+                            <button
+                              className="btn btn-secondary"
+                              onClick={() => handleSync(p.id)}
+                              disabled={syncingProvider === p.id}
+                              style={{ fontSize: '12px', padding: '6px 12px', display: 'flex', alignItems: 'center', gap: '4px' }}
+                              title="Sync external entities into persistent memory and knowledge"
+                            >
+                              <RefreshCw size={12} className={syncingProvider === p.id ? 'animate-spin' : ''} />
+                              {syncingProvider === p.id ? t('connSyncing') : t('connSyncNow')}
+                            </button>
+                            <button
+                              className="btn btn-secondary"
+                              onClick={handleOpenCalendarPicker}
+                              style={{ fontSize: '12px', padding: '6px 12px', display: 'flex', alignItems: 'center', gap: '4px' }}
+                            >
+                              <Calendar size={12} /> Select Calendar
+                            </button>
+                          </>
+                        ) : (
                           <button
                             className="btn btn-secondary"
                             onClick={() => handleSync(p.id)}
@@ -1046,121 +1359,337 @@ export function Connections({ navigate: _navigate, initialExecutionId, initialTa
                             title="Sync external entities into persistent memory and knowledge"
                           >
                             <RefreshCw size={12} className={syncingProvider === p.id ? 'animate-spin' : ''} />
-                            {syncingProvider === p.id ? 'Syncing...' : 'Sync Now'}
+                            {syncingProvider === p.id ? t('connSyncing') : t('connSyncNow')}
                           </button>
-                          <button
-                            className="btn btn-secondary"
-                            onClick={handleOpenCalendarPicker}
-                            style={{ fontSize: '12px', padding: '6px 12px', display: 'flex', alignItems: 'center', gap: '4px' }}
-                          >
-                            <Settings size={12} /> Select Calendar
-                          </button>
-                          <button
-                            className="btn btn-ghost"
-                            onClick={() => handleDisconnect(p.id)}
-                            style={{ fontSize: '12px', padding: '6px 12px', color: 'hsl(var(--destructive))' }}
-                          >
-                            Disconnect / Revoke
-                          </button>
-                        </>
-                      ) : (googleAuthPending || verifyingProvider === 'google_calendar') ? (
+                        )}
+
                         <button
                           className="btn btn-secondary"
-                          disabled
-                          style={{ fontSize: '12px', padding: '6px 14px', display: 'flex', alignItems: 'center', gap: '4px' }}
-                        >
-                          <RefreshCw size={12} className="animate-spin" /> Verifica in corso...
-                        </button>
-                      ) : isVerificationFailed ? (
-                        <button
-                          className="btn btn-primary"
-                          onClick={() => {
-                            if (conn?.auth_metadata?.client_id) setGoogleClientId(conn.auth_metadata.client_id);
-                            setIsGoogleModalOpen(true);
-                          }}
-                          style={{ fontSize: '12px', padding: '6px 14px' }}
-                        >
-                          Retry Authorization
-                        </button>
-                      ) : (
-                        <button
-                          className="btn btn-primary"
-                          onClick={() => {
-                            if (conn?.auth_metadata?.client_id) setGoogleClientId(conn.auth_metadata.client_id);
-                            setIsGoogleModalOpen(true);
-                          }}
-                          style={{ fontSize: '12px', padding: '6px 14px' }}
-                        >
-                          Connect Google Calendar
-                        </button>
-                      )}
-                    </>
-                  ) : (
-                    <>
-                      {isVerified && (
-                        <button
-                          className="btn btn-secondary"
-                          onClick={() => handleSync(p.id)}
-                          disabled={syncingProvider === p.id}
+                          onClick={() => setManageProvider(p)}
                           style={{ fontSize: '12px', padding: '6px 12px', display: 'flex', alignItems: 'center', gap: '4px' }}
-                          title="Sync external entities into persistent memory and knowledge"
                         >
-                          <RefreshCw size={12} className={syncingProvider === p.id ? 'animate-spin' : ''} />
-                          {syncingProvider === p.id ? 'Syncing...' : 'Sync Now'}
+                          <Settings size={12} /> {t('connManage')}
                         </button>
-                      )}
-                      {(isConfiguredStatus || isVerificationFailed || isVerified) && (
-                        <button
-                          className={`btn ${isConfiguredStatus || isVerificationFailed ? 'btn-primary' : 'btn-secondary'}`}
-                          onClick={() => handleVerifyConnection(p.id)}
-                          disabled={verifyingProvider === p.id}
-                          style={{ fontSize: '12px', padding: '6px 12px', display: 'flex', alignItems: 'center', gap: '4px' }}
-                          title="Perform live credentials test"
-                        >
-                          <ShieldCheck size={12} className={verifyingProvider === p.id ? 'animate-spin' : ''} />
-                          {verifyingProvider === p.id ? 'Verifying...' : isVerificationFailed ? 'Retry Verify' : 'Verify'}
-                        </button>
-                      )}
-                      {conn && !isDisconnected ? (
-                        <>
-                          <button
-                            className="btn btn-secondary"
-                            onClick={() => openConfigModal(p, conn)}
-                            style={{ fontSize: '12px', padding: '6px 12px', display: 'flex', alignItems: 'center', gap: '4px' }}
-                          >
-                            <Settings size={12} /> Configure
-                          </button>
-                          <button
-                            className="btn btn-ghost"
-                            onClick={() => handleDisconnect(p.id)}
-                            style={{ fontSize: '12px', padding: '6px 12px', color: 'hsl(var(--destructive))' }}
-                          >
-                            Disconnect
-                          </button>
-                        </>
-                      ) : (
-                        <button
-                          className="btn btn-primary"
-                          onClick={() => openConfigModal(p, conn)}
-                          style={{ fontSize: '12px', padding: '6px 14px' }}
-                        >
-                          Configure & Connect
-                        </button>
-                      )}
-                    </>
-                  )}
-                </div>
+                      </div>
+                    </div>
+                  );
+                })}
               </div>
-            );
-          })}
+            </div>
+          )}
+
+          {/* Section 2: Needs Attention */}
+          {attentionProviders.length > 0 && (
+            <div>
+              <div style={{ marginBottom: '14px' }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                  <span style={{ width: '8px', height: '8px', borderRadius: '50%', backgroundColor: '#f59e0b' }} />
+                  <h2 style={{ fontSize: '16px', fontWeight: 700, margin: 0, color: 'hsl(var(--fg))' }}>
+                    {t('connSecNeedsAttention')} ({attentionProviders.length})
+                  </h2>
+                </div>
+                <p style={{ margin: '3px 0 0 16px', fontSize: '13px', color: 'hsl(var(--muted-fg))' }}>
+                  {t('connSecNeedsAttentionDesc')}
+                </p>
+              </div>
+
+              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(340px, 1fr))', gap: '16px' }}>
+                {attentionProviders.map(p => {
+                  const conn = connections.find(c => c.provider === p.id);
+                  const Icon = p.icon;
+                  const status = conn?.status;
+                  const isFailed = status === 'verification_failed' || status === 'error';
+                  const isNeedsAuth = status === 'verification_required' || status === 'needs_auth';
+                  const isVerifying = verifyingProvider === p.id || (p.id === 'google_calendar' && googleAuthPending);
+                  const diagnostic = diagnoseError(conn?.last_verification_error);
+
+                  return (
+                    <div
+                      key={p.id}
+                      className="card"
+                      style={{
+                        padding: '20px',
+                        borderRadius: '12px',
+                        border: isFailed ? '1px solid #ef444440' : '1px solid #f59e0b40',
+                        borderLeft: isFailed ? '4px solid #ef4444' : '4px solid #f59e0b',
+                        display: 'flex',
+                        flexDirection: 'column',
+                        justifyContent: 'space-between',
+                        gap: '16px',
+                        backgroundColor: 'hsl(var(--card))',
+                      }}
+                    >
+                      <div>
+                        {/* Provider Header */}
+                        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '12px' }}>
+                          <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+                            <div style={{
+                              width: '40px',
+                              height: '40px',
+                              borderRadius: '10px',
+                              backgroundColor: `${p.color}15`,
+                              display: 'flex',
+                              alignItems: 'center',
+                              justifyContent: 'center',
+                              color: p.color,
+                            }}>
+                              <Icon size={20} />
+                            </div>
+                            <div>
+                              <div style={{ fontWeight: 600, fontSize: '15px', color: 'hsl(var(--fg))' }}>{p.name}</div>
+                              <div style={{ fontSize: '12px', color: 'hsl(var(--muted-fg))', fontWeight: 500 }}>
+                                {conn?.account_name || 'Configured'}
+                              </div>
+                            </div>
+                          </div>
+
+                          {isVerifying ? (
+                            <span style={{ display: 'inline-flex', alignItems: 'center', gap: '4px', fontSize: '11px', color: '#f59e0b', fontWeight: 600, backgroundColor: '#f59e0b15', padding: '4px 10px', borderRadius: '12px' }}>
+                              <RefreshCw size={12} className="animate-spin" /> {t('connStatusVerifying')}
+                            </span>
+                          ) : isFailed ? (
+                            <span style={{ display: 'inline-flex', alignItems: 'center', gap: '4px', fontSize: '11px', color: '#ef4444', fontWeight: 600, backgroundColor: '#ef444415', padding: '4px 10px', borderRadius: '12px' }}>
+                              <AlertCircle size={12} /> {t('connStatusVerifFailed')}
+                            </span>
+                          ) : isNeedsAuth ? (
+                            <span style={{ display: 'inline-flex', alignItems: 'center', gap: '4px', fontSize: '11px', color: '#f59e0b', fontWeight: 600, backgroundColor: '#f59e0b15', padding: '4px 10px', borderRadius: '12px' }}>
+                              <AlertCircle size={12} /> {t('connStatusNeedsAuth')}
+                            </span>
+                          ) : (
+                            <span style={{ display: 'inline-flex', alignItems: 'center', gap: '4px', fontSize: '11px', color: '#38bdf8', fontWeight: 600, backgroundColor: '#38bdf815', padding: '4px 10px', borderRadius: '12px' }}>
+                              <ShieldCheck size={12} /> {t('connStatusConfigured')}
+                            </span>
+                          )}
+                        </div>
+
+                        {/* Error Diagnostic Box */}
+                        {isFailed && diagnostic ? (
+                          <div style={{
+                            padding: '10px 12px',
+                            borderRadius: '8px',
+                            backgroundColor: '#ef444410',
+                            border: '1px solid #ef444420',
+                            marginBottom: '12px',
+                          }}>
+                            <div style={{ fontWeight: 600, fontSize: '12px', color: '#ef4444', display: 'flex', alignItems: 'center', gap: '6px' }}>
+                              <AlertTriangle size={13} /> {diagnostic.title}
+                            </div>
+                            <div style={{ fontSize: '11px', color: 'hsl(var(--fg))', marginTop: '2px', lineHeight: 1.4 }}>
+                              {diagnostic.desc}
+                            </div>
+                            {conn?.last_verification_error && (
+                              <details style={{ marginTop: '6px', fontSize: '10px', color: 'hsl(var(--muted-fg))' }}>
+                                <summary style={{ cursor: 'pointer', userSelect: 'none' }}>{t('connShowTechDetails')}</summary>
+                                <pre style={{ margin: '4px 0 0', padding: '6px', backgroundColor: 'hsl(var(--muted)/0.5)', borderRadius: '4px', overflowX: 'auto', fontFamily: 'monospace' }}>
+                                  {conn.last_verification_error}
+                                </pre>
+                              </details>
+                            )}
+                          </div>
+                        ) : (
+                          <div style={{
+                            padding: '8px 12px',
+                            borderRadius: '8px',
+                            backgroundColor: '#38bdf810',
+                            border: '1px solid #38bdf820',
+                            marginBottom: '12px',
+                            fontSize: '12px',
+                            color: '#0284c7',
+                            display: 'flex',
+                            alignItems: 'center',
+                            gap: '6px',
+                          }}>
+                            <ShieldCheck size={14} />
+                            <span>Credentials saved in keychain. Awaiting live network probe.</span>
+                          </div>
+                        )}
+
+                        <p style={{ fontSize: '13px', color: 'hsl(var(--muted-fg))', margin: 0, lineHeight: 1.4 }}>
+                          {p.description}
+                        </p>
+                      </div>
+
+                      {/* Primary Actions */}
+                      <div style={{ display: 'flex', justifyContent: 'flex-end', flexWrap: 'wrap', gap: '8px', borderTop: '1px solid hsl(var(--border)/0.5)', paddingTop: '14px' }}>
+                        {p.id === 'google_calendar' ? (
+                          <button
+                            className="btn btn-primary"
+                            onClick={() => {
+                              if (conn?.auth_metadata?.client_id) setGoogleClientId(conn.auth_metadata.client_id);
+                              setIsGoogleModalOpen(true);
+                            }}
+                            disabled={isVerifying}
+                            style={{ fontSize: '12px', padding: '6px 14px' }}
+                          >
+                            {isVerifying ? (
+                              <span style={{ display: 'flex', alignItems: 'center', gap: '4px' }}>
+                                <RefreshCw size={12} className="animate-spin" /> {t('connStatusVerifying')}
+                              </span>
+                            ) : (
+                              t('connReconnect')
+                            )}
+                          </button>
+                        ) : (
+                          <button
+                            className="btn btn-primary"
+                            onClick={() => handleVerifyConnection(p.id)}
+                            disabled={isVerifying}
+                            style={{ fontSize: '12px', padding: '6px 14px', display: 'flex', alignItems: 'center', gap: '4px' }}
+                          >
+                            <ShieldCheck size={13} className={isVerifying ? 'animate-spin' : ''} />
+                            {isVerifying ? t('connStatusVerifying') : isFailed ? t('connRetryVerify') : t('connVerify')}
+                          </button>
+                        )}
+
+                        <button
+                          className="btn btn-secondary"
+                          onClick={() => setManageProvider(p)}
+                          style={{ fontSize: '12px', padding: '6px 12px', display: 'flex', alignItems: 'center', gap: '4px' }}
+                        >
+                          <Settings size={12} /> {t('connManage')}
+                        </button>
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+          )}
+
+          {/* Section 3: Available to Connect */}
+          {availableToConnectProviders.length > 0 && (
+            <div>
+              <div style={{ marginBottom: '14px' }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                  <span style={{ width: '8px', height: '8px', borderRadius: '50%', backgroundColor: 'hsl(var(--muted-fg))' }} />
+                  <h2 style={{ fontSize: '16px', fontWeight: 700, margin: 0, color: 'hsl(var(--fg))' }}>
+                    {t('connSecAvailable')} ({availableToConnectProviders.length})
+                  </h2>
+                </div>
+                <p style={{ margin: '3px 0 0 16px', fontSize: '13px', color: 'hsl(var(--muted-fg))' }}>
+                  {t('connSecAvailableDesc')}
+                </p>
+              </div>
+
+              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(340px, 1fr))', gap: '16px' }}>
+                {availableToConnectProviders.map(p => {
+                  const conn = connections.find(c => c.provider === p.id);
+                  const Icon = p.icon;
+                  const isDisconnected = conn?.status === 'disconnected';
+
+                  return (
+                    <div
+                      key={p.id}
+                      className="card"
+                      style={{
+                        padding: '20px',
+                        borderRadius: '12px',
+                        border: '1px solid hsl(var(--border))',
+                        display: 'flex',
+                        flexDirection: 'column',
+                        justifyContent: 'space-between',
+                        gap: '16px',
+                        backgroundColor: 'hsl(var(--card))',
+                      }}
+                    >
+                      <div>
+                        {/* Provider Header */}
+                        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '12px' }}>
+                          <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+                            <div style={{
+                              width: '40px',
+                              height: '40px',
+                              borderRadius: '10px',
+                              backgroundColor: `${p.color}15`,
+                              display: 'flex',
+                              alignItems: 'center',
+                              justifyContent: 'center',
+                              color: p.color,
+                            }}>
+                              <Icon size={20} />
+                            </div>
+                            <div>
+                              <div style={{ fontWeight: 600, fontSize: '15px', color: 'hsl(var(--fg))' }}>{p.name}</div>
+                              <div style={{ fontSize: '12px', color: 'hsl(var(--muted-fg))' }}>
+                                {p.builtIn ? 'Local Workspace Engine' : isDisconnected ? t('connStatusDisconnected') : t('connStatusNotConfigured')}
+                              </div>
+                            </div>
+                          </div>
+
+                          <span style={{ fontSize: '11px', color: 'hsl(var(--muted-fg))', backgroundColor: 'hsl(var(--muted)/0.4)', padding: '3px 8px', borderRadius: '10px' }}>
+                            {isDisconnected ? t('connStatusDisconnected') : t('connStatusNotConfigured')}
+                          </span>
+                        </div>
+
+                        {/* Description */}
+                        <p style={{ fontSize: '13px', color: 'hsl(var(--muted-fg))', margin: '0 0 12px', lineHeight: 1.45 }}>
+                          {p.description}
+                        </p>
+
+                        {/* Capabilities Preview */}
+                        <div style={{ display: 'flex', flexWrap: 'wrap', gap: '5px' }}>
+                          {p.capabilitiesList.slice(0, 2).map((cap, i) => (
+                            <span
+                              key={i}
+                              style={{
+                                fontSize: '11px',
+                                backgroundColor: 'hsl(var(--muted)/0.4)',
+                                color: 'hsl(var(--muted-fg))',
+                                padding: '2px 8px',
+                                borderRadius: '4px',
+                              }}
+                            >
+                              • {cap}
+                            </span>
+                          ))}
+                        </div>
+                      </div>
+
+                      {/* Primary Connect Action */}
+                      <div style={{ display: 'flex', justifyContent: 'flex-end', borderTop: '1px solid hsl(var(--border)/0.5)', paddingTop: '14px' }}>
+                        {p.id === 'calendar' ? (
+                          <button
+                            className="btn btn-primary"
+                            onClick={handleConnectCalendar}
+                            style={{ fontSize: '12px', padding: '6px 14px' }}
+                          >
+                            Initialize Calendar
+                          </button>
+                        ) : p.id === 'google_calendar' ? (
+                          <button
+                            className="btn btn-primary"
+                            onClick={() => {
+                              if (conn?.auth_metadata?.client_id) setGoogleClientId(conn.auth_metadata.client_id);
+                              setIsGoogleModalOpen(true);
+                            }}
+                            style={{ fontSize: '12px', padding: '6px 14px', backgroundColor: '#4285F4', borderColor: '#4285F4', color: '#fff' }}
+                          >
+                            Connect Google Calendar
+                          </button>
+                        ) : (
+                          <button
+                            className="btn btn-primary"
+                            onClick={() => openConfigModal(p, conn)}
+                            style={{ fontSize: '12px', padding: '6px 14px' }}
+                          >
+                            {isDisconnected ? t('connReconnect') : t('connConnect')}
+                          </button>
+                        )}
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+          )}
         </div>
       )}
 
-      {/* Tab 2: Calendar Schedule */}
+      {/* TAB 2: CALENDAR SCHEDULE */}
       {activeTab === 'calendar' && (
         <div>
           {/* Calendar Source Switcher */}
-          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '16px' }}>
+          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '16px', flexWrap: 'wrap', gap: '10px' }}>
             <div style={{ display: 'flex', gap: '8px' }}>
               <button
                 className={`btn ${selectedScheduleSource === 'local' ? 'btn-primary' : 'btn-secondary'}`}
@@ -1274,160 +1803,510 @@ export function Connections({ navigate: _navigate, initialExecutionId, initialTa
         </div>
       )}
 
-      {/* Tab 3: Action Executions Log */}
+      {/* TAB 3: ACTION EXECUTIONS LOG */}
       {activeTab === 'actions' && (
-        <div style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
-          {executions.length === 0 ? (
-            <div className="card" style={{ padding: '40px', textAlign: 'center', color: 'hsl(var(--muted-fg))' }}>
-              <Zap size={32} style={{ margin: '0 auto 12px', opacity: 0.5 }} />
-              <div style={{ fontWeight: 600, marginBottom: '4px' }}>No action executions recorded yet</div>
-              <div style={{ fontSize: '13px' }}>Actions executed by Aether or requiring approval will be audited here.</div>
-            </div>
-          ) : (
-            executions.map(exec => {
-              const summary = getActionSummary(exec);
-              const detail = getActionDetail(exec);
-              const isTargeted = initialExecutionId === exec.id;
-              return (
-                <div
-                  key={exec.id}
-                  id={`exec-card-${exec.id}`}
-                  className="card"
-                  style={{
-                    padding: '16px 20px',
-                    borderRadius: '10px',
-                    display: 'flex',
-                    flexDirection: 'column',
-                    gap: '8px',
-                    border: isTargeted ? '2px solid hsl(var(--primary))' : undefined,
-                    boxShadow: isTargeted ? '0 0 16px rgba(99, 102, 241, 0.25)' : undefined,
-                    transition: 'all 0.3s ease',
-                  }}
-                >
-                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
-                    <div>
-                      <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+        <div>
+          {/* Action Status Filters */}
+          <div style={{ display: 'flex', gap: '8px', marginBottom: '16px', alignItems: 'center' }}>
+            <span style={{ fontSize: '12px', color: 'hsl(var(--muted-fg))', fontWeight: 600 }}>Filter:</span>
+            {['all', 'pending', 'succeeded', 'failed'].map(f => (
+              <button
+                key={f}
+                onClick={() => setActionStatusFilter(f)}
+                style={{
+                  padding: '4px 10px',
+                  borderRadius: '12px',
+                  fontSize: '11px',
+                  fontWeight: 600,
+                  cursor: 'pointer',
+                  border: actionStatusFilter === f ? '1px solid hsl(var(--primary))' : '1px solid hsl(var(--border))',
+                  backgroundColor: actionStatusFilter === f ? 'hsl(var(--primary)/0.12)' : 'transparent',
+                  color: actionStatusFilter === f ? 'hsl(var(--primary))' : 'hsl(var(--muted-fg))',
+                }}
+              >
+                {f.toUpperCase()}
+              </button>
+            ))}
+          </div>
+
+          <div style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
+            {filteredExecutions.length === 0 ? (
+              <div className="card" style={{ padding: '40px', textAlign: 'center', color: 'hsl(var(--muted-fg))' }}>
+                <Zap size={32} style={{ margin: '0 auto 12px', opacity: 0.5 }} />
+                <div style={{ fontWeight: 600, marginBottom: '4px' }}>No action executions recorded yet</div>
+                <div style={{ fontSize: '13px' }}>Actions executed by Aether or requiring approval will be audited here.</div>
+              </div>
+            ) : (
+              filteredExecutions.map(exec => {
+                const summary = getActionSummary(exec);
+                const detail = getActionDetail(exec);
+                const isTargeted = initialExecutionId === exec.id;
+                return (
+                  <div
+                    key={exec.id}
+                    id={`exec-card-${exec.id}`}
+                    className="card"
+                    style={{
+                      padding: '16px 20px',
+                      borderRadius: '10px',
+                      display: 'flex',
+                      flexDirection: 'column',
+                      gap: '8px',
+                      border: isTargeted ? '2px solid hsl(var(--primary))' : undefined,
+                      boxShadow: isTargeted ? '0 0 16px rgba(99, 102, 241, 0.25)' : undefined,
+                      transition: 'all 0.3s ease',
+                    }}
+                  >
+                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', flexWrap: 'wrap', gap: '8px' }}>
+                      <div>
+                        <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                          <span style={{
+                            fontSize: '11px',
+                            fontWeight: 700,
+                            padding: '2px 8px',
+                            borderRadius: '4px',
+                            backgroundColor: 'hsl(var(--muted)/0.4)',
+                            color: 'hsl(var(--fg))',
+                          }}>
+                            {exec.action_id}
+                          </span>
+                          <span style={{ fontWeight: 600, fontSize: '14px', color: 'hsl(var(--fg))' }}>
+                            {summary}
+                          </span>
+                        </div>
+                        {detail && (
+                          <div style={{ fontSize: '12px', color: 'hsl(var(--muted-fg))', marginTop: '4px', paddingLeft: '4px', fontStyle: 'italic' }}>
+                            "{detail}"
+                          </div>
+                        )}
+                        <div style={{ fontSize: '11px', color: 'hsl(var(--muted-fg))', marginTop: '6px' }}>
+                          ID: {exec.id} • {exec.created_at ? new Date(exec.created_at).toLocaleString() : ''}
+                        </div>
+                      </div>
+                      <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: '4px' }}>
                         <span style={{
                           fontSize: '11px',
-                          fontWeight: 700,
-                          padding: '2px 8px',
-                          borderRadius: '4px',
-                          backgroundColor: 'hsl(var(--muted)/0.4)',
-                          color: 'hsl(var(--fg))',
+                          fontWeight: 600,
+                          padding: '3px 10px',
+                          borderRadius: '10px',
+                          backgroundColor: (exec.status === 'success' || exec.status === 'succeeded') ? '#10b98115' : (exec.status === 'pending_approval' || exec.status === 'waiting_approval') ? '#f59e0b15' : (exec.status === 'running' || exec.status === 'queued') ? '#3b82f615' : '#ef444415',
+                          color: (exec.status === 'success' || exec.status === 'succeeded') ? '#10b981' : (exec.status === 'pending_approval' || exec.status === 'waiting_approval') ? '#f59e0b' : (exec.status === 'running' || exec.status === 'queued') ? '#3b82f6' : '#ef4444',
                         }}>
-                          {exec.action_id}
+                          {exec.status.toUpperCase()}
                         </span>
-                        <span style={{ fontWeight: 600, fontSize: '14px', color: 'hsl(var(--fg))' }}>
-                          {summary}
-                        </span>
-                      </div>
-                      {detail && (
-                        <div style={{ fontSize: '12px', color: 'hsl(var(--muted-fg))', marginTop: '4px', paddingLeft: '4px', fontStyle: 'italic' }}>
-                          "{detail}"
-                        </div>
-                      )}
-                      <div style={{ fontSize: '11px', color: 'hsl(var(--muted-fg))', marginTop: '6px' }}>
-                        ID: {exec.id} • {exec.created_at ? new Date(exec.created_at).toLocaleString() : ''}
                       </div>
                     </div>
-                    <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: '4px' }}>
+
+                    {exec.error_message && (
+                      <div style={{
+                        fontSize: '12px',
+                        color: '#ef4444',
+                        backgroundColor: '#ef444410',
+                        border: '1px solid #ef444420',
+                        padding: '8px 12px',
+                        borderRadius: '6px',
+                        marginTop: '4px',
+                      }}>
+                        <strong>Error:</strong> {exec.error_message}
+                      </div>
+                    )}
+
+                    {(exec.status === 'success' || exec.status === 'succeeded') && exec.output_data && (
+                      <div style={{
+                        fontSize: '12px',
+                        color: 'hsl(var(--muted-fg))',
+                        backgroundColor: 'hsl(var(--muted)/0.2)',
+                        padding: '6px 10px',
+                        borderRadius: '6px',
+                        fontFamily: 'monospace',
+                        overflow: 'hidden',
+                        textOverflow: 'ellipsis',
+                        whiteSpace: 'nowrap',
+                      }}>
+                        Result: {typeof exec.output_data === 'string' ? exec.output_data : JSON.stringify(exec.output_data).slice(0, 160)}
+                      </div>
+                    )}
+
+                    {(exec.status === 'pending_approval' || exec.status === 'waiting_approval') && (
+                      <div style={{ display: 'flex', gap: '8px', marginTop: '8px', justifyContent: 'flex-end', borderTop: '1px solid hsl(var(--border)/0.4)', paddingTop: '10px' }}>
+                        <button
+                          onClick={() => handleRejectAction(exec.id)}
+                          disabled={actionLoadingId === exec.id}
+                          style={{
+                            display: 'inline-flex',
+                            alignItems: 'center',
+                            gap: '6px',
+                            padding: '6px 12px',
+                            borderRadius: '6px',
+                            border: '1px solid hsl(var(--border))',
+                            backgroundColor: 'transparent',
+                            color: '#ef4444',
+                            fontSize: '12px',
+                            fontWeight: 600,
+                            cursor: actionLoadingId === exec.id ? 'not-allowed' : 'pointer',
+                            opacity: actionLoadingId === exec.id ? 0.6 : 1,
+                          }}
+                        >
+                          {actionLoadingId === exec.id ? <Loader2 size={13} className="animate-spin" /> : <X size={13} />}
+                          Decline
+                        </button>
+                        <button
+                          onClick={() => handleApproveAction(exec.id)}
+                          disabled={actionLoadingId === exec.id}
+                          style={{
+                            display: 'inline-flex',
+                            alignItems: 'center',
+                            gap: '6px',
+                            padding: '6px 14px',
+                            borderRadius: '6px',
+                            border: 'none',
+                            backgroundColor: '#10b981',
+                            color: '#ffffff',
+                            fontSize: '12px',
+                            fontWeight: 600,
+                            cursor: actionLoadingId === exec.id ? 'not-allowed' : 'pointer',
+                            opacity: actionLoadingId === exec.id ? 0.6 : 1,
+                          }}
+                        >
+                          {actionLoadingId === exec.id ? <Loader2 size={13} className="animate-spin" /> : <Check size={13} />}
+                          Approve & Run
+                        </button>
+                      </div>
+                    )}
+                  </div>
+                );
+              })
+            )}
+          </div>
+        </div>
+      )}
+
+      {/* MANAGE CONNECTION MODAL / DRAWER */}
+      {manageProvider && (
+        <div style={{
+          position: 'fixed',
+          inset: 0,
+          backgroundColor: 'rgba(0, 0, 0, 0.65)',
+          backdropFilter: 'blur(4px)',
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'center',
+          zIndex: 1000,
+        }}>
+          <div className="card" style={{ width: '560px', maxHeight: '90vh', overflowY: 'auto', padding: '28px', borderRadius: '14px', display: 'flex', flexDirection: 'column', gap: '20px' }}>
+            {/* Header */}
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
+                <div style={{
+                  width: '44px',
+                  height: '44px',
+                  borderRadius: '12px',
+                  backgroundColor: `${manageProvider.color}15`,
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  color: manageProvider.color,
+                }}>
+                  <manageProvider.icon size={24} />
+                </div>
+                <div>
+                  <h3 style={{ margin: 0, fontSize: '18px', fontWeight: 700, color: 'hsl(var(--fg))' }}>
+                    {manageProvider.name}
+                  </h3>
+                  <div style={{ fontSize: '13px', color: 'hsl(var(--muted-fg))' }}>
+                    {activeManageConn?.account_name || 'Configured Integration'}
+                  </div>
+                </div>
+              </div>
+              <button
+                className="btn btn-ghost"
+                onClick={() => {
+                  setManageProvider(null);
+                  setShowTechDetails(false);
+                }}
+                style={{ padding: '6px', borderRadius: '50%' }}
+              >
+                <X size={18} />
+              </button>
+            </div>
+
+            {/* Status & Identity Card */}
+            <div style={{
+              padding: '14px 16px',
+              borderRadius: '10px',
+              backgroundColor: 'hsl(var(--muted)/0.3)',
+              border: '1px solid hsl(var(--border))',
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'space-between',
+            }}>
+              <div>
+                <div style={{ fontSize: '11px', textTransform: 'uppercase', letterSpacing: '0.05em', color: 'hsl(var(--muted-fg))', fontWeight: 600 }}>
+                  Current Status
+                </div>
+                <div style={{ fontSize: '14px', fontWeight: 600, color: 'hsl(var(--fg))', marginTop: '2px' }}>
+                  {activeManageConn?.status ? activeManageConn.status.toUpperCase() : 'NOT CONFIGURED'}
+                </div>
+              </div>
+
+              {activeManageConn?.status === 'verified' || activeManageConn?.status === 'connected' ? (
+                <span style={{ display: 'inline-flex', alignItems: 'center', gap: '4px', fontSize: '12px', color: '#10b981', fontWeight: 600, backgroundColor: '#10b98115', padding: '4px 10px', borderRadius: '12px' }}>
+                  <CheckCircle2 size={14} /> Operational
+                </span>
+              ) : activeManageConn?.status === 'verification_failed' ? (
+                <span style={{ display: 'inline-flex', alignItems: 'center', gap: '4px', fontSize: '12px', color: '#ef4444', fontWeight: 600, backgroundColor: '#ef444415', padding: '4px 10px', borderRadius: '12px' }}>
+                  <AlertCircle size={14} /> Verification Failed
+                </span>
+              ) : (
+                <span style={{ display: 'inline-flex', alignItems: 'center', gap: '4px', fontSize: '12px', color: '#f59e0b', fontWeight: 600, backgroundColor: '#f59e0b15', padding: '4px 10px', borderRadius: '12px' }}>
+                  <AlertCircle size={14} /> Needs Attention
+                </span>
+              )}
+            </div>
+
+            {/* What Aether Can Do */}
+            <div>
+              <div style={{ fontSize: '14px', fontWeight: 700, color: 'hsl(var(--fg))', marginBottom: '8px' }}>
+                {t('connWhatAetherCanDo')}
+              </div>
+              <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
+                {manageProvider.capabilitiesList.map((cap, i) => (
+                  <div key={i} style={{ display: 'flex', alignItems: 'center', gap: '8px', fontSize: '13px', color: 'hsl(var(--fg))' }}>
+                    <Check size={14} style={{ color: '#10b981', flexShrink: 0 }} />
+                    <span>{cap}</span>
+                  </div>
+                ))}
+              </div>
+              <div style={{
+                marginTop: '10px',
+                padding: '8px 12px',
+                borderRadius: '8px',
+                backgroundColor: 'hsl(var(--muted)/0.2)',
+                fontSize: '11px',
+                color: 'hsl(var(--muted-fg))',
+                lineHeight: 1.4,
+                display: 'flex',
+                alignItems: 'center',
+                gap: '8px',
+              }}>
+                <Shield size={14} style={{ color: 'hsl(var(--primary))', flexShrink: 0 }} />
+                <span>{t('connSafetyNote')}</span>
+              </div>
+            </div>
+
+            {/* Recent Activity */}
+            <div>
+              <div style={{ fontSize: '14px', fontWeight: 700, color: 'hsl(var(--fg))', marginBottom: '8px' }}>
+                {t('connRecentActivity')}
+              </div>
+              {manageRecentExecutions.length === 0 ? (
+                <div style={{ fontSize: '12px', color: 'hsl(var(--muted-fg))', fontStyle: 'italic', padding: '8px 0' }}>
+                  {t('connNoRecentActivity')}
+                </div>
+              ) : (
+                <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
+                  {manageRecentExecutions.map(exec => (
+                    <div
+                      key={exec.id}
+                      style={{
+                        padding: '8px 12px',
+                        borderRadius: '6px',
+                        backgroundColor: 'hsl(var(--muted)/0.2)',
+                        display: 'flex',
+                        alignItems: 'center',
+                        justifyContent: 'space-between',
+                        fontSize: '12px',
+                      }}
+                    >
+                      <div style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', maxWidth: '340px' }}>
+                        <span style={{ fontWeight: 600, marginRight: '6px' }}>{exec.action_id}:</span>
+                        <span style={{ color: 'hsl(var(--muted-fg))' }}>{getActionSummary(exec)}</span>
+                      </div>
                       <span style={{
-                        fontSize: '11px',
+                        fontSize: '10px',
                         fontWeight: 600,
-                        padding: '3px 10px',
-                        borderRadius: '10px',
-                        backgroundColor: (exec.status === 'success' || exec.status === 'succeeded') ? '#10b98115' : (exec.status === 'pending_approval' || exec.status === 'waiting_approval') ? '#f59e0b15' : (exec.status === 'running' || exec.status === 'queued') ? '#3b82f615' : '#ef444415',
-                        color: (exec.status === 'success' || exec.status === 'succeeded') ? '#10b981' : (exec.status === 'pending_approval' || exec.status === 'waiting_approval') ? '#f59e0b' : (exec.status === 'running' || exec.status === 'queued') ? '#3b82f6' : '#ef4444',
+                        padding: '2px 6px',
+                        borderRadius: '4px',
+                        backgroundColor: (exec.status === 'success' || exec.status === 'succeeded') ? '#10b98115' : '#ef444415',
+                        color: (exec.status === 'success' || exec.status === 'succeeded') ? '#10b981' : '#ef4444',
                       }}>
                         {exec.status.toUpperCase()}
                       </span>
                     </div>
-                  </div>
+                  ))}
+                </div>
+              )}
+            </div>
 
-                  {exec.error_message && (
-                    <div style={{
-                      fontSize: '12px',
-                      color: '#ef4444',
-                      backgroundColor: '#ef444410',
-                      border: '1px solid #ef444420',
-                      padding: '8px 12px',
-                      borderRadius: '6px',
-                      marginTop: '4px',
-                    }}>
-                      <strong>Error:</strong> {exec.error_message}
-                    </div>
-                  )}
+            {/* Advanced Diagnostics Toggle */}
+            <div style={{ borderTop: '1px solid hsl(var(--border))', paddingTop: '12px' }}>
+              <button
+                type="button"
+                onClick={() => setShowTechDetails(!showTechDetails)}
+                style={{
+                  background: 'none',
+                  border: 'none',
+                  padding: 0,
+                  fontSize: '12px',
+                  fontWeight: 600,
+                  color: 'hsl(var(--muted-fg))',
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: '4px',
+                  cursor: 'pointer',
+                }}
+              >
+                {showTechDetails ? <ChevronUp size={14} /> : <ChevronDown size={14} />}
+                {t('connDiagnostics')}
+              </button>
 
-                  {(exec.status === 'success' || exec.status === 'succeeded') && exec.output_data && (
-                    <div style={{
-                      fontSize: '12px',
-                      color: 'hsl(var(--muted-fg))',
-                      backgroundColor: 'hsl(var(--muted)/0.2)',
-                      padding: '6px 10px',
-                      borderRadius: '6px',
-                      fontFamily: 'monospace',
-                      overflow: 'hidden',
-                      textOverflow: 'ellipsis',
-                      whiteSpace: 'nowrap',
-                    }}>
-                      Result: {typeof exec.output_data === 'string' ? exec.output_data : JSON.stringify(exec.output_data).slice(0, 160)}
-                    </div>
-                  )}
-
-                  {(exec.status === 'pending_approval' || exec.status === 'waiting_approval') && (
-                    <div style={{ display: 'flex', gap: '8px', marginTop: '8px', justifyContent: 'flex-end', borderTop: '1px solid hsl(var(--border)/0.4)', paddingTop: '10px' }}>
-                      <button
-                        onClick={() => handleRejectAction(exec.id)}
-                        disabled={actionLoadingId === exec.id}
-                        style={{
-                          display: 'inline-flex',
-                          alignItems: 'center',
-                          gap: '6px',
-                          padding: '6px 12px',
-                          borderRadius: '6px',
-                          border: '1px solid hsl(var(--border))',
-                          backgroundColor: 'transparent',
-                          color: '#ef4444',
-                          fontSize: '12px',
-                          fontWeight: 600,
-                          cursor: actionLoadingId === exec.id ? 'not-allowed' : 'pointer',
-                          opacity: actionLoadingId === exec.id ? 0.6 : 1,
-                        }}
-                      >
-                        {actionLoadingId === exec.id ? <Loader2 size={13} className="animate-spin" /> : <X size={13} />}
-                        Decline
-                      </button>
-                      <button
-                        onClick={() => handleApproveAction(exec.id)}
-                        disabled={actionLoadingId === exec.id}
-                        style={{
-                          display: 'inline-flex',
-                          alignItems: 'center',
-                          gap: '6px',
-                          padding: '6px 14px',
-                          borderRadius: '6px',
-                          border: 'none',
-                          backgroundColor: '#10b981',
-                          color: '#ffffff',
-                          fontSize: '12px',
-                          fontWeight: 600,
-                          cursor: actionLoadingId === exec.id ? 'not-allowed' : 'pointer',
-                          opacity: actionLoadingId === exec.id ? 0.6 : 1,
-                        }}
-                      >
-                        {actionLoadingId === exec.id ? <Loader2 size={13} className="animate-spin" /> : <Check size={13} />}
-                        Approve & Run
-                      </button>
+              {showTechDetails && (
+                <div style={{
+                  marginTop: '10px',
+                  padding: '12px',
+                  borderRadius: '8px',
+                  backgroundColor: 'hsl(var(--muted)/0.2)',
+                  fontSize: '11px',
+                  fontFamily: 'monospace',
+                  display: 'flex',
+                  flexDirection: 'column',
+                  gap: '6px',
+                  color: 'hsl(var(--fg))',
+                }}>
+                  <div><strong>{t('connConnId')}:</strong> {activeManageConn?.id || 'none'}</div>
+                  <div><strong>{t('connMethod')}:</strong> {activeManageConn?.verification_method || 'none'}</div>
+                  <div><strong>{t('connScopes')}:</strong> {activeManageConn?.scopes?.join(', ') || 'default'}</div>
+                  <div><strong>{t('connLastVerified')}:</strong> {activeManageConn?.last_verified_at || 'Never'}</div>
+                  <div><strong>{t('connLastSynced')}:</strong> {activeManageConn?.last_synced_at || 'Never'}</div>
+                  <div><strong>Last Successful Op:</strong> {activeManageConn?.last_successful_operation || 'None'}</div>
+                  {activeManageConn?.last_verification_error && (
+                    <div style={{ color: '#ef4444' }}>
+                      <strong>Last Error:</strong> {activeManageConn.last_verification_error}
                     </div>
                   )}
                 </div>
-              );
-            })
-          )}
+              )}
+            </div>
+
+            {/* Modal Actions */}
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', borderTop: '1px solid hsl(var(--border))', paddingTop: '16px' }}>
+              <button
+                className="btn btn-ghost"
+                onClick={() => setDisconnectTarget({ id: manageProvider.id, name: manageProvider.name })}
+                style={{ color: '#ef4444', fontSize: '12px', display: 'flex', alignItems: 'center', gap: '4px' }}
+              >
+                <Trash2 size={13} /> {t('connDisconnect')}
+              </button>
+
+              <div style={{ display: 'flex', gap: '8px' }}>
+                {!manageProvider.builtIn && !manageProvider.isOAuth && (
+                  <button
+                    className="btn btn-secondary"
+                    onClick={() => {
+                      const p = manageProvider;
+                      const c = activeManageConn;
+                      setManageProvider(null);
+                      if (p) openConfigModal(p, c || undefined);
+                    }}
+                    style={{ fontSize: '12px' }}
+                  >
+                    {t('connEditCredentials')}
+                  </button>
+                )}
+
+                {manageProvider.isOAuth ? (
+                  <>
+                    <button
+                      className="btn btn-secondary"
+                      onClick={() => {
+                        setManageProvider(null);
+                        handleOpenCalendarPicker();
+                      }}
+                      style={{ fontSize: '12px', display: 'flex', alignItems: 'center', gap: '4px' }}
+                    >
+                      <Calendar size={12} /> Select Calendar
+                    </button>
+                    <button
+                      className="btn btn-primary"
+                      onClick={() => {
+                        if (activeManageConn?.auth_metadata?.client_id) setGoogleClientId(activeManageConn.auth_metadata.client_id);
+                        setManageProvider(null);
+                        setIsGoogleModalOpen(true);
+                      }}
+                      style={{ fontSize: '12px', backgroundColor: '#4285F4', borderColor: '#4285F4', color: '#fff' }}
+                    >
+                      Re-authorize Google
+                    </button>
+                  </>
+                ) : (
+                  <button
+                    className="btn btn-primary"
+                    onClick={async () => {
+                      await handleVerifyConnection(manageProvider.id);
+                    }}
+                    disabled={verifyingProvider === manageProvider.id}
+                    style={{ fontSize: '12px', display: 'flex', alignItems: 'center', gap: '4px' }}
+                  >
+                    <ShieldCheck size={13} className={verifyingProvider === manageProvider.id ? 'animate-spin' : ''} />
+                    {verifyingProvider === manageProvider.id ? t('connStatusVerifying') : t('connReverify')}
+                  </button>
+                )}
+              </div>
+            </div>
+          </div>
         </div>
       )}
 
-      {/* Create Event Modal */}
+      {/* DISCONNECT CONFIRMATION MODAL */}
+      {disconnectTarget && (
+        <div style={{
+          position: 'fixed',
+          inset: 0,
+          backgroundColor: 'rgba(0, 0, 0, 0.7)',
+          backdropFilter: 'blur(4px)',
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'center',
+          zIndex: 1100,
+        }}>
+          <div className="card" style={{ width: '420px', padding: '24px', borderRadius: '12px', display: 'flex', flexDirection: 'column', gap: '14px' }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
+              <div style={{ width: '40px', height: '40px', borderRadius: '10px', backgroundColor: '#ef444415', color: '#ef4444', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                <AlertTriangle size={20} />
+              </div>
+              <h3 style={{ margin: 0, fontSize: '17px', fontWeight: 600 }}>
+                {t('connDisconnectTitle').replace('{provider}', disconnectTarget.name)}
+              </h3>
+            </div>
+
+            <p style={{ fontSize: '13px', color: 'hsl(var(--muted-fg))', lineHeight: 1.5, margin: 0 }}>
+              {t('connDisconnectDesc')}
+            </p>
+
+            <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '8px', marginTop: '6px' }}>
+              <button
+                type="button"
+                className="btn btn-ghost"
+                onClick={() => setDisconnectTarget(null)}
+                disabled={disconnecting}
+              >
+                {t('connCancel')}
+              </button>
+              <button
+                type="button"
+                className="btn btn-primary"
+                onClick={confirmDisconnect}
+                disabled={disconnecting}
+                style={{ backgroundColor: '#ef4444', borderColor: '#ef4444', color: '#fff' }}
+              >
+                {disconnecting ? 'Disconnecting...' : t('connConfirmDisconnect')}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* CREATE EVENT MODAL */}
       {isEventModalOpen && (
         <div style={{
           position: 'fixed',
@@ -1496,38 +2375,55 @@ export function Connections({ navigate: _navigate, initialExecutionId, initialTa
         </div>
       )}
 
-      {/* Credential Configuration Modal */}
+      {/* CREDENTIAL CONFIGURATION MODAL */}
       {configModalProvider && (
         <div style={{
           position: 'fixed',
           inset: 0,
-          backgroundColor: 'rgba(0, 0, 0, 0.6)',
+          backgroundColor: 'rgba(0, 0, 0, 0.65)',
           backdropFilter: 'blur(4px)',
           display: 'flex',
           alignItems: 'center',
           justifyContent: 'center',
           zIndex: 1000,
         }}>
-          <div className="card" style={{ width: '480px', maxHeight: '90vh', overflowY: 'auto', padding: '24px', borderRadius: '12px' }}>
-            <div style={{ display: 'flex', alignItems: 'center', gap: '10px', marginBottom: '16px' }}>
+          <div className="card" style={{ width: '500px', maxHeight: '90vh', overflowY: 'auto', padding: '26px', borderRadius: '14px' }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '12px', marginBottom: '16px' }}>
               <div style={{
-                width: '36px',
-                height: '36px',
-                borderRadius: '8px',
+                width: '38px',
+                height: '38px',
+                borderRadius: '10px',
                 backgroundColor: `${configModalProvider.color}15`,
                 display: 'flex',
                 alignItems: 'center',
                 justifyContent: 'center',
                 color: configModalProvider.color,
               }}>
-                <configModalProvider.icon size={20} />
+                <configModalProvider.icon size={22} />
               </div>
               <div>
                 <h3 style={{ margin: 0, fontSize: '18px', fontWeight: 600 }}>Configure {configModalProvider.name}</h3>
                 <div style={{ fontSize: '12px', color: 'hsl(var(--muted-fg))' }}>
-                  {isConfigured ? 'Update credentials (leave secrets blank to keep existing)' : 'Provide authentic credentials to enable real agentic actions'}
+                  {isConfigured ? 'Update credentials (leave secrets blank to keep current)' : 'Provide authentic credentials to enable real agentic actions'}
                 </div>
               </div>
+            </div>
+
+            {/* Keychain Protection Notice */}
+            <div style={{
+              padding: '8px 12px',
+              borderRadius: '8px',
+              backgroundColor: 'hsl(var(--muted)/0.3)',
+              border: '1px solid hsl(var(--border))',
+              marginBottom: '14px',
+              display: 'flex',
+              alignItems: 'center',
+              gap: '8px',
+              fontSize: '11px',
+              color: 'hsl(var(--muted-fg))',
+            }}>
+              <Lock size={13} style={{ color: '#10b981', flexShrink: 0 }} />
+              <span>{t('connSecuredKeychain')}</span>
             </div>
 
             {/* Test result message if any */}
@@ -1951,7 +2847,7 @@ export function Connections({ navigate: _navigate, initialExecutionId, initialTa
         </div>
       )}
 
-      {/* Google Calendar OAuth Flow Modal */}
+      {/* GOOGLE CALENDAR OAUTH MODAL */}
       {isGoogleModalOpen && (
         <div style={{
           position: 'fixed',
@@ -1963,11 +2859,11 @@ export function Connections({ navigate: _navigate, initialExecutionId, initialTa
           justifyContent: 'center',
           zIndex: 1000,
         }}>
-          <div className="card" style={{ width: '500px', maxHeight: '90vh', overflowY: 'auto', padding: '24px', borderRadius: '12px' }}>
+          <div className="card" style={{ width: '500px', maxHeight: '90vh', overflowY: 'auto', padding: '26px', borderRadius: '14px' }}>
             <div style={{ display: 'flex', alignItems: 'center', gap: '12px', marginBottom: '16px' }}>
               <div style={{
-                width: '40px',
-                height: '40px',
+                width: '42px',
+                height: '42px',
                 borderRadius: '10px',
                 backgroundColor: '#4285F415',
                 display: 'flex',
@@ -1980,7 +2876,7 @@ export function Connections({ navigate: _navigate, initialExecutionId, initialTa
               <div>
                 <h3 style={{ margin: 0, fontSize: '18px', fontWeight: 600 }}>Connect Google Calendar</h3>
                 <div style={{ fontSize: '12px', color: 'hsl(var(--muted-fg))' }}>
-                  Real OAuth 2.0 Authorization with PKCE & Live Verification
+                  Official OAuth 2.0 PKCE flow with direct Google API authorization
                 </div>
               </div>
             </div>
@@ -2052,7 +2948,13 @@ export function Connections({ navigate: _navigate, initialExecutionId, initialTa
                   disabled={googleAuthPending}
                   style={{ backgroundColor: '#4285F4', borderColor: '#4285F4', color: '#fff' }}
                 >
-                  {googleAuthPending ? 'Verifica in corso...' : 'Authorize with Google'}
+                  {googleAuthPending ? (
+                    <span style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+                      <RefreshCw size={12} className="animate-spin" /> Verifica in corso...
+                    </span>
+                  ) : (
+                    'Authorize with Google'
+                  )}
                 </button>
               </div>
             </form>
@@ -2088,7 +2990,7 @@ export function Connections({ navigate: _navigate, initialExecutionId, initialTa
         </div>
       )}
 
-      {/* Google Calendar Selector Modal */}
+      {/* GOOGLE CALENDAR SELECTOR MODAL */}
       {isCalendarPickerOpen && (
         <div style={{
           position: 'fixed',
