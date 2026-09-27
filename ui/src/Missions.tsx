@@ -235,7 +235,7 @@ export function Missions({ navigate, initialMissionId }: MissionsProps) {
 
   const [missions, setMissions] = useState<Mission[]>([]);
   const [loading, setLoading] = useState(true);
-  const [filter, setFilter] = useState<'all' | 'active' | 'completed' | 'draft'>('all');
+  const [filter, setFilter] = useState<'all' | 'needs_attention' | 'active' | 'completed' | 'draft'>('all');
   const [selectedMission, setSelectedMission] = useState<Mission | null>(null);
   const [graphData, setGraphData] = useState<MissionGraph | null>(null);
   const [loadingGraph, setLoadingGraph] = useState(false);
@@ -840,6 +840,9 @@ export function Missions({ navigate, initialMissionId }: MissionsProps) {
         { method: 'POST' }
       );
       if (!res.ok) {
+        if (res.status === 404) {
+          throw new Error(t('workDeliverableFileMissing'));
+        }
         const data = await res.json().catch(() => ({}));
         throw new Error(data.detail || t('deliverableOpenFailed'));
       }
@@ -856,6 +859,9 @@ export function Missions({ navigate, initialMissionId }: MissionsProps) {
         apiUrl(`/api/missions/${selectedMission.id}/deliverables/${deliverableId}/download`)
       );
       if (!res.ok) {
+        if (res.status === 404) {
+          throw new Error(t('workDeliverableFileMissing'));
+        }
         const data = await res.json().catch(() => ({}));
         throw new Error(data.detail || t('deliverableDownloadFailed'));
       }
@@ -975,6 +981,7 @@ export function Missions({ navigate, initialMissionId }: MissionsProps) {
   const getStatusBadge = (status: string) => {
     switch (status) {
       case 'completed':
+      case 'succeeded':
         return (
           <span className="badge badge-emerald" style={{ display: 'inline-flex', alignItems: 'center', gap: '5px', fontWeight: 600 }}>
             <CheckCircle size={12} /> {t('statusCompleted')}
@@ -983,7 +990,7 @@ export function Missions({ navigate, initialMissionId }: MissionsProps) {
       case 'running':
         return (
           <span className="badge badge-indigo" style={{ display: 'inline-flex', alignItems: 'center', gap: '5px', fontWeight: 600 }}>
-            <span style={{ width: '6px', height: '6px', borderRadius: '50%', backgroundColor: '#6366f1', display: 'inline-block' }} />
+            <span style={{ width: '6px', height: '6px', borderRadius: '50%', backgroundColor: '#6366f1', display: 'inline-block' }} className="animate-pulse" />
             {t('statusRunning')}
           </span>
         );
@@ -996,14 +1003,15 @@ export function Missions({ navigate, initialMissionId }: MissionsProps) {
       case 'verifying':
         return (
           <span className="badge badge-indigo" style={{ display: 'inline-flex', alignItems: 'center', gap: '5px', fontWeight: 600 }}>
-            <span style={{ width: '6px', height: '6px', borderRadius: '50%', backgroundColor: '#6366f1', display: 'inline-block' }} className="animate-pulse" />
+            <RefreshCw size={12} className="animate-spin" />
             {t('statusVerifying')}
           </span>
         );
       case 'awaiting_approval':
+      case 'waiting_approval':
         return (
           <span className="badge badge-amber" style={{ display: 'inline-flex', alignItems: 'center', gap: '5px', fontWeight: 600 }}>
-            <ShieldAlert size={12} /> {t('filterReviewNeeded')}
+            <ShieldAlert size={12} /> {t('workReviewNeededBadge')}
           </span>
         );
       case 'interrupted':
@@ -1012,10 +1020,28 @@ export function Missions({ navigate, initialMissionId }: MissionsProps) {
             <Pause size={12} /> {t('statusInterrupted')}
           </span>
         );
+      case 'queued':
+        return (
+          <span className="badge" style={{ display: 'inline-flex', alignItems: 'center', gap: '5px', background: 'hsl(var(--muted))', color: 'hsl(var(--fg))', fontWeight: 600 }}>
+            <Clock size={12} /> {t('statusQueued')}
+          </span>
+        );
+      case 'rejected':
+        return (
+          <span className="badge badge-rose" style={{ display: 'inline-flex', alignItems: 'center', gap: '5px', fontWeight: 600 }}>
+            <X size={12} /> {t('statusRejected')}
+          </span>
+        );
+      case 'expired':
+        return (
+          <span className="badge" style={{ display: 'inline-flex', alignItems: 'center', gap: '5px', background: 'hsl(var(--muted))', color: 'hsl(var(--muted-fg))', fontWeight: 600 }}>
+            <Clock size={12} /> {t('statusExpired')}
+          </span>
+        );
       case 'cancelled':
         return (
           <span className="badge" style={{ display: 'inline-flex', alignItems: 'center', gap: '5px', background: 'hsl(var(--muted))', color: 'hsl(var(--muted-fg))', fontWeight: 600 }}>
-            Cancelled
+            {t('statusCancelled')}
           </span>
         );
       case 'failed':
@@ -1034,12 +1060,33 @@ export function Missions({ navigate, initialMissionId }: MissionsProps) {
     }
   };
 
-  const filteredMissions = missions.filter(m => {
-    if (filter === 'active') return ['running', 'planning', 'verifying', 'awaiting_approval'].includes(m.status);
-    if (filter === 'completed') return m.status === 'completed';
-    if (filter === 'draft') return m.status === 'draft';
-    return true;
-  });
+  const attentionMissions = useMemo(() => {
+    return missions.filter(m => m.status === 'awaiting_approval' || (m.status as string) === 'waiting_approval');
+  }, [missions]);
+
+  const activeMissions = useMemo(() => {
+    return missions.filter(m => ['running', 'planning', 'verifying', 'interrupted'].includes(m.status) && !attentionMissions.some(am => am.id === m.id));
+  }, [missions, attentionMissions]);
+
+  const completedMissions = useMemo(() => {
+    return missions.filter(m => m.status === 'completed' || (m.status as string) === 'succeeded');
+  }, [missions]);
+
+  const draftMissions = useMemo(() => {
+    return missions.filter(m => m.status === 'draft' || (m.status as string) === 'queued');
+  }, [missions]);
+
+  const failedMissions = useMemo(() => {
+    return missions.filter(m => ['failed', 'cancelled', 'rejected', 'expired'].includes(m.status));
+  }, [missions]);
+
+  const filteredMissions = useMemo(() => {
+    if (filter === 'needs_attention') return attentionMissions;
+    if (filter === 'active') return activeMissions;
+    if (filter === 'completed') return completedMissions;
+    if (filter === 'draft') return draftMissions;
+    return missions;
+  }, [filter, missions, attentionMissions, activeMissions, completedMissions, draftMissions]);
 
   // Real Workforce resolution (Slice 2B)
   const currentTeam = useMemo(() => {
@@ -1076,7 +1123,9 @@ export function Missions({ navigate, initialMissionId }: MissionsProps) {
       else pending++;
     }
 
-    return { completed, running, pending, blocked };
+    const total = selectedMission.milestones.length;
+    const percent = total > 0 ? Math.round((completed / total) * 100) : 0;
+    return { completed, running, pending, blocked, percent };
   }, [selectedMission, executions, selectedExecutionId]);
 
   const workforceStatus = useMemo(() => {
@@ -1099,6 +1148,132 @@ export function Missions({ navigate, initialMissionId }: MissionsProps) {
     }
     return { key: 'assigned', label: t('statusAssigned'), color: 'hsl(var(--muted-fg))', bg: 'hsl(var(--muted))' };
   }, [selectedMission, executions, selectedExecutionId, t]);
+
+  const renderMissionCard = (m: Mission) => {
+    const completedCount = m.milestones.filter(ms => ms.status === 'completed').length;
+    const totalCount = m.milestones.length;
+    const progressPct = totalCount > 0 ? (completedCount / totalCount) * 100 : 0;
+    const isSelected = selectedMission?.id === m.id;
+    const isNeedsAttention = m.status === 'awaiting_approval' || (m.status as string) === 'waiting_approval';
+    const isRunning = m.status === 'running' || m.status === 'verifying';
+    const runningMilestone = m.milestones.find(ms => ms.status === 'running');
+
+    return (
+      <div
+        key={m.id}
+        data-testid={`mission-card-${m.id}`}
+        onClick={() => setSelectedMission(m)}
+        style={{
+          padding: '14px 16px',
+          borderRadius: '10px',
+          border: isSelected
+            ? '1.5px solid hsl(var(--primary))'
+            : isNeedsAttention
+            ? '1px solid #f59e0b'
+            : '1px solid hsl(var(--border))',
+          backgroundColor: isSelected
+            ? 'hsl(var(--primary) / 0.05)'
+            : isNeedsAttention
+            ? 'rgba(245, 158, 11, 0.04)'
+            : 'hsl(var(--card))',
+          cursor: 'pointer',
+          transition: 'all 0.15s ease',
+          boxShadow: isSelected ? '0 0 0 1px hsl(var(--primary) / 0.2)' : 'none',
+          display: 'flex',
+          flexDirection: 'column',
+          gap: '8px'
+        }}
+        className="hover:border-primary/60 hover:shadow-sm"
+      >
+        <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', gap: '10px' }}>
+          <div style={{ fontSize: '14px', fontWeight: 600, color: 'hsl(var(--fg))', lineHeight: 1.3 }}>
+            {m.title}
+          </div>
+          {getStatusBadge(m.status)}
+        </div>
+
+        {/* Needs Attention Alert Pill */}
+        {isNeedsAttention && (
+          <div style={{
+            display: 'inline-flex',
+            alignItems: 'center',
+            gap: '5px',
+            fontSize: '11px',
+            fontWeight: 600,
+            color: '#b45309',
+            backgroundColor: 'rgba(245, 158, 11, 0.15)',
+            padding: '2px 8px',
+            borderRadius: '6px',
+            width: 'fit-content'
+          }}>
+            <ShieldAlert size={12} />
+            <span>{t('workReviewNeededBadge')}</span>
+          </div>
+        )}
+
+        {/* Running Milestone Banner */}
+        {isRunning && runningMilestone && (
+          <div style={{
+            display: 'inline-flex',
+            alignItems: 'center',
+            gap: '6px',
+            fontSize: '11px',
+            fontWeight: 600,
+            color: 'hsl(var(--primary))',
+            backgroundColor: 'hsl(var(--primary) / 0.1)',
+            padding: '2px 8px',
+            borderRadius: '6px',
+            width: 'fit-content'
+          }}>
+            <span style={{ width: '6px', height: '6px', borderRadius: '50%', backgroundColor: 'hsl(var(--primary))' }} className="animate-pulse" />
+            <span>{t('workWorkingNow')}: {runningMilestone.title}</span>
+          </div>
+        )}
+
+        <div style={{
+          fontSize: '12px',
+          color: 'hsl(var(--muted-fg))',
+          overflow: 'hidden',
+          textOverflow: 'ellipsis',
+          display: '-webkit-box',
+          WebkitLineClamp: selectedMission ? 2 : 3,
+          WebkitBoxOrient: 'vertical',
+          lineHeight: 1.45
+        }}>
+          {m.objective}
+        </div>
+
+        {/* Progress Bar & Milestone Status */}
+        <div style={{ marginTop: '2px' }}>
+          <div style={{
+            height: '4px',
+            width: '100%',
+            backgroundColor: 'hsl(var(--muted))',
+            borderRadius: '2px',
+            overflow: 'hidden',
+            marginBottom: '6px'
+          }}>
+            <div style={{
+              height: '100%',
+              width: `${progressPct}%`,
+              backgroundColor: progressPct === 100 ? '#10b981' : isNeedsAttention ? '#f59e0b' : 'hsl(var(--primary))',
+              transition: 'width 0.3s ease'
+            }} />
+          </div>
+
+          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', fontSize: '11px', color: 'hsl(var(--muted-fg))' }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '4px' }}>
+              <Users size={12} />
+              <span>{m.team_name || t('defaultWorkforce')}</span>
+            </div>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '4px' }}>
+              <span>{completedCount} {t('ofMilestones')} {totalCount} {completedCount === 1 ? t('completedCountSingular') : t('completedCount')}</span>
+            </div>
+          </div>
+        </div>
+      </div>
+    );
+  };
 
 
   return (
@@ -1130,16 +1305,6 @@ export function Missions({ navigate, initialMissionId }: MissionsProps) {
               <h1 style={{ fontSize: '18px', fontWeight: 600, margin: 0, color: 'hsl(var(--fg))' }}>
                 {t('missionsTitle')}
               </h1>
-              <span style={{
-                fontSize: '11px',
-                fontWeight: 600,
-                padding: '1px 7px',
-                borderRadius: '12px',
-                backgroundColor: 'hsl(var(--primary) / 0.15)',
-                color: 'hsl(var(--primary))'
-              }}>
-                Phase A
-              </span>
             </div>
             <p style={{ fontSize: '12px', color: 'hsl(var(--muted-fg))', margin: '2px 0 0' }}>
               {t('missionsSubtitle')}
@@ -1188,49 +1353,70 @@ export function Missions({ navigate, initialMissionId }: MissionsProps) {
             justifyContent: 'space-between',
             gap: '6px'
           }}>
-            <div style={{ display: 'flex', gap: '4px' }}>
-              {(['all', 'active', 'completed', 'draft'] as const).map(tabKey => {
+            <div style={{ display: 'flex', gap: '4px', flexWrap: 'wrap' }}>
+              {(['all', 'needs_attention', 'active', 'completed', 'draft'] as const).map(tabKey => {
                 const label = tabKey === 'all' ? t('filterAll')
+                  : tabKey === 'needs_attention' ? t('workNeedsAttention')
                   : tabKey === 'active' ? t('filterActive')
                   : tabKey === 'completed' ? t('filterCompleted')
                   : t('filterDraft');
-                const count = missions.filter(m => {
-                  if (tabKey === 'active') return ['running', 'planning', 'verifying', 'awaiting_approval'].includes(m.status);
-                  if (tabKey === 'completed') return m.status === 'completed';
-                  if (tabKey === 'draft') return m.status === 'draft';
-                  return true;
-                }).length;
+                const count = tabKey === 'all' ? missions.length
+                  : tabKey === 'needs_attention' ? attentionMissions.length
+                  : tabKey === 'active' ? activeMissions.length
+                  : tabKey === 'completed' ? completedMissions.length
+                  : draftMissions.length;
+
+                if (tabKey === 'needs_attention' && count === 0 && filter !== 'needs_attention') {
+                  return null;
+                }
+
+                const isAttention = tabKey === 'needs_attention' && count > 0;
 
                 return (
                   <button
                     key={tabKey}
                     onClick={() => setFilter(tabKey)}
-                    className={`btn btn-sm ${filter === tabKey ? 'btn-secondary' : 'btn-ghost'}`}
-                    style={{ fontSize: '12px', padding: '3px 10px', borderRadius: '6px' }}
+                    className={`btn btn-sm ${filter === tabKey ? (isAttention ? 'btn-amber' : 'btn-secondary') : 'btn-ghost'}`}
+                    style={{
+                      fontSize: '12px',
+                      padding: '3px 10px',
+                      borderRadius: '6px',
+                      color: isAttention && filter !== tabKey ? '#f59e0b' : undefined,
+                      borderColor: isAttention && filter === tabKey ? '#f59e0b' : undefined
+                    }}
                   >
                     <span>{label}</span>
-                    <span style={{ fontSize: '10px', opacity: 0.7, marginLeft: '4px' }}>{count}</span>
+                    <span style={{
+                      fontSize: '10px',
+                      opacity: 0.8,
+                      marginLeft: '4px',
+                      backgroundColor: isAttention ? 'rgba(245, 158, 11, 0.2)' : 'hsl(var(--muted))',
+                      padding: '1px 5px',
+                      borderRadius: '10px'
+                    }}>
+                      {count}
+                    </span>
                   </button>
                 );
               })}
             </div>
           </div>
 
-          {/* Missions List Container (Centered Max-width 860px when full-screen) */}
+          {/* Missions List Container */}
           <div style={{ flex: 1, overflowY: 'auto', padding: '16px' }}>
             <div style={{
               maxWidth: selectedMission ? '100%' : '860px',
               margin: '0 auto',
               display: 'flex',
               flexDirection: 'column',
-              gap: '10px'
+              gap: '12px'
             }}>
               {loading ? (
                 <div style={{ padding: '40px', textAlign: 'center', color: 'hsl(var(--muted-fg))', fontSize: '13px' }}>
                   <RefreshCw size={22} className="animate-spin" style={{ margin: '0 auto 10px', opacity: 0.6 }} />
                   Loading missions...
                 </div>
-              ) : filteredMissions.length === 0 ? (
+              ) : missions.length === 0 ? (
                 <div style={{
                   padding: '48px 24px',
                   textAlign: 'center',
@@ -1241,7 +1427,7 @@ export function Missions({ navigate, initialMissionId }: MissionsProps) {
                 }}>
                   <Target size={36} style={{ margin: '0 auto 14px', opacity: 0.35 }} />
                   <div style={{ fontSize: '15px', fontWeight: 600, color: 'hsl(var(--fg))' }}>{t('noMissionsYet')}</div>
-                  <div style={{ fontSize: '13px', marginTop: '6px', maxWidth: '340px', marginInline: 'auto', lineHeight: 1.5 }}>
+                  <div style={{ fontSize: '13px', marginTop: '6px', maxWidth: '380px', marginInline: 'auto', lineHeight: 1.5 }}>
                     {t('noMissionsDesc')}
                   </div>
                   <button
@@ -1253,85 +1439,162 @@ export function Missions({ navigate, initialMissionId }: MissionsProps) {
                     <span>{t('newMission')}</span>
                   </button>
                 </div>
+              ) : filter !== 'all' ? (
+                filteredMissions.length === 0 ? (
+                  <div style={{ padding: '32px 16px', textAlign: 'center', color: 'hsl(var(--muted-fg))', fontSize: '13px' }}>
+                    No missions matching this filter.
+                  </div>
+                ) : (
+                  filteredMissions.map(m => renderMissionCard(m))
+                )
               ) : (
-                filteredMissions.map(m => {
-                  const completedCount = m.milestones.filter(ms => ms.status === 'completed').length;
-                  const totalCount = m.milestones.length;
-                  const progressPct = totalCount > 0 ? (completedCount / totalCount) * 100 : 0;
-                  const isSelected = selectedMission?.id === m.id;
-
-                  return (
-                    <div
-                      key={m.id}
-                      data-testid={`mission-card-${m.id}`}
-                      onClick={() => setSelectedMission(m)}
-                      style={{
-                        padding: '14px 16px',
-                        borderRadius: '10px',
-                        border: isSelected
-                          ? '1.5px solid hsl(var(--primary))'
-                          : '1px solid hsl(var(--border))',
-                        backgroundColor: isSelected
-                          ? 'hsl(var(--primary) / 0.05)'
-                          : 'hsl(var(--card))',
-                        cursor: 'pointer',
-                        transition: 'all 0.15s ease',
-                        boxShadow: isSelected ? '0 0 0 1px hsl(var(--primary) / 0.2)' : 'none'
-                      }}
-                      className="hover:border-primary/60 hover:shadow-sm"
-                    >
-                      <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', gap: '10px' }}>
-                        <div style={{ fontSize: '14px', fontWeight: 600, color: 'hsl(var(--fg))', lineHeight: 1.3 }}>
-                          {m.title}
-                        </div>
-                        {getStatusBadge(m.status)}
-                      </div>
-
+                /* Grouped View for 'all' */
+                <div style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
+                  {/* Needs Attention Group */}
+                  {attentionMissions.length > 0 && (
+                    <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
                       <div style={{
-                        fontSize: '12px',
-                        color: 'hsl(var(--muted-fg))',
-                        marginTop: '6px',
-                        overflow: 'hidden',
-                        textOverflow: 'ellipsis',
-                        display: '-webkit-box',
-                        WebkitLineClamp: selectedMission ? 2 : 3,
-                        WebkitBoxOrient: 'vertical',
-                        lineHeight: 1.45
+                        display: 'flex',
+                        alignItems: 'center',
+                        gap: '6px',
+                        fontSize: '11px',
+                        fontWeight: 700,
+                        textTransform: 'uppercase',
+                        letterSpacing: '0.05em',
+                        color: '#f59e0b',
+                        padding: '0 4px'
                       }}>
-                        {m.objective}
-                      </div>
-
-                      {/* Progress Bar & Milestone Status */}
-                      <div style={{ marginTop: '10px' }}>
-                        <div style={{
-                          height: '4px',
-                          width: '100%',
-                          backgroundColor: 'hsl(var(--muted))',
-                          borderRadius: '2px',
-                          overflow: 'hidden',
-                          marginBottom: '6px'
+                        <ShieldAlert size={13} />
+                        <span>{t('workNeedsAttention')}</span>
+                        <span style={{
+                          fontSize: '10px',
+                          backgroundColor: 'rgba(245, 158, 11, 0.2)',
+                          padding: '1px 6px',
+                          borderRadius: '10px'
                         }}>
-                          <div style={{
-                            height: '100%',
-                            width: `${progressPct}%`,
-                            backgroundColor: progressPct === 100 ? '#10b981' : 'hsl(var(--primary))',
-                            transition: 'width 0.3s ease'
-                          }} />
-                        </div>
-
-                        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', fontSize: '11px', color: 'hsl(var(--muted-fg))' }}>
-                          <div style={{ display: 'flex', alignItems: 'center', gap: '4px' }}>
-                            <Users size={12} />
-                            <span>{m.team_name || t('defaultWorkforce')}</span>
-                          </div>
-                          <div style={{ display: 'flex', alignItems: 'center', gap: '4px' }}>
-                            <span>{completedCount} {t('ofMilestones')} {totalCount} {t('completedCount')}</span>
-                          </div>
-                        </div>
+                          {attentionMissions.length}
+                        </span>
                       </div>
+                      {attentionMissions.map(m => renderMissionCard(m))}
                     </div>
-                  );
-                })
+                  )}
+
+                  {/* Active Group */}
+                  {activeMissions.length > 0 && (
+                    <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
+                      <div style={{
+                        display: 'flex',
+                        alignItems: 'center',
+                        gap: '6px',
+                        fontSize: '11px',
+                        fontWeight: 700,
+                        textTransform: 'uppercase',
+                        letterSpacing: '0.05em',
+                        color: 'hsl(var(--primary))',
+                        padding: '0 4px'
+                      }}>
+                        <Play size={12} fill="currentColor" />
+                        <span>{t('workActive')}</span>
+                        <span style={{
+                          fontSize: '10px',
+                          backgroundColor: 'hsl(var(--primary) / 0.15)',
+                          padding: '1px 6px',
+                          borderRadius: '10px'
+                        }}>
+                          {activeMissions.length}
+                        </span>
+                      </div>
+                      {activeMissions.map(m => renderMissionCard(m))}
+                    </div>
+                  )}
+
+                  {/* Completed Group */}
+                  {completedMissions.length > 0 && (
+                    <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
+                      <div style={{
+                        display: 'flex',
+                        alignItems: 'center',
+                        gap: '6px',
+                        fontSize: '11px',
+                        fontWeight: 700,
+                        textTransform: 'uppercase',
+                        letterSpacing: '0.05em',
+                        color: '#10b981',
+                        padding: '0 4px'
+                      }}>
+                        <CheckCircle size={13} />
+                        <span>{t('workCompleted')}</span>
+                        <span style={{
+                          fontSize: '10px',
+                          backgroundColor: 'rgba(16, 185, 129, 0.15)',
+                          padding: '1px 6px',
+                          borderRadius: '10px'
+                        }}>
+                          {completedMissions.length}
+                        </span>
+                      </div>
+                      {completedMissions.map(m => renderMissionCard(m))}
+                    </div>
+                  )}
+
+                  {/* Draft Group */}
+                  {draftMissions.length > 0 && (
+                    <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
+                      <div style={{
+                        display: 'flex',
+                        alignItems: 'center',
+                        gap: '6px',
+                        fontSize: '11px',
+                        fontWeight: 700,
+                        textTransform: 'uppercase',
+                        letterSpacing: '0.05em',
+                        color: 'hsl(var(--muted-fg))',
+                        padding: '0 4px'
+                      }}>
+                        <Circle size={12} />
+                        <span>{t('workDraft')}</span>
+                        <span style={{
+                          fontSize: '10px',
+                          backgroundColor: 'hsl(var(--muted))',
+                          padding: '1px 6px',
+                          borderRadius: '10px'
+                        }}>
+                          {draftMissions.length}
+                        </span>
+                      </div>
+                      {draftMissions.map(m => renderMissionCard(m))}
+                    </div>
+                  )}
+
+                  {/* Failed / Cancelled Group */}
+                  {failedMissions.length > 0 && (
+                    <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
+                      <div style={{
+                        display: 'flex',
+                        alignItems: 'center',
+                        gap: '6px',
+                        fontSize: '11px',
+                        fontWeight: 700,
+                        textTransform: 'uppercase',
+                        letterSpacing: '0.05em',
+                        color: '#ef4444',
+                        padding: '0 4px'
+                      }}>
+                        <AlertCircle size={13} />
+                        <span>{t('workFailed')}</span>
+                        <span style={{
+                          fontSize: '10px',
+                          backgroundColor: 'rgba(239, 68, 68, 0.15)',
+                          padding: '1px 6px',
+                          borderRadius: '10px'
+                        }}>
+                          {failedMissions.length}
+                        </span>
+                      </div>
+                      {failedMissions.map(m => renderMissionCard(m))}
+                    </div>
+                  )}
+                </div>
               )}
             </div>
           </div>
@@ -1640,72 +1903,179 @@ export function Missions({ navigate, initialMissionId }: MissionsProps) {
               flexDirection: 'column',
               gap: '20px'
             }}>
-              {/* 1. SIMPLE STATUS BANNER */}
-              <div style={{
-                padding: '12px 18px',
-                borderRadius: '10px',
-                border: selectedMission.status === 'running'
-                  ? '1px solid hsl(var(--primary) / 0.4)'
-                  : selectedMission.status === 'verifying'
-                  ? '1px solid rgba(99, 102, 241, 0.4)'
-                  : selectedMission.status === 'awaiting_approval'
-                  ? '1px solid #f59e0b'
-                  : selectedMission.status === 'completed'
-                  ? '1px solid #10b98133'
-                  : '1px solid hsl(var(--border))',
-                backgroundColor: selectedMission.status === 'running'
-                  ? 'hsl(var(--primary) / 0.08)'
-                  : selectedMission.status === 'verifying'
-                  ? 'rgba(99, 102, 241, 0.08)'
-                  : selectedMission.status === 'awaiting_approval'
-                  ? 'rgba(245, 158, 11, 0.08)'
-                  : selectedMission.status === 'completed'
-                  ? 'rgba(16, 185, 129, 0.06)'
-                  : 'hsl(var(--card))',
-                display: 'flex',
-                alignItems: 'center',
-                justifyContent: 'space-between',
-                gap: '12px'
-              }}>
-                <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+              {/* 1. ACTIVE WORK / OPERATIONAL PULSE BANNER */}
+              {(selectedMission.status === 'running' || selectedMission.status === 'verifying') ? (() => {
+                const activeExec = executions.find(e => e.id === selectedExecutionId) || (executions.length > 0 ? executions[executions.length - 1] : null);
+                const runningMilestone = selectedMission.milestones.find(m => {
+                  const msState = (activeExec?.milestone_states || []).find(s => s.milestone_id === m.id);
+                  return msState ? msState.status === 'running' : m.status === 'running';
+                });
+
+                return (
                   <div style={{
-                    width: '9px',
-                    height: '9px',
-                    borderRadius: '50%',
-                    backgroundColor: selectedMission.status === 'running'
-                      ? 'hsl(var(--primary))'
-                      : selectedMission.status === 'verifying'
-                      ? '#6366f1'
-                      : selectedMission.status === 'awaiting_approval'
-                      ? '#f59e0b'
-                      : selectedMission.status === 'completed'
-                      ? '#10b981'
-                      : 'hsl(var(--muted-fg))'
-                  }} />
-                  <div style={{ fontSize: '13px', fontWeight: 600, color: 'hsl(var(--fg))' }}>
-                    {selectedMission.status === 'running' && t('operationalPulseRunning')}
-                    {selectedMission.status === 'verifying' && t('operationalPulseVerifying')}
-                    {selectedMission.status === 'draft' && t('operationalPulseIdle')}
-                    {selectedMission.status === 'interrupted' && t('operationalPulsePaused')}
-                    {selectedMission.status === 'awaiting_approval' && t('operationalPulseApproval')}
-                    {selectedMission.status === 'completed' && t('operationalPulseCompleted')}
-                    {selectedMission.status === 'failed' && t('operationalPulseFailed')}
-                    {selectedMission.status === 'cancelled' && t('operationalPulseCancelled')}
+                    padding: '16px 20px',
+                    borderRadius: '12px',
+                    border: '1px solid hsl(var(--primary) / 0.4)',
+                    backgroundColor: 'hsl(var(--primary) / 0.08)',
+                    display: 'flex',
+                    flexDirection: 'column',
+                    gap: '12px'
+                  }}>
+                    <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: '10px' }}>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+                        <div style={{
+                          width: '10px',
+                          height: '10px',
+                          borderRadius: '50%',
+                          backgroundColor: selectedMission.status === 'running' ? 'hsl(var(--primary))' : '#6366f1',
+                          boxShadow: selectedMission.status === 'running' ? '0 0 0 4px hsl(var(--primary) / 0.25)' : '0 0 0 4px rgba(99, 102, 241, 0.25)'
+                        }} />
+                        <span style={{ fontSize: '13px', fontWeight: 700, color: 'hsl(var(--fg))', letterSpacing: '0.02em' }}>
+                          {selectedMission.status === 'running' ? t('workActiveWorkTitle') : t('operationalPulseVerifying')}
+                        </span>
+                        {selectedExecutionId && (
+                          <span style={{ fontSize: '11px', padding: '1px 6px', borderRadius: '4px', backgroundColor: 'hsl(var(--primary) / 0.15)', color: 'hsl(var(--primary))', fontWeight: 600 }}>
+                            Run #{executions.find(e => e.id === selectedExecutionId)?.run_number || 1}
+                          </span>
+                        )}
+                      </div>
+
+                      <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                        <button
+                          onClick={() => handleMissionAction(t('pauseMission'), 'pause')}
+                          disabled={actionLoading === 'pause'}
+                          className="btn btn-sm btn-ghost"
+                          style={{ fontSize: '12px', display: 'flex', alignItems: 'center', gap: '4px' }}
+                        >
+                          <Pause size={13} />
+                          <span>{actionLoading === 'pause' ? 'Pausing...' : t('pauseMission')}</span>
+                        </button>
+                        <button
+                          onClick={() => handleMissionAction(t('cancelMission'), 'cancel')}
+                          disabled={actionLoading === 'cancel'}
+                          className="btn btn-sm btn-ghost text-rose-500 hover:bg-rose-500/10"
+                          style={{ fontSize: '12px', display: 'flex', alignItems: 'center', gap: '4px' }}
+                        >
+                          <X size={13} />
+                          <span>{actionLoading === 'cancel' ? 'Cancelling...' : t('cancelMission')}</span>
+                        </button>
+                      </div>
+                    </div>
+
+                    {runningMilestone && (
+                      <div style={{
+                        padding: '10px 14px',
+                        borderRadius: '8px',
+                        backgroundColor: 'hsl(var(--card))',
+                        border: '1px solid hsl(var(--primary) / 0.2)',
+                        display: 'flex',
+                        alignItems: 'center',
+                        justifyContent: 'space-between',
+                        gap: '12px',
+                        flexWrap: 'wrap'
+                      }}>
+                        <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                          <span style={{ fontSize: '12px', color: 'hsl(var(--muted-fg))' }}>
+                            {t('workWorkingNow')}
+                          </span>
+                          <span style={{ fontSize: '13px', fontWeight: 600, color: 'hsl(var(--fg))' }}>
+                            {runningMilestone.title}
+                          </span>
+                        </div>
+                        {runningMilestone.assigned_agent && (
+                          <span style={{
+                            fontSize: '11px',
+                            padding: '2px 8px',
+                            borderRadius: '4px',
+                            backgroundColor: 'hsl(var(--primary) / 0.1)',
+                            color: 'hsl(var(--primary))',
+                            fontWeight: 600
+                          }}>
+                            @{runningMilestone.assigned_agent}
+                          </span>
+                        )}
+                      </div>
+                    )}
+
+                    {selectedMission.milestones.length > 0 && (
+                      <div style={{ display: 'flex', flexDirection: 'column', gap: '4px' }}>
+                        <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '11.5px', color: 'hsl(var(--muted-fg))' }}>
+                          <span>{t('workCurrentProgress')}</span>
+                          <span>{pipelineStats.completed} {t('ofMilestones')} {selectedMission.milestones.length} {t('completedCount')} ({pipelineStats.percent}%)</span>
+                        </div>
+                        <div style={{
+                          width: '100%',
+                          height: '6px',
+                          borderRadius: '3px',
+                          backgroundColor: 'hsl(var(--muted))',
+                          overflow: 'hidden'
+                        }}>
+                          <div style={{
+                            width: `${pipelineStats.percent}%`,
+                            height: '100%',
+                            backgroundColor: 'hsl(var(--primary))',
+                            transition: 'width 0.3s ease'
+                          }} />
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                );
+              })() : (
+                <div style={{
+                  padding: '12px 18px',
+                  borderRadius: '10px',
+                  border: selectedMission.status === 'awaiting_approval'
+                    ? '1px solid #f59e0b'
+                    : selectedMission.status === 'completed'
+                    ? '1px solid #10b98133'
+                    : '1px solid hsl(var(--border))',
+                  backgroundColor: selectedMission.status === 'awaiting_approval'
+                    ? 'rgba(245, 158, 11, 0.08)'
+                    : selectedMission.status === 'completed'
+                    ? 'rgba(16, 185, 129, 0.06)'
+                    : 'hsl(var(--card))',
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'space-between',
+                  gap: '12px'
+                }}>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+                    <div style={{
+                      width: '9px',
+                      height: '9px',
+                      borderRadius: '50%',
+                      backgroundColor: selectedMission.status === 'awaiting_approval'
+                        ? '#f59e0b'
+                        : selectedMission.status === 'completed'
+                        ? '#10b981'
+                        : selectedMission.status === 'failed'
+                        ? '#ef4444'
+                        : 'hsl(var(--muted-fg))'
+                    }} />
+                    <div style={{ fontSize: '13px', fontWeight: 600, color: 'hsl(var(--fg))' }}>
+                      {selectedMission.status === 'draft' && t('operationalPulseIdle')}
+                      {selectedMission.status === 'interrupted' && t('operationalPulsePaused')}
+                      {selectedMission.status === 'awaiting_approval' && t('operationalPulseApproval')}
+                      {selectedMission.status === 'completed' && t('operationalPulseCompleted')}
+                      {selectedMission.status === 'failed' && t('operationalPulseFailed')}
+                      {selectedMission.status === 'cancelled' && t('operationalPulseCancelled')}
+                    </div>
+                  </div>
+
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '6px', fontSize: '12px', color: 'hsl(var(--muted-fg))' }}>
+                    <Clock size={13} />
+                    <span>
+                      {new Date(selectedMission.updated_at || selectedMission.created_at).toLocaleDateString([], {
+                        month: 'short',
+                        day: 'numeric',
+                        hour: '2-digit',
+                        minute: '2-digit'
+                      })}
+                    </span>
                   </div>
                 </div>
-
-                <div style={{ display: 'flex', alignItems: 'center', gap: '6px', fontSize: '12px', color: 'hsl(var(--muted-fg))' }}>
-                  <Clock size={13} />
-                  <span>
-                    {new Date(selectedMission.updated_at || selectedMission.created_at).toLocaleDateString([], {
-                      month: 'short',
-                      day: 'numeric',
-                      hour: '2-digit',
-                      minute: '2-digit'
-                    })}
-                  </span>
-                </div>
-              </div>
+              )}
 
               {/* APPROVAL GATE BANNER (When Awaiting Signoff) */}
               {selectedMission.status === 'awaiting_approval' && (() => {
@@ -2046,6 +2416,25 @@ export function Missions({ navigate, initialMissionId }: MissionsProps) {
                     <span>{t('addStep')}</span>
                   </button>
                 </div>
+
+                {/* Stage Progress Bar */}
+                {selectedMission.milestones.length > 0 && (
+                  <div style={{
+                    width: '100%',
+                    height: '6px',
+                    borderRadius: '3px',
+                    backgroundColor: 'hsl(var(--muted))',
+                    overflow: 'hidden',
+                    marginBottom: '16px'
+                  }}>
+                    <div style={{
+                      width: `${pipelineStats.percent}%`,
+                      height: '100%',
+                      backgroundColor: pipelineStats.percent === 100 ? '#10b981' : 'hsl(var(--primary))',
+                      transition: 'width 0.3s ease'
+                    }} />
+                  </div>
+                )}
 
                 {/* Inline Milestone Creation Form */}
                 {isAddingMilestone && (
@@ -2578,10 +2967,115 @@ export function Missions({ navigate, initialMissionId }: MissionsProps) {
                 )}
               </div>
 
-              {/* 6. PROGRESSIVE DISCLOSURE INSPECTOR GATEWAY */}
+              {/* 6. MISSION ACTIVITY STORY */}
               <div style={{
-                padding: '14px 18px',
-                borderRadius: '10px',
+                padding: '20px',
+                borderRadius: '12px',
+                border: '1px solid hsl(var(--border))',
+                backgroundColor: 'hsl(var(--card))'
+              }}>
+                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '14px', flexWrap: 'wrap', gap: '8px' }}>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                    <Activity size={16} className="text-primary" />
+                    <div>
+                      <h3 style={{ fontSize: '14px', fontWeight: 600, margin: 0, color: 'hsl(var(--fg))' }}>
+                        {t('workActivityStoryTitle')}
+                      </h3>
+                      <p style={{ fontSize: '12px', color: 'hsl(var(--muted-fg))', margin: '2px 0 0' }}>
+                        {t('workActivityStoryDesc')}
+                      </p>
+                    </div>
+                  </div>
+                  {activities.length > 5 && (
+                    <button
+                      onClick={() => {
+                        setActiveInspectorTab('trace');
+                        setIsInspectorOpen(true);
+                      }}
+                      className="btn btn-ghost"
+                      style={{ fontSize: '11px', color: 'hsl(var(--primary))', padding: '4px 8px' }}
+                    >
+                      <span>{t('viewDetails')} ({activities.length}) →</span>
+                    </button>
+                  )}
+                </div>
+
+                {loadingActivities ? (
+                  <div style={{ padding: '20px', textAlign: 'center', color: 'hsl(var(--muted-fg))', fontSize: '12px' }}>
+                    <RefreshCw size={15} className="animate-spin" style={{ margin: '0 auto 6px' }} />
+                    Loading...
+                  </div>
+                ) : activities.length === 0 ? (
+                  <div style={{
+                    padding: '20px 16px',
+                    borderRadius: '8px',
+                    border: '1px dashed hsl(var(--border))',
+                    textAlign: 'center',
+                    color: 'hsl(var(--muted-fg))',
+                    fontSize: '12.5px'
+                  }}>
+                    {t('traceEmptyTitle')}
+                  </div>
+                ) : (
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
+                    {activities.slice(-5).reverse().map((act) => (
+                      <div
+                        key={act.id}
+                        style={{
+                          padding: '10px 12px',
+                          borderRadius: '8px',
+                          backgroundColor: 'hsl(var(--bg))',
+                          border: '1px solid hsl(var(--border))',
+                          display: 'flex',
+                          alignItems: 'flex-start',
+                          justifyContent: 'space-between',
+                          gap: '12px'
+                        }}
+                      >
+                        <div style={{ display: 'flex', alignItems: 'flex-start', gap: '8px', minWidth: 0, flex: 1 }}>
+                          <div style={{
+                            width: '6px',
+                            height: '6px',
+                            borderRadius: '50%',
+                            backgroundColor: 'hsl(var(--primary))',
+                            marginTop: '6px',
+                            flexShrink: 0
+                          }} />
+                          <div style={{ minWidth: 0, flex: 1 }}>
+                            <div style={{ display: 'flex', alignItems: 'center', gap: '6px', marginBottom: '2px', flexWrap: 'wrap' }}>
+                              <span style={{ fontSize: '12px', fontWeight: 600, color: 'hsl(var(--fg))' }}>
+                                {act.agent || 'System'}
+                              </span>
+                              <span style={{
+                                fontSize: '10px',
+                                padding: '1px 5px',
+                                borderRadius: '4px',
+                                backgroundColor: 'hsl(var(--muted))',
+                                color: 'hsl(var(--muted-fg))',
+                                textTransform: 'uppercase'
+                              }}>
+                                {act.activity_type}
+                              </span>
+                            </div>
+                            <div style={{ fontSize: '12px', color: 'hsl(var(--fg))', lineHeight: 1.45 }}>
+                              {act.message}
+                            </div>
+                          </div>
+                        </div>
+
+                        <span style={{ fontSize: '10.5px', color: 'hsl(var(--muted-fg))', whiteSpace: 'nowrap', flexShrink: 0 }}>
+                          {new Date(act.created_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+                        </span>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+
+              {/* 7. PROGRESSIVE DISCLOSURE INSPECTOR GATEWAY */}
+              <div style={{
+                padding: '16px 20px',
+                borderRadius: '12px',
                 border: '1px solid hsl(var(--border))',
                 backgroundColor: 'hsl(var(--card))',
                 display: 'flex',
@@ -2589,12 +3083,27 @@ export function Missions({ navigate, initialMissionId }: MissionsProps) {
                 justifyContent: 'space-between',
                 gap: '16px'
               }}>
-                <div>
-                  <div style={{ fontSize: '13px', fontWeight: 600, color: 'hsl(var(--fg))' }}>
-                    {t('inspectExecution')}
+                <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
+                  <div style={{
+                    width: '36px',
+                    height: '36px',
+                    borderRadius: '8px',
+                    backgroundColor: 'hsl(var(--primary) / 0.1)',
+                    color: 'hsl(var(--primary))',
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                    flexShrink: 0
+                  }}>
+                    <Layers size={18} />
                   </div>
-                  <div style={{ fontSize: '12px', color: 'hsl(var(--muted-fg))', marginTop: '2px' }}>
-                    {t('inspectExecutionDesc')}
+                  <div>
+                    <div style={{ fontSize: '13px', fontWeight: 600, color: 'hsl(var(--fg))' }}>
+                      {t('inspectExecution')}
+                    </div>
+                    <div style={{ fontSize: '12px', color: 'hsl(var(--muted-fg))', marginTop: '2px' }}>
+                      {t('workAdvancedSectionDesc')}
+                    </div>
                   </div>
                 </div>
 
@@ -2604,7 +3113,8 @@ export function Missions({ navigate, initialMissionId }: MissionsProps) {
                     if (selectedMission) fetchActivities(selectedMission.id);
                   }}
                   className="btn btn-secondary"
-                  style={{ display: 'flex', alignItems: 'center', gap: '6px', fontSize: '12.5px', padding: '6px 12px' }}
+                  data-testid="inspect-execution-btn"
+                  style={{ display: 'flex', alignItems: 'center', gap: '6px', fontSize: '12.5px', padding: '6px 14px' }}
                 >
                   <Layers size={14} />
                   <span>{t('inspectExecution')}</span>
@@ -2654,6 +3164,7 @@ export function Missions({ navigate, initialMissionId }: MissionsProps) {
               </div>
               <button onClick={() => setIsInspectorOpen(false)} className="btn btn-ghost" aria-label="Close Inspector" data-testid="close-inspector-btn" style={{ padding: '4px' }}>
                 <X size={18} />
+                <span className="sr-only">Close Inspector</span>
               </button>
             </div>
 

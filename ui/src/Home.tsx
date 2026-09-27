@@ -472,7 +472,7 @@ export function Home({
               )}
             </div>
             <p style={{ margin: '4px 0 0', fontSize: '14px', color: 'hsl(var(--muted-fg))' }}>
-              Your operational AI companion. State your goal, review what needs authorization, and receive verified outcomes.
+              {t('homeWelcome')}. State your goal, review what needs authorization, and receive verified outcomes.
             </p>
           </div>
         </div>

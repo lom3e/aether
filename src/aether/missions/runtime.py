@@ -1559,17 +1559,33 @@ class MissionRuntime:
     ) -> None:
         if not self.broadcaster:
             return
+
         try:
-            self.graph_compiler.invalidate_cache(mission_id, execution_id)
-            graph = self.graph_compiler.compile(mission_id=mission_id, execution_id=execution_id, force_refresh=True)
-            if graph:
-                self._broadcast({
-                    "type": "mission_graph_updated",
-                    "mission_id": mission_id,
-                    "execution_id": execution_id or graph.execution_id,
-                    "event": event_type,
-                    "graph": graph.to_dict(),
-                })
-        except Exception as exc:
-            logger.debug("Failed to broadcast graph update: %s", exc)
+            loop = asyncio.get_running_loop()
+        except RuntimeError:
+            loop = None
+
+        def _task():
+            try:
+                self.graph_compiler.invalidate_cache(mission_id, execution_id)
+                graph = self.graph_compiler.compile(mission_id=mission_id, execution_id=execution_id, force_refresh=True)
+                if graph:
+                    payload = {
+                        "type": "mission_graph_updated",
+                        "mission_id": mission_id,
+                        "execution_id": execution_id or graph.execution_id,
+                        "event": event_type,
+                        "graph": graph.to_dict(),
+                    }
+                    if loop and not loop.is_closed():
+                        loop.call_soon_threadsafe(self._broadcast, payload)
+                    else:
+                        self._broadcast(payload)
+            except Exception as exc:
+                logger.debug("Failed to broadcast graph update: %s", exc)
+
+        if loop and not loop.is_closed():
+            loop.create_task(asyncio.to_thread(_task))
+        else:
+            _task()
 

@@ -790,6 +790,7 @@ class Workspace:
         }
         with open(ws.config_path, "w", encoding="utf-8") as f:
             yaml.dump(manifest, f, sort_keys=False, default_flow_style=False)
+        ws._config_cache = manifest
 
         _save_last_workspace(ws.root)
         cls._active_workspaces[str(ws.root)] = ws
