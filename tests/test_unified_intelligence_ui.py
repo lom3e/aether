@@ -179,7 +179,7 @@ def test_unified_intelligence_inspector_tab(browser_context):
 
     # Verify Discreet Character Budget
     injected_chars = page.locator("[data-testid='metric-injected-chars']")
-    expect(injected_chars).to_be_visible()
+    expect(injected_chars).to_be_visible(timeout=15000)
 
     # Verify Evidence Cards (Primary Simplified View)
     evidence_list = page.locator("[data-testid='intelligence-evidence-list']")

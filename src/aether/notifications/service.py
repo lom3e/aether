@@ -142,14 +142,6 @@ class NotificationService:
             except Exception as e:
                 logger.debug("Could not forward notification to Telegram connector: %s", e)
 
-        # Dispatch across multi-channel fabric
-        try:
-            receipts = self.dispatcher.dispatch(saved, target_channel_types=target_channels)
-            meta["delivery_count"] = len(receipts)
-        except Exception as exc:
-            logger.warning("Dispatcher error during notify: %s", exc)
-
-
         # Broadcast via Event Hub if available
         if self.event_hub:
             try:
@@ -160,6 +152,13 @@ class NotificationService:
                 )
             except Exception as e:
                 logger.debug(f"Could not broadcast notification via event hub: {e}")
+
+        # Dispatch across multi-channel fabric
+        try:
+            receipts = self.dispatcher.dispatch(saved, target_channel_types=target_channels)
+            meta["delivery_count"] = len(receipts)
+        except Exception as exc:
+            logger.warning("Dispatcher error during notify: %s", exc)
 
         logger.info(f"Notification emitted [{notif_type.value}]: {title} ({workspace_id})")
         return saved

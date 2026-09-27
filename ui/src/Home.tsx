@@ -91,6 +91,16 @@ export function Home({
     }
   }, [workspaceName]);
 
+  // Deep-link auto-scroll and focus for pending approvals
+  useEffect(() => {
+    if (initialApprovalId && overview.pending_approvals?.length > 0) {
+      const el = document.getElementById(`approval-card-${initialApprovalId}`);
+      if (el) {
+        el.scrollIntoView({ behavior: 'smooth', block: 'center' });
+      }
+    }
+  }, [initialApprovalId, overview.pending_approvals]);
+
   // Real-time SSE Connection (Phase D Event Hub)
   useEffect(() => {
     if (!workspaceName) return;
@@ -246,48 +256,6 @@ export function Home({
     window.speechSynthesis.speak(utterance);
   };
 
-  // If no workspace exists or is active, show the explicit no-workspace empty state
-  if (!workspaceName) {
-    return (
-      <div style={{ flex: 1, overflowY: 'auto', display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '40px 24px' }}>
-        <div className="card" style={{ maxWidth: '520px', width: '100%', padding: '44px 36px', textAlign: 'center', boxShadow: '0 12px 36px rgba(0,0,0,0.08)' }}>
-          <div style={{
-            width: '64px',
-            height: '64px',
-            borderRadius: '16px',
-            backgroundColor: 'hsl(var(--primary)/0.12)',
-            display: 'flex',
-            alignItems: 'center',
-            justifyContent: 'center',
-            margin: '0 auto 20px',
-          }}>
-            <img
-              src="/brand/logo_viola.svg"
-              alt="Aether"
-              width="36"
-              height="36"
-              style={{ display: 'block' }}
-            />
-          </div>
-          <h2 style={{ fontSize: '22px', fontWeight: 700, marginBottom: '10px', color: 'hsl(var(--fg))' }}>
-            {t('createFirstWorkspace')}
-          </h2>
-          <p className="text-muted" style={{ fontSize: '14px', lineHeight: 1.6, marginBottom: '28px', maxWidth: '420px', margin: '0 auto 28px' }}>
-            {t('noActiveWorkspaceDesc')}
-          </p>
-          <button
-            className="btn btn-primary"
-            style={{ padding: '10px 24px', fontSize: '14px', margin: '0 auto', display: 'inline-flex', alignItems: 'center', gap: '8px' }}
-            onClick={onOpenWorkspaceModal ? onOpenWorkspaceModal : () => navigate('settings')}
-          >
-            <Plus size={16} />
-            <span>{t('createWorkspaceBtn')}</span>
-          </button>
-        </div>
-      </div>
-    );
-  }
-
   const handleSendPrompt = async (promptText: string) => {
     const text = promptText.trim();
     if (!text || isSubmitting) return;
@@ -417,6 +385,48 @@ export function Home({
     }
   };
 
+  // If no workspace exists or is active, show the explicit no-workspace empty state
+  if (!workspaceName) {
+    return (
+      <div style={{ flex: 1, overflowY: 'auto', display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '40px 24px' }}>
+        <div className="card" style={{ maxWidth: '520px', width: '100%', padding: '44px 36px', textAlign: 'center', boxShadow: '0 12px 36px rgba(0,0,0,0.08)' }}>
+          <div style={{
+            width: '64px',
+            height: '64px',
+            borderRadius: '16px',
+            backgroundColor: 'hsl(var(--primary)/0.12)',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            margin: '0 auto 20px',
+          }}>
+            <img
+              src="/brand/logo_viola.svg"
+              alt="Aether"
+              width="36"
+              height="36"
+              style={{ display: 'block' }}
+            />
+          </div>
+          <h2 style={{ fontSize: '22px', fontWeight: 700, marginBottom: '10px', color: 'hsl(var(--fg))' }}>
+            {t('createFirstWorkspace')}
+          </h2>
+          <p className="text-muted" style={{ fontSize: '14px', lineHeight: 1.6, marginBottom: '28px', maxWidth: '420px', margin: '0 auto 28px' }}>
+            {t('noActiveWorkspaceDesc')}
+          </p>
+          <button
+            className="btn btn-primary"
+            style={{ padding: '10px 24px', fontSize: '14px', margin: '0 auto', display: 'inline-flex', alignItems: 'center', gap: '8px' }}
+            onClick={onOpenWorkspaceModal ? onOpenWorkspaceModal : () => navigate('settings')}
+          >
+            <Plus size={16} />
+            <span>{t('createWorkspaceBtn')}</span>
+          </button>
+        </div>
+      </div>
+    );
+  }
+
   return (
     <div style={{ display: 'flex', flexDirection: 'column', height: '100%', flex: 1 }}>
       <TopHeader
@@ -437,8 +447,8 @@ export function Home({
         }
       />
       <div style={{ flex: 1, overflowY: 'auto', padding: '32px 28px', maxWidth: '1000px', margin: '0 auto', width: '100%' }}>
-        {/* Top Banner */}
-        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '28px' }}>
+        {/* Top Banner & Workspace Overview Status */}
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '24px' }}>
           <div>
             <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
               <h1 style={{ fontSize: '24px', fontWeight: 700, margin: 0, color: 'hsl(var(--fg))' }}>
@@ -447,14 +457,268 @@ export function Home({
               <span className="badge badge-primary" style={{ fontSize: '12px', padding: '2px 8px' }}>
                 {workspaceName}
               </span>
+              {overview.pending_approvals?.length > 0 ? (
+                <span className="badge" style={{ backgroundColor: '#f59e0b20', color: '#f59e0b', border: '1px solid #f59e0b50', fontSize: '11px' }}>
+                  {overview.pending_approvals.length} Requires Review
+                </span>
+              ) : overview.background_tasks?.some((t: any) => t.status === 'running') ? (
+                <span className="badge" style={{ backgroundColor: 'hsl(var(--primary)/0.15)', color: 'hsl(var(--primary))', fontSize: '11px' }}>
+                  Work In Progress
+                </span>
+              ) : (
+                <span className="badge" style={{ backgroundColor: '#10b98115', color: '#10b981', border: '1px solid #10b98130', fontSize: '11px' }}>
+                  Workforce Ready
+                </span>
+              )}
             </div>
             <p style={{ margin: '4px 0 0', fontSize: '14px', color: 'hsl(var(--muted-fg))' }}>
-              Your operational AI companion. Your AI Workforce is ready. State your goal, and Aether takes care of it.
+              Your operational AI companion. State your goal, review what needs authorization, and receive verified outcomes.
             </p>
           </div>
         </div>
 
-        {/* Main Companion Input Box */}
+        {/* 1. NEEDS ATTENTION / APPROVALS (TOP OPERATIONAL PRIORITY) */}
+        {overview.pending_approvals && overview.pending_approvals.length > 0 && (
+          <div data-testid="needs-attention-section" style={{ marginBottom: '28px' }}>
+            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '12px' }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                <Shield size={18} color="#f59e0b" />
+                <h2 style={{ fontSize: '16px', fontWeight: 700, margin: 0, color: 'hsl(var(--fg))' }}>
+                  {t('needsAttention') || 'Needs Attention'} ({overview.pending_approvals.length})
+                </h2>
+              </div>
+              <span style={{ fontSize: '12px', color: '#f59e0b', fontWeight: 500 }}>
+                Operations paused awaiting your sign-off
+              </span>
+            </div>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
+              {overview.pending_approvals.map((appr: any) => {
+                const isTargeted = initialApprovalId === appr.execution_id;
+                const isLoading = actionLoading === appr.execution_id;
+                return (
+                  <div
+                    key={appr.execution_id}
+                    id={`approval-card-${appr.execution_id}`}
+                    className="card"
+                    style={{
+                      padding: '16px 20px',
+                      borderRadius: '12px',
+                      border: isTargeted ? '2px solid #f59e0b' : '1px solid #f59e0b50',
+                      boxShadow: isTargeted ? '0 0 16px rgba(245, 158, 11, 0.3)' : '0 2px 8px rgba(0,0,0,0.04)',
+                      backgroundColor: isTargeted ? '#f59e0b14' : '#f59e0b08',
+                      display: 'flex',
+                      justifyContent: 'space-between',
+                      alignItems: 'center',
+                      transition: 'all 0.3s ease',
+                    }}
+                  >
+                    <div style={{ flex: 1, marginRight: '16px' }}>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                        <span style={{ fontSize: '10px', fontWeight: 700, padding: '2px 7px', borderRadius: '4px', backgroundColor: '#f59e0b20', color: '#f59e0b', textTransform: 'uppercase', letterSpacing: '0.04em' }}>
+                          Confirmation Required
+                        </span>
+                        <span style={{ fontWeight: 600, fontSize: '14.5px' }}>{appr.human_summary || appr.action_name}</span>
+                      </div>
+                      {appr.action_id === 'email.send' && (
+                        <div style={{ fontSize: '12.5px', color: 'hsl(var(--fg)/0.85)', marginTop: '6px', padding: '8px 12px', backgroundColor: 'hsl(var(--muted)/0.3)', borderRadius: '6px' }}>
+                          <div><strong>To:</strong> {appr.input_data?.to}</div>
+                          <div><strong>Subject:</strong> {appr.input_data?.subject}</div>
+                          {appr.input_data?.body && <div style={{ marginTop: '4px', whiteSpace: 'pre-wrap', color: 'hsl(var(--muted-fg))' }}>{appr.input_data.body}</div>}
+                        </div>
+                      )}
+                      {appr.action_id === 'github.create_issue' && (
+                        <div style={{ fontSize: '12.5px', color: 'hsl(var(--fg)/0.85)', marginTop: '6px', padding: '8px 12px', backgroundColor: 'hsl(var(--muted)/0.3)', borderRadius: '6px' }}>
+                          <div><strong>Repo:</strong> {appr.input_data?.owner ? `${appr.input_data.owner}/${appr.input_data.repository}` : (appr.input_data?.repository || 'repository')}</div>
+                          <div><strong>Title:</strong> {appr.input_data?.title}</div>
+                          {appr.input_data?.body && <div style={{ marginTop: '4px', whiteSpace: 'pre-wrap', color: 'hsl(var(--muted-fg))' }}>{appr.input_data.body}</div>}
+                        </div>
+                      )}
+                      {appr.action_id === 'slack.send_message' && (
+                        <div style={{ fontSize: '12.5px', color: 'hsl(var(--fg)/0.85)', marginTop: '6px', padding: '8px 12px', backgroundColor: 'hsl(var(--muted)/0.3)', borderRadius: '6px' }}>
+                          <div><strong>Channel:</strong> {appr.input_data?.channel || '#general'}</div>
+                          {appr.input_data?.text && <div style={{ marginTop: '4px', whiteSpace: 'pre-wrap', color: 'hsl(var(--muted-fg))' }}>{appr.input_data.text}</div>}
+                        </div>
+                      )}
+                      {appr.action_id === 'calendar.create_event' && (
+                        <div style={{ fontSize: '12.5px', color: 'hsl(var(--muted-fg))', marginTop: '4px' }}>
+                          {appr.input_data?.start_time ? `Time: ${appr.input_data.start_time}` : ''} {appr.input_data?.location ? `• Location: ${appr.input_data.location}` : ''}
+                        </div>
+                      )}
+                    </div>
+                    <div style={{ display: 'flex', gap: '8px', alignItems: 'center' }}>
+                      <button
+                        className="btn btn-ghost"
+                        disabled={isLoading}
+                        onClick={() => handleRejectAction(appr.execution_id)}
+                        style={{ fontSize: '12px', padding: '6px 12px', color: 'hsl(var(--destructive))', opacity: isLoading ? 0.6 : 1 }}
+                      >
+                        Decline
+                      </button>
+                      <button
+                        className="btn btn-primary"
+                        disabled={isLoading}
+                        onClick={() => handleApproveAction(appr.execution_id)}
+                        style={{
+                          fontSize: '12px',
+                          padding: '6px 16px',
+                          backgroundColor: '#10b981',
+                          borderColor: '#10b981',
+                          display: 'flex',
+                          alignItems: 'center',
+                          gap: '6px',
+                          opacity: isLoading ? 0.6 : 1,
+                        }}
+                      >
+                        {isLoading && <Loader2 size={13} className="animate-spin" />}
+                        {isLoading ? 'Approving...' : 'Approve'}
+                      </button>
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+        )}
+
+        {/* 2. ACTIVE WORK / RUNNING TASKS */}
+        {((overview.background_tasks && overview.background_tasks.length > 0) || (overview.active_works && overview.active_works.length > 0)) && (
+          <div data-testid="background-tasks-section" style={{ marginBottom: '28px' }}>
+            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '12px' }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                <Clock size={16} className="text-primary" />
+                <h2 style={{ fontSize: '16px', fontWeight: 700, margin: 0, color: 'hsl(var(--fg))' }}>
+                  {t('activeWork') || 'Active Work'} ({(overview.background_tasks?.length || 0) + (overview.active_works?.length || 0)})
+                </h2>
+              </div>
+              <button
+                className="btn btn-ghost"
+                onClick={() => navigate('missions')}
+                style={{ fontSize: '12px', padding: '2px 8px', color: 'hsl(var(--primary))' }}
+              >
+                View all in Work →
+              </button>
+            </div>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
+              {overview.background_tasks?.map((task: any) => (
+                <div
+                  key={task.id}
+                  className="card"
+                  data-testid="background-task-card"
+                  style={{
+                    padding: '16px 20px',
+                    borderRadius: '12px',
+                    border: '1px solid hsl(var(--border))',
+                    display: 'flex',
+                    flexDirection: 'column',
+                    gap: '8px',
+                  }}
+                >
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                    <div>
+                      <span style={{ fontWeight: 600, fontSize: '14px' }}>{task.title || 'Operational Background Task'}</span>
+                      <div style={{ fontSize: '12px', color: 'hsl(var(--muted-fg))', marginTop: '2px' }}>
+                        {task.current_step || task.status}
+                      </div>
+                    </div>
+                    <span
+                      className={`badge ${task.status === 'completed' ? 'badge-success' : task.status === 'running' ? 'badge-primary' : 'badge-warning'}`}
+                      style={{ fontSize: '11px', textTransform: 'capitalize' }}
+                    >
+                      {task.status}
+                    </span>
+                  </div>
+
+                  {/* Progress Bar */}
+                  <div style={{ width: '100%', height: '6px', borderRadius: '3px', backgroundColor: 'hsl(var(--muted))', overflow: 'hidden' }}>
+                    <div
+                      style={{
+                        width: `${task.progress_pct || (task.status === 'completed' ? 100 : 25)}%`,
+                        height: '100%',
+                        backgroundColor: task.status === 'completed' ? '#10b981' : 'hsl(var(--primary))',
+                        transition: 'width 0.4s ease',
+                      }}
+                    />
+                  </div>
+
+                  {task.deliverable_path && (
+                    <div style={{ display: 'flex', justifyContent: 'flex-end', marginTop: '4px' }}>
+                      <button
+                        className="btn btn-ghost"
+                        onClick={() => navigate('missions')}
+                        style={{ fontSize: '12px', padding: '4px 8px', color: 'hsl(var(--primary))', display: 'inline-flex', alignItems: 'center', gap: '4px' }}
+                      >
+                        <ExternalLink size={12} /> View Deliverable
+                      </button>
+                    </div>
+                  )}
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
+
+        {/* 3. RECENT DELIVERABLES / OUTCOMES */}
+        {overview.recent_deliverables && overview.recent_deliverables.length > 0 && (
+          <div style={{ marginBottom: '28px' }}>
+            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '12px' }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                <FileText size={16} className="text-primary" />
+                <h2 style={{ fontSize: '16px', fontWeight: 700, margin: 0, color: 'hsl(var(--fg))' }}>
+                  {t('recentDeliverables') || 'Recent Deliverables'} ({overview.recent_deliverables.length})
+                </h2>
+              </div>
+              <button
+                className="btn btn-ghost"
+                onClick={() => navigate('missions')}
+                style={{ fontSize: '12px', padding: '2px 8px', color: 'hsl(var(--primary))' }}
+              >
+                Open in Work →
+              </button>
+            </div>
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(280px, 1fr))', gap: '12px' }}>
+              {overview.recent_deliverables.map((deliv: any) => (
+                <div
+                  key={deliv.id || deliv.file_path}
+                  className="card"
+                  onClick={() => navigate('missions')}
+                  style={{
+                    padding: '14px 16px',
+                    borderRadius: '10px',
+                    border: '1px solid hsl(var(--border))',
+                    cursor: 'pointer',
+                    display: 'flex',
+                    flexDirection: 'column',
+                    gap: '6px',
+                    transition: 'border-color 0.15s ease',
+                  }}
+                >
+                  <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                      <FileText size={15} color="hsl(var(--primary))" />
+                      <span style={{ fontSize: '13.5px', fontWeight: 600 }}>{deliv.title || deliv.name}</span>
+                    </div>
+                    <span className="badge" style={{ fontSize: '10px', textTransform: 'uppercase' }}>
+                      {deliv.file_type || 'artifact'}
+                    </span>
+                  </div>
+                  {deliv.summary && (
+                    <p style={{ margin: 0, fontSize: '12px', color: 'hsl(var(--muted-fg))', lineHeight: 1.4 }}>
+                      {deliv.summary}
+                    </p>
+                  )}
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginTop: '4px', fontSize: '11px', color: 'hsl(var(--muted-fg))' }}>
+                    <span>{deliv.created_at ? new Date(deliv.created_at).toLocaleDateString([], { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' }) : ''}</span>
+                    <span style={{ color: 'hsl(var(--primary))', display: 'inline-flex', alignItems: 'center', gap: '3px' }}>
+                      View outcome <ArrowRight size={10} />
+                    </span>
+                  </div>
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
+
+        {/* 4. MAIN COLLABORATOR INPUT BOX */}
         <div className="card" style={{
           padding: '24px',
           borderRadius: '16px',
@@ -680,193 +944,25 @@ export function Home({
           </div>
         )}
 
-        {/* Real-time Background Operations (Phase D Background Tasks) */}
-        {overview.background_tasks && overview.background_tasks.length > 0 && (
-          <div data-testid="background-tasks-section" style={{ marginBottom: '32px' }}>
-            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '12px' }}>
-              <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-                <Clock size={16} className="text-primary" />
-                <h2 style={{ fontSize: '16px', fontWeight: 700, margin: 0, color: 'hsl(var(--fg))' }}>
-                  Operational Tasks ({overview.background_tasks.length})
-                </h2>
-              </div>
-            </div>
-            <div style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
-              {overview.background_tasks.map((task: any) => (
-                <div
-                  key={task.id}
-                  className="card"
-                  data-testid="background-task-card"
-                  style={{
-                    padding: '16px 20px',
-                    borderRadius: '12px',
-                    border: '1px solid hsl(var(--border))',
-                    display: 'flex',
-                    flexDirection: 'column',
-                    gap: '8px',
-                  }}
-                >
-                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                    <div>
-                      <span style={{ fontWeight: 600, fontSize: '14px' }}>{task.title || 'Operational Background Task'}</span>
-                      <div style={{ fontSize: '12px', color: 'hsl(var(--muted-fg))', marginTop: '2px' }}>
-                        {task.current_step || task.status}
-                      </div>
-                    </div>
-                    <span
-                      className={`badge ${task.status === 'completed' ? 'badge-success' : task.status === 'running' ? 'badge-primary' : 'badge-warning'}`}
-                      style={{ fontSize: '11px', textTransform: 'capitalize' }}
-                    >
-                      {task.status}
-                    </span>
-                  </div>
-
-                  {/* Progress Bar */}
-                  <div style={{ width: '100%', height: '6px', borderRadius: '3px', backgroundColor: 'hsl(var(--muted))', overflow: 'hidden' }}>
-                    <div
-                      style={{
-                        width: `${task.progress_pct || (task.status === 'completed' ? 100 : 25)}%`,
-                        height: '100%',
-                        backgroundColor: task.status === 'completed' ? '#10b981' : 'hsl(var(--primary))',
-                        transition: 'width 0.4s ease',
-                      }}
-                    />
-                  </div>
-
-                  {task.deliverable_path && (
-                    <div style={{ display: 'flex', justifyContent: 'flex-end', marginTop: '4px' }}>
-                      <button
-                        className="btn btn-ghost"
-                        onClick={() => navigate('missions')}
-                        style={{ fontSize: '12px', padding: '4px 8px', color: 'hsl(var(--primary))', display: 'inline-flex', alignItems: 'center', gap: '4px' }}
-                      >
-                        <ExternalLink size={12} /> View Deliverable
-                      </button>
-                    </div>
-                  )}
-                </div>
-              ))}
-            </div>
-          </div>
-        )}
-
-        {/* Pending Approvals Global Section (if any exists in workspace) */}
-        {overview.pending_approvals && overview.pending_approvals.length > 0 && (
-          <div style={{ marginBottom: '32px' }}>
-            <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '12px' }}>
-              <Shield size={18} color="#f59e0b" />
-              <h2 style={{ fontSize: '16px', fontWeight: 700, margin: 0, color: 'hsl(var(--fg))' }}>
-                Pending Approvals ({overview.pending_approvals.length})
-              </h2>
-            </div>
-            <div style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
-              {overview.pending_approvals.map((appr: any) => {
-                const isTargeted = initialApprovalId === appr.execution_id;
-                const isLoading = actionLoading === appr.execution_id;
-                return (
-                  <div
-                    key={appr.execution_id}
-                    id={`approval-card-${appr.execution_id}`}
-                    className="card"
-                    style={{
-                      padding: '16px 20px',
-                      borderRadius: '12px',
-                      border: isTargeted ? '2px solid #f59e0b' : '1px solid #f59e0b50',
-                      boxShadow: isTargeted ? '0 0 16px rgba(245, 158, 11, 0.3)' : undefined,
-                      backgroundColor: isTargeted ? '#f59e0b14' : '#f59e0b08',
-                      display: 'flex',
-                      justifyContent: 'space-between',
-                      alignItems: 'center',
-                      transition: 'all 0.3s ease',
-                    }}
-                  >
-                    <div style={{ flex: 1, marginRight: '16px' }}>
-                      <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-                        <span style={{ fontSize: '11px', fontWeight: 700, padding: '2px 8px', borderRadius: '4px', backgroundColor: '#f59e0b20', color: '#f59e0b', textTransform: 'uppercase' }}>
-                          Action Requires Approval
-                        </span>
-                        <span style={{ fontWeight: 600, fontSize: '15px' }}>{appr.human_summary || appr.action_name}</span>
-                      </div>
-                      {appr.action_id === 'email.send' && (
-                        <div style={{ fontSize: '13px', color: 'hsl(var(--fg)/0.85)', marginTop: '6px', padding: '8px 12px', backgroundColor: 'hsl(var(--muted)/0.3)', borderRadius: '6px' }}>
-                          <div><strong>To:</strong> {appr.input_data?.to}</div>
-                          <div><strong>Subject:</strong> {appr.input_data?.subject}</div>
-                          {appr.input_data?.body && <div style={{ marginTop: '4px', whiteSpace: 'pre-wrap', color: 'hsl(var(--muted-fg))' }}>{appr.input_data.body}</div>}
-                        </div>
-                      )}
-                      {appr.action_id === 'github.create_issue' && (
-                        <div style={{ fontSize: '13px', color: 'hsl(var(--fg)/0.85)', marginTop: '6px', padding: '8px 12px', backgroundColor: 'hsl(var(--muted)/0.3)', borderRadius: '6px' }}>
-                          <div><strong>Repo:</strong> {appr.input_data?.owner ? `${appr.input_data.owner}/${appr.input_data.repository}` : (appr.input_data?.repository || 'repository')}</div>
-                          <div><strong>Title:</strong> {appr.input_data?.title}</div>
-                          {appr.input_data?.body && <div style={{ marginTop: '4px', whiteSpace: 'pre-wrap', color: 'hsl(var(--muted-fg))' }}>{appr.input_data.body}</div>}
-                        </div>
-                      )}
-                      {appr.action_id === 'slack.send_message' && (
-                        <div style={{ fontSize: '13px', color: 'hsl(var(--fg)/0.85)', marginTop: '6px', padding: '8px 12px', backgroundColor: 'hsl(var(--muted)/0.3)', borderRadius: '6px' }}>
-                          <div><strong>Channel:</strong> {appr.input_data?.channel || '#general'}</div>
-                          {appr.input_data?.text && <div style={{ marginTop: '4px', whiteSpace: 'pre-wrap', color: 'hsl(var(--muted-fg))' }}>{appr.input_data.text}</div>}
-                        </div>
-                      )}
-                      {appr.action_id === 'calendar.create_event' && (
-                        <div style={{ fontSize: '13px', color: 'hsl(var(--muted-fg))', marginTop: '4px' }}>
-                          {appr.input_data?.start_time ? `Time: ${appr.input_data.start_time}` : ''} {appr.input_data?.location ? `• Location: ${appr.input_data.location}` : ''}
-                        </div>
-                      )}
-                    </div>
-                    <div style={{ display: 'flex', gap: '8px', alignItems: 'center' }}>
-                      <button
-                        className="btn btn-ghost"
-                        disabled={isLoading}
-                        onClick={() => handleRejectAction(appr.execution_id)}
-                        style={{ fontSize: '12px', padding: '6px 12px', color: 'hsl(var(--destructive))', opacity: isLoading ? 0.6 : 1 }}
-                      >
-                        Decline
-                      </button>
-                      <button
-                        className="btn btn-primary"
-                        disabled={isLoading}
-                        onClick={() => handleApproveAction(appr.execution_id)}
-                        style={{
-                          fontSize: '12px',
-                          padding: '6px 16px',
-                          backgroundColor: '#10b981',
-                          borderColor: '#10b981',
-                          display: 'flex',
-                          alignItems: 'center',
-                          gap: '6px',
-                          opacity: isLoading ? 0.6 : 1,
-                        }}
-                      >
-                        {isLoading && <Loader2 size={13} className="animate-spin" />}
-                        {isLoading ? 'Approving...' : 'Approve'}
-                      </button>
-                    </div>
-                  </div>
-                );
-              })}
-            </div>
-          </div>
-        )}
-
-        {/* Hub Cards Grid: Work, Connections, Activity */}
-        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(280px, 1fr))', gap: '16px', marginBottom: '28px' }}>
+        {/* 5. HUB CARDS GRID: Work, Connections, Automations, Activity */}
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))', gap: '16px', marginBottom: '28px' }}>
           {/* Work Hub Card */}
           <div
             className="card"
-            style={{ padding: '20px', borderRadius: '12px', cursor: 'pointer' }}
+            style={{ padding: '18px', borderRadius: '12px', cursor: 'pointer' }}
             onClick={() => navigate('missions')}
           >
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '10px' }}>
-              <div style={{ display: 'flex', alignItems: 'center', gap: '8px', fontWeight: 600, fontSize: '15px' }}>
-                <Users size={18} color="hsl(var(--primary))" /> Work in Progress
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '8px' }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '8px', fontWeight: 600, fontSize: '14.5px' }}>
+                <Users size={17} color="hsl(var(--primary))" /> Work & Missions
               </div>
-              <ArrowRight size={16} color="hsl(var(--muted-fg))" />
+              <ArrowRight size={15} color="hsl(var(--muted-fg))" />
             </div>
-            <div style={{ fontSize: '13px', color: 'hsl(var(--muted-fg))' }}>
+            <div style={{ fontSize: '12.5px', color: 'hsl(var(--muted-fg))' }}>
               {overview.active_works?.length > 0 ? (
-                <span><strong>{overview.active_works.length}</strong> active missions running with digital workforce.</span>
+                <span><strong>{overview.active_works.length}</strong> active missions running.</span>
               ) : (
-                <span>No active missions. Click to view deliverables and execution history.</span>
+                <span>Outcome commitments and verifiable milestones.</span>
               )}
             </div>
           </div>
@@ -874,34 +970,51 @@ export function Home({
           {/* Connections Hub Card */}
           <div
             className="card"
-            style={{ padding: '20px', borderRadius: '12px', cursor: 'pointer' }}
+            style={{ padding: '18px', borderRadius: '12px', cursor: 'pointer' }}
             onClick={() => navigate('connections')}
           >
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '10px' }}>
-              <div style={{ display: 'flex', alignItems: 'center', gap: '8px', fontWeight: 600, fontSize: '15px' }}>
-                <Calendar size={18} color="#4285F4" /> Connections & Apps
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '8px' }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '8px', fontWeight: 600, fontSize: '14.5px' }}>
+                <Calendar size={17} color="#4285F4" /> Connections
               </div>
-              <ArrowRight size={16} color="hsl(var(--muted-fg))" />
+              <ArrowRight size={15} color="hsl(var(--muted-fg))" />
             </div>
-            <div style={{ fontSize: '13px', color: 'hsl(var(--muted-fg))' }}>
-              <span><strong>{overview.connected_apps_count || 1}</strong> apps connected (Calendar sync active).</span>
+            <div style={{ fontSize: '12.5px', color: 'hsl(var(--muted-fg))' }}>
+              <span><strong>{overview.connected_apps_count || 0}</strong> apps configured and verified.</span>
+            </div>
+          </div>
+
+          {/* Automations Hub Card */}
+          <div
+            className="card"
+            style={{ padding: '18px', borderRadius: '12px', cursor: 'pointer' }}
+            onClick={() => navigate('automations')}
+          >
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '8px' }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '8px', fontWeight: 600, fontSize: '14.5px' }}>
+                <Clock size={17} color="#8b5cf6" /> Automations
+              </div>
+              <ArrowRight size={15} color="hsl(var(--muted-fg))" />
+            </div>
+            <div style={{ fontSize: '12.5px', color: 'hsl(var(--muted-fg))' }}>
+              <span>Scheduled cron jobs and event watchers.</span>
             </div>
           </div>
 
           {/* Activity Hub Card */}
           <div
             className="card"
-            style={{ padding: '20px', borderRadius: '12px', cursor: 'pointer' }}
+            style={{ padding: '18px', borderRadius: '12px', cursor: 'pointer' }}
             onClick={() => navigate('activity')}
           >
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '10px' }}>
-              <div style={{ display: 'flex', alignItems: 'center', gap: '8px', fontWeight: 600, fontSize: '15px' }}>
-                <Activity size={18} color="#10b981" /> Activity Feed
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '8px' }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '8px', fontWeight: 600, fontSize: '14.5px' }}>
+                <Activity size={17} color="#10b981" /> Activity Feed
               </div>
-              <ArrowRight size={16} color="hsl(var(--muted-fg))" />
+              <ArrowRight size={15} color="hsl(var(--muted-fg))" />
             </div>
-            <div style={{ fontSize: '13px', color: 'hsl(var(--muted-fg))' }}>
-              <span>View plain-language audit trail of operations and outcomes.</span>
+            <div style={{ fontSize: '12.5px', color: 'hsl(var(--muted-fg))' }}>
+              <span>Plain-language audit trail of operations.</span>
             </div>
           </div>
         </div>

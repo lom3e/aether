@@ -50,7 +50,12 @@ def _ensure_workspace(page):
     page.wait_for_selector(".sidebar", timeout=10000)
 
     create_ws_btn = page.locator("button:has-text('+ Create workspace'), button:has-text('+ Crea workspace')").first
-    if create_ws_btn.is_visible():
+    if not create_ws_btn.is_visible():
+        ws_btn = page.locator(".sidebar button:has-text('No Workspace'), .sidebar button:has-text('Nessun Workspace')").first
+        if ws_btn.is_visible():
+            ws_btn.click()
+            page.wait_for_selector("input[placeholder*='Acme Robotics'], input[placeholder*='Financial Research']", timeout=5000)
+    else:
         create_ws_btn.click()
         page.wait_for_selector("input[placeholder*='Acme Robotics'], input[placeholder*='Financial Research']", timeout=5000)
 
@@ -59,8 +64,15 @@ def _ensure_workspace(page):
         name_input.fill("Companion Workspace")
         create_btn = page.locator("button:has-text('Create & Open Workspace'), button:has-text('Initialize Workspace')").first
         if create_btn.is_visible():
+            expect(create_btn).to_be_enabled(timeout=5000)
             create_btn.click()
+            page.wait_for_selector(".badge-primary, .sidebar", timeout=10000)
             page.wait_for_timeout(1000)
+
+    cancel_btn = page.locator("button:has-text('Cancel'), button:has-text('Annulla')").first
+    if cancel_btn.is_visible():
+        cancel_btn.click()
+        page.wait_for_timeout(300)
 
 
 def test_01_companion_home_and_task_execution(browser_context):

@@ -92,7 +92,7 @@ class TelegramConnector(BaseConnector):
         return str(cid).strip() if cid else None
 
     def _get_allowed_chat_ids(self) -> list[str]:
-        raw = self._auth_metadata.get("allowed_chat_ids") or ""
+        raw = self._auth_metadata.get("allowed_chat_ids") or self._auth_metadata.get("authorized_chats") or ""
         if isinstance(raw, list):
             return [str(x).strip() for x in raw if str(x).strip()]
         if isinstance(raw, str) and raw.strip():

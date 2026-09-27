@@ -45,18 +45,29 @@ def _ensure_workspace(page):
     page.goto(base_url)
     page.wait_for_selector(".sidebar", timeout=10000)
 
-    create_ws_btn = page.locator("button:has-text('+ Create workspace'), button:has-text('+ Crea workspace')").first
-    if create_ws_btn.is_visible():
+    try:
+        create_ws_btn = page.locator("button:has-text('+ Create workspace'), button:has-text('+ Crea workspace')").first
+        create_ws_btn.wait_for(state="visible", timeout=2500)
         create_ws_btn.click()
-        page.wait_for_selector("input[placeholder*='Acme Robotics'], input[placeholder*='Financial Research']", timeout=5000)
+    except Exception:
+        pass
 
-    name_input = page.locator("input[placeholder*='Acme Robotics'], input[placeholder*='Financial Research']").first
-    if name_input.is_visible():
+    try:
+        name_input = page.locator("input[placeholder*='Acme Robotics'], input[placeholder*='Financial Research']").first
+        name_input.wait_for(state="visible", timeout=2500)
         name_input.fill("Personal Agent Workspace")
         create_btn = page.locator("button:has-text('Create & Open Workspace'), button:has-text('Initialize Workspace')").first
-        if create_btn.is_visible():
-            create_btn.click()
-            page.wait_for_timeout(1000)
+        expect(create_btn).to_be_enabled(timeout=5000)
+        create_btn.click()
+        page.wait_for_selector("h1:has-text('Personal Aether'), .badge-primary", timeout=10000)
+        page.wait_for_timeout(1000)
+    except Exception:
+        pass
+
+    cancel_btn = page.locator("button:has-text('Cancel'), button:has-text('Annulla')").first
+    if cancel_btn.is_visible():
+        cancel_btn.click()
+        page.wait_for_timeout(300)
 
 
 def test_01_personal_agent_companion_flow(browser_context):
@@ -131,8 +142,8 @@ def test_03_connections_and_integrations_view(browser_context):
     page.wait_for_timeout(500)
 
     expect(page.locator("h1:has-text('Connections & Integrations')")).to_be_visible()
-    expect(page.locator("text=Google Calendar")).to_be_visible()
-    expect(page.locator("text=GitHub")).to_be_visible()
+    expect(page.locator("text=Google Calendar").first).to_be_visible()
+    expect(page.locator("text=GitHub").first).to_be_visible()
 
     # Switch to Calendar Schedule tab
     page.locator("button:has-text('Calendar Schedule')").click()

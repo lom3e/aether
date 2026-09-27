@@ -1187,7 +1187,7 @@ export function AmbientCompanion({
           <input
             ref={inputRef}
             type="text"
-            data-testid="companion-chat-input"
+            data-testid="companion-input-field"
             value={promptInput}
             onChange={e => setPromptInput(e.target.value)}
             onKeyDown={e => {
@@ -1233,7 +1233,7 @@ export function AmbientCompanion({
           <button
             onClick={handleSendPrompt}
             disabled={!promptInput.trim() || isSubmitting}
-            data-testid="companion-send-btn"
+            data-testid="companion-submit-btn"
             style={{
               padding: "5px 8px",
               borderRadius: "6px",
@@ -1906,7 +1906,7 @@ export function AmbientCompanion({
 
         {/* Active Conversational Transcript */}
         {(lastUserPrompt || latestResponse) && (
-          <div style={{ display: "flex", flexDirection: "column", gap: "10px" }}>
+          <div data-testid="companion-messages-container" style={{ display: "flex", flexDirection: "column", gap: "10px" }}>
             {/* User Message Bubble */}
             {lastUserPrompt && (
               <div

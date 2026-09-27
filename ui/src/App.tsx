@@ -187,10 +187,11 @@ function MainApp() {
   }, [workspaceName, registerShortcut, openShortcutsModal, closeShortcutsModal]);
 
   const navigate = useCallback((view: string, params: any = null) => {
-    if (view === 'chat' && params && typeof params === 'string') {
+    const targetView = view === 'work' ? 'missions' : view;
+    if (targetView === 'chat' && params && typeof params === 'string') {
       setActiveConversationId(params);
     }
-    setCurrentView(view);
+    setCurrentView(targetView);
     setViewParams(params);
   }, []);
 

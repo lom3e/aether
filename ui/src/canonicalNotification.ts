@@ -86,6 +86,7 @@ export function resolveCanonicalTarget(raw: any): TargetResolutionResult {
         switch (section) {
           case 'missions':
           case 'mission':
+          case 'work':
             return { view: 'missions', params: entityId, valid: true };
           case 'approvals':
           case 'approval':
@@ -123,6 +124,7 @@ export function resolveCanonicalTarget(raw: any): TargetResolutionResult {
   if (targetType) {
     switch (targetType) {
       case 'mission':
+      case 'work':
         return { view: 'missions', params: targetId, valid: true };
       case 'approval':
         // Approvals route to missions (which hosts the pending approval modal/card)
