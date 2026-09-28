@@ -1500,7 +1500,7 @@ export function Connections({ navigate: _navigate, initialExecutionId, initialTa
                             gap: '6px',
                           }}>
                             <ShieldCheck size={14} />
-                            <span>Credentials saved in keychain. Awaiting live network probe.</span>
+                            <span>Credentials saved in encrypted vault. Awaiting live network probe.</span>
                           </div>
                         )}
 
@@ -2409,7 +2409,7 @@ export function Connections({ navigate: _navigate, initialExecutionId, initialTa
               </div>
             </div>
 
-            {/* Keychain Protection Notice */}
+            {/* Encrypted Vault Protection Notice */}
             <div style={{
               padding: '8px 12px',
               borderRadius: '8px',

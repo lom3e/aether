@@ -27,6 +27,7 @@ from aether.connections.openapi import OpenAPIConnector
 from aether.connections.slack import SlackConnector
 from aether.connections.telegram import TelegramConnector
 from aether.connections.store import ConnectionStore
+from aether.core.secrets import get_secret_store, resolve_secrets_in_dict
 
 logger = logging.getLogger(__name__)
 
@@ -125,9 +126,11 @@ class ConnectionService:
         self,
         store: ConnectionStore,
         activity_service: ActivityService | None = None,
+        secret_store: Any | None = None,
     ) -> None:
         self.store = store
         self.activity_service = activity_service
+        self.secret_store = secret_store or getattr(store, "secret_store", None) or get_secret_store()
 
     def get_default_capabilities(self, provider: str) -> list[str]:
         p = provider.lower().strip()
@@ -228,7 +231,11 @@ class ConnectionService:
                         last_verified_at = now_iso
                         last_verification_error = None
                     else:
-                        status = ConnectionStatus.VERIFICATION_FAILED
+                        status = (
+                            ConnectionStatus.CONFIGURED
+                            if "Status remains configured" in live_msg
+                            else ConnectionStatus.VERIFICATION_FAILED
+                        )
                         verification_method = "live_check"
                         last_verified_at = None
                         last_verification_error = live_msg
@@ -317,10 +324,11 @@ class ConnectionService:
 
         p = provider.lower().strip()
         now_iso = datetime.now(timezone.utc).isoformat()
+        resolved_meta = resolve_secrets_in_dict(meta, self.secret_store)
         if p == "calendar":
             valid, message = True, "Aether local calendar storage ready."
         else:
-            valid, message = verify_credentials(provider, meta, live_check=live_check)
+            valid, message = verify_credentials(provider, resolved_meta, live_check=live_check)
 
         if not existing:
             status = (
@@ -328,7 +336,7 @@ class ConnectionService:
                 if (valid and (live_check or p == "calendar"))
                 else (
                     ConnectionStatus.CONFIGURED
-                    if valid
+                    if (valid or "Status remains configured" in message)
                     else (ConnectionStatus.NOT_CONFIGURED if not meta else ConnectionStatus.VERIFICATION_FAILED)
                 )
             )
@@ -360,7 +368,10 @@ class ConnectionService:
                         existing.status = ConnectionStatus.CONFIGURED
                 existing.last_verification_error = None
             else:
-                existing.status = ConnectionStatus.VERIFICATION_FAILED
+                if "Status remains configured" in message:
+                    existing.status = ConnectionStatus.CONFIGURED
+                else:
+                    existing.status = ConnectionStatus.VERIFICATION_FAILED
                 existing.last_verification_error = message
 
         saved = self.store.save_connection(existing)
@@ -489,31 +500,31 @@ class ConnectionService:
     def get_github_connector(self, workspace_id: str) -> GitHubConnector:
         """Returns GitHubConnector configured with the workspace's credentials."""
         conn = self.store.get_connection_by_provider(workspace_id, "github")
-        meta = conn.auth_metadata if conn else {}
+        meta = resolve_secrets_in_dict(conn.auth_metadata, self.secret_store) if conn else {}
         return GitHubConnector(auth_metadata=meta)
 
     def get_email_connector(self, workspace_id: str) -> EmailConnector:
         """Returns EmailConnector configured with the workspace's credentials."""
         conn = self.store.get_connection_by_provider(workspace_id, "email")
-        meta = conn.auth_metadata if conn else {}
+        meta = resolve_secrets_in_dict(conn.auth_metadata, self.secret_store) if conn else {}
         return EmailConnector(auth_metadata=meta)
 
     def get_slack_connector(self, workspace_id: str) -> SlackConnector:
         """Returns SlackConnector configured with the workspace's credentials."""
         conn = self.store.get_connection_by_provider(workspace_id, "slack")
-        meta = conn.auth_metadata if conn else {}
+        meta = resolve_secrets_in_dict(conn.auth_metadata, self.secret_store) if conn else {}
         return SlackConnector(auth_metadata=meta)
 
     def get_http_connector(self, workspace_id: str) -> HttpConnector:
         """Returns HttpConnector configured with the workspace's credentials."""
         conn = self.store.get_connection_by_provider(workspace_id, "http")
-        meta = conn.auth_metadata if conn else {}
+        meta = resolve_secrets_in_dict(conn.auth_metadata, self.secret_store) if conn else {}
         return HttpConnector(auth_metadata=meta)
 
     def get_telegram_connector(self, workspace_id: str) -> TelegramConnector:
         """Returns TelegramConnector configured with the workspace's credentials."""
         conn = self.store.get_connection_by_provider(workspace_id, "telegram")
-        meta = conn.auth_metadata if conn else {}
+        meta = resolve_secrets_in_dict(conn.auth_metadata, self.secret_store) if conn else {}
         return TelegramConnector(auth_metadata=meta)
 
     def get_google_calendar_connector(self, workspace_id: str) -> GoogleCalendarConnector:
@@ -523,8 +534,9 @@ class ConnectionService:
             raise RuntimeError("Google Calendar connection is not configured in this workspace.")
         if conn.status == ConnectionStatus.DISCONNECTED:
             raise RuntimeError("Google Calendar connection is disconnected in this workspace.")
+        resolved_meta = resolve_secrets_in_dict(conn.auth_metadata, self.secret_store)
         return GoogleCalendarConnector(
-            auth_metadata=conn.auth_metadata,
+            auth_metadata=resolved_meta,
             workspace_id=workspace_id,
             store=self.store,
         )
@@ -532,13 +544,13 @@ class ConnectionService:
     def get_notion_connector(self, workspace_id: str) -> NotionConnector:
         """Returns NotionConnector configured with the workspace's credentials."""
         conn = self.store.get_connection_by_provider(workspace_id, "notion")
-        meta = conn.auth_metadata if conn else {}
+        meta = resolve_secrets_in_dict(conn.auth_metadata, self.secret_store) if conn else {}
         return NotionConnector(auth_metadata=meta)
 
     def get_openapi_connector(self, workspace_id: str) -> OpenAPIConnector:
         """Returns OpenAPIConnector configured with the workspace's credentials."""
         conn = self.store.get_connection_by_provider(workspace_id, "openapi")
-        meta = conn.auth_metadata if conn else {}
+        meta = resolve_secrets_in_dict(conn.auth_metadata, self.secret_store) if conn else {}
         return OpenAPIConnector(auth_metadata=meta)
 
     def get_connector(self, workspace_id: str, provider: str) -> BaseConnector | None:
@@ -607,5 +619,5 @@ def verify_credentials(
         if not meta or not any(str(v).strip() for v in meta.values()):
             return False, f"Credentials required for {provider}."
         if live_check:
-            return True, f"{provider} credentials validated."
+            return False, f"Live verification is not supported for generic provider '{provider}'. Status remains configured."
         return True, f"{provider} credentials format verified."

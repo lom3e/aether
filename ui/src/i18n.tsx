@@ -975,7 +975,7 @@ export const translations = {
     connErrNetDesc: 'Could not reach the remote service. Check your network connection or endpoint URL.',
     connErrConfig: 'Configuration Incomplete or Invalid',
     connErrConfigDesc: 'Required parameters, URLs, or port numbers are missing or improperly formatted.',
-    connSecuredKeychain: 'Secret credentials securely stored in local keychain',
+    connSecuredKeychain: 'Secret credentials securely stored in encrypted local vault',
     connActionApproved: 'Action approved successfully',
     connActionDeclined: 'Action declined',
   },
@@ -1951,7 +1951,7 @@ export const translations = {
     connErrNetDesc: 'Impossibile raggiungere il servizio remoto. Controlla la connessione di rete o l\'URL dell\'endpoint.',
     connErrConfig: 'Configurazione Incompleta o Non Valida',
     connErrConfigDesc: 'Parametri obbligatori, URL o porte mancanti o formattati in modo non corretto.',
-    connSecuredKeychain: 'Credenziali segrete custodite in modo sicuro nel portachiavi locale',
+    connSecuredKeychain: 'Credenziali segrete custodite in modo sicuro nel vault locale cifrato',
     connActionApproved: 'Azione approvata con successo',
     connActionDeclined: 'Azione rifiutata',
   }

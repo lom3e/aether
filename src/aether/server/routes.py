@@ -2720,6 +2720,16 @@ async def webhook_automation_endpoint(request: Request, slug_or_id: str):
 
     # Validate secret if configured
     expected_secret = target_auto.trigger.webhook_secret
+    if expected_secret and (expected_secret.startswith("secret_ref:") or expected_secret.startswith("sec_")):
+        s_store = (
+            getattr(ws, "secret_store", None)
+            or getattr(ws, "secrets", None)
+            or getattr(getattr(ws, "automations", None), "secret_store", None)
+        )
+        if not s_store:
+            from aether.core.secrets import get_secret_store
+            s_store = get_secret_store()
+        expected_secret = s_store.get_secret(expected_secret) or expected_secret
     if expected_secret:
         header_secret = request.headers.get("x-aether-webhook-secret")
         auth_header = request.headers.get("authorization", "")
@@ -4162,68 +4172,36 @@ async def retry_mission_route(request: Request, mission_id: str, payload: Missio
 
 @router.post("/missions/{mission_id}/approve")
 async def approve_mission_route(request: Request, mission_id: str, payload: MissionActionApprovePayload | None = None):
-    runtime = _resolve_mission_runtime(request)
-    from aether.missions.runtime import NotFoundError, ConflictError
-    notes = payload.notes if payload else None
-    try:
-        execution = await runtime.approve_gate(mission_id, notes=notes)
-        mission = runtime.store.get_mission(mission_id)
-        ws = getattr(request.app.state, "workspace", None)
-        if ws:
-            _mark_approval_notification_done(ws, mission_id)
-        return {
-            "execution": execution.to_dict(),
-            "mission": mission.to_dict() if mission else None,
-            "status": "approved",
-        }
-    except NotFoundError as e:
-        raise HTTPException(status_code=404, detail=str(e))
-    except ConflictError as e:
-        active = runtime.store.get_active_execution(mission_id)
-        mission = runtime.store.get_mission(mission_id)
-        return {
-            "execution": active.to_dict() if active else None,
-            "mission": mission.to_dict() if mission else None,
-            "status": "already_completed",
-            "message": str(e),
-        }
-    except ValueError as e:
-        raise HTTPException(status_code=422, detail=str(e))
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+    """Domain-specific route delegated to unified canonical approval engine."""
+    canonical_payload = CanonicalApprovalPayload(
+        target_type="mission",
+        notes=payload.notes if payload else None,
+    )
+    res = await _handle_canonical_approval(request, mission_id, "approve", canonical_payload)
+    entity = res.get("entity") or {}
+    return {
+        "execution": entity.get("execution"),
+        "mission": entity.get("mission"),
+        "status": res.get("status", "approved"),
+        **({"message": res["message"]} if "message" in res and res.get("status") == "already_completed" else {}),
+    }
 
 
 @router.post("/missions/{mission_id}/reject")
 async def reject_mission_route(request: Request, mission_id: str, payload: MissionActionRejectPayload | None = None):
-    runtime = _resolve_mission_runtime(request)
-    from aether.missions.runtime import NotFoundError, ConflictError
-    feedback = payload.feedback if payload else None
-    try:
-        execution = await runtime.reject_gate(mission_id, feedback=feedback)
-        mission = runtime.store.get_mission(mission_id)
-        ws = getattr(request.app.state, "workspace", None)
-        if ws:
-            _mark_approval_notification_done(ws, mission_id)
-        return {
-            "execution": execution.to_dict(),
-            "mission": mission.to_dict() if mission else None,
-            "status": "rejected",
-        }
-    except NotFoundError as e:
-        raise HTTPException(status_code=404, detail=str(e))
-    except ConflictError as e:
-        active = runtime.store.get_active_execution(mission_id)
-        mission = runtime.store.get_mission(mission_id)
-        return {
-            "execution": active.to_dict() if active else None,
-            "mission": mission.to_dict() if mission else None,
-            "status": "already_completed",
-            "message": str(e),
-        }
-    except ValueError as e:
-        raise HTTPException(status_code=422, detail=str(e))
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+    """Domain-specific route delegated to unified canonical approval engine."""
+    canonical_payload = CanonicalApprovalPayload(
+        target_type="mission",
+        reason=payload.feedback if payload else None,
+    )
+    res = await _handle_canonical_approval(request, mission_id, "reject", canonical_payload)
+    entity = res.get("entity") or {}
+    return {
+        "execution": entity.get("execution"),
+        "mission": entity.get("mission"),
+        "status": res.get("status", "rejected"),
+        **({"message": res["message"]} if "message" in res and res.get("status") == "already_completed" else {}),
+    }
 
 
 @router.get("/missions/{mission_id}/executions")
@@ -6506,15 +6484,13 @@ async def approve_action_execution_route(
     execution_id: str,
     payload: ApproveActionPayload = ApproveActionPayload(),
 ):
-    ws = getattr(request.app.state, "workspace", None)
-    if not ws:
-        raise HTTPException(status_code=503, detail="Workspace not initialized.")
-    try:
-        execution = ws.actions.approve(execution_id, approver=payload.approver)
-        _mark_approval_notification_done(ws, execution_id)
-        return execution.to_dict()
-    except ValueError as exc:
-        raise HTTPException(status_code=400, detail=str(exc))
+    """Legacy route delegated to unified canonical approval engine."""
+    canonical_payload = CanonicalApprovalPayload(
+        target_type="action_execution",
+        approver=payload.approver,
+    )
+    res = await _handle_canonical_approval(request, execution_id, "approve", canonical_payload)
+    return res.get("entity", res)
 
 
 @router.post("/actions/executions/{execution_id}/reject")
@@ -6523,15 +6499,13 @@ async def reject_action_execution_route(
     execution_id: str,
     payload: RejectActionPayload = RejectActionPayload(),
 ):
-    ws = getattr(request.app.state, "workspace", None)
-    if not ws:
-        raise HTTPException(status_code=503, detail="Workspace not initialized.")
-    try:
-        execution = ws.actions.reject(execution_id, reason=payload.reason)
-        _mark_approval_notification_done(ws, execution_id)
-        return execution.to_dict()
-    except ValueError as exc:
-        raise HTTPException(status_code=400, detail=str(exc))
+    """Legacy route delegated to unified canonical approval engine."""
+    canonical_payload = CanonicalApprovalPayload(
+        target_type="action_execution",
+        reason=payload.reason,
+    )
+    res = await _handle_canonical_approval(request, execution_id, "reject", canonical_payload)
+    return res.get("entity", res)
 
 
 # ---------------------------------------------------------------------------
@@ -7060,15 +7034,15 @@ async def telegram_status_route(request: Request, workspace_id: str | None = Non
     if not ws:
         raise HTTPException(status_code=503, detail="Workspace not initialized.")
     ws_id = (workspace_id or ws.name).strip()
-    conn = ws.connections.get_connection(ws_id, "telegram")
-    if not conn or conn.status.value != "connected":
+    if not conn or not conn.is_configured:
         return {"configured": False, "status": "disconnected"}
 
     connector = ws.connections.get_telegram_connector(ws_id)
     valid, msg = connector.verify(live_check=True)
     return {
         "configured": True,
-        "status": "connected" if valid else "error",
+        "status": "verified" if valid else "verification_failed",
+        "connected": valid,
         "message": msg,
         "default_chat_id": connector._get_default_chat_id(),
         "allowed_chat_ids": connector._get_allowed_chat_ids(),

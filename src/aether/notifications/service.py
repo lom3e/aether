@@ -117,31 +117,6 @@ class NotificationService:
 
         saved = self.store.save(notification)
 
-        # Forward critical alerts or approvals to Telegram if connector is active
-        if self.connection_service:
-            try:
-                conn = self.connection_service.get_connection(workspace_id, "telegram")
-                if conn and (getattr(conn, "is_verified", False) or getattr(conn, "is_configured", False)):
-                    telegram_connector = self.connection_service.get_telegram_connector(workspace_id)
-                    chat_id = telegram_connector._get_default_chat_id()
-                    if chat_id:
-                        if action_required and action_payload and "execution_id" in action_payload:
-                            telegram_connector.send_approval_request(
-                                chat_id=chat_id,
-                                action_id=action_payload.get("action_id", "action"),
-                                execution_id=action_payload.get("execution_id", ""),
-                                title=title,
-                                description=message,
-                            )
-                        elif notif_priority == NotificationPriority.HIGH:
-                            telegram_connector.send_message(
-                                chat_id=chat_id,
-                                text=f"🚨 *{title}*\n\n{message}",
-                                parse_mode="Markdown",
-                            )
-            except Exception as e:
-                logger.debug("Could not forward notification to Telegram connector: %s", e)
-
         # Broadcast via Event Hub if available
         if self.event_hub:
             try:

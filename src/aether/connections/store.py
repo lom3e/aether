@@ -13,6 +13,7 @@ from typing import Any, Generator
 import uuid
 
 from aether.connections.models import CalendarEvent, Connection, ConnectionStatus
+from aether.core.secrets import extract_secrets_from_dict, get_secret_store, resolve_secrets_in_dict
 
 logger = logging.getLogger(__name__)
 
@@ -20,9 +21,10 @@ logger = logging.getLogger(__name__)
 class ConnectionStore:
     """SQLite-backed store for external tool connections and cached/synced entities."""
 
-    def __init__(self, db_path: str | Path) -> None:
+    def __init__(self, db_path: str | Path, secret_store: Any | None = None) -> None:
         self.db_path = Path(db_path)
         self.db_path.parent.mkdir(parents=True, exist_ok=True)
+        self.secret_store = secret_store or get_secret_store()
         self._local = threading.local()
         self._conns_lock = threading.Lock()
         self._all_conns: set[sqlite3.Connection] = set()
@@ -111,7 +113,17 @@ class ConnectionStore:
                     pass
 
     def save_connection(self, conn: Connection) -> Connection:
-        """Saves or updates a connection."""
+        """Saves or updates a connection with secret isolation."""
+        db_meta = dict(conn.auth_metadata or {})
+        if self.secret_store:
+            sanitized, _ = extract_secrets_from_dict(
+                db_meta,
+                secret_store=self.secret_store,
+                entity_type="connection",
+                entity_id=conn.id,
+            )
+            db_meta = sanitized
+
         with self._transaction() as cursor:
             cursor.execute(
                 """
@@ -131,7 +143,7 @@ class ConnectionStore:
                     conn.status.value if isinstance(conn.status, ConnectionStatus) else str(conn.status),
                     json.dumps(conn.scopes or []),
                     json.dumps(conn.capabilities or []),
-                    json.dumps(conn.auth_metadata or {}),
+                    json.dumps(db_meta),
                     conn.last_synced_at,
                     conn.last_verified_at,
                     conn.last_verification_error,
@@ -230,6 +242,8 @@ class ConnectionStore:
 
     def _row_to_connection(self, row: sqlite3.Row) -> Connection:
         keys = row.keys()
+        raw_meta = json.loads(row["auth_metadata"]) if row["auth_metadata"] else {}
+        auth_meta = resolve_secrets_in_dict(raw_meta, self.secret_store) if self.secret_store else raw_meta
         return Connection(
             id=row["id"],
             workspace_id=row["workspace_id"],
@@ -238,7 +252,7 @@ class ConnectionStore:
             status=ConnectionStatus.from_str(row["status"]),
             scopes=json.loads(row["scopes"]) if row["scopes"] else [],
             capabilities=json.loads(row["capabilities"]) if row["capabilities"] else [],
-            auth_metadata=json.loads(row["auth_metadata"]) if row["auth_metadata"] else {},
+            auth_metadata=auth_meta,
             last_synced_at=row["last_synced_at"] if "last_synced_at" in keys else None,
             last_verified_at=row["last_verified_at"] if "last_verified_at" in keys else None,
             last_verification_error=row["last_verification_error"] if "last_verification_error" in keys else None,

@@ -495,8 +495,10 @@ class WatcherManager:
             elif auto.trigger.type == TriggerType.GITHUB_WATCHER or (auto.metadata and auto.metadata.get("watcher", {}).get("type") == "github_repo"):
                 w_meta = auto.metadata.get("watcher", {}) if auto.metadata else {}
                 owner = auto.trigger.github_owner or w_meta.get("owner", "")
-                repo = auto.trigger.github_repo or w_meta.get("repo", "")
                 token = auto.trigger.github_token or w_meta.get("token")
+                if token and (token.startswith("secret_ref:") or token.startswith("sec_")):
+                    from aether.core.secrets import get_secret_store
+                    token = get_secret_store().get_secret(token) or token
                 interval = auto.trigger.check_interval_seconds or int(w_meta.get("interval_seconds", 60))
                 checkpoint = auto.metadata.get("watcher_checkpoint") if auto.metadata else None
 

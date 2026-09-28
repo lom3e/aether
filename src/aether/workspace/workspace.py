@@ -191,12 +191,26 @@ class Workspace:
         return str(self.legacy_aether_dir / "automations.db")
 
     @property
+    def secret_store(self):
+        """Return the SecretStore for this workspace."""
+        def _factory():
+            from aether.core.secrets import get_secret_store
+            vault_file = self.data_dir / "vault" / "secrets.vault"
+            return get_secret_store(vault_file)
+        return self._get_or_create("secret_store", _factory)
+
+    def migrate_secrets(self) -> dict[str, int]:
+        """Runs idempotent secret migration across all workspace databases."""
+        from aether.core.secrets import migrate_all_secrets
+        return migrate_all_secrets(self, self.secret_store)
+
+    @property
     def automations(self):
         """Return the AutomationStore for this workspace."""
         def _factory():
             from aether.automation.store import AutomationStore
             Path(self.automations_db_path).parent.mkdir(parents=True, exist_ok=True)
-            return AutomationStore(self.automations_db_path)
+            return AutomationStore(self.automations_db_path, secret_store=self.secret_store)
         return self._get_or_create("automations", _factory)
 
     @property
@@ -312,7 +326,7 @@ class Workspace:
         def _factory():
             from aether.connections.store import ConnectionStore
             Path(self.connections_db_path).parent.mkdir(parents=True, exist_ok=True)
-            return ConnectionStore(self.connections_db_path)
+            return ConnectionStore(self.connections_db_path, secret_store=self.secret_store)
         return self._get_or_create("connection_store", _factory)
 
     @property
@@ -320,7 +334,11 @@ class Workspace:
         """Return the ConnectionService for this workspace."""
         def _factory():
             from aether.connections.service import ConnectionService
-            return ConnectionService(self.connection_store, activity_service=self.activity)
+            return ConnectionService(
+                self.connection_store,
+                activity_service=self.activity,
+                secret_store=self.secret_store,
+            )
         return self._get_or_create("connections", _factory)
 
     @property
@@ -601,7 +619,7 @@ class Workspace:
         def _factory():
             from aether.notifications.store import NotificationStore
             Path(self.notifications_db_path).parent.mkdir(parents=True, exist_ok=True)
-            return NotificationStore(self.notifications_db_path)
+            return NotificationStore(self.notifications_db_path, secret_store=self.secret_store)
         return self._get_or_create("notification_store", _factory)
 
     @property

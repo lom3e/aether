@@ -1,0 +1,24 @@
+{
+  "manifest_version": "1.0",
+  "generated_at": "2026-09-28T18:27:41.804487+00:00",
+  "source": "/Users/matteo/Matteo/Lavoro/Progetti Personali/Aether/aether/ui/dist",
+  "target": "/Users/matteo/Matteo/Lavoro/Progetti Personali/Aether/aether/src/aether/server/static",
+  "file_count": 14,
+  "total_bytes": 5262530,
+  "files": {
+    "icon.png": "658495e9568c6f0258ab16b69755d7bba43cc0766c7748bf6e05f0b23cacdb2f",
+    "index.html": "9f8d167bd300e2a7044404dbc76d7fa35d9b4a69458c79e85e41208639d0b892",
+    ".DS_Store": "6d38a193af8e29d89ca26434a7bfec7ed5c315000f6928a3616ce271b3a3a685",
+    "logo.png": "658495e9568c6f0258ab16b69755d7bba43cc0766c7748bf6e05f0b23cacdb2f",
+    "icons.svg": "b45fa506195cfcdef406ba9f0c77b36ddc1a7c224040926ec70abc2fdea7b93a",
+    "favicon.svg": "5e49bf20d68aa517195aa596b7444eb0db060da2ade6598ad523182ebde42eac",
+    "brand/logo_viola.svg": "ecd8bafd31ff4a6f58a78ea877a8859e3a0cdeb336e7894b4f8a0555d3d639a3",
+    "brand/scritta_AETHER.svg": "41933f4dd765da51c110901b74e28cd6f038d8e29eb230f66330173d15eeafb2",
+    "brand/logo_viola_con_scritta.svg": "d238b895a795458d686e1702f2ca5ba343295f5f731586f95d4e3bdc9e4ac992",
+    "brand/logo_bianco.svg": "69c365adb03b0be08b407d48a2641ea6a05ae2bc87a61fdc04e678e1f3bd4ae7",
+    "brand/logo_nero.svg": "57f24ea0a4fb899d494e9666a0d916103fcf9258ef77d80183c00e0341057285",
+    "brand/favicon.svg": "5e49bf20d68aa517195aa596b7444eb0db060da2ade6598ad523182ebde42eac",
+    "assets/index-BkImqyXq.css": "b128f12e21597fa8c076e1aa63fc20d3ea5da10714c6402b0e4ae139dae78523",
+    "assets/index-Dn0OkkAT.js": "37814aa5b683c2626845b0977a91c3afa89600bc49712428bb9b2837a915296f"
+  }
+}

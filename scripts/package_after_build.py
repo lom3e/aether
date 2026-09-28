@@ -19,6 +19,8 @@ import time
 from pathlib import Path
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
+if str(REPO_ROOT) not in sys.path:
+    sys.path.insert(0, str(REPO_ROOT))
 VENV_PYTHON = REPO_ROOT / ".venv" / "bin" / "python"
 
 # Re-execute with project virtual environment Python if available
@@ -35,33 +37,17 @@ BUILD_DIST_SCRIPT = REPO_ROOT / "scripts" / "build_distribution.py"
 
 
 def sync_frontend_static_assets() -> int:
-    """Synchronizes ui/dist into src/aether/server/static."""
+    """Synchronizes ui/dist into src/aether/server/static using canonical sync_static."""
     print("\n--- [PIPELINE] 1. Synchronizing Frontend Static Assets ---")
-    if not UI_DIST_DIR.exists() or not (UI_DIST_DIR / "index.html").exists():
-        print(
-            f"ERROR: UI distribution artifacts not found at {UI_DIST_DIR}. "
-            f"Expected {UI_DIST_DIR / 'index.html'} to exist.",
-            file=sys.stderr,
-        )
+    from scripts.sync_static import sync_static_assets, verify_static_manifest
+
+    manifest = sync_static_assets(source_dir=UI_DIST_DIR, target_dir=SERVER_STATIC_DIR)
+    ok, msg = verify_static_manifest(target_dir=SERVER_STATIC_DIR)
+    if not ok:
+        print(f"ERROR: Static manifest verification failed: {msg}", file=sys.stderr)
         sys.exit(1)
-
-    SERVER_STATIC_DIR.parent.mkdir(parents=True, exist_ok=True)
-    if SERVER_STATIC_DIR.exists():
-        shutil.rmtree(SERVER_STATIC_DIR, ignore_errors=True)
-
-    shutil.copytree(UI_DIST_DIR, SERVER_STATIC_DIR, symlinks=True)
-
-    static_index = SERVER_STATIC_DIR / "index.html"
-    if not static_index.exists() or static_index.stat().st_size == 0:
-        print(
-            f"ERROR: Static asset synchronization failed: {static_index} missing or empty.",
-            file=sys.stderr,
-        )
-        sys.exit(1)
-
-    file_count = sum(len(files) for _, _, files in os.walk(SERVER_STATIC_DIR))
-    print(f"✓ Synchronized {file_count} frontend files into {SERVER_STATIC_DIR}")
-    return file_count
+    print(f"✓ Synchronized {manifest['file_count']} frontend files into {SERVER_STATIC_DIR} (Manifest verified)")
+    return manifest["file_count"]
 
 
 def run_packaging_pipeline():

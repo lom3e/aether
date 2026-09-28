@@ -11,6 +11,8 @@ import sys
 from pathlib import Path
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
+if str(REPO_ROOT) not in sys.path:
+    sys.path.insert(0, str(REPO_ROOT))
 SRC_DIR = REPO_ROOT / "src"
 ENTRYPOINT = SRC_DIR / "aether" / "entrypoint_standalone.py"
 BUILD_DIR = REPO_ROOT / "build"
@@ -133,10 +135,13 @@ def build_runtime() -> Path:
     ui_dist_dir = REPO_ROOT / "ui" / "dist"
     server_static_dir = SRC_DIR / "aether" / "server" / "static"
     if ui_dist_dir.exists():
-        print(f"Syncing UI bundle {ui_dist_dir} -> {server_static_dir}...")
-        if server_static_dir.exists():
-            shutil.rmtree(server_static_dir, ignore_errors=True)
-        shutil.copytree(ui_dist_dir, server_static_dir, symlinks=True)
+        print(f"Syncing UI bundle {ui_dist_dir} -> {server_static_dir} using canonical sync_static...")
+        from scripts.sync_static import sync_static_assets, verify_static_manifest
+        sync_static_assets(source_dir=ui_dist_dir, target_dir=server_static_dir)
+        ok, msg = verify_static_manifest(target_dir=server_static_dir)
+        if not ok:
+            print(f"ERROR: Static manifest verification failed: {msg}", file=sys.stderr)
+            sys.exit(1)
 
     # 2. Prepare PyInstaller command
     pyinstaller_bin = shutil.which("pyinstaller") or sys.executable

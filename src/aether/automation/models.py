@@ -424,10 +424,21 @@ class AutomationRunRecord:
             status = RunStatus(raw_status)
         except ValueError:
             # Map legacy states
-            if raw_status in ("success", "ok"):
+            clean_status = str(raw_status).lower().strip()
+            if clean_status in ("success", "ok"):
                 status = RunStatus.SUCCEEDED
+            elif clean_status in ("error", "fail", "failed", "failure"):
+                status = RunStatus.FAILED
+            elif clean_status in ("waiting_approval", "wait_approval", "pending_approval"):
+                status = RunStatus.WAITING_APPROVAL
+            elif clean_status in ("cancel", "canceled", "cancelled"):
+                status = RunStatus.CANCELLED
+            elif clean_status in ("reject", "rejected"):
+                status = RunStatus.REJECTED
+            elif clean_status in ("running", "executing"):
+                status = RunStatus.RUNNING
             else:
-                status = RunStatus.QUEUED
+                status = RunStatus.FAILED if "err" in clean_status or "fail" in clean_status else RunStatus.QUEUED
 
         return cls(
             run_id=data.get("run_id") or f"run_{uuid.uuid4().hex[:10]}",

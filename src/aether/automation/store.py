@@ -22,13 +22,15 @@ from aether.automation.models import (
     TriggerConfig,
 )
 from aether.core.sqlite import get_sqlite_connection, sqlite_connection
+from aether.core.secrets import get_secret_store, is_secret_ref
 
 
 class AutomationStore:
-    """Manages persistent automation workflows and run execution history."""
+    """Manages persistent automation workflows and run execution history with secret isolation."""
 
-    def __init__(self, db_path: str | Path) -> None:
+    def __init__(self, db_path: str | Path, secret_store: Any | None = None) -> None:
         self.db_path = str(db_path)
+        self.secret_store = secret_store or get_secret_store()
         self._is_memory = self.db_path == ":memory:" or "mode=memory" in self.db_path
         if self.db_path == ":memory:":
             self.db_path = f"file:memdb_auto_{uuid.uuid4().hex}?mode=memory&cache=shared"
@@ -175,13 +177,20 @@ class AutomationStore:
             except Exception:
                 retry_cfg = {}
 
+        trigger_obj = TriggerConfig.from_dict(trigger_data)
+        if self.secret_store:
+            if trigger_obj.github_token and is_secret_ref(trigger_obj.github_token):
+                trigger_obj.github_token = self.secret_store.get_secret(trigger_obj.github_token) or trigger_obj.github_token
+            if trigger_obj.webhook_secret and is_secret_ref(trigger_obj.webhook_secret):
+                trigger_obj.webhook_secret = self.secret_store.get_secret(trigger_obj.webhook_secret) or trigger_obj.webhook_secret
+
         return AutomationDefinition(
             id=r[0],
             name=r[1],
             description=r[2],
             enabled=bool(r[3]),
             team_name=r[4],
-            trigger=TriggerConfig.from_dict(trigger_data),
+            trigger=trigger_obj,
             steps=[PipelineStep.from_dict(s) for s in steps_data],
             output_destination=OutputDestination.from_dict(out_data) if out_data else None,
             created_at=r[8],
@@ -241,6 +250,22 @@ class AutomationStore:
             auto.created_at = now
         auto.updated_at = now
 
+        trigger_data = auto.trigger.to_dict() if auto.trigger else {}
+        if auto.trigger and self.secret_store:
+            if auto.trigger.github_token and not is_secret_ref(auto.trigger.github_token):
+                s_ref = self.secret_store.generate_secret_ref(prefix="auto")
+                self.secret_store.store_secret(s_ref, auto.trigger.github_token, "automation_trigger", auto.id)
+                trigger_data["github_token"] = s_ref
+            elif auto.trigger.github_token:
+                trigger_data["github_token"] = auto.trigger.github_token
+
+            if auto.trigger.webhook_secret and not is_secret_ref(auto.trigger.webhook_secret):
+                s_ref = self.secret_store.generate_secret_ref(prefix="auto")
+                self.secret_store.store_secret(s_ref, auto.trigger.webhook_secret, "automation_trigger", auto.id)
+                trigger_data["webhook_secret"] = s_ref
+            elif auto.trigger.webhook_secret:
+                trigger_data["webhook_secret"] = auto.trigger.webhook_secret
+
         with self._get_connection() as conn:
             conn.execute(
                 """
@@ -280,7 +305,7 @@ class AutomationStore:
                     auto.description,
                     1 if auto.enabled else 0,
                     auto.team_name,
-                    json.dumps(auto.trigger.to_dict()),
+                    json.dumps(trigger_data),
                     json.dumps([s.to_dict() for s in auto.steps]),
                     json.dumps(auto.output_destination.to_dict()) if auto.output_destination else None,
                     auto.created_at,
@@ -328,10 +353,21 @@ class AutomationStore:
         try:
             status = RunStatus(raw_status)
         except ValueError:
-            if raw_status in ("success", "ok"):
+            clean_status = str(raw_status).lower().strip()
+            if clean_status in ("success", "ok"):
                 status = RunStatus.SUCCEEDED
+            elif clean_status in ("error", "fail", "failed", "failure"):
+                status = RunStatus.FAILED
+            elif clean_status in ("waiting_approval", "wait_approval", "pending_approval"):
+                status = RunStatus.WAITING_APPROVAL
+            elif clean_status in ("cancel", "canceled", "cancelled"):
+                status = RunStatus.CANCELLED
+            elif clean_status in ("reject", "rejected"):
+                status = RunStatus.REJECTED
+            elif clean_status in ("running", "executing"):
+                status = RunStatus.RUNNING
             else:
-                status = RunStatus.QUEUED
+                status = RunStatus.FAILED if "err" in clean_status or "fail" in clean_status else RunStatus.QUEUED
 
         return AutomationRunRecord(
             run_id=r[0],

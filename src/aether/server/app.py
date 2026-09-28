@@ -143,6 +143,12 @@ async def startup_event():
         except Exception:
             pass
 
+        # Idempotently migrate any legacy plaintext secrets to SecretStore
+        try:
+            ws.migrate_secrets()
+        except Exception as e:
+            print(f"Warning: secret migration encountered an issue: {e}")
+
         # Start Automation Scheduler
         try:
             if hasattr(ws, "automations"):

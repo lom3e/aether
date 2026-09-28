@@ -159,15 +159,34 @@ class Notification:
             tt_str = self.target_type.value if hasattr(self.target_type, "value") else str(self.target_type)
             self.deep_link = f"aether://{tt_str}/{self.target_id}"
 
-        # Canonicalize open_target for deterministic navigation
+        # Canonicalize open_target for deterministic navigation conforming to wire contract
         resolved_tid = self.target_id or self.link_id
         tt_val = self.target_type.value if hasattr(self.target_type, "value") else (str(self.target_type) if self.target_type else "")
-        if not self.open_target and (self.link_view or resolved_tid or tt_val):
+        created_ts = int(datetime.now(timezone.utc).timestamp())
+        try:
+            if self.created_at:
+                created_ts = int(datetime.fromisoformat(self.created_at).timestamp())
+        except Exception:
+            pass
+
+        if self.open_target is not None and isinstance(self.open_target, dict):
+            self.open_target.setdefault("notification_id", self.id)
+            self.open_target.setdefault("target_type", tt_val or "view")
+            self.open_target.setdefault("target_id", resolved_tid)
+            self.open_target.setdefault("view", self.link_view or "home")
+            self.open_target.setdefault("id", resolved_tid)
+            self.open_target.setdefault("deep_link", self.deep_link)
+            self.open_target.setdefault("created_at", created_ts)
+        elif self.link_view or resolved_tid or tt_val:
             self.open_target = {
-                "view": self.link_view or "home",
-                "params": resolved_tid,
+                "notification_id": self.id,
                 "target_type": tt_val or "view",
+                "target_id": resolved_tid,
+                "view": self.link_view or "home",
+                "id": resolved_tid,
+                "params": resolved_tid,
                 "deep_link": self.deep_link,
+                "created_at": created_ts,
             }
 
         # Canonicalize approval actions if action is required

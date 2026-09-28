@@ -13,11 +13,13 @@ import smtplib
 import subprocess
 import sys
 import time
+import threading
 from typing import Any
 import urllib.error
 import urllib.request
 import uuid
 
+from aether.core.secrets import get_secret_store, resolve_secrets_in_dict
 from aether.notifications.models import (
     ChannelType,
     DeliveryReceipt,
@@ -65,10 +67,14 @@ class NotificationDispatcher:
         store: NotificationStore,
         connection_service: Any = None,
         event_hub: Any = None,
+        secret_store: Any | None = None,
     ) -> None:
         self.store = store
         self.connection_service = connection_service
         self.event_hub = event_hub
+        self.secret_store = secret_store or getattr(store, "secret_store", None) or get_secret_store()
+        self._lock = threading.Lock()
+        self._recent_telegram_deliveries: dict[str, float] = {}
 
     def dispatch(
         self,
@@ -108,7 +114,16 @@ class NotificationDispatcher:
                 self.store.save_channel(channel)
                 channel_map[c_type] = channel
 
-            if not channel.enabled:
+            channel_is_active = channel.enabled
+            if not channel_is_active and c_type == ChannelType.TELEGRAM and self.connection_service:
+                try:
+                    conn = self.connection_service.get_connection(workspace_id, "telegram")
+                    if conn and (getattr(conn, "is_verified", False) or getattr(conn, "is_configured", False)):
+                        channel_is_active = True
+                except Exception:
+                    pass
+
+            if not channel_is_active:
                 receipt = DeliveryReceipt(
                     id=f"rcpt-{uuid.uuid4().hex[:10]}",
                     notification_id=notification.id,
@@ -366,7 +381,19 @@ class NotificationDispatcher:
         channel: NotificationChannel,
         notification: Notification,
     ) -> tuple[DeliveryStatus, str]:
-        """Delivers notification to Telegram bot or connection bridge."""
+        """Delivers notification to Telegram bot or connection bridge with deduplication and secret resolution."""
+        # Enforce single delivery per notification ID
+        dedup_key = f"telegram:{notification.id}:{channel.workspace_id}"
+        now_ts = time.time()
+        with self._lock:
+            # Prune records older than 60 seconds
+            self._recent_telegram_deliveries = {
+                k: ts for k, ts in self._recent_telegram_deliveries.items() if now_ts - ts < 60.0
+            }
+            if dedup_key in self._recent_telegram_deliveries:
+                return DeliveryStatus.SKIPPED, "Duplicate Telegram notification suppressed (already sent)"
+            self._recent_telegram_deliveries[dedup_key] = now_ts
+
         # 1. Connection service connector if active
         if self.connection_service:
             try:
@@ -394,9 +421,10 @@ class NotificationDispatcher:
             except Exception as e:
                 logger.debug("Telegram connection connector delivery failed, checking direct bot config: %s", e)
 
-        # 2. Direct channel bot token & chat_id configuration
-        bot_token = channel.config.get("bot_token") or os.environ.get("TELEGRAM_BOT_TOKEN")
-        chat_id = channel.config.get("chat_id") or os.environ.get("TELEGRAM_CHAT_ID")
+        # 2. Direct channel bot token & chat_id configuration (with SecretStore resolution)
+        resolved_cfg = resolve_secrets_in_dict(channel.config, self.secret_store)
+        bot_token = resolved_cfg.get("bot_token") or os.environ.get("TELEGRAM_BOT_TOKEN")
+        chat_id = resolved_cfg.get("chat_id") or os.environ.get("TELEGRAM_CHAT_ID")
         if not bot_token or not chat_id:
             return DeliveryStatus.SKIPPED, "Telegram bot_token or chat_id not configured"
 
@@ -428,13 +456,14 @@ class NotificationDispatcher:
         channel: NotificationChannel,
         notification: Notification,
     ) -> tuple[DeliveryStatus, str]:
-        """Delivers notification payload to configured webhook URL."""
-        webhook_url = channel.config.get("url") or channel.config.get("webhook_url")
+        """Delivers notification payload to configured webhook URL with secret resolution."""
+        resolved_cfg = resolve_secrets_in_dict(channel.config, self.secret_store)
+        webhook_url = resolved_cfg.get("url") or resolved_cfg.get("webhook_url")
         if not webhook_url:
             return DeliveryStatus.SKIPPED, "Webhook endpoint URL not configured"
 
-        fmt = channel.config.get("format", "generic").lower().strip()
-        secret = channel.config.get("secret")
+        fmt = resolved_cfg.get("format", "generic").lower().strip()
+        secret = resolved_cfg.get("secret")
 
         if fmt in ("slack", "discord"):
             body = {

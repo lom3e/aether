@@ -45,10 +45,24 @@ class PersonalEventHub:
             return len(self._subscribers.get(workspace_id, []))
 
     def publish(self, workspace_id: str, event_type: str, data: dict[str, Any]) -> int:
-        """Publishes an event to all subscribers of a workspace."""
+        """Publishes an event to all subscribers of a workspace with canonical envelope metadata."""
+        from aether.core.events import CrossSurfaceEventEnvelope
+        envelope = CrossSurfaceEventEnvelope.wrap(workspace_id=workspace_id, event_type=event_type, data=data)
         payload = {
             "type": event_type,
-            "data": data,
+            "data": {
+                **envelope.payload,
+                "_envelope": {
+                    "event_id": envelope.event_id,
+                    "event_type": envelope.event_type,
+                    "workspace_id": envelope.workspace_id,
+                    "entity_type": envelope.entity_type,
+                    "entity_id": envelope.entity_id,
+                    "occurred_at": envelope.occurred_at,
+                    "version": envelope.version,
+                },
+            },
+            "envelope": envelope.to_dict(),
         }
         count = 0
         with self._lock:

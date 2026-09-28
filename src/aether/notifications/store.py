@@ -26,6 +26,7 @@ from aether.notifications.models import (
     NotificationStatus,
     NotificationType,
 )
+from aether.core.secrets import extract_secrets_from_dict, get_secret_store
 
 logger = logging.getLogger(__name__)
 
@@ -33,9 +34,10 @@ logger = logging.getLogger(__name__)
 class NotificationStore:
     """SQLite-backed persistent store for notifications."""
 
-    def __init__(self, db_path: str | Path) -> None:
+    def __init__(self, db_path: str | Path, secret_store: Any | None = None) -> None:
         self.db_path = Path(db_path)
         self.db_path.parent.mkdir(parents=True, exist_ok=True)
+        self.secret_store = secret_store or get_secret_store()
         self._local = threading.local()
         self._conns_lock = threading.Lock()
         self._all_conns: set[sqlite3.Connection] = set()
@@ -391,9 +393,18 @@ class NotificationStore:
         return self._row_to_channel(row) if row else None
 
     def save_channel(self, channel: NotificationChannel) -> NotificationChannel:
-        """Inserts or updates a delivery channel configuration."""
+        """Inserts or updates a delivery channel configuration with secret isolation."""
         from datetime import datetime, timezone
         channel.updated_at = datetime.now(timezone.utc).isoformat()
+        if channel.config and self.secret_store:
+            sanitized_cfg, _ = extract_secrets_from_dict(
+                channel.config,
+                secret_store=self.secret_store,
+                entity_type="notification_channel",
+                entity_id=channel.id,
+            )
+            channel.config = sanitized_cfg
+
         with self._transaction() as cursor:
             cursor.execute(
                 """

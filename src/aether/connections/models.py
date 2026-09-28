@@ -89,8 +89,10 @@ class Connection:
         if mask_secrets:
             masked = {}
             for k, v in meta.items():
-                if any(secret_word in k.lower() for secret_word in ("token", "secret", "password", "key", "webhook", "pat", "verifier", "credential")):
-                    if isinstance(v, str) and len(v) > 6:
+                if any(secret_word in k.lower() for secret_word in ("token", "secret", "password", "key", "webhook", "pat", "verifier", "credential", "auth")):
+                    if isinstance(v, str) and (v.startswith("secret_ref:") or v.startswith("sec_")):
+                        masked[k] = "••••••••"
+                    elif isinstance(v, str) and len(v) > 6:
                         masked[k] = f"{v[:4]}...{v[-3:]}"
                     elif isinstance(v, str) and v:
                         masked[k] = "••••••••"
@@ -117,6 +119,12 @@ class Connection:
             "created_at": self.created_at,
             "updated_at": self.updated_at,
         }
+
+    def get_resolved_auth_metadata(self, secret_store: Any | None = None) -> dict[str, Any]:
+        """Resolves any secret_ref tokens into plaintext values for connector execution."""
+        from aether.core.secrets import get_secret_store, resolve_secrets_in_dict
+        store = secret_store or get_secret_store()
+        return resolve_secrets_in_dict(self.auth_metadata, store)
 
     @classmethod
     def from_dict(cls, data: dict[str, Any]) -> Connection:

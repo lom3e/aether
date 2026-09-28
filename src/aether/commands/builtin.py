@@ -180,7 +180,7 @@ def register_builtin_commands(registry: CommandRegistry) -> None:
 
         prov_indicator = "Unknown"
         if prov_health:
-            if prov_health.status == "connected":
+            if prov_health.status in ("connected", "verified"):
                 lat = f" ({prov_health.latency_ms:.0f}ms)" if prov_health.latency_ms else ""
                 prov_indicator = f"🟢 Connected{lat}"
             elif prov_health.status == "unconfigured":

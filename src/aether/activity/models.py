@@ -33,13 +33,16 @@ class ActivityStatus(StrEnum):
     FAILED = "failed"
     REJECTED = "rejected"
     CANCELLED = "cancelled"
+    UNKNOWN = "unknown"
 
     # Backward compatibility aliases
     PENDING_APPROVAL = "waiting_approval"
     SUCCEEDED = "completed"
 
     @classmethod
-    def from_str(cls, val: str) -> ActivityStatus:
+    def from_str(cls, val: str | None) -> ActivityStatus:
+        if not val:
+            return cls.UNKNOWN
         if isinstance(val, cls):
             return val
         clean = str(val).lower().strip()
@@ -56,10 +59,14 @@ class ActivityStatus(StrEnum):
             "rejected": cls.REJECTED,
             "cancelled": cls.CANCELLED,
             "canceled": cls.CANCELLED,
+            "unknown": cls.UNKNOWN,
         }
         if clean in aliases:
             return aliases[clean]
-        return cls.IN_PROGRESS
+        try:
+            return cls(clean)
+        except ValueError:
+            return cls.UNKNOWN
 
     def __eq__(self, other: object) -> bool:
         if isinstance(other, str):
@@ -110,7 +117,7 @@ class ActivityEvent:
             title=data.get("title", ""),
             description=data.get("description", ""),
             category=ActivityCategory.from_str(data.get("category", "work")),
-            status=ActivityStatus.from_str(data.get("status", "completed")),
+            status=ActivityStatus.from_str(data.get("status") if "status" in data and data.get("status") is not None else "completed"),
             link_view=data.get("link_view"),
             link_id=data.get("link_id"),
             metadata=dict(data.get("metadata") or {}),

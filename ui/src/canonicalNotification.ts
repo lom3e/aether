@@ -68,7 +68,7 @@ export function resolveCanonicalTarget(raw: any): TargetResolutionResult {
   if (raw.open_target && typeof raw.open_target === 'object' && raw.open_target.view) {
     return {
       view: raw.open_target.view,
-      params: raw.open_target.params !== undefined ? raw.open_target.params : (raw.target_id || raw.link_id || null),
+      params: raw.open_target.params !== undefined ? raw.open_target.params : (raw.open_target.target_id || raw.open_target.id || raw.target_id || raw.link_id || null),
       valid: true,
     };
   }
