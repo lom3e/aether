@@ -27,6 +27,8 @@ dependencies = [
     "uvicorn>=0.23.0",
     "websockets>=11.0",
     "pyyaml>=6.0",
+    "cryptography>=41.0.0",
+    "keyring>=24.0.0",
 ]
 
 [project.optional-dependencies]
@@ -64,4 +66,6 @@ testpaths = [
 ]
 markers = [
     "integration: marks tests that require external services (e.g., Ollama server). Deselect with '-m not integration'.",
+    "live_provider: marks live external provider tests (skips explicitly if real credentials not present in env).",
+    "mock_provider: marks isolated mock provider tests.",
 ]

@@ -175,6 +175,12 @@ class FilesystemWatcher(BaseWatcher):
                     detected.append({"path": rel_path, "event": "modified", "size": size, "mtime": mtime})
                     self._last_event_timestamps[rel_path] = now_ts
 
+        # Check deleted files
+        for rel_path in set(self._file_snapshots.keys()) - set(current_snapshots.keys()):
+            if "deleted" in self.watch_events:
+                detected.append({"path": rel_path, "event": "deleted", "size": 0, "mtime": now_ts})
+                self._last_event_timestamps[rel_path] = now_ts
+
         self._file_snapshots = current_snapshots
 
         if detected:

@@ -502,19 +502,27 @@ class NotificationDispatcher:
         channel: NotificationChannel,
         notification: Notification,
     ) -> tuple[DeliveryStatus, str]:
-        """Delivers notification via SMTP relay."""
-        smtp_host = channel.config.get("smtp_host")
-        to_addrs = channel.config.get("to_addrs") or []
+        """Delivers notification via SMTP relay with secret resolution."""
+        resolved_cfg = resolve_secrets_in_dict(channel.config, self.secret_store)
+        smtp_host = resolved_cfg.get("smtp_host")
+        to_addrs = (
+            resolved_cfg.get("to_addrs")
+            or resolved_cfg.get("recipient_email")
+            or resolved_cfg.get("recipients")
+            or resolved_cfg.get("recipient")
+            or resolved_cfg.get("to")
+            or []
+        )
         if isinstance(to_addrs, str):
             to_addrs = [a.strip() for a in to_addrs.split(",") if a.strip()]
 
         if not smtp_host or not to_addrs:
             return DeliveryStatus.SKIPPED, "SMTP host or recipients not configured"
 
-        smtp_port = int(channel.config.get("smtp_port") or 587)
-        smtp_user = channel.config.get("smtp_user")
-        smtp_pass = channel.config.get("smtp_pass")
-        from_addr = channel.config.get("from_addr") or smtp_user or "notifications@aether.local"
+        smtp_port = int(resolved_cfg.get("smtp_port") or 587)
+        smtp_user = resolved_cfg.get("smtp_user")
+        smtp_pass = resolved_cfg.get("smtp_pass") or resolved_cfg.get("smtp_password") or resolved_cfg.get("password")
+        from_addr = resolved_cfg.get("from_addr") or smtp_user or "notifications@aether.local"
 
         from email.mime.text import MIMEText
         from email.mime.multipart import MIMEMultipart
@@ -537,4 +545,7 @@ class NotificationDispatcher:
                 server.sendmail(from_addr, to_addrs, msg.as_string())
             return DeliveryStatus.SENT, f"Email delivered to {len(to_addrs)} recipients"
         except Exception as e:
-            return DeliveryStatus.FAILED, f"SMTP relay failed: {e}"
+            err_str = str(e)
+            if smtp_pass and smtp_pass in err_str:
+                err_str = err_str.replace(smtp_pass, "••••••••")
+            return DeliveryStatus.FAILED, f"SMTP relay failed: {err_str}"

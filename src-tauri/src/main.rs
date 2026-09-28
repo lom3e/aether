@@ -45,33 +45,43 @@ pub struct DesktopNotificationPayload {
 }
 
 fn get_target_file_path(data_dir: &Path) -> PathBuf {
+    data_dir.join("pending_notification_targets.json")
+}
+
+fn get_legacy_target_file_path(data_dir: &Path) -> PathBuf {
     data_dir.join("pending_notification_target.json")
 }
 
-fn persist_target_to_file(data_dir: &Path, target: &CanonicalNotificationTarget) {
+fn persist_targets_to_file(data_dir: &Path, targets: &[CanonicalNotificationTarget]) {
     let path = get_target_file_path(data_dir);
-    if let Ok(json) = serde_json::to_string_pretty(target) {
+    if targets.is_empty() {
+        if path.exists() {
+            let _ = std::fs::remove_file(path);
+        }
+    } else if let Ok(json) = serde_json::to_string_pretty(targets) {
         let _ = std::fs::write(path, json);
     }
 }
 
-fn clear_target_file(data_dir: &Path) {
-    let path = get_target_file_path(data_dir);
-    if path.exists() {
-        let _ = std::fs::remove_file(path);
-    }
-}
-
-fn read_persisted_target(data_dir: &Path) -> Option<CanonicalNotificationTarget> {
+fn read_persisted_targets(data_dir: &Path) -> Vec<CanonicalNotificationTarget> {
     let path = get_target_file_path(data_dir);
     if path.exists() {
         if let Ok(contents) = std::fs::read_to_string(&path) {
-            if let Ok(target) = serde_json::from_str::<CanonicalNotificationTarget>(&contents) {
-                return Some(target);
+            if let Ok(targets) = serde_json::from_str::<Vec<CanonicalNotificationTarget>>(&contents) {
+                return targets;
             }
         }
     }
-    None
+    let legacy = get_legacy_target_file_path(data_dir);
+    if legacy.exists() {
+        if let Ok(contents) = std::fs::read_to_string(&legacy) {
+            if let Ok(target) = serde_json::from_str::<CanonicalNotificationTarget>(&contents) {
+                let _ = std::fs::remove_file(legacy);
+                return vec![target];
+            }
+        }
+    }
+    Vec::new()
 }
 
 #[allow(dead_code)]
@@ -229,8 +239,12 @@ fn send_desktop_notification(
 
     if let Ok(mut pending) = state.pending_targets.lock() {
         pending.push(canonical_target.clone());
+        if pending.len() > 50 {
+            let drop_count = pending.len() - 50;
+            pending.drain(0..drop_count);
+        }
+        persist_targets_to_file(&state.data_dir, &pending);
     }
-    persist_target_to_file(&state.data_dir, &canonical_target);
 
     // 4. Send native OS notification via tauri-plugin-notification
     let mut builder = app.notification().builder();
@@ -259,23 +273,19 @@ fn send_desktop_notification(
 
 #[tauri::command]
 fn consume_notification_target(state: State<RuntimeState>) -> Option<CanonicalNotificationTarget> {
+    let now = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_secs();
+
     let mut target = None;
     if let Ok(mut pending) = state.pending_targets.lock() {
-        target = pending.pop();
-    }
-    if target.is_none() {
-        target = read_persisted_target(&state.data_dir);
-    }
-    clear_target_file(&state.data_dir);
-
-    if let Some(ref t) = target {
-        let now = SystemTime::now()
-            .duration_since(UNIX_EPOCH)
-            .unwrap_or_default()
-            .as_secs();
-        if now.saturating_sub(t.created_at) > 900 {
-            return None;
+        if pending.is_empty() {
+            *pending = read_persisted_targets(&state.data_dir);
         }
+        pending.retain(|t| now.saturating_sub(t.created_at) <= 900);
+        target = pending.pop();
+        persist_targets_to_file(&state.data_dir, &pending);
     }
     target
 }
@@ -748,18 +758,17 @@ fn main() {
     let notifications_muted_for_tray = Arc::clone(&notifications_muted);
     let recent_notifications = Arc::new(Mutex::new(HashMap::new()));
     let pending_targets = Arc::new(Mutex::new(Vec::new()));
-
-    if let Some(saved) = read_persisted_target(&data_dir) {
-        let now = SystemTime::now()
-            .duration_since(UNIX_EPOCH)
-            .unwrap_or_default()
-            .as_secs();
-        if now.saturating_sub(saved.created_at) <= 900 {
-            pending_targets.lock().unwrap().push(saved);
-        } else {
-            clear_target_file(&data_dir);
-        }
-    }
+    let saved_targets = read_persisted_targets(&data_dir);
+    let now = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_secs();
+    let valid_targets: Vec<_> = saved_targets
+        .into_iter()
+        .filter(|t| now.saturating_sub(t.created_at) <= 900)
+        .collect();
+    *pending_targets.lock().unwrap() = valid_targets.clone();
+    persist_targets_to_file(&data_dir, &valid_targets);
 
     let app = tauri::Builder::default()
         .plugin(tauri_plugin_notification::init())
@@ -930,14 +939,19 @@ fn main() {
             println!("[Aether Desktop] macOS Reopen event (has_visible_windows={}). Focusing main window...", has_visible_windows);
             show_main_window_action(&app_handle);
             if let Some(state) = app_handle.try_state::<RuntimeState>() {
+                let now = SystemTime::now()
+                    .duration_since(UNIX_EPOCH)
+                    .unwrap_or_default()
+                    .as_secs();
                 let mut target = None;
                 if let Ok(mut pending) = state.pending_targets.lock() {
+                    if pending.is_empty() {
+                        *pending = read_persisted_targets(&state.data_dir);
+                    }
+                    pending.retain(|t| now.saturating_sub(t.created_at) <= 900);
                     target = pending.pop();
+                    persist_targets_to_file(&state.data_dir, &pending);
                 }
-                if target.is_none() {
-                    target = read_persisted_target(&state.data_dir);
-                }
-                clear_target_file(&state.data_dir);
 
                 if let Some(t) = target {
                     let now = SystemTime::now()

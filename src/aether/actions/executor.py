@@ -8,6 +8,7 @@ from __future__ import annotations
 from datetime import datetime, timezone
 import logging
 from pathlib import Path
+import threading
 from typing import Any
 import uuid
 
@@ -90,6 +91,7 @@ class ActionExecutor:
         self.connection_service = connection_service
         self.project_path = Path(project_path) if project_path else None
         self.safety_policy = safety_policy or ActionSafetyPolicy()
+        self._approval_lock = threading.RLock()
 
     def execute(
         self,
@@ -182,73 +184,75 @@ class ActionExecutor:
 
     def approve(self, execution_id: str, approver: str = "user") -> ActionExecution:
         """Approves a pending execution and runs it. Idempotent if already approved/completed."""
-        execution = self.store.get_execution(execution_id)
-        if not execution:
-            raise ValueError(f"Execution '{execution_id}' not found")
+        with self._approval_lock:
+            execution = self.store.get_execution(execution_id)
+            if not execution:
+                raise ValueError(f"Execution '{execution_id}' not found")
 
-        # Idempotency: if already approved or running or completed, return existing execution
-        if execution.status in (ActionExecutionStatus.APPROVED, ActionExecutionStatus.SUCCEEDED, ActionExecutionStatus.RUNNING):
-            return execution
+            # Idempotency: if already approved or running or completed, return existing execution
+            if execution.status in (ActionExecutionStatus.APPROVED, ActionExecutionStatus.SUCCEEDED, ActionExecutionStatus.RUNNING):
+                return execution
 
-        if execution.status in (ActionExecutionStatus.REJECTED, ActionExecutionStatus.CANCELLED, ActionExecutionStatus.EXPIRED):
-            raise ValueError(f"Cannot approve execution '{execution_id}': action was already declined / {execution.status.value}.")
+            if execution.status in (ActionExecutionStatus.REJECTED, ActionExecutionStatus.CANCELLED, ActionExecutionStatus.EXPIRED):
+                raise ValueError(f"Cannot approve execution '{execution_id}': action was already declined / {execution.status.value}.")
 
-        if execution.status == ActionExecutionStatus.FAILED:
-            raise ValueError(f"Cannot approve execution '{execution_id}': action has already failed.")
+            if execution.status == ActionExecutionStatus.FAILED:
+                raise ValueError(f"Cannot approve execution '{execution_id}': action has already failed.")
 
-        if execution.status not in (ActionExecutionStatus.WAITING_APPROVAL, ActionExecutionStatus.PENDING_APPROVAL):
-            raise ValueError(f"Cannot approve execution in status '{execution.status.value}'")
+            if execution.status not in (ActionExecutionStatus.WAITING_APPROVAL, ActionExecutionStatus.PENDING_APPROVAL):
+                raise ValueError(f"Cannot approve execution in status '{execution.status.value}'")
 
-        definition = self.registry.get(execution.action_id)
-        if not definition:
-            raise ValueError(f"Action '{execution.action_id}' not found")
+            definition = self.registry.get(execution.action_id)
+            if not definition:
+                raise ValueError(f"Action '{execution.action_id}' not found")
 
-        execution.transition_to(ActionExecutionStatus.APPROVED)
-        execution.approved_by = approver
-        self.store.save_execution(execution)
+            execution.transition_to(ActionExecutionStatus.APPROVED)
+            execution.approved_by = approver
+            self.store.save_execution(execution)
 
         return self._dispatch_and_run(definition, execution)
 
     def reject(self, execution_id: str, reason: str = "User declined") -> ActionExecution:
         """Rejects a pending execution. Idempotent if already rejected."""
-        execution = self.store.get_execution(execution_id)
-        if not execution:
-            raise ValueError(f"Execution '{execution_id}' not found")
+        with self._approval_lock:
+            execution = self.store.get_execution(execution_id)
+            if not execution:
+                raise ValueError(f"Execution '{execution_id}' not found")
 
-        # Idempotency: if already rejected, return cleanly
-        if execution.status == ActionExecutionStatus.REJECTED:
+            # Idempotency: if already rejected, return cleanly
+            if execution.status == ActionExecutionStatus.REJECTED:
+                return execution
+
+            if execution.is_terminal():
+                raise ValueError(f"Cannot decline execution '{execution_id}': action was already approved and is in terminal state '{execution.status.value}'.")
+
+            if execution.status in (ActionExecutionStatus.APPROVED, ActionExecutionStatus.RUNNING):
+                raise ValueError(f"Cannot decline execution '{execution_id}': action was already approved.")
+
+            if execution.status not in (ActionExecutionStatus.WAITING_APPROVAL, ActionExecutionStatus.PENDING_APPROVAL):
+                raise ValueError(f"Cannot reject execution in status '{execution.status.value}'")
+
+            definition = self.registry.get(execution.action_id)
+            action_name = definition.name if definition else execution.action_id
+
+            execution.transition_to(ActionExecutionStatus.REJECTED)
+            execution.rejection_reason = reason
+            execution.completed_at = datetime.now(timezone.utc).isoformat()
+            self.store.save_execution(execution)
+
+            if self.activity_service:
+                self.activity_service.log(
+                    workspace_id=execution.workspace_id,
+                    title=f"Declined: {action_name}",
+                    description=f"Action was declined ({reason}).",
+                    category=ActivityCategory.ACTION,
+                    status=ActivityStatus.REJECTED,
+                    link_view="home",
+                    link_id=execution.id,
+                    metadata={"action_id": execution.action_id, "execution_id": execution.id},
+                )
+
             return execution
-
-        if execution.is_terminal():
-            raise ValueError(f"Cannot decline execution '{execution_id}': action was already approved and is in terminal state '{execution.status.value}'.")
-
-        if execution.status in (ActionExecutionStatus.APPROVED, ActionExecutionStatus.RUNNING):
-            raise ValueError(f"Cannot decline execution '{execution_id}': action was already approved.")
-
-        if execution.status not in (ActionExecutionStatus.WAITING_APPROVAL, ActionExecutionStatus.PENDING_APPROVAL):
-            raise ValueError(f"Cannot reject execution in status '{execution.status.value}'")
-
-        definition = self.registry.get(execution.action_id)
-        action_name = definition.name if definition else execution.action_id
-
-        execution.transition_to(ActionExecutionStatus.REJECTED)
-        execution.rejection_reason = reason
-        execution.completed_at = datetime.now(timezone.utc).isoformat()
-        self.store.save_execution(execution)
-
-        if self.activity_service:
-            self.activity_service.log(
-                workspace_id=execution.workspace_id,
-                title=f"Declined: {action_name}",
-                description=f"Action was declined ({reason}).",
-                category=ActivityCategory.ACTION,
-                status=ActivityStatus.REJECTED,
-                link_view="home",
-                link_id=execution.id,
-                metadata={"action_id": execution.action_id, "execution_id": execution.id},
-            )
-
-        return execution
 
     approve_execution = approve
     reject_execution = reject

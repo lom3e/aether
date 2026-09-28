@@ -1,5 +1,6 @@
 import os
 import asyncio
+from contextlib import asynccontextmanager
 from pathlib import Path
 from typing import Any
 from fastapi import FastAPI, Request
@@ -12,7 +13,17 @@ from aether.workspace.workspace import Workspace
 from aether.server.routes import router as api_router
 from aether.server.sockets import router as ws_router
 
-app = FastAPI(title="Aether Platform API", version="1.0.0")
+
+@asynccontextmanager
+async def lifespan(app_instance: FastAPI):
+    await startup_event()
+    try:
+        yield
+    finally:
+        await shutdown_event()
+
+
+app = FastAPI(title="Aether Platform API", version="1.0.0", lifespan=lifespan)
 
 # Setup CORS for local development and desktop webview
 allowed_origins_env = os.environ.get("AETHER_ALLOWED_ORIGINS", "")
@@ -79,7 +90,6 @@ async def session_token_middleware(request: Request, call_next):
 
 
 # Inizializza Workspace e lo inietta nell'app state
-@app.on_event("startup")
 async def startup_event():
     configured_root = os.environ.get("AETHER_WORKSPACE")
     if not configured_root:
@@ -149,6 +159,15 @@ async def startup_event():
         except Exception as e:
             print(f"Warning: secret migration encountered an issue: {e}")
 
+        # Action execution crash recovery
+        try:
+            if hasattr(ws, "action_store"):
+                recovered_actions = ws.action_store.recover_interrupted_executions()
+                if recovered_actions:
+                    print(f"ActionStore recovered {recovered_actions} interrupted execution(s) on startup.")
+        except Exception as exc:
+            print(f"Warning: could not run action crash recovery: {exc}")
+
         # Start Automation Scheduler
         try:
             if hasattr(ws, "automations"):
@@ -202,7 +221,6 @@ app.include_router(api_router, prefix="/api")
 app.include_router(ws_router)
 
 
-@app.on_event("shutdown")
 async def shutdown_event():
     app.state.is_shutting_down = True
 

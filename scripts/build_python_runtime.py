@@ -113,6 +113,11 @@ HIDDEN_IMPORTS = [
     "aether.personal.service",
     "aether.planning",
     "aether.tools",
+    "cryptography",
+    "cryptography.hazmat.primitives.ciphers.aead",
+    "keyring",
+    "keyring.backends",
+    "keyring.backends.macOS",
 ]
 
 
@@ -170,6 +175,11 @@ def build_runtime() -> Path:
     if builtin_presets.exists():
         cmd.extend(["--add-data", f"{builtin_presets}{data_sep}aether/presets/builtin"])
 
+    # Include server static directory if present
+    server_static = SRC_DIR / "aether" / "server" / "static"
+    if server_static.exists():
+        cmd.extend(["--add-data", f"{server_static}{data_sep}aether/server/static"])
+
     # Include UI dist if present
     ui_dist = REPO_ROOT / "ui" / "dist"
     if ui_dist.exists():
@@ -180,6 +190,8 @@ def build_runtime() -> Path:
         cmd.extend(["--hidden-import", imp])
 
     cmd.extend(["--collect-submodules", "aether"])
+    cmd.extend(["--collect-submodules", "cryptography"])
+    cmd.extend(["--collect-submodules", "keyring"])
 
     cmd.append(str(ENTRYPOINT))
 

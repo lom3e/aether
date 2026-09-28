@@ -1,6 +1,6 @@
 {
   "manifest_version": "1.0",
-  "generated_at": "2026-09-28T18:27:41.804487+00:00",
+  "generated_at": "2026-09-28T20:24:33.777037+00:00",
   "source": "/Users/matteo/Matteo/Lavoro/Progetti Personali/Aether/aether/ui/dist",
   "target": "/Users/matteo/Matteo/Lavoro/Progetti Personali/Aether/aether/src/aether/server/static",
   "file_count": 14,

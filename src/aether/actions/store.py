@@ -149,6 +149,26 @@ class ActionStore:
         rows = conn.execute(query, params).fetchall()
         return [self._row_to_execution(r) for r in rows]
 
+    def recover_interrupted_executions(self) -> int:
+        """
+        Crash recovery hook called on application startup.
+        Marks any action executions left in 'running' or 'queued' as failed due to process crash/restart.
+        Crucially preserves 'waiting_approval' / 'pending_approval' so pending user decisions survive restarts.
+        """
+        now = datetime.now(timezone.utc).isoformat()
+        with self._transaction() as cursor:
+            cursor.execute(
+                """
+                UPDATE action_executions
+                SET status = 'failed',
+                    error_message = 'Action execution interrupted by application restart/crash',
+                    completed_at = ?
+                WHERE status IN ('running', 'queued');
+                """,
+                (now,),
+            )
+            return cursor.rowcount
+
     def _row_to_execution(self, row: sqlite3.Row) -> ActionExecution:
         keys = row.keys()
         provider_val = row["provider"] if "provider" in keys and row["provider"] else ""

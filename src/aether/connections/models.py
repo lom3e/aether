@@ -84,23 +84,11 @@ class Connection:
             ConnectionStatus.VERIFICATION_FAILED,
         )
 
-    def to_dict(self, mask_secrets: bool = False) -> dict[str, Any]:
+    def to_dict(self, mask_secrets: bool = True) -> dict[str, Any]:
         meta = dict(self.auth_metadata or {})
         if mask_secrets:
-            masked = {}
-            for k, v in meta.items():
-                if any(secret_word in k.lower() for secret_word in ("token", "secret", "password", "key", "webhook", "pat", "verifier", "credential", "auth")):
-                    if isinstance(v, str) and (v.startswith("secret_ref:") or v.startswith("sec_")):
-                        masked[k] = "••••••••"
-                    elif isinstance(v, str) and len(v) > 6:
-                        masked[k] = f"{v[:4]}...{v[-3:]}"
-                    elif isinstance(v, str) and v:
-                        masked[k] = "••••••••"
-                    else:
-                        masked[k] = v
-                else:
-                    masked[k] = v
-            meta = masked
+            from aether.core.secrets import mask_secrets_deep
+            meta = mask_secrets_deep(meta)
 
         return {
             "id": self.id,
