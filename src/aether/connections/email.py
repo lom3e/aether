@@ -34,8 +34,13 @@ class EmailConnector(BaseConnector):
     Works with Gmail, Outlook, Amazon SES, or custom SMTP servers.
     """
 
-    def __init__(self, auth_metadata: dict[str, Any] | None = None) -> None:
+    def __init__(
+        self,
+        auth_metadata: dict[str, Any] | None = None,
+        secret_store: Any | None = None,
+    ) -> None:
         self._auth_metadata = dict(auth_metadata or {})
+        self._secret_store = secret_store
 
     @property
     def provider(self) -> str:
@@ -119,10 +124,23 @@ class EmailConnector(BaseConnector):
             ):
                 if k in params and params[k] is not None:
                     merged[k] = params[k]
+
+        # Resolve any secret_ref tokens via SecretStore
+        from aether.core.secrets import is_secret_ref, get_secret_store
+        store = self._secret_store or get_secret_store()
+        for k in ("password", "token", "app_password"):
+            val = merged.get(k)
+            if isinstance(val, str) and is_secret_ref(val):
+                try:
+                    resolved = store.get_secret(val)
+                    if resolved is not None:
+                        merged[k] = resolved
+                except Exception:
+                    pass
         return merged
 
     def verify(self, auth_metadata: dict[str, Any] | None = None, live_check: bool = False) -> tuple[bool, str]:
-        meta = auth_metadata or self._auth_metadata
+        meta = self._get_config(auth_metadata) if auth_metadata else self._get_config()
         username = str(meta.get("username") or meta.get("email") or "").strip()
         password = str(meta.get("password") or meta.get("app_password") or meta.get("token") or "").strip()
         host = str(meta.get("smtp_host") or "").strip()
@@ -142,6 +160,11 @@ class EmailConnector(BaseConnector):
             return False, "App password or token is required."
         if not host:
             return False, "SMTP Host is required (e.g. smtp.gmail.com)."
+
+        def _sanitize(msg: str) -> str:
+            if password and password in msg:
+                return msg.replace(password, "••••••••")
+            return msg
 
         # Perform live connection check if requested
         if live_check or meta.get("live_check"):
@@ -177,11 +200,11 @@ class EmailConnector(BaseConnector):
                     except Exception:
                         pass
             except socket.gaierror as exc:
-                return False, f"SMTP DNS resolution failed for host '{host}': {exc}"
+                return False, _sanitize(f"SMTP DNS resolution failed for host '{host}': {exc}")
             except (TimeoutError, socket.timeout):
                 return False, f"SMTP connection timed out connecting to '{host}:{port}'."
             except ssl.SSLError as exc:
-                return False, f"SMTP SSL/TLS handshake failed on '{host}:{port}': {exc}"
+                return False, _sanitize(f"SMTP SSL/TLS handshake failed on '{host}:{port}': {exc}")
             except smtplib.SMTPNotSupportedError as exc:
                 return False, f"SMTP STARTTLS is not supported by '{host}': {exc}"
             except smtplib.SMTPAuthenticationError:
@@ -189,13 +212,13 @@ class EmailConnector(BaseConnector):
             except (smtplib.SMTPConnectError, ConnectionRefusedError):
                 return False, f"Could not connect to SMTP server '{host}:{port}': server unavailable or connection refused."
             except smtplib.SMTPServerDisconnected as exc:
-                return False, f"SMTP server disconnected unexpectedly: {exc}"
+                return False, _sanitize(f"SMTP server disconnected unexpectedly: {exc}")
             except smtplib.SMTPRecipientsRefused as exc:
-                return False, f"SMTP test recipient refused by server: {exc}"
+                return False, _sanitize(f"SMTP test recipient refused by server: {exc}")
             except smtplib.SMTPException as exc:
-                return False, f"SMTP error: {exc}"
+                return False, _sanitize(f"SMTP error: {exc}")
             except Exception as exc:
-                return False, f"SMTP verification error: {type(exc).__name__} - {exc}"
+                return False, _sanitize(f"SMTP verification error: {type(exc).__name__} - {exc}")
 
         return True, "Email SMTP credentials format verified."
 
@@ -295,7 +318,10 @@ class EmailConnector(BaseConnector):
         except smtplib.SMTPRecipientsRefused as exc:
             raise ConnectorError(f"Recipient address refused by server: {exc}", provider=self.provider) from None
         except (smtplib.SMTPException, OSError) as exc:
-            raise ConnectorError(f"SMTP send failed: {type(exc).__name__} - {exc}", provider=self.provider) from None
+            err_msg = f"SMTP send failed: {type(exc).__name__} - {exc}"
+            if password and password in err_msg:
+                err_msg = err_msg.replace(password, "••••••••")
+            raise ConnectorError(err_msg, provider=self.provider) from None
 
         return {
             "status": "sent",

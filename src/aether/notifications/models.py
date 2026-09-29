@@ -337,6 +337,8 @@ class DeliveryStatus(StrEnum):
     FAILED = "failed"
     SKIPPED = "skipped"
     PENDING = "pending"
+    RECEIVED = "received"
+    OPENED = "opened"
 
     @classmethod
     def from_str(cls, val: str) -> DeliveryStatus:

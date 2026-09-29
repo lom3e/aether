@@ -284,7 +284,9 @@ fn consume_notification_target(state: State<RuntimeState>) -> Option<CanonicalNo
             *pending = read_persisted_targets(&state.data_dir);
         }
         pending.retain(|t| now.saturating_sub(t.created_at) <= 900);
-        target = pending.pop();
+        if !pending.is_empty() {
+            target = Some(pending.remove(0));
+        }
         persist_targets_to_file(&state.data_dir, &pending);
     }
     target
@@ -949,7 +951,9 @@ fn main() {
                         *pending = read_persisted_targets(&state.data_dir);
                     }
                     pending.retain(|t| now.saturating_sub(t.created_at) <= 900);
-                    target = pending.pop();
+                    if !pending.is_empty() {
+                        target = Some(pending.remove(0));
+                    }
                     persist_targets_to_file(&state.data_dir, &pending);
                 }
 

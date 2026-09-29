@@ -154,10 +154,16 @@ async def startup_event():
             pass
 
         # Idempotently migrate any legacy plaintext secrets to SecretStore
+        app.state.protection_status = "migration_running"
+        app.state.migration_error = None
         try:
             ws.migrate_secrets()
+            app.state.protection_status = "ready"
         except Exception as e:
-            print(f"Warning: secret migration encountered an issue: {e}")
+            app.state.protection_status = "migration_failed"
+            app.state.migration_error = str(e)
+            ws.protection_status = "migration_failed"
+            print(f"CRITICAL: secret migration failed during startup: {e}")
 
         # Action execution crash recovery
         try:

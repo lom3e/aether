@@ -133,9 +133,28 @@ class KeychainMasterKeyProvider(MasterKeyProvider):
     """
     macOS Keychain OS-backed credential store provider.
     Stores and retrieves the master vault root key via the OS Keychain.
+    Scopes account names deterministically to the specific vault path to prevent
+    cross-workspace/vault key collisions, while preserving backwards compatibility
+    with legacy 'master_vault_key'.
     """
     SERVICE_NAME = "aether-runtime"
-    ACCOUNT_NAME = "master_vault_key"
+    DEFAULT_ACCOUNT_NAME = "master_vault_key"
+
+    def get_account_name(self, vault_path: Path) -> str:
+        """Derives a deterministic, collision-free Keychain account name for a vault path."""
+        env_account = os.environ.get("AETHER_KEYCHAIN_ACCOUNT", "").strip()
+        if env_account:
+            return env_account
+
+        try:
+            canon = str(vault_path.expanduser().resolve())
+            default_canon = str((Path.home() / ".aether" / "vault" / "secrets.vault").resolve())
+            if canon == default_canon:
+                return self.DEFAULT_ACCOUNT_NAME
+            digest = hashlib.sha256(canon.encode("utf-8")).hexdigest()[:16]
+            return f"vault_{digest}"
+        except Exception:
+            return self.DEFAULT_ACCOUNT_NAME
 
     def is_available(self) -> bool:
         if sys.platform != "darwin":
@@ -157,12 +176,32 @@ class KeychainMasterKeyProvider(MasterKeyProvider):
             return None, "unavailable"
         try:
             import keyring
-            hex_key = keyring.get_password(self.SERVICE_NAME, self.ACCOUNT_NAME)
+            account = self.get_account_name(vault_path)
+            hex_key = keyring.get_password(self.SERVICE_NAME, account)
             if hex_key and len(hex_key) == 64:
                 return bytes.fromhex(hex_key), "macos_keychain"
+
+            # Fallback to legacy global account name if non-default scoped was not found
+            if account != self.DEFAULT_ACCOUNT_NAME:
+                legacy_hex = keyring.get_password(self.SERVICE_NAME, self.DEFAULT_ACCOUNT_NAME)
+                if legacy_hex and len(legacy_hex) == 64:
+                    return bytes.fromhex(legacy_hex), "macos_keychain"
         except Exception as exc:
             logger.debug("Keychain get_password failed: %s", exc)
         return None, "macos_keychain"
+
+    def set_master_key(self, vault_path: Path, key: bytes) -> bool:
+        """Explicitly persists a master key to Keychain under the vault's scoped account."""
+        if not self.is_available():
+            return False
+        try:
+            import keyring
+            account = self.get_account_name(vault_path)
+            keyring.set_password(self.SERVICE_NAME, account, key.hex())
+            return True
+        except Exception as exc:
+            logger.warning("Could not set master key in macOS Keychain for %s: %s", vault_path, exc)
+            return False
 
     def get_or_create_master_key(self, vault_path: Path) -> tuple[bytes, str]:
         existing, source = self.get_master_key(vault_path)
@@ -172,7 +211,8 @@ class KeychainMasterKeyProvider(MasterKeyProvider):
         new_key = secrets.token_bytes(32)
         try:
             import keyring
-            keyring.set_password(self.SERVICE_NAME, self.ACCOUNT_NAME, new_key.hex())
+            account = self.get_account_name(vault_path)
+            keyring.set_password(self.SERVICE_NAME, account, new_key.hex())
             return new_key, "macos_keychain"
         except Exception as exc:
             logger.warning("Could not store master key in macOS Keychain: %s. Falling back.", exc)
@@ -299,6 +339,35 @@ class CompositeMasterKeyManager:
 
         # 3. File provider
         return self.file.get_or_create_master_key(vault_path)
+
+    def get_candidate_keys(self, vault_path: Path) -> list[tuple[bytes, str]]:
+        """
+        Returns all plausible candidate master keys across environment, Keychain,
+        and local key files, ordered by priority. Used for transparent recovery and migration.
+        """
+        candidates: list[tuple[bytes, str]] = []
+        seen: set[bytes] = set()
+
+        # 1. Environment key
+        k_env, src_env = self.env.get_master_key(vault_path)
+        if k_env and k_env not in seen:
+            candidates.append((k_env, src_env))
+            seen.add(k_env)
+
+        # 2. Keychain key (scoped and fallback)
+        if self.keychain.is_available():
+            k_kc, src_kc = self.keychain.get_master_key(vault_path)
+            if k_kc and k_kc not in seen:
+                candidates.append((k_kc, src_kc))
+                seen.add(k_kc)
+
+        # 3. File key (from local .vault_key)
+        k_file, src_file = self.file.get_master_key(vault_path)
+        if k_file and k_file not in seen:
+            candidates.append((k_file, src_file))
+            seen.add(k_file)
+
+        return candidates
 
 
 # =====================================================================
@@ -528,25 +597,19 @@ class EncryptedVaultSecretStore(SecretStore):
     def _load_vault(self) -> None:
         """
         Loads and decrypts all records from persistent vault storage.
-        Enforces strict fail-closed behavior on corruption or missing key.
+        Order of verification:
+        1. Read and parse envelope from file FIRST.
+        2. Validate format version (reject future/unsupported format versions before resolving keys).
+        3. Resolve master key & candidate keys across Keychain, environment, and file storage.
+        4. Decrypt records with candidate key fallback & transparent secure source migration.
+        Enforces strict fail-closed behavior on corruption, missing key, or invalid tag.
         """
         if not self.vault_path.exists():
             self._status = "uninitialized"
             return
 
         with self._lock:
-            # 1. Verify master key exists for existing vault file
-            key, source = self._key_manager.get_master_key(self.vault_path)
-            if key is None:
-                self._status = "key_unavailable"
-                self._last_error = f"Master key is unavailable for existing vault at {self.vault_path}"
-                logger.error("%s. Vault cannot be loaded without master key.", self._last_error)
-                raise VaultKeyUnavailableError(self._last_error)
-
-            self._master_key = key
-            self._key_source = source
-
-            # 2. Read and parse vault structure
+            # 1. Read and parse vault structure FIRST
             try:
                 data_str = self.vault_path.read_text(encoding="utf-8")
             except Exception as e:
@@ -566,12 +629,30 @@ class EncryptedVaultSecretStore(SecretStore):
                 logger.error(self._last_error)
                 raise VaultCorruptedError(self._last_error) from e
 
-            # 3. Check format version
+            if not isinstance(raw_json, dict):
+                self._status = "vault_corrupted"
+                self._last_error = "Vault file root must be a JSON object"
+                raise VaultCorruptedError(self._last_error)
+
+            # 2. Check format version BEFORE key resolution (Strict order required by audit)
             fmt_ver = raw_json.get("format_version") or raw_json.get("version", 1)
+            if not isinstance(fmt_ver, int) or fmt_ver <= 0:
+                self._status = "vault_corrupted"
+                self._last_error = f"Invalid format_version in vault: {fmt_ver}"
+                raise VaultFormatError(self._last_error)
+
             if fmt_ver > CURRENT_FORMAT_VERSION:
                 self._status = "unsupported_version"
                 self._last_error = f"Unsupported vault format version {fmt_ver} (current max: {CURRENT_FORMAT_VERSION})"
                 raise VaultFormatError(self._last_error)
+
+            # 3. Gather candidate keys
+            candidate_keys = self._key_manager.get_candidate_keys(self.vault_path)
+            if not candidate_keys:
+                self._status = "key_unavailable"
+                self._last_error = f"Master key is unavailable for existing vault at {self.vault_path}"
+                logger.error("%s. Vault cannot be loaded without master key.", self._last_error)
+                raise VaultKeyUnavailableError(self._last_error)
 
             records = raw_json.get("records", {})
             new_cache: dict[str, str] = {}
@@ -580,32 +661,86 @@ class EncryptedVaultSecretStore(SecretStore):
             # 4. Decrypt records based on version
             if fmt_ver == 1:
                 logger.info("Migrating legacy format version 1 vault to version 2 (AES-256-GCM)...")
-                candidate_keys: list[bytes] = []
-                if self._master_key:
-                    candidate_keys.append(self._master_key)
-                file_k, _ = self._key_manager.file.get_master_key(self.vault_path)
-                if file_k and file_k not in candidate_keys:
-                    candidate_keys.append(file_k)
+                just_keys = [k for k, _ in candidate_keys]
+                successful_key: bytes | None = None
+                successful_source: str = "unknown"
 
                 for s_ref, enc_data in records.items():
-                    plain = self._decrypt_legacy_v1(enc_data, candidate_keys)
+                    plain = self._decrypt_legacy_v1(enc_data, just_keys)
                     if plain is None:
                         self._status = "vault_corrupted"
                         self._last_error = f"Legacy vault record '{s_ref}' could not be decrypted"
                         raise VaultCorruptedError(self._last_error)
                     new_cache[s_ref] = plain
                     new_metadata[s_ref] = enc_data.get("metadata", {})
+
+                # Determine winning key that decrypted the v1 records
+                for k, src in candidate_keys:
+                    if not records or self._decrypt_legacy_v1(next(iter(records.values())), [k]) is not None:
+                        successful_key = k
+                        successful_source = src
+                        break
+
+                self._master_key = successful_key or candidate_keys[0][0]
+                self._key_source = successful_source
                 self._cache = new_cache
                 self._metadata = new_metadata
+
+                # Seamless migration of master key to Keychain if available
+                if self._key_manager.keychain.is_available():
+                    if self._key_manager.keychain.set_master_key(self.vault_path, self._master_key):
+                        self._key_source = "macos_keychain"
+
                 # Upgrade file format on disk to version 2
                 self._save_vault()
             else:
-                for s_ref, enc_data in records.items():
-                    plain = self._decrypt_record_v2(s_ref, enc_data)
-                    new_cache[s_ref] = plain
-                    new_metadata[s_ref] = enc_data.get("metadata", {})
-                self._cache = new_cache
-                self._metadata = new_metadata
+                # Format Version 2 (AES-256-GCM AEAD)
+                if not records:
+                    self._master_key, self._key_source = candidate_keys[0]
+                    self._cache = {}
+                    self._metadata = {}
+                else:
+                    decrypted_cache: dict[str, str] | None = None
+                    decrypted_meta: dict[str, dict[str, Any]] = {}
+                    winning_key: bytes | None = None
+                    winning_src: str = "unknown"
+                    last_decrypt_err: Exception | None = None
+
+                    for cand_key, cand_src in candidate_keys:
+                        try:
+                            temp_cache: dict[str, str] = {}
+                            temp_meta: dict[str, dict[str, Any]] = {}
+                            for s_ref, enc_data in records.items():
+                                nonce = base64.b64decode(enc_data["nonce"])
+                                ciphertext = base64.b64decode(enc_data["ciphertext"])
+                                aad = f"v{CURRENT_FORMAT_VERSION}:{s_ref}".encode("utf-8")
+                                aesgcm = AESGCM(cand_key)
+                                pt_bytes = aesgcm.decrypt(nonce, ciphertext, aad)
+                                temp_cache[s_ref] = pt_bytes.decode("utf-8")
+                                temp_meta[s_ref] = enc_data.get("metadata", {})
+                            decrypted_cache = temp_cache
+                            decrypted_meta = temp_meta
+                            winning_key = cand_key
+                            winning_src = cand_src
+                            break
+                        except Exception as exc:
+                            last_decrypt_err = exc
+                            continue
+
+                    if decrypted_cache is None:
+                        self._status = "vault_corrupted"
+                        self._last_error = f"AEAD authentication tag mismatch: invalid key or corrupted vault ({last_decrypt_err})"
+                        raise VaultCorruptedError(self._last_error)
+
+                    self._master_key = winning_key
+                    self._key_source = winning_src
+                    self._cache = decrypted_cache
+                    self._metadata = decrypted_meta
+
+                    # Seamless migration of master key to Keychain if available and key was from file
+                    if winning_src != "macos_keychain" and self._key_manager.keychain.is_available():
+                        if self._key_manager.keychain.set_master_key(self.vault_path, winning_key):
+                            self._key_source = "macos_keychain"
 
             self._status = "healthy"
             self._last_error = None
@@ -812,6 +947,13 @@ def extract_secrets_deep(
                     entity_type=entity_type,
                     entity_id=entity_id,
                 )
+                # Verify immediately before returning sanitized pointer (fail-closed verification)
+                stored_val = secret_store.get_secret(s_ref)
+                if stored_val != v:
+                    raise SecretStoreError(
+                        f"Failed to verify secret persistence for ref '{s_ref}'. "
+                        f"Stored value does not match expected value."
+                    )
                 sanitized[k] = s_ref
                 total_extracted += 1
             elif isinstance(v, (dict, list)):
@@ -955,6 +1097,7 @@ class MigrationJournal:
 def migrate_all_secrets(
     workspace: Any,
     secret_store: SecretStore | None = None,
+    force: bool = False,
 ) -> dict[str, int]:
     """
     Strictly idempotent, failure-safe migration of raw SQLite databases across:
@@ -978,8 +1121,12 @@ def migrate_all_secrets(
 
     # Check journal state: if already completed and no forced run, return immediately
     j_state = journal.get_status()
-    if j_state.get("status") == "completed" and j_state.get("version") == CURRENT_FORMAT_VERSION:
+    if not force and j_state.get("status") == "completed" and j_state.get("version") == CURRENT_FORMAT_VERSION:
         # Quick idempotency check: 0 new migrations needed
+        try:
+            setattr(workspace, "protection_status", "ready")
+        except Exception:
+            pass
         return {"connections": 0, "notifications": 0, "automations": 0}
 
     journal.record_start()
@@ -1014,6 +1161,13 @@ def migrate_all_secrets(
                             (json.dumps(sanitized), conn_id),
                         )
                         results["connections"] += count
+                if results["connections"] > 0:
+                    try:
+                        conn.commit()
+                        conn.execute("PRAGMA wal_checkpoint(TRUNCATE);")
+                        conn.execute("VACUUM;")
+                    except Exception:
+                        pass
 
         # 2. Notification Channels Migration (Raw inspection)
         if hasattr(workspace, "notifications") and hasattr(workspace.notifications, "store"):
@@ -1041,6 +1195,13 @@ def migrate_all_secrets(
                             (json.dumps(sanitized), chan_id),
                         )
                         results["notifications"] += count
+                if results["notifications"] > 0:
+                    try:
+                        conn.commit()
+                        conn.execute("PRAGMA wal_checkpoint(TRUNCATE);")
+                        conn.execute("VACUUM;")
+                    except Exception:
+                        pass
 
         # 3. Automations Migration (Raw inspection)
         if hasattr(workspace, "automations"):
@@ -1069,8 +1230,19 @@ def migrate_all_secrets(
                                 (json.dumps(sanitized), auto_id),
                             )
                             results["automations"] += count
+                    if results["automations"] > 0:
+                        try:
+                            conn.commit()
+                            conn.execute("PRAGMA wal_checkpoint(TRUNCATE);")
+                            conn.execute("VACUUM;")
+                        except Exception:
+                            pass
 
         journal.record_success(results)
+        try:
+            setattr(workspace, "protection_status", "ready")
+        except Exception:
+            pass
         logger.info("Universal secret migration completed successfully: %s", results)
         return results
 

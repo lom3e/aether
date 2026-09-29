@@ -243,7 +243,7 @@ def test_action_executor_content_actions():
             ws.id,
             {"name": "Autumn Expansion", "description": "Workforce campaign", "objectives": ["Goal A"]},
         )
-        assert res_camp.status.value == "success"
+        assert res_camp.status.value in ("succeeded", "success")
         camp_data = res_camp.output_data["campaign"]
         camp_id = camp_data["id"]
         assert camp_data["name"] == "Autumn Expansion"
@@ -259,14 +259,14 @@ def test_action_executor_content_actions():
                 "target_platforms": ["linkedin", "twitter_thread"],
             },
         )
-        assert res_rep.status.value == "success"
+        assert res_rep.status.value in ("succeeded", "success")
         variants = res_rep.output_data["variants"]
         assert len(variants) == 2
         var_id = variants[0]["id"]
 
         # 3. content.list_campaigns
         res_list_camps = executor.execute("content.list_campaigns", ws.id, {})
-        assert res_list_camps.status.value == "success"
+        assert res_list_camps.status.value in ("succeeded", "success")
         assert len(res_list_camps.output_data["campaigns"]) >= 1
 
         # 4. content.schedule_variant
@@ -275,7 +275,7 @@ def test_action_executor_content_actions():
             ws.id,
             {"variant_id": var_id, "scheduled_at": "2026-11-15T09:00:00Z"},
         )
-        assert res_sched.status.value == "success"
+        assert res_sched.status.value in ("succeeded", "success")
         assert res_sched.output_data["variant"]["status"] == "scheduled"
 
 

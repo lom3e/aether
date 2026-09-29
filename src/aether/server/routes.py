@@ -26,13 +26,25 @@ async def health(request: Request):
     ws = getattr(request.app.state, "workspace", None)
     bound_host = getattr(request.app.state, "bound_host", None)
     bound_port = getattr(request.app.state, "bound_port", None)
+
+    protection_status = getattr(request.app.state, "protection_status", None)
+    if ws is not None and hasattr(ws, "protection_status"):
+        protection_status = ws.protection_status
+    if not protection_status:
+        protection_status = "ready" if ws is not None else "uninitialized"
+
+    migration_error = getattr(request.app.state, "migration_error", None)
+    status_str = "degraded" if protection_status == "migration_failed" else "ok"
+
     return {
-        "status": "ok",
+        "status": status_str,
         "version": __version__,
         "workspace_initialized": ws is not None,
         "workspace_root": str(ws.root) if ws is not None else None,
         "host": bound_host,
         "port": bound_port,
+        "protection_status": protection_status,
+        "migration_error": migration_error,
     }
 
 

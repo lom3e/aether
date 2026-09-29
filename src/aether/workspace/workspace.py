@@ -85,6 +85,7 @@ class Workspace:
 
         # Cached instances (stores, services)
         self._instances: dict[str, Any] = {}
+        self.protection_status: str = "ready"
 
         # Register in active workspaces registry
         Workspace._active_workspaces[str(self.root)] = self
@@ -199,10 +200,16 @@ class Workspace:
             return get_secret_store(vault_file)
         return self._get_or_create("secret_store", _factory)
 
-    def migrate_secrets(self) -> dict[str, int]:
+    def migrate_secrets(self, force: bool = False) -> dict[str, int]:
         """Runs idempotent secret migration across all workspace databases."""
         from aether.core.secrets import migrate_all_secrets
-        return migrate_all_secrets(self, self.secret_store)
+        try:
+            res = migrate_all_secrets(self, self.secret_store, force=force)
+            self.protection_status = "ready"
+            return res
+        except Exception:
+            self.protection_status = "migration_failed"
+            raise
 
     @property
     def automations(self):
