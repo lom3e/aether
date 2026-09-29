@@ -977,3 +977,36 @@ To deliver immediate value, establish end-to-end integration, and validate the a
    - Workforce Health view with real aggregate performance indicators (success rates, error rates, average duration, rework cycles, human checkpoints) and per-agent utilization metrics.
    - Factual diagnostic insights highlighting reliability without speculative assertions.
 
+---
+
+## VI. Phase A Macro-pass 1: Intent & Proposal Foundation
+
+**Status:** Completed  
+**Baseline:** Post-Hardening `7b3189624c98379932cb5361e8d00a341cd4049b`  
+**Scope Limitation:** Macro-pass 1 establishes the canonical foundation for IntentRequest → ContextPack / ContextResolver → MissionProposal → ProposalValidator. It deliberately does not implement proposal acceptance, mission compilation, or runtime execution.
+
+### Architectural Invariants Enforced
+1. **Single Runtime & Event Bus:** Reuses existing `MissionRuntime` and event architecture; introduces no second agent runtime or event bus.
+2. **Side-Effect Free Proposals:** Generating and validating proposals executes zero tools, creates no background missions, and writes no records to `MissionStore`.
+3. **Additive Persistence:** Proposals, intent requests, and context packs are persisted strictly in `PersonalStore` (`intent_requests`, `proposal_context`, `mission_proposals`).
+4. **Secret-Free Provenance:** Sensitive credentials, tokens, and authorization payloads are stripped and masked prior to proposal inclusion or storage.
+5. **Truthful Evidence-Derived Confidence:** Confidence values reflect real evidence coverage and unresolved ambiguities (clamped between 0.05 and 0.95), rejecting fake default 1.0 certainties.
+6. **Backward Compatibility:** Simple conversational queries (`ANSWER`, `DO`, simple `ACT`) continue uninterrupted via `/personal/chat`. Composite or delegated intents generate structured proposals instead of triggering unverified execution.
+
+### Canonical Contracts (`src/aether/planning/contracts.py`)
+- `IntentRequest`: Canonical typed input preserving raw input immutably, workspace binding, urgency, constraints, and source surface.
+- `ContextPack`: Structured context envelope detailing matched, ambiguous, unresolved, and missing entities with truthful resolution states and provenance citations.
+- `OutcomeConstraint`: Declarative verification requirements (e.g. `pull_request_created`, `files_modified`, `tests_passed`).
+- `MissionProposal`: Structured, versionable proposal containing narrative overview, logical proposed steps, upfront required approval specifications, outcome constraints, expected deliverables, risks, assumptions, and human-readable markdown generation (`to_human_markdown()`).
+- `ProposalValidationResult`: Structural and safety validation evaluation report.
+
+### Core Boundaries & Services
+- **Context Resolution (`src/aether/planning/resolver.py`):** `ContextResolver` binds natural language entities to existing workspace projects, git branches, active connections, files, and clients using `UnifiedIntelligenceService`. Masks credentials and preserves unresolved ambiguity states.
+- **Proposal Generation (`src/aether/planning/generator.py`):** `ProposalGenerator` produces logical step sequences and upfront sensitive action approval requirements (`email.send`, `slack.send_message`, `github.create_pull_request`, `files.delete`) without invoking execution engines.
+- **Proposal Validation (`src/aether/planning/validation.py`):** `ProposalValidator` enforces workspace scoping, rejects unverified outcome claims prior to run, validates evidence presence, prevents secret leakage, and checks approval boundaries.
+- **Persistence Boundary (`src/aether/personal/store.py`):** Additive SQLite schema (`intent_requests`, `proposal_context`, `mission_proposals`) providing versioned proposal history and retrieval.
+- **API Boundary (`src/aether/server/routes.py`):**
+  - `POST /personal/intents`: Intent analysis and proposal generation endpoint.
+  - `GET /personal/proposals/{proposal_id}`: Proposal inspection endpoint.
+  - `GET /personal/proposals`: Workspace proposal listing endpoint.
+

@@ -5790,6 +5790,13 @@ class PersonalChatPayload(BaseModel):
     workspace_id: str | None = None
 
 
+class IntentRequestPayload(BaseModel):
+    raw_input: str
+    workspace_id: str | None = None
+    session_id: str | None = None
+    source_surface: str = "api"
+
+
 class ExecuteActionPayload(BaseModel):
     action_id: str
     input_data: dict[str, Any] = Field(default_factory=dict)
@@ -5884,6 +5891,57 @@ async def personal_chat_route(request: Request, payload: PersonalChatPayload):
         session_id=payload.session_id,
     )
     return msg.to_dict()
+
+
+# ---------------------------------------------------------------------------
+# Phase A Macro-pass 1: Intent & Proposal Foundation Endpoints
+# ---------------------------------------------------------------------------
+
+@router.post("/personal/intents")
+async def create_personal_intent_route(request: Request, payload: IntentRequestPayload):
+    """
+    Understands natural intent, resolves context, generates a proposal, and validates it.
+    Zero side-effects: does not create or start missions, does not execute actions.
+    """
+    ws = getattr(request.app.state, "workspace", None)
+    if not ws:
+        raise HTTPException(status_code=503, detail="Workspace not initialized.")
+    ws_id = (payload.workspace_id or ws.name).strip()
+    intent, context_pack, proposal, validation_result = ws.personal.create_intent_and_proposal(
+        raw_input=payload.raw_input,
+        workspace_id=ws_id,
+        session_id=payload.session_id,
+        source_surface=payload.source_surface,
+    )
+    return {
+        "intent": intent.to_dict(),
+        "context_pack": context_pack.to_dict(),
+        "proposal": proposal.to_dict(),
+        "validation": validation_result.to_dict(),
+    }
+
+
+@router.get("/personal/proposals/{proposal_id}")
+async def get_proposal_route(request: Request, proposal_id: str):
+    """Retrieves an addressable mission proposal by ID."""
+    ws = getattr(request.app.state, "workspace", None)
+    if not ws:
+        raise HTTPException(status_code=503, detail="Workspace not initialized.")
+    proposal = ws.personal_store.get_proposal(proposal_id)
+    if not proposal:
+        raise HTTPException(status_code=404, detail=f"Proposal '{proposal_id}' not found.")
+    return proposal.to_dict()
+
+
+@router.get("/personal/proposals")
+async def list_proposals_route(request: Request, workspace_id: str | None = None, limit: int = 20):
+    """Lists addressable mission proposals for a workspace."""
+    ws = getattr(request.app.state, "workspace", None)
+    if not ws:
+        return []
+    ws_id = (workspace_id or ws.name).strip()
+    proposals = ws.personal_store.list_proposals(workspace_id=ws_id, limit=limit)
+    return [p.to_dict() for p in proposals]
 
 
 @router.get("/personal/sessions")

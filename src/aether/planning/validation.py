@@ -2,7 +2,21 @@ from __future__ import annotations
 
 from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
+import re
+from typing import Any
 
+from aether.core.secrets import is_secret_key
+from aether.planning.contracts import (
+    ClarificationRequirement,
+    ContextPack,
+    MissionProposal,
+    OutcomeKind,
+    ProposalStatus,
+    ProposalValidationResult,
+    ProposalValidationStatus,
+    ResolutionState,
+    VerificationMethod,
+)
 from aether.planning.types import CognitivePlan
 
 
@@ -36,3 +50,221 @@ class PlanValidator(ABC):
             ValidationResult indicating whether the plan is valid and any errors.
         """
         pass
+
+
+class ProposalValidator:
+    """
+    Deterministic validator for MissionProposals (Phase A Macro-pass 1).
+    Distinguishes VALID, REQUIRES_CLARIFICATION, INVALID, and FAILED states.
+    Enforces architectural invariants:
+      - Workspace scoping integrity.
+      - Lifecycle state consistency.
+      - Zero secrets / credentials in proposals.
+      - Outcome constraint validity (no completed outcomes without evidence).
+      - No contradictory constraints.
+      - No claimed unavailable evidence.
+      - No execution side-effects during generation.
+      - Required approval boundaries preserved.
+    """
+
+    SECRET_PATTERNS = [
+        re.compile(r"ghp_[a-zA-Z0-9]{36}"),             # GitHub PAT
+        re.compile(r"xoxb-[0-9]{11,13}-[a-zA-Z0-9]+"),   # Slack bot token
+        re.compile(r"-----BEGIN (?:RSA |EC )?PRIVATE KEY-----"),
+        re.compile(r"\b(?:bearer\s+[a-zA-Z0-9_\-\.]{20,})\b", re.IGNORECASE),
+        re.compile(r"\b(?:api[_-]?key|secret|password)\s*[:=]\s*['\"][^'\"]{6,}['\"]", re.IGNORECASE),
+    ]
+
+    SENSITIVE_ACTIONS = {
+        "email.send": "External email communication",
+        "slack.send_message": "External Slack messaging",
+        "telegram.send_message": "External Telegram messaging",
+        "github.create_pull_request": "Remote PR creation",
+        "github.create_branch": "Remote branch mutation",
+        "files.delete": "Destructive filesystem operation",
+    }
+
+    def validate(
+        self,
+        proposal: MissionProposal,
+        context: ContextPack | None = None,
+    ) -> ProposalValidationResult:
+        """
+        Validates a MissionProposal against strict safety and truthfulness invariants.
+        """
+        errors: list[str] = []
+        warnings: list[str] = []
+        clarifications: list[ClarificationRequirement] = list(proposal.clarification_requirements)
+
+        # 1. Workspace scope check
+        if not proposal.workspace_id or not proposal.workspace_id.strip():
+            errors.append("Proposal lacks mandatory workspace_id scope.")
+
+        if context is not None:
+            if proposal.workspace_id.strip() != context.workspace_scope.strip():
+                errors.append(
+                    f"Workspace scope mismatch: proposal has '{proposal.workspace_id}' "
+                    f"but context pack has '{context.workspace_scope}'."
+                )
+
+        # 2. Lifecycle state consistency
+        if proposal.status == ProposalStatus.READY_FOR_ACCEPTANCE:
+            blocking = [c for c in clarifications if c.blocking]
+            if blocking:
+                errors.append(
+                    f"Proposal is marked READY_FOR_ACCEPTANCE but has {len(blocking)} blocking clarification requirements."
+                )
+            if context is not None:
+                unres = [e for e in context.resolved_entities if e.resolution_state in (ResolutionState.UNRESOLVED, ResolutionState.NOT_FOUND)]
+                if unres:
+                    errors.append(
+                        f"Proposal marked READY_FOR_ACCEPTANCE cannot have unresolved entities: "
+                        f"{', '.join(f'{e.entity_type}:{e.display_name}' for e in unres)}."
+                    )
+            if proposal.confidence < 0.4:
+                errors.append(
+                    f"Proposal marked READY_FOR_ACCEPTANCE has insufficient confidence ({proposal.confidence})."
+                )
+
+        # 3. Secret and Sensitive Payload Detection
+        self._scan_for_secrets(proposal, errors)
+
+        # 4. Outcome Constraints Verification
+        self._validate_outcome_constraints(proposal, errors, warnings)
+
+        # 5. Contradictory Constraints Check
+        self._validate_contradictory_constraints(proposal, errors)
+
+        # 6. Evidence Availability Check
+        if context is not None:
+            self._validate_evidence_availability(proposal, context, errors)
+
+        # 7. Premature Execution Check
+        self._validate_no_premature_execution(proposal, errors)
+
+        # 8. Approval Boundaries Check
+        self._validate_approval_boundaries(proposal, errors)
+
+        # Determine final status
+        if proposal.status == ProposalStatus.FAILED or (context and context.retrieval_failures and not context.resolved_entities):
+            final_status = ProposalValidationStatus.FAILED
+            is_valid = False
+        elif errors:
+            final_status = ProposalValidationStatus.INVALID
+            is_valid = False
+        elif any(c.blocking for c in clarifications) or proposal.status == ProposalStatus.NEEDS_CLARIFICATION:
+            final_status = ProposalValidationStatus.REQUIRES_CLARIFICATION
+            is_valid = False
+        else:
+            final_status = ProposalValidationStatus.VALID
+            is_valid = True
+
+        return ProposalValidationResult(
+            status=final_status,
+            is_valid=is_valid,
+            errors=errors,
+            warnings=warnings,
+            clarification_requirements=clarifications,
+            metadata={
+                "proposal_id": proposal.id,
+                "version": proposal.version,
+                "confidence": proposal.confidence,
+                "inspected_steps_count": len(proposal.proposed_steps),
+            },
+        )
+
+    def _scan_for_secrets(self, proposal: MissionProposal, errors: list[str]) -> None:
+        """Verifies that no secrets or credentials leak into human-readable proposal text."""
+        text_blobs = [
+            proposal.title,
+            proposal.objective,
+            proposal.why,
+            proposal.context_summary,
+        ]
+        for step in proposal.proposed_steps:
+            text_blobs.extend([step.title, step.description])
+        for deliv in proposal.expected_deliverables:
+            text_blobs.extend([deliv.title, deliv.description, deliv.file_path or ""])
+        for assump in proposal.assumptions:
+            text_blobs.append(assump.description)
+        for risk in proposal.risks:
+            text_blobs.append(risk.description)
+
+        for text in text_blobs:
+            for pat in self.SECRET_PATTERNS:
+                if pat.search(text):
+                    errors.append(f"Security invariant violated: secret or raw credential token detected in proposal text.")
+                    return
+
+    def _validate_outcome_constraints(
+        self,
+        proposal: MissionProposal,
+        errors: list[str],
+        warnings: list[str],
+    ) -> None:
+        """Validates that outcome constraints are well-formed and verifiable."""
+        valid_kinds = {k.value for k in OutcomeKind}
+        valid_methods = {m.value for m in VerificationMethod}
+
+        for oc in proposal.outcome_constraints:
+            if not oc.description:
+                errors.append(f"Outcome constraint '{oc.id}' lacks a description.")
+            if oc.verification_method not in valid_methods:
+                errors.append(
+                    f"Outcome constraint '{oc.id}' specifies unsupported verification method '{oc.verification_method}'."
+                )
+            # Invariant: an outcome cannot be verified before execution has occurred
+            if oc.status in ("verified", "completed", "succeeded") and not oc.evidence_refs:
+                errors.append(
+                    f"Truthfulness invariant violated: outcome constraint '{oc.id}' claims status '{oc.status}' "
+                    f"prior to execution without verified evidence."
+                )
+
+    def _validate_contradictory_constraints(self, proposal: MissionProposal, errors: list[str]) -> None:
+        """Detects mutually conflicting constraints in proposal."""
+        c_lower = [c.lower() for c in proposal.constraints]
+        all_actions = []
+        for s in proposal.proposed_steps:
+            all_actions.extend([a.lower() for a in s.required_tools_or_actions])
+
+        # Example: read-only constraint vs mutating actions
+        is_readonly = any("read-only" in c or "no mutations" in c or "read only" in c for c in c_lower)
+        has_mutation = any(
+            any(m in a for m in ["create", "update", "delete", "write", "send"])
+            for a in all_actions
+        )
+        if is_readonly and has_mutation:
+            errors.append("Contradictory constraints: proposal specifies read-only mode but includes mutating actions.")
+
+    def _validate_evidence_availability(
+        self,
+        proposal: MissionProposal,
+        context: ContextPack,
+        errors: list[str],
+    ) -> None:
+        """Verifies that evidence claimed by proposal exists in context pack."""
+        available_ev_ids = {ev.id for ev in context.evidence_references}
+        for oc in proposal.outcome_constraints:
+            for ev_ref in oc.evidence_refs:
+                if ev_ref not in available_ev_ids:
+                    errors.append(
+                        f"Outcome constraint '{oc.id}' claims evidence '{ev_ref}' not found in ContextPack."
+                    )
+
+    def _validate_no_premature_execution(self, proposal: MissionProposal, errors: list[str]) -> None:
+        """Ensures proposal generation did not trigger mission creation or runtime execution."""
+        if proposal.provenance and proposal.provenance.metadata:
+            meta = proposal.provenance.metadata
+            if meta.get("mission_id") or meta.get("execution_id"):
+                errors.append("Proposal generation violated invariant: mission or execution record was created prematurely.")
+
+    def _validate_approval_boundaries(self, proposal: MissionProposal, errors: list[str]) -> None:
+        """Ensures all sensitive operations have declared approval boundaries."""
+        declared_actions = {a.action_or_boundary for a in proposal.required_approvals}
+        for step in proposal.proposed_steps:
+            for action in step.required_tools_or_actions:
+                if action in self.SENSITIVE_ACTIONS and action not in declared_actions:
+                    errors.append(
+                        f"Approval boundary missing: step '{step.title}' includes sensitive action '{action}' "
+                        f"({self.SENSITIVE_ACTIONS[action]}) without declared RequiredApprovalSpec."
+                    )

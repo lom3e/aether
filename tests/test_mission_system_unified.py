@@ -435,13 +435,14 @@ def test_j_conversational_prompts_do_not_create_missions(tmp_path: Path):
     assert mission_store.list_missions() == []
     assert res_answer.content != ""
 
-    # 2. Delegation prompt (DELEGATE tier) -> MUST create a mission with milestones
+    # 2. Delegation prompt (DELEGATE tier) -> Phase A Macro-pass 1: routes to MissionProposal without premature mission creation
     res_delegate = service.process_prompt(
         workspace_id="ws-test",
         prompt="Delega un'analisi strategica completa per Automotive",
     )
-    missions_after = mission_store.list_missions()
-    assert len(missions_after) == 1
-    created_msn = missions_after[0]
-    assert "Automotive" in created_msn.title or "Automotive" in created_msn.objective
-    assert len(created_msn.milestones) == 3
+    # Invariant: NO mission was created in MissionStore during proposal phase
+    assert mission_store.list_missions() == []
+    assert res_delegate.metadata.get("proposal_id") is not None
+    prop = personal_store.get_proposal(res_delegate.metadata["proposal_id"])
+    assert prop is not None
+    assert "Automotive" in prop.title or "Automotive" in prop.objective
