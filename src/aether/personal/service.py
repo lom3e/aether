@@ -177,11 +177,10 @@ class PersonalAgentService:
         # Persist truthfully in PersonalStore (strictly additive, never in MissionStore)
         if self.store:
             try:
-                self.store.save_intent_request(intent)
-                self.store.save_context_pack(context_pack, intent.id)
-                self.store.save_proposal(proposal)
+                self.store.save_intent_and_proposal(intent, context_pack, proposal)
             except Exception as exc:
-                logger.warning("Failed to persist proposal in PersonalStore: %s", exc)
+                logger.error("Durable persistence failed in PersonalStore: %s", exc)
+                raise RuntimeError(f"Durable persistence failed: {exc}") from exc
 
         return intent, context_pack, proposal, validation_result
 
@@ -1252,13 +1251,14 @@ class PersonalAgentService:
 
             return UserIntent(
                 raw_prompt=effective_prompt,
-                tier=IntentTier.ACT,
+                tier=IntentTier.DELEGATE,
                 summary=f"Delegate to external worker '{agent_name}'",
                 action_id="agents.delegate_external",
                 action_args={
                     "agent_name": agent_name,
                     "instruction": prompt,
                 },
+                delegation_goal=prompt,
             )
 
         # 4. Multi-agent workforce delegation & deep research / report generation (DELEGATE tier)
@@ -1650,78 +1650,68 @@ class PersonalAgentService:
                         )
 
         elif intent.tier == IntentTier.DELEGATE:
-            if intent.action_id == "autonomy.take_care_of_it":
-                step_del = PersonalStep(
-                    id=f"step-{uuid.uuid4().hex[:8]}",
-                    title="Aether Operational Autonomy: Take Care of It",
-                    status="running",
-                    category="delegation",
-                )
-                steps.append(step_del)
-                orchestrator = getattr(self.workspace, "autonomy_orchestrator", None)
-                if orchestrator:
-                    goal = orchestrator.plan_and_execute(workspace_id, prompt)
-                    step_del.status = "completed" if goal.status == "completed" else str(goal.status)
-                    step_del.details = {
-                        "goal_id": goal.id,
-                        "stages": len(goal.stages),
-                        "deliverables": len(goal.deliverables),
-                        "tier": goal.allocated_tier,
-                    }
-                    lines = [
-                        f"### ⚡ Operazione Autonoma Completata: `{goal.goal[:50]}`",
-                        f"- **Stato:** `{goal.status.value.upper()}`",
-                        f"- **Compute Fabric Tier:** `{goal.allocated_tier}` (Nodo: `{goal.allocated_node_id}`)",
-                        f"- **Fasi Completate:** {len(goal.stages)} fasi end-to-end",
-                        "",
-                    ]
-                    if goal.deliverables:
-                        lines.append("#### 📁 Deliverable e Artefatti:")
-                        for d in goal.deliverables:
-                            lines.append(f"- **{d.get('name')}** (`{d.get('path')}`)")
-                        lines.append("")
-                    if goal.learning_summary:
-                        lines.append(f"> 💡 *Apprendimento registrato nella Workforce Memory.*")
-                    response_text = "\n".join(lines)
-                else:
-                    response_text = "Operational autonomy orchestrator not available."
-
-            else:
-                # Phase A Macro-pass 1: Composite / Delegated requests route through Proposal Foundation.
-                # Generates a truthful, versionable MissionProposal without executing tools or creating missions.
+            # Phase A Macro-pass 1.1: ALL Composite / Delegated / Autonomous requests route through Proposal Foundation.
+            # Generates a truthful, versionable MissionProposal without executing tools, starting engines, or creating missions.
+            try:
                 intent_req, ctx_pack, proposal, val_res = self.create_intent_and_proposal(
                     raw_input=prompt,
                     workspace_id=workspace_id,
                     session_id=session_id,
                     source_surface="chat",
                 )
-
-                step_title = (
-                    "Mission Proposal Prepared"
-                    if val_res.is_valid
-                    else "Mission Proposal (Review Required)"
-                )
-                step_del = PersonalStep(
+            except Exception as exc:
+                logger.error("Failed to generate or persist mission proposal: %s", exc)
+                step_err = PersonalStep(
                     id=f"step-{uuid.uuid4().hex[:8]}",
-                    title=step_title,
-                    status="completed",
+                    title="Mission Proposal Generation Failed",
+                    status="failed",
                     category="delegation",
-                    details={
-                        "proposal_id": proposal.id,
-                        "proposal_title": proposal.title,
-                        "status": proposal.status.value,
-                        "validation_status": val_res.status.value,
-                        "confidence": proposal.confidence,
-                        "clarifications_needed": len(proposal.clarification_requirements),
-                    },
+                    details={"error": str(exc)},
                 )
-                steps.append(step_del)
+                steps.append(step_err)
+                msg_fail = PersonalMessage(
+                    id=f"pmsg-{uuid.uuid4().hex[:12]}",
+                    session_id=session_id or f"psess-{uuid.uuid4().hex[:8]}",
+                    role="assistant",
+                    content=f"❌ Unable to prepare proposal: {exc}",
+                    timestamp=datetime.now(timezone.utc).isoformat(),
+                    tier=intent.tier,
+                    steps=steps,
+                    metadata={"error": str(exc)},
+                )
+                if self.store:
+                    try:
+                        self.store.save_message(msg_fail)
+                    except Exception:
+                        pass
+                return msg_fail
 
-                msg_metadata["proposal_id"] = proposal.id
-                msg_metadata["proposal_status"] = proposal.status.value
-                msg_metadata["proposal_version"] = proposal.version
+            step_title = (
+                "Mission Proposal Prepared"
+                if val_res.is_valid
+                else "Mission Proposal (Review Required)"
+            )
+            step_del = PersonalStep(
+                id=f"step-{uuid.uuid4().hex[:8]}",
+                title=step_title,
+                status="completed",
+                category="delegation",
+                details={
+                    "proposal_id": proposal.id,
+                    "proposal_title": proposal.title,
+                    "status": proposal.status.value,
+                    "validation_status": val_res.status.value,
+                    "confidence": proposal.confidence,
+                    "clarifications_needed": len(proposal.clarification_requirements),
+                },
+            )
+            steps.append(step_del)
 
-                response_text = proposal.to_human_markdown()
+            msg_metadata["proposal_id"] = proposal.id
+            msg_metadata["proposal_status"] = proposal.status.value
+            msg_metadata["proposal_version"] = proposal.version
+
+            response_text = proposal.to_human_markdown()
 
 
         else:
@@ -2140,13 +2130,18 @@ class PersonalAgentService:
             return {"action": "refresh_deliverables", "status": "completed", "deliverables": delivs}
 
         elif quick_action_id == "take_care_of_it":
-            orch = getattr(self.workspace, "autonomy_orchestrator", None)
             goal_prompt = context.get("goal") or "Verify workspace health, inspect active compute, and synthesize deliverables"
-            goal = orch.plan_and_execute(workspace_id, goal_prompt, context=context) if orch else None
+            intent_req, ctx_pack, proposal, val_res = self.create_intent_and_proposal(
+                raw_input=goal_prompt,
+                workspace_id=workspace_id,
+                source_surface="companion",
+            )
             return {
                 "action": "take_care_of_it",
-                "status": "completed",
-                "goal": goal.to_dict() if goal else {},
+                "status": "blocked_pending_acceptance",
+                "proposal_id": proposal.id,
+                "proposal": proposal.to_dict(),
+                "validation": val_res.to_dict(),
             }
 
         # Fallback to direct prompt processing

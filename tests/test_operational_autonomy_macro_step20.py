@@ -192,19 +192,27 @@ def test_action_registry_and_executor_autonomy(temp_workspace: Workspace):
     assert action_def.tier == ActionTier.DO
     assert action_def.provider == "autonomy"
 
-    # 2. Execute autonomy.take_care_of_it via ActionExecutor
+    # 2. Execute autonomy.take_care_of_it via ActionExecutor (stops at proposal boundary)
     res = ws.actions.execute(
         action_id="autonomy.take_care_of_it",
         workspace_id=ws_id,
         input_data={"goal": "Verifica le risorse locali ed esporta l'inventario"},
     )
     assert res.output_data is not None
-    goal_dict = res.output_data.get("goal")
-    assert goal_dict is not None
-    assert goal_dict["status"] == "completed"
-    assert len(goal_dict["deliverables"]) >= 1
+    assert res.output_data.get("status") == "blocked_pending_acceptance"
+    assert "proposal_id" in res.output_data
+    assert "proposal" in res.output_data
 
     # 3. List goals via ActionExecutor
+    ws.autonomy_store.save_goal(
+        AutonomousGoal(
+            id="test-goal-list",
+            workspace_id=ws_id,
+            goal="Test list goals",
+            raw_prompt="Test list",
+            status=AutonomousGoalStatus.COMPLETED,
+        )
+    )
     res_list = ws.actions.execute(
         action_id="autonomy.list_goals",
         workspace_id=ws_id,
@@ -214,7 +222,7 @@ def test_action_registry_and_executor_autonomy(temp_workspace: Workspace):
 
 
 def test_personal_agent_conversational_autonomy(temp_workspace: Workspace):
-    """Verifies PersonalAgentService intent classification and autonomous execution."""
+    """Verifies PersonalAgentService intent classification and proposal generation without bypass."""
     ws = temp_workspace
     ws_id = ws.name
 
@@ -223,18 +231,19 @@ def test_personal_agent_conversational_autonomy(temp_workspace: Workspace):
     assert intent.tier == IntentTier.DELEGATE
     assert intent.action_id == "autonomy.take_care_of_it"
 
-    # 2. Conversational prompt processing
+    # 2. Conversational prompt processing creates proposal and stops before execution
     reply = ws.personal.process_prompt(
         workspace_id=ws_id,
         prompt="Prenditene cura tu: analizza il cluster e sintetizza il deliverable",
     )
     assert reply.role == "assistant"
-    assert "Operazione Autonoma Completata" in reply.content
+    assert "Mission Proposal" in reply.content
+    assert "proposal_id" in reply.metadata
     assert any(s.category == "delegation" and s.status == "completed" for s in reply.steps)
 
 
 def test_companion_quick_action_take_care_of_it(temp_workspace: Workspace):
-    """Verifies 'take_care_of_it' companion quick action executes properly."""
+    """Verifies 'take_care_of_it' companion quick action stops at proposal boundary."""
     ws = temp_workspace
     ws_id = ws.name
 
@@ -244,9 +253,8 @@ def test_companion_quick_action_take_care_of_it(temp_workspace: Workspace):
         context={"goal": "Esegui un ciclo di controllo autonomo e sintetizza i deliverable"},
     )
     assert qa_res["action"] == "take_care_of_it"
-    assert qa_res["status"] == "completed"
-    assert "goal" in qa_res
-    assert qa_res["goal"]["status"] == "completed"
+    assert qa_res["status"] == "blocked_pending_acceptance"
+    assert "proposal_id" in qa_res
 
 
 @pytest.mark.asyncio

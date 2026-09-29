@@ -742,3 +742,363 @@ async def test_api_personal_intents_and_proposals_flow(tmp_path):
     assert exc_info.value.status_code == 404
 
     ws.personal.close()
+
+
+# ===========================================================================
+# 8. Macro-pass 1.1 Hardening & Trust Boundary Tests
+# ===========================================================================
+
+def test_autonomy_take_care_of_it_blocks_at_proposal_boundary(tmp_path):
+    """Verifies autonomy.take_care_of_it stops at proposal boundary with zero execution bypass."""
+    ws = Workspace(tmp_path)
+    initial_mission_count = len(ws.missions.list_missions(ws.name))
+
+    res = ws.actions.execute(
+        action_id="autonomy.take_care_of_it",
+        workspace_id=ws.name,
+        input_data={"goal": "Refactor authentication and deploy to staging"},
+    )
+    assert res.output_data is not None
+    assert res.output_data.get("status") == "blocked_pending_acceptance"
+    prop_id = res.output_data.get("proposal_id")
+    assert prop_id is not None
+
+    # Proposal was durably persisted in personal store
+    saved_proposal = ws.personal_store.get_proposal(prop_id)
+    assert saved_proposal is not None
+    assert saved_proposal.workspace_id == ws.name
+
+    # Invariants: zero missions created, zero autonomous goals executed
+    assert len(ws.missions.list_missions(ws.name)) == initial_mission_count
+    assert len(ws.autonomy_store.list_goals(ws.name)) == 0
+
+
+def test_external_worker_delegation_stops_at_proposal_boundary(tmp_path):
+    """Verifies external worker delegation commands route to proposal with declared approval boundary."""
+    ws = Workspace(tmp_path)
+    initial_mission_count = len(ws.missions.list_missions(ws.name))
+
+    reply = ws.personal.process_prompt(
+        workspace_id=ws.name,
+        prompt="delega all'agente esterno worker_contract l'analisi dei contratti",
+    )
+    assert reply.role == "assistant"
+    assert "proposal_id" in reply.metadata
+    prop_id = reply.metadata["proposal_id"]
+
+    proposal = ws.personal_store.get_proposal(prop_id)
+    assert proposal is not None
+    assert any(a.action_or_boundary == "agents.delegate_external" for a in proposal.required_approvals)
+    assert len(ws.missions.list_missions(ws.name)) == initial_mission_count
+
+
+@pytest.mark.asyncio
+async def test_proposal_api_workspace_authorization_and_cross_tenant_isolation(tmp_path):
+    """Verifies strict workspace isolation and authorization across all proposal API endpoints."""
+    from starlette.requests import Request
+    from aether.server.app import app
+    from aether.server.routes import (
+        create_personal_intent_route,
+        get_proposal_route,
+        list_proposals_route,
+        IntentRequestPayload,
+    )
+    from fastapi import HTTPException
+
+    ws = Workspace(tmp_path)
+    app.state.workspace = ws
+
+    def make_req(path: str = "/", method: str = "GET"):
+        scope = {"type": "http", "app": app, "headers": [], "path": path, "method": method}
+        return Request(scope)
+
+    # 1. Empty raw_input returns 422
+    with pytest.raises(HTTPException) as exc_info:
+        await create_personal_intent_route(
+            make_req("/personal/intents", method="POST"),
+            IntentRequestPayload(raw_input="   ", workspace_id=ws.name),
+        )
+    assert exc_info.value.status_code == 422
+
+    # 2. Cross-tenant workspace_id in payload returns 403
+    with pytest.raises(HTTPException) as exc_info:
+        await create_personal_intent_route(
+            make_req("/personal/intents", method="POST"),
+            IntentRequestPayload(raw_input="Perform audit", workspace_id="other_tenant_ws"),
+        )
+    assert exc_info.value.status_code == 403
+
+    # 3. Create valid proposal in active workspace
+    res = await create_personal_intent_route(
+        make_req("/personal/intents", method="POST"),
+        IntentRequestPayload(raw_input="Valid audit request", workspace_id=ws.name),
+    )
+    prop_id = res["proposal"]["id"]
+
+    # 4. Cross-tenant proposal listing returns 403
+    with pytest.raises(HTTPException) as exc_info:
+        await list_proposals_route(make_req("/personal/proposals", method="GET"), workspace_id="other_tenant_ws")
+    assert exc_info.value.status_code == 403
+
+    # 5. Foreign workspace proposal retrieval returns 403
+    foreign_intent = IntentRequest(
+        id="intent-foreign",
+        workspace_id="other_tenant_ws",
+        raw_input="Foreign Intent",
+    )
+    ws.personal_store.save_intent_request(foreign_intent)
+
+    foreign_prop = MissionProposal(
+        id="prop-foreign-999",
+        intent_id=foreign_intent.id,
+        workspace_id="other_tenant_ws",
+        title="Foreign Proposal",
+        objective="Foreign Objective",
+        why="Foreign Why",
+        context_summary="Foreign Summary",
+    )
+    ws.personal_store.save_proposal(foreign_prop)
+
+    with pytest.raises(HTTPException) as exc_info:
+        await get_proposal_route(make_req("/personal/proposals/prop-foreign-999", method="GET"), "prop-foreign-999")
+    assert exc_info.value.status_code == 403
+
+
+def test_persistence_atomicity_and_fail_closed_error_handling(tmp_path):
+    """Verifies atomic persistence failure rolls back cleanly and raises RuntimeError."""
+    from unittest.mock import patch
+    ws = Workspace(tmp_path)
+
+    # Simulate SQLite transaction failure during proposal persistence
+    with patch.object(ws.personal_store, "save_intent_and_proposal", side_effect=RuntimeError("Simulated disk full")):
+        with pytest.raises(RuntimeError, match="Simulated disk full"):
+            ws.personal.create_intent_and_proposal(
+                raw_input="Compile report",
+                workspace_id=ws.name,
+            )
+
+    # Invariants: no proposals persisted, no missions created
+    assert len(ws.personal_store.list_proposals(ws.name)) == 0
+    assert len(ws.missions.list_missions(ws.name)) == 0
+
+
+def test_provenance_roundtrip_and_serialization_integrity(tmp_path):
+    """Verifies ContextProvenance roundtrip through models and SQLite storage."""
+    ws = Workspace(tmp_path)
+
+    # Empty provenance deserializes to None
+    assert ContextProvenance.from_dict({}) is None
+    assert ContextProvenance.from_dict({"unrelated": "data"}) is None
+
+    prov = ContextProvenance(
+        source_entity="connections_store",
+        workspace_id=ws.name,
+        locator="conn:github",
+        verification_status="verified",
+        evidence_refs=["ev-conn-1"],
+        metadata={"confidence": 0.85, "retrieval_method": "query_by_name"},
+    )
+    intent = IntentRequest(
+        id="intent-prov-test",
+        workspace_id=ws.name,
+        raw_input="Check GitHub connection status",
+        provenance=prov,
+    )
+    pack = ContextPack(
+        workspace_scope=ws.name,
+        provenance=prov,
+    )
+    proposal = MissionProposal(
+        id="prop-prov-test",
+        intent_id=intent.id,
+        workspace_id=ws.name,
+        title="Check GitHub",
+        objective="Verify integration",
+        why="Safety check",
+        context_summary="Summary",
+        provenance=prov,
+    )
+
+    ws.personal_store.save_intent_and_proposal(intent, pack, proposal)
+
+    loaded_intent = ws.personal_store.get_intent_request(intent.id)
+    assert loaded_intent is not None
+    assert isinstance(loaded_intent.provenance, ContextProvenance)
+    assert loaded_intent.provenance.source_entity == "connections_store"
+    assert loaded_intent.provenance.verification_status == "verified"
+
+    loaded_proposal = ws.personal_store.get_proposal(proposal.id)
+    assert loaded_proposal is not None
+    assert isinstance(loaded_proposal.provenance, ContextProvenance)
+    assert loaded_proposal.provenance.metadata["confidence"] == 0.85
+
+
+def test_fail_closed_deserialization_validation_result():
+    """Verifies ProposalValidationResult.from_dict fails closed on empty or invalid inputs."""
+    res_empty = ProposalValidationResult.from_dict({})
+    assert not res_empty.is_valid
+    assert res_empty.status == ProposalValidationStatus.INVALID
+    assert len(res_empty.errors) > 0
+
+    res_missing = ProposalValidationResult.from_dict({"is_valid": True})
+    assert not res_missing.is_valid
+    assert res_missing.status == ProposalValidationStatus.INVALID
+
+
+def test_ambiguity_strictly_blocks_acceptance(tmp_path):
+    """Verifies that ambiguous entities or context ambiguities strictly prevent READY_FOR_ACCEPTANCE."""
+    ws = Workspace(tmp_path)
+    generator = ProposalGenerator(provider=MockProvider())
+    validator = ProposalValidator()
+
+    # ContextPack with ambiguous repository entity
+    intent = IntentRequest(id="intent-ambig", workspace_id=ws.name, raw_input="Deploy repo")
+    ctx_pack = ContextPack(
+        workspace_scope=ws.name,
+        resolved_entities=[
+            ResolvedEntity(
+                entity_type="repository",
+                canonical_id="repo:aether-service",
+                display_name="aether-service",
+                workspace_scope=ws.name,
+                resolution_state=ResolutionState.AMBIGUOUS,
+                confidence=0.5,
+                metadata={"candidates": ["aether-service-frontend", "aether-service-backend"]},
+            )
+        ],
+        ambiguity=["Ambiguous repository candidate matches"],
+    )
+
+    proposal = generator.generate(intent, ctx_pack)
+    assert proposal.status == ProposalStatus.NEEDS_CLARIFICATION
+    assert any(c.blocking for c in proposal.clarification_requirements)
+
+    # Attempting to validate a mutated proposal claiming READY_FOR_ACCEPTANCE must fail
+    proposal.status = ProposalStatus.READY_FOR_ACCEPTANCE
+    val_res = validator.validate(proposal, ctx_pack)
+    assert not val_res.is_valid
+    assert val_res.status in (ProposalValidationStatus.REQUIRES_CLARIFICATION, ProposalValidationStatus.INVALID)
+    assert any("ambiguous" in err.lower() for err in val_res.errors)
+
+
+def test_outcome_constraint_verification_method_compatibility(tmp_path):
+    """Verifies outcome constraints validate compatible verification methods."""
+    ws = Workspace(tmp_path)
+    validator = ProposalValidator()
+
+    intent = IntentRequest(id="intent-compat", workspace_id=ws.name, raw_input="Create PR")
+    ctx_pack = ContextPack(workspace_scope=ws.name)
+
+    # Incompatible: PULL_REQUEST_CREATED with GIT_STATUS
+    proposal_incompat = MissionProposal(
+        id="prop-incompat",
+        intent_id=intent.id,
+        workspace_id=ws.name,
+        title="Open PR",
+        objective="Create pull request",
+        why="Integrate changes",
+        context_summary="Summary",
+        proposed_steps=[
+            ProposedStep(
+                id="s1",
+                order_idx=1,
+                title="Push branch",
+                description="Push",
+                assigned_team_or_role="Dev",
+                required_tools_or_actions=["github.create_pull_request"],
+            )
+        ],
+        outcome_constraints=[
+            OutcomeConstraint(
+                id="oc-1",
+                kind=OutcomeKind.PULL_REQUEST_CREATED.value,
+                description="PR opened",
+                verification_method=VerificationMethod.GIT_STATUS.value,  # Incompatible!
+                required=True,
+            )
+        ],
+        required_approvals=[
+            RequiredApprovalSpec(
+                id="a1",
+                action_or_boundary="github.create_pull_request",
+                reason="Remote PR creation",
+            )
+        ],
+        status=ProposalStatus.READY_FOR_ACCEPTANCE,
+    )
+    val_res = validator.validate(proposal_incompat, ctx_pack)
+    assert not val_res.is_valid
+    assert any("incompatible" in err.lower() for err in val_res.errors)
+
+    # Compatible: PULL_REQUEST_CREATED with PROVIDER_EVIDENCE
+    proposal_compat = MissionProposal(
+        id="prop-compat",
+        intent_id=intent.id,
+        workspace_id=ws.name,
+        title="Open PR",
+        objective="Create pull request",
+        why="Integrate changes",
+        context_summary="Summary",
+        proposed_steps=[
+            ProposedStep(
+                id="s1",
+                order_idx=1,
+                title="Push branch",
+                description="Push",
+                assigned_team_or_role="Dev",
+                required_tools_or_actions=["github.create_pull_request"],
+            )
+        ],
+        outcome_constraints=[
+            OutcomeConstraint(
+                id="oc-1",
+                kind=OutcomeKind.PULL_REQUEST_CREATED.value,
+                description="PR opened",
+                verification_method=VerificationMethod.PROVIDER_EVIDENCE.value,  # Compatible!
+                required=True,
+            )
+        ],
+        required_approvals=[
+            RequiredApprovalSpec(
+                id="a1",
+                action_or_boundary="github.create_pull_request",
+                reason="Remote PR creation",
+            )
+        ],
+        confidence=0.8,
+        status=ProposalStatus.READY_FOR_ACCEPTANCE,
+    )
+    val_compat = validator.validate(proposal_compat, ctx_pack)
+    assert val_compat.is_valid
+    assert val_compat.status == ProposalValidationStatus.VALID
+
+
+def test_comprehensive_secret_scanning(tmp_path):
+    """Verifies that secrets are caught across constraints, approvals, provenance, entity metadata, and excerpts."""
+    ws = Workspace(tmp_path)
+    validator = ProposalValidator()
+    secret_sentinel = "sentinel_secret_tok_998877665544332211"
+
+    intent = IntentRequest(id="intent-sec", workspace_id=ws.name, raw_input="Deploy with key")
+    ctx_pack = ContextPack(workspace_scope=ws.name)
+    proposal = MissionProposal(
+        id="prop-sec",
+        intent_id=intent.id,
+        workspace_id=ws.name,
+        title="Deploy",
+        objective="Deploy app",
+        why="Continuous delivery",
+        context_summary="Summary",
+        outcome_constraints=[
+            OutcomeConstraint(
+                id="oc-sec",
+                kind=OutcomeKind.CUSTOM.value,
+                description=f"Deploy with key: {secret_sentinel}",
+                verification_method=VerificationMethod.MANUAL_REVIEW.value,
+                required=True,
+            )
+        ],
+    )
+    val = validator.validate(proposal, ctx_pack)
+    assert not val.is_valid
+    assert any("secret" in err.lower() for err in val.errors)

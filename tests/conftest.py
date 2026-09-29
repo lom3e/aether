@@ -18,6 +18,7 @@ from pathlib import Path
 import pytest
 from aether.server.app import app
 from aether.core.paths import set_aether_data_dir
+from aether.core.secrets import MemorySecretStore, set_secret_store
 
 
 @pytest.fixture(autouse=True)
@@ -32,6 +33,7 @@ def reset_app_state_and_paths():
     app.state.active_team_name = None
     set_aether_data_dir(None)
     os.environ.pop("AETHER_DATA_DIR", None)
+    set_secret_store(MemorySecretStore())
     ws = getattr(app.state, "workspace", None)
     if ws is not None and hasattr(ws, "close"):
         try:
@@ -59,6 +61,7 @@ def reset_app_state_and_paths():
     set_aether_data_dir(None)
     os.environ.pop("AETHER_DATA_DIR", None)
     os.environ.pop("AETHER_SESSION_TOKEN", None)
+    set_secret_store(MemorySecretStore())
 
 
 def _find_aether_bin() -> Path:

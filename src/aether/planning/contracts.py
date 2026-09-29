@@ -32,11 +32,15 @@ class OutcomeKind(StrEnum):
 
 class VerificationMethod(StrEnum):
     """Method by which an outcome constraint can be truthfully verified."""
+    PROVIDER_EVIDENCE = "provider_evidence"
+    FILESYSTEM_DIFF = "filesystem_diff"
     FILE_EXISTENCE = "file_existence"
     TEST_RUNNER = "test_runner"
     GIT_STATUS = "git_status"
+    DELIVERY_RECEIPT = "delivery_receipt"
     CHECKSUM = "checksum"
     MANUAL_REVIEW = "manual_review"
+    VERIFICATION_UNAVAILABLE = "verification_unavailable"
     NONE = "none"
 
 
@@ -81,12 +85,17 @@ class ContextProvenance:
         }
 
     @classmethod
-    def from_dict(cls, data: dict[str, Any]) -> ContextProvenance:
+    def from_dict(cls, data: dict[str, Any] | None) -> ContextProvenance | None:
+        if not data or not isinstance(data, dict):
+            return None
+        recognized = {"source_entity", "workspace_id", "locator", "verification_status", "evidence_refs", "metadata"}
+        if not any(k in data for k in recognized):
+            return None
         return cls(
             source_entity=data.get("source_entity", "system"),
             workspace_id=data.get("workspace_id", "default"),
             locator=data.get("locator"),
-            verification_status=data.get("verification_status", "verified"),
+            verification_status=data.get("verification_status") or "unverified",
             retrieved_at=data.get("retrieved_at") or datetime.now(timezone.utc).isoformat(),
             evidence_refs=list(data.get("evidence_refs") or []),
             metadata=dict(data.get("metadata") or {}),
@@ -215,9 +224,9 @@ class ContextPack:
             for e in (data.get("evidence_references") or [])
         ]
         prov = (
-            ContextProvenance.from_dict(data["provenance"])
+            ContextProvenance.from_dict(data.get("provenance"))
             if isinstance(data.get("provenance"), dict)
-            else None
+            else (data.get("provenance") if isinstance(data.get("provenance"), ContextProvenance) else None)
         )
         return cls(
             workspace_scope=data.get("workspace_scope", "default"),
@@ -264,7 +273,7 @@ class IntentRequest:
         requested_deliverables: list[str] | None = None,
         relevant_entities: list[str] | None = None,
         ambiguity: list[str] | None = None,
-        provenance: ContextProvenance | None = None,
+        provenance: ContextProvenance | dict[str, Any] | None = None,
         status: str = "received",
     ) -> None:
         if not workspace_id or not workspace_id.strip():
@@ -283,6 +292,8 @@ class IntentRequest:
         object.__setattr__(self, "requested_deliverables", list(requested_deliverables or []))
         object.__setattr__(self, "relevant_entities", list(relevant_entities or []))
         object.__setattr__(self, "ambiguity", list(ambiguity or []))
+        if isinstance(provenance, dict):
+            provenance = ContextProvenance.from_dict(provenance)
         object.__setattr__(self, "provenance", provenance)
         object.__setattr__(self, "status", status)
 
@@ -318,9 +329,9 @@ class IntentRequest:
     @classmethod
     def from_dict(cls, data: dict[str, Any]) -> IntentRequest:
         prov = (
-            ContextProvenance.from_dict(data["provenance"])
+            ContextProvenance.from_dict(data.get("provenance"))
             if isinstance(data.get("provenance"), dict)
-            else None
+            else (data.get("provenance") if isinstance(data.get("provenance"), ContextProvenance) else None)
         )
         return cls(
             id=data.get("id") or f"intent-{uuid.uuid4().hex[:12]}",
@@ -638,9 +649,9 @@ class MissionProposal:
             for c in (data.get("clarification_requirements") or [])
         ]
         prov = (
-            ContextProvenance.from_dict(data["provenance"])
+            ContextProvenance.from_dict(data.get("provenance"))
             if isinstance(data.get("provenance"), dict)
-            else None
+            else (data.get("provenance") if isinstance(data.get("provenance"), ContextProvenance) else None)
         )
 
         return cls(
@@ -669,12 +680,22 @@ class MissionProposal:
             updated_at=data.get("updated_at") or datetime.now(timezone.utc).isoformat(),
         )
 
+    @property
+    def confidence_label(self) -> str:
+        """Truthful, non-probabilistic evidence coverage indicator."""
+        if self.confidence >= 0.8:
+            return "High Evidence Coverage"
+        elif self.confidence >= 0.5:
+            return "Partial Evidence Coverage"
+        else:
+            return "Low / Degraded Evidence Coverage"
+
     def to_human_markdown(self) -> str:
         """Renders an intuitive, transparent, human-readable markdown representation."""
         lines = [
             f"# Mission Proposal: {self.title}",
             "",
-            f"**Status:** `{self.status.value.upper()}` | **Confidence:** `{round(self.confidence * 100, 1)}%` | **Version:** `v{self.version}`",
+            f"**Status:** `{self.status.value.upper()}` | **Evidence:** `{self.confidence_label}` (score: {self.confidence:.2f}) | **Version:** `v{self.version}`",
             "",
             f"### 🎯 Objective",
             f"{self.objective}",
@@ -737,6 +758,9 @@ class MissionProposal:
                 lines.append(f"- [{r.severity.upper()}] {r.description}{mit_str}")
             lines.append("")
 
+        lines.append("---")
+        lines.append("*Note: Evidence score reflects context matching density and unverified assumptions, not statistical probability.*")
+
         return "\n".join(lines)
 
 
@@ -761,12 +785,37 @@ class ProposalValidationResult:
         }
 
     @classmethod
-    def from_dict(cls, data: dict[str, Any]) -> ProposalValidationResult:
-        status_raw = data.get("status", "valid")
+    def from_dict(cls, data: dict[str, Any] | None) -> ProposalValidationResult:
+        if not data or not isinstance(data, dict):
+            return cls(
+                status=ProposalValidationStatus.INVALID,
+                is_valid=False,
+                errors=["Malformed or missing validation result payload."],
+            )
+
+        status_raw = data.get("status")
+        if not status_raw:
+            return cls(
+                status=ProposalValidationStatus.INVALID,
+                is_valid=False,
+                errors=["Validation payload missing mandatory 'status' field."],
+            )
+
         try:
             status = ProposalValidationStatus(status_raw)
         except ValueError:
-            status = ProposalValidationStatus.VALID
+            return cls(
+                status=ProposalValidationStatus.INVALID,
+                is_valid=False,
+                errors=[f"Unrecognized validation status '{status_raw}'."],
+            )
+
+        errors = list(data.get("errors") or [])
+        is_valid = bool(data.get("is_valid", False))
+
+        # Invariant: can NEVER be valid if there are errors or if status is not VALID
+        if errors or status != ProposalValidationStatus.VALID:
+            is_valid = False
 
         clarifs = [
             ClarificationRequirement.from_dict(c) if isinstance(c, dict) else c
@@ -775,8 +824,8 @@ class ProposalValidationResult:
 
         return cls(
             status=status,
-            is_valid=bool(data.get("is_valid", True)),
-            errors=list(data.get("errors") or []),
+            is_valid=is_valid,
+            errors=errors,
             warnings=list(data.get("warnings") or []),
             clarification_requirements=clarifs,
             metadata=dict(data.get("metadata") or {}),

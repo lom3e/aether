@@ -462,6 +462,106 @@ class PersonalStore:
     # Phase A Macro-pass 1: Intent & Proposal Foundation Persistence
     # -----------------------------------------------------------------------
 
+    def save_intent_and_proposal(
+        self,
+        intent: IntentRequest,
+        context_pack: ContextPack,
+        proposal: MissionProposal,
+    ) -> tuple[IntentRequest, ContextPack, MissionProposal]:
+        """
+        Atomically persists an IntentRequest, ContextPack, and MissionProposal within a single SQLite transaction.
+        If any write fails, the entire transaction rolls back and an exception is raised.
+        """
+        with self._transaction() as cursor:
+            cursor.execute(
+                """
+                INSERT OR REPLACE INTO intent_requests (
+                    id, workspace_id, session_id, raw_input, source_surface,
+                    status, inferred_goal, urgency, constraints, requested_deliverables,
+                    relevant_entities, ambiguity, provenance, created_at
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    intent.id,
+                    intent.workspace_id,
+                    intent.session_id,
+                    intent.raw_input,
+                    intent.source_surface,
+                    intent.status,
+                    intent.inferred_goal,
+                    intent.urgency,
+                    json.dumps(intent.constraints),
+                    json.dumps(intent.requested_deliverables),
+                    json.dumps(intent.relevant_entities),
+                    json.dumps(intent.ambiguity),
+                    json.dumps(intent.provenance.to_dict() if intent.provenance else {}),
+                    intent.created_at,
+                ),
+            )
+
+            ctx_id = f"ctx-{intent.id}"
+            cursor.execute(
+                """
+                INSERT OR REPLACE INTO proposal_context (
+                    id, intent_id, workspace_scope, confidence, resolved_entities,
+                    evidence_references, unresolved_references, ambiguity, assumptions,
+                    retrieval_failures, provenance, created_at
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    ctx_id,
+                    intent.id,
+                    context_pack.workspace_scope,
+                    context_pack.confidence,
+                    json.dumps([e.to_dict() for e in context_pack.resolved_entities]),
+                    json.dumps([ev.to_dict() for ev in context_pack.evidence_references]),
+                    json.dumps(context_pack.unresolved_references),
+                    json.dumps(context_pack.ambiguity),
+                    json.dumps(context_pack.assumptions),
+                    json.dumps(context_pack.retrieval_failures),
+                    json.dumps(context_pack.provenance.to_dict() if context_pack.provenance else {}),
+                    datetime.now(timezone.utc).isoformat(),
+                ),
+            )
+
+            cursor.execute(
+                """
+                INSERT OR REPLACE INTO mission_proposals (
+                    id, intent_id, workspace_id, version, title, objective, why,
+                    context_summary, proposed_steps, constraints, outcome_constraints,
+                    expected_deliverables, checkpoints, risks, assumptions, confidence,
+                    required_approvals, clarification_ids, clarification_requirements,
+                    provenance, status, created_at, updated_at
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    proposal.id,
+                    proposal.intent_id,
+                    proposal.workspace_id,
+                    proposal.version,
+                    proposal.title,
+                    proposal.objective,
+                    proposal.why,
+                    proposal.context_summary,
+                    json.dumps([s.to_dict() for s in proposal.proposed_steps]),
+                    json.dumps(proposal.constraints),
+                    json.dumps([o.to_dict() for o in proposal.outcome_constraints]),
+                    json.dumps([d.to_dict() for d in proposal.expected_deliverables]),
+                    json.dumps(proposal.checkpoints),
+                    json.dumps([r.to_dict() for r in proposal.risks]),
+                    json.dumps([a.to_dict() for a in proposal.assumptions]),
+                    proposal.confidence,
+                    json.dumps([a.to_dict() for a in proposal.required_approvals]),
+                    json.dumps(proposal.clarification_ids),
+                    json.dumps([c.to_dict() for c in proposal.clarification_requirements]),
+                    json.dumps(proposal.provenance.to_dict() if proposal.provenance else {}),
+                    proposal.status.value if hasattr(proposal.status, "value") else str(proposal.status),
+                    proposal.created_at,
+                    proposal.updated_at,
+                ),
+            )
+        return intent, context_pack, proposal
+
     def save_intent_request(self, intent: IntentRequest) -> IntentRequest:
         """Persists an IntentRequest record."""
         with self._transaction() as cursor:
@@ -498,22 +598,22 @@ class PersonalStore:
         row = conn.execute("SELECT * FROM intent_requests WHERE id = ?", (intent_id,)).fetchone()
         if not row:
             return None
-        return IntentRequest(
-            id=row["id"],
-            workspace_id=row["workspace_id"],
-            raw_input=row["raw_input"],
-            source_surface=row["source_surface"],
-            created_at=row["created_at"],
-            session_id=row["session_id"],
-            inferred_goal=row["inferred_goal"],
-            constraints=json.loads(row["constraints"]) if row["constraints"] else [],
-            urgency=row["urgency"],
-            requested_deliverables=json.loads(row["requested_deliverables"]) if row["requested_deliverables"] else [],
-            relevant_entities=json.loads(row["relevant_entities"]) if row["relevant_entities"] else [],
-            ambiguity=json.loads(row["ambiguity"]) if row["ambiguity"] else [],
-            provenance=json.loads(row["provenance"]) if row["provenance"] else None,
-            status=row["status"],
-        )
+        return IntentRequest.from_dict({
+            "id": row["id"],
+            "workspace_id": row["workspace_id"],
+            "raw_input": row["raw_input"],
+            "source_surface": row["source_surface"],
+            "created_at": row["created_at"],
+            "session_id": row["session_id"],
+            "inferred_goal": row["inferred_goal"],
+            "constraints": json.loads(row["constraints"]) if row["constraints"] else [],
+            "urgency": row["urgency"],
+            "requested_deliverables": json.loads(row["requested_deliverables"]) if row["requested_deliverables"] else [],
+            "relevant_entities": json.loads(row["relevant_entities"]) if row["relevant_entities"] else [],
+            "ambiguity": json.loads(row["ambiguity"]) if row["ambiguity"] else [],
+            "provenance": json.loads(row["provenance"]) if row["provenance"] else None,
+            "status": row["status"],
+        })
 
     def save_context_pack(self, context_pack: ContextPack, intent_id: str) -> ContextPack:
         """Persists resolved context pack associated with an intent."""

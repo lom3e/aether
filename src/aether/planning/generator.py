@@ -59,6 +59,7 @@ class ProposalGenerator:
         clarification_reqs: list[ClarificationRequirement] = []
         clarification_ids: list[str] = []
 
+        # 1a. Unresolved references are strictly blocking
         for unres in context.unresolved_references:
             c_id = f"clarif-{uuid.uuid4().hex[:6]}"
             clarification_ids.append(c_id)
@@ -71,15 +72,35 @@ class ProposalGenerator:
                 )
             )
 
+        # 1b. Ambiguous entities (e.g. multiple matching repos, clients, projects, accounts) are strictly blocking
+        for ent in context.resolved_entities:
+            if ent.resolution_state == ResolutionState.AMBIGUOUS:
+                c_id = f"clarif-{uuid.uuid4().hex[:6]}"
+                clarification_ids.append(c_id)
+                clarification_reqs.append(
+                    ClarificationRequirement(
+                        id=c_id,
+                        question=f"Ambiguity in {ent.entity_type} '{ent.display_name}': multiple candidate matches detected. Please specify target {ent.entity_type}.",
+                        context_key=f"{ent.entity_type}:{ent.display_name}",
+                        blocking=True,
+                    )
+                )
+
+        # 1c. Textual context ambiguities - critical domain ambiguities are blocking
         for amb in context.ambiguity:
             c_id = f"clarif-{uuid.uuid4().hex[:6]}"
             clarification_ids.append(c_id)
+            # Critical ambiguities (target repo, client, project, branch, destination, account) must block execution
+            is_critical = any(
+                k in amb.lower()
+                for k in ["repo", "project", "client", "branch", "account", "connection", "destination", "multiple", "differ"]
+            )
             clarification_reqs.append(
                 ClarificationRequirement(
                     id=c_id,
                     question=amb,
                     context_key="prompt_ambiguity",
-                    blocking=False,
+                    blocking=is_critical,
                 )
             )
 
@@ -136,11 +157,18 @@ class ProposalGenerator:
 
         # 10. Lifecycle status determination
         has_blocking_clarification = any(c.blocking for c in clarification_reqs)
-        if has_blocking_clarification:
+        has_ambiguous_or_unresolved_entity = any(
+            e.resolution_state in (ResolutionState.AMBIGUOUS, ResolutionState.UNRESOLVED, ResolutionState.NOT_FOUND)
+            for e in context.resolved_entities
+        )
+        has_retrieval_failure = bool(context.retrieval_failures)
+
+        if has_blocking_clarification or has_ambiguous_or_unresolved_entity or context.ambiguity or context.unresolved_references:
+            # Critical invariant: Ambiguous or unresolved context can NEVER produce READY_FOR_ACCEPTANCE
             status = ProposalStatus.NEEDS_CLARIFICATION
-        elif context.retrieval_failures and not context.resolved_entities:
+        elif has_retrieval_failure and not context.resolved_entities:
             status = ProposalStatus.FAILED
-        elif context.confidence >= 0.7 and not clarification_reqs:
+        elif context.confidence >= 0.6 and not clarification_reqs and not has_retrieval_failure:
             status = ProposalStatus.READY_FOR_ACCEPTANCE
         else:
             status = ProposalStatus.DRAFT
@@ -148,7 +176,7 @@ class ProposalGenerator:
         # 11. Proposal Confidence
         # Inherit context confidence, with penalty if clarifications are needed
         confidence = context.confidence
-        if has_blocking_clarification:
+        if has_blocking_clarification or has_ambiguous_or_unresolved_entity:
             confidence = max(0.1, confidence * 0.7)
         if not context.resolved_entities and not context.evidence_references:
             confidence = min(confidence, 0.4)
@@ -261,6 +289,18 @@ class ProposalGenerator:
                     required_tools_or_actions=["knowledge.search"],
                 )
             )
+        elif any(k in prompt for k in ["worker", "agente esterno", "external worker", "external agent", "mcp"]):
+            steps.append(
+                ProposedStep(
+                    id=f"step-2",
+                    order_idx=1,
+                    title="External Worker Task Delegation",
+                    description="Dispatch task to designated external specialist worker.",
+                    assigned_team_or_role="External Worker Specialist",
+                    dependencies=["step-1"],
+                    required_tools_or_actions=["agents.delegate_external"],
+                )
+            )
         else:
             steps.append(
                 ProposedStep(
@@ -339,6 +379,16 @@ class ProposalGenerator:
                 )
             )
 
+        if any(k in prompt for k in ["worker", "agente esterno", "external worker", "external agent", "mcp", "remoto"]):
+            approvals.append(
+                RequiredApprovalSpec(
+                    id=f"appr-ext-worker",
+                    action_or_boundary="agents.delegate_external",
+                    reason="Delegating tasks to external or remote agent workers executes outside local control.",
+                    sensitive_fields=["agent_name", "instruction"],
+                )
+            )
+
         return approvals
 
     def _derive_outcome_constraints(
@@ -380,7 +430,31 @@ class ProposalGenerator:
                     id=f"oc-pr",
                     kind=OutcomeKind.PULL_REQUEST_CREATED.value,
                     description="Pull request successfully opened and recorded on remote provider.",
-                    verification_method=VerificationMethod.GIT_STATUS.value,
+                    verification_method=VerificationMethod.PROVIDER_EVIDENCE.value,
+                    required=True,
+                    status="pending",
+                )
+            )
+
+        if any(k in prompt for k in ["email", "mail", "invia mail", "send email"]):
+            constraints.append(
+                OutcomeConstraint(
+                    id=f"oc-email",
+                    kind=OutcomeKind.EMAIL_SENT.value,
+                    description="Outbound email dispatch confirmed by delivery receipt or provider.",
+                    verification_method=VerificationMethod.DELIVERY_RECEIPT.value,
+                    required=True,
+                    status="pending",
+                )
+            )
+
+        if any(k in prompt for k in ["refactor", "modifica file", "modify file", "edit file", "scrivi file"]):
+            constraints.append(
+                OutcomeConstraint(
+                    id=f"oc-files",
+                    kind=OutcomeKind.FILES_MODIFIED.value,
+                    description="Target source code files modified and verified via diff.",
+                    verification_method=VerificationMethod.FILESYSTEM_DIFF.value,
                     required=True,
                     status="pending",
                 )

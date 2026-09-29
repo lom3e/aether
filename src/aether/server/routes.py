@@ -5902,17 +5902,32 @@ async def create_personal_intent_route(request: Request, payload: IntentRequestP
     """
     Understands natural intent, resolves context, generates a proposal, and validates it.
     Zero side-effects: does not create or start missions, does not execute actions.
+    Enforces strict workspace authorization and fail-closed persistence handling.
     """
     ws = getattr(request.app.state, "workspace", None)
     if not ws:
         raise HTTPException(status_code=503, detail="Workspace not initialized.")
-    ws_id = (payload.workspace_id or ws.name).strip()
-    intent, context_pack, proposal, validation_result = ws.personal.create_intent_and_proposal(
-        raw_input=payload.raw_input,
-        workspace_id=ws_id,
-        session_id=payload.session_id,
-        source_surface=payload.source_surface,
-    )
+
+    if not payload.raw_input or not payload.raw_input.strip():
+        raise HTTPException(status_code=422, detail="raw_input cannot be empty.")
+
+    requested_ws = (payload.workspace_id or ws.name).strip()
+    if requested_ws != ws.name:
+        raise HTTPException(
+            status_code=403,
+            detail=f"Workspace access forbidden: requested workspace '{requested_ws}' does not match active workspace '{ws.name}'.",
+        )
+
+    try:
+        intent, context_pack, proposal, validation_result = ws.personal.create_intent_and_proposal(
+            raw_input=payload.raw_input,
+            workspace_id=ws.name,
+            session_id=payload.session_id,
+            source_surface=payload.source_surface,
+        )
+    except RuntimeError as err:
+        raise HTTPException(status_code=500, detail=str(err)) from err
+
     return {
         "intent": intent.to_dict(),
         "context_pack": context_pack.to_dict(),
@@ -5923,24 +5938,33 @@ async def create_personal_intent_route(request: Request, payload: IntentRequestP
 
 @router.get("/personal/proposals/{proposal_id}")
 async def get_proposal_route(request: Request, proposal_id: str):
-    """Retrieves an addressable mission proposal by ID."""
+    """Retrieves an addressable mission proposal by ID with workspace authorization."""
     ws = getattr(request.app.state, "workspace", None)
     if not ws:
         raise HTTPException(status_code=503, detail="Workspace not initialized.")
     proposal = ws.personal_store.get_proposal(proposal_id)
     if not proposal:
         raise HTTPException(status_code=404, detail=f"Proposal '{proposal_id}' not found.")
+    if proposal.workspace_id != ws.name:
+        raise HTTPException(
+            status_code=403,
+            detail=f"Forbidden: Proposal '{proposal_id}' belongs to another workspace.",
+        )
     return proposal.to_dict()
 
 
 @router.get("/personal/proposals")
 async def list_proposals_route(request: Request, workspace_id: str | None = None, limit: int = 20):
-    """Lists addressable mission proposals for a workspace."""
+    """Lists addressable mission proposals for the active workspace."""
     ws = getattr(request.app.state, "workspace", None)
     if not ws:
         return []
-    ws_id = (workspace_id or ws.name).strip()
-    proposals = ws.personal_store.list_proposals(workspace_id=ws_id, limit=limit)
+    if workspace_id is not None and workspace_id.strip() and workspace_id.strip() != ws.name:
+        raise HTTPException(
+            status_code=403,
+            detail=f"Forbidden: Cannot list proposals for another workspace '{workspace_id}'.",
+        )
+    proposals = ws.personal_store.list_proposals(workspace_id=ws.name, limit=limit)
     return [p.to_dict() for p in proposals]
 
 

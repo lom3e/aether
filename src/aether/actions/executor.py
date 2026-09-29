@@ -278,7 +278,7 @@ class ActionExecutor:
                 result = self._execute_builtin_action(definition, execution)
 
             # Validate real success vs failure
-            if isinstance(result, dict) and (result.get("success") is False or "error" in result):
+            if isinstance(result, dict) and (result.get("success") is False or bool(result.get("error"))):
                 err_msg = str(result.get("error") or "Action returned an unsuccessful result.")
                 raise RuntimeError(err_msg)
 
@@ -1959,12 +1959,20 @@ class ActionExecutor:
                 raise ValueError("Autonomy orchestrator not available on workspace.")
 
             if action_id == "autonomy.take_care_of_it":
-                goal = orchestrator.plan_and_execute(
+                # Phase A Macro-pass 1.1: Autonomy enters the proposal architecture.
+                # Does NOT execute plan_and_execute; stops at the proposal boundary.
+                goal_prompt = inp.get("goal", "").strip() or "Autonomous operational loop"
+                intent, context_pack, proposal, val_res = ws.personal.create_intent_and_proposal(
+                    raw_input=goal_prompt,
                     workspace_id=ws_id,
-                    goal_prompt=inp.get("goal", ""),
-                    context=inp.get("context", {}),
+                    source_surface="autonomy_action",
                 )
-                return {"goal": goal.to_dict()}
+                return {
+                    "status": "blocked_pending_acceptance",
+                    "proposal_id": proposal.id,
+                    "proposal": proposal.to_dict(),
+                    "validation": val_res.to_dict(),
+                }
 
             elif action_id == "autonomy.list_goals":
                 store = getattr(ws, "autonomy_store", None)

@@ -89,8 +89,8 @@ class ContextResolver:
 
         # 1. Workspace scope check
         if ws_id != expected_ws and ws_id != "default" and expected_ws != "default":
-            ambiguities.append(
-                f"Requested workspace '{ws_id}' differs from active workspace context '{expected_ws}'."
+            retrieval_failures.append(
+                f"Workspace authorization mismatch: requested '{ws_id}' does not match active workspace '{expected_ws}'."
             )
 
         # 2. Project / Repository Resolution
@@ -199,12 +199,12 @@ class ContextResolver:
 
         # Look for explicit repo or project keywords in prompt
         repo_mention = re.search(
-            r"\b(?:repo|repository|progetto|project|codebase)\s+([a-zA-Z0-9_\-\./]+)",
+            r"\b(?:repo|repository|progetto|project|codebase)\s+['\"]?([a-zA-Z0-9_\-\./]+)['\"]?",
             prompt,
             re.IGNORECASE,
         )
         branch_mention = re.search(
-            r"\b(?:branch|ramo)\s+([a-zA-Z0-9_\-\./]+)",
+            r"\b(?:branch|ramo)\s+['\"]?([a-zA-Z0-9_\-\./]+)['\"]?",
             prompt,
             re.IGNORECASE,
         )
@@ -230,7 +230,7 @@ class ContextResolver:
 
             # Check if prompt targets a different project
             if repo_mention:
-                target_repo = repo_mention.group(1).strip()
+                target_repo = repo_mention.group(1).strip().strip("'\":,.;")
                 if target_repo.lower() not in (proj_name.lower(), proj_id.lower(), "current", "this", "questo", "attivo"):
                     resolved_entities.append(
                         ResolvedEntity(
@@ -389,8 +389,8 @@ class ContextResolver:
         for p in detected_providers:
             matches = conn_map.get(p, [])
             if len(matches) == 1:
-                c = matches[0]
                 status_val = getattr(getattr(c, "status", None), "value", str(getattr(c, "status", "unknown")))
+                is_verified = (status_val == "verified")
                 ev_id = f"ev-conn-{uuid.uuid4().hex[:6]}"
                 evidence_refs.append(
                     EvidenceReference(
@@ -399,7 +399,7 @@ class ContextResolver:
                         source_identifier=str(getattr(c, "id", p)),
                         workspace=intent.workspace_id,
                         locator=f"connections/{getattr(c, 'id', p)}",
-                        verification_status="verified" if status_val == "connected" else "unverified",
+                        verification_status="verified" if is_verified else "unverified",
                         excerpt=f"Provider {p.capitalize()} connection: {status_val}",
                         metadata=mask_secrets_deep({
                             "account_name": getattr(c, "account_name", ""),
@@ -407,14 +407,16 @@ class ContextResolver:
                         }),
                     )
                 )
+                if not is_verified:
+                    ambiguities.append(f"Connection '{p.capitalize()}' is in status '{status_val}' (not verified).")
                 resolved_entities.append(
                     ResolvedEntity(
                         entity_type="connection",
                         canonical_id=str(getattr(c, "id", p)),
                         display_name=getattr(c, "account_name", p.capitalize()) or p.capitalize(),
                         workspace_scope=intent.workspace_id,
-                        resolution_state=ResolutionState.MATCHED,
-                        confidence=0.9 if status_val == "connected" else 0.5,
+                        resolution_state=ResolutionState.MATCHED if is_verified else ResolutionState.UNRESOLVED,
+                        confidence=0.9 if is_verified else 0.4,
                         evidence_references=[ev_id],
                         metadata={"provider": p, "status": status_val},
                     )
@@ -630,7 +632,7 @@ class ContextResolver:
         self,
         intent: IntentRequest,
         evidence_refs: list[EvidenceReference],
-        assumptions: list[Assumptions],
+        assumptions: list[str],
         retrieval_failures: list[str],
     ) -> None:
         """Retrieves semantic memory and knowledge graph context without throwing."""

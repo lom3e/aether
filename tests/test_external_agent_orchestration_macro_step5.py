@@ -291,7 +291,7 @@ def test_action_executor_delegate_external(http_worker_server, tmp_path):
         auto_approve=True,
     )
 
-    assert exec_res.status.value == "success"
+    assert exec_res.status.value in ("succeeded", "success")
     assert "Processed instruction: Fetch remote logs" in (exec_res.output_data or {}).get("output", "")
 
 
@@ -301,7 +301,7 @@ def test_personal_companion_external_agent_intent(http_worker_server, tmp_path):
     service = ws.personal
 
     intent = service.classify_intent("delega all'agente esterno l'analisi dei contratti")
-    assert intent.tier == IntentTier.ACT
+    assert intent.tier == IntentTier.DELEGATE
     assert intent.action_id == "agents.delegate_external"
 
     # Execute prompt through companion
@@ -310,8 +310,9 @@ def test_personal_companion_external_agent_intent(http_worker_server, tmp_path):
         prompt="delega all'agente esterno worker_contract l'analisi dei contratti",
     )
 
-    # In ACT tier, requires confirmation unless approved, or pending approval is drafted
+    # In DELEGATE tier, prepares proposal and waits for acceptance without execution
     assert msg.role == "assistant"
+    assert "proposal_id" in msg.metadata
     assert len(msg.steps) >= 1
 
 

@@ -73,6 +73,7 @@ class ProposalValidator:
         re.compile(r"-----BEGIN (?:RSA |EC )?PRIVATE KEY-----"),
         re.compile(r"\b(?:bearer\s+[a-zA-Z0-9_\-\.]{20,})\b", re.IGNORECASE),
         re.compile(r"\b(?:api[_-]?key|secret|password)\s*[:=]\s*['\"][^'\"]{6,}['\"]", re.IGNORECASE),
+        re.compile(r"\b(?:sentinel_secret_[a-zA-Z0-9_]+)\b", re.IGNORECASE),
     ]
 
     SENSITIVE_ACTIONS = {
@@ -82,6 +83,40 @@ class ProposalValidator:
         "github.create_pull_request": "Remote PR creation",
         "github.create_branch": "Remote branch mutation",
         "files.delete": "Destructive filesystem operation",
+        "agents.delegate_external": "External worker delegation",
+    }
+
+    COMPATIBLE_VERIFICATION_METHODS: dict[str, set[str]] = {
+        OutcomeKind.PULL_REQUEST_CREATED.value: {
+            VerificationMethod.PROVIDER_EVIDENCE.value,
+            VerificationMethod.MANUAL_REVIEW.value,
+            VerificationMethod.VERIFICATION_UNAVAILABLE.value,
+        },
+        OutcomeKind.FILES_MODIFIED.value: {
+            VerificationMethod.FILESYSTEM_DIFF.value,
+            VerificationMethod.GIT_STATUS.value,
+            VerificationMethod.MANUAL_REVIEW.value,
+        },
+        OutcomeKind.TESTS_PASSED.value: {
+            VerificationMethod.TEST_RUNNER.value,
+            VerificationMethod.MANUAL_REVIEW.value,
+        },
+        OutcomeKind.REPORT_GENERATED.value: {
+            VerificationMethod.FILE_EXISTENCE.value,
+            VerificationMethod.CHECKSUM.value,
+            VerificationMethod.MANUAL_REVIEW.value,
+        },
+        OutcomeKind.EMAIL_SENT.value: {
+            VerificationMethod.DELIVERY_RECEIPT.value,
+            VerificationMethod.PROVIDER_EVIDENCE.value,
+            VerificationMethod.MANUAL_REVIEW.value,
+            VerificationMethod.VERIFICATION_UNAVAILABLE.value,
+        },
+        OutcomeKind.DELIVERABLE_CREATED.value: {
+            VerificationMethod.FILE_EXISTENCE.value,
+            VerificationMethod.CHECKSUM.value,
+            VerificationMethod.MANUAL_REVIEW.value,
+        },
     }
 
     def validate(
@@ -115,19 +150,32 @@ class ProposalValidator:
                     f"Proposal is marked READY_FOR_ACCEPTANCE but has {len(blocking)} blocking clarification requirements."
                 )
             if context is not None:
-                unres = [e for e in context.resolved_entities if e.resolution_state in (ResolutionState.UNRESOLVED, ResolutionState.NOT_FOUND)]
+                unres = [
+                    e for e in context.resolved_entities
+                    if e.resolution_state in (ResolutionState.UNRESOLVED, ResolutionState.NOT_FOUND, ResolutionState.AMBIGUOUS)
+                ]
                 if unres:
                     errors.append(
-                        f"Proposal marked READY_FOR_ACCEPTANCE cannot have unresolved entities: "
+                        f"Proposal marked READY_FOR_ACCEPTANCE cannot have ambiguous or unresolved entities: "
                         f"{', '.join(f'{e.entity_type}:{e.display_name}' for e in unres)}."
                     )
-            if proposal.confidence < 0.4:
+                if context.ambiguity:
+                    errors.append(
+                        f"Proposal marked READY_FOR_ACCEPTANCE cannot have unresolved context ambiguities: "
+                        f"{'; '.join(context.ambiguity)}."
+                    )
+                if context.unresolved_references:
+                    errors.append(
+                        f"Proposal marked READY_FOR_ACCEPTANCE cannot have unresolved references: "
+                        f"{', '.join(context.unresolved_references)}."
+                    )
+            if proposal.confidence < 0.5:
                 errors.append(
                     f"Proposal marked READY_FOR_ACCEPTANCE has insufficient confidence ({proposal.confidence})."
                 )
 
         # 3. Secret and Sensitive Payload Detection
-        self._scan_for_secrets(proposal, errors)
+        self._scan_for_secrets(proposal, context, errors)
 
         # 4. Outcome Constraints Verification
         self._validate_outcome_constraints(proposal, errors, warnings)
@@ -173,27 +221,63 @@ class ProposalValidator:
             },
         )
 
-    def _scan_for_secrets(self, proposal: MissionProposal, errors: list[str]) -> None:
-        """Verifies that no secrets or credentials leak into human-readable proposal text."""
-        text_blobs = [
+    def _scan_for_secrets(
+        self,
+        proposal: MissionProposal,
+        context: ContextPack | None,
+        errors: list[str],
+    ) -> None:
+        """Verifies that no secrets or credentials leak into proposal or context structures."""
+        text_blobs: list[str] = [
             proposal.title,
             proposal.objective,
             proposal.why,
             proposal.context_summary,
         ]
+        text_blobs.extend(proposal.constraints)
         for step in proposal.proposed_steps:
             text_blobs.extend([step.title, step.description])
+            text_blobs.extend(step.required_tools_or_actions)
         for deliv in proposal.expected_deliverables:
             text_blobs.extend([deliv.title, deliv.description, deliv.file_path or ""])
         for assump in proposal.assumptions:
             text_blobs.append(assump.description)
         for risk in proposal.risks:
-            text_blobs.append(risk.description)
+            text_blobs.extend([risk.description, risk.mitigation or ""])
+        for oc in proposal.outcome_constraints:
+            text_blobs.extend([oc.description, oc.kind, oc.verification_method])
+        for appr in proposal.required_approvals:
+            text_blobs.extend([appr.reason, appr.action_or_boundary])
+            text_blobs.extend(appr.sensitive_fields)
+        if proposal.provenance:
+            text_blobs.extend([proposal.provenance.source_entity, proposal.provenance.locator or ""])
+            for k, v in proposal.provenance.metadata.items():
+                text_blobs.append(f"{k}:{v}")
+
+        if context is not None:
+            text_blobs.extend(context.retrieval_failures)
+            text_blobs.extend(context.ambiguity)
+            text_blobs.extend(context.assumptions)
+            text_blobs.extend(context.unresolved_references)
+            for ent in context.resolved_entities:
+                text_blobs.append(ent.display_name)
+                for k, v in ent.metadata.items():
+                    text_blobs.append(f"{k}:{v}")
+            for ev in context.evidence_references:
+                text_blobs.extend([ev.source_identifier, ev.excerpt or "", ev.locator or ""])
+                for k, v in ev.metadata.items():
+                    text_blobs.append(f"{k}:{v}")
+            if context.provenance:
+                text_blobs.extend([context.provenance.source_entity, context.provenance.locator or ""])
+                for k, v in context.provenance.metadata.items():
+                    text_blobs.append(f"{k}:{v}")
 
         for text in text_blobs:
+            if not text:
+                continue
             for pat in self.SECRET_PATTERNS:
                 if pat.search(text):
-                    errors.append(f"Security invariant violated: secret or raw credential token detected in proposal text.")
+                    errors.append(f"Security invariant violated: secret or raw credential token detected in proposal/context.")
                     return
 
     def _validate_outcome_constraints(
@@ -213,6 +297,16 @@ class ProposalValidator:
                 errors.append(
                     f"Outcome constraint '{oc.id}' specifies unsupported verification method '{oc.verification_method}'."
                 )
+
+            # Check compatibility between outcome kind and verification method
+            if oc.kind in self.COMPATIBLE_VERIFICATION_METHODS:
+                compatible = self.COMPATIBLE_VERIFICATION_METHODS[oc.kind]
+                if oc.verification_method not in compatible:
+                    errors.append(
+                        f"Truthfulness invariant violated: outcome '{oc.kind}' has incompatible verification method "
+                        f"'{oc.verification_method}'; compatible methods are: {', '.join(sorted(compatible))}."
+                    )
+
             # Invariant: an outcome cannot be verified before execution has occurred
             if oc.status in ("verified", "completed", "succeeded") and not oc.evidence_refs:
                 errors.append(

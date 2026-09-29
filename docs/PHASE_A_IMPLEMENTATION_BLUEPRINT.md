@@ -1002,11 +1002,56 @@ To deliver immediate value, establish end-to-end integration, and validate the a
 
 ### Core Boundaries & Services
 - **Context Resolution (`src/aether/planning/resolver.py`):** `ContextResolver` binds natural language entities to existing workspace projects, git branches, active connections, files, and clients using `UnifiedIntelligenceService`. Masks credentials and preserves unresolved ambiguity states.
-- **Proposal Generation (`src/aether/planning/generator.py`):** `ProposalGenerator` produces logical step sequences and upfront sensitive action approval requirements (`email.send`, `slack.send_message`, `github.create_pull_request`, `files.delete`) without invoking execution engines.
-- **Proposal Validation (`src/aether/planning/validation.py`):** `ProposalValidator` enforces workspace scoping, rejects unverified outcome claims prior to run, validates evidence presence, prevents secret leakage, and checks approval boundaries.
-- **Persistence Boundary (`src/aether/personal/store.py`):** Additive SQLite schema (`intent_requests`, `proposal_context`, `mission_proposals`) providing versioned proposal history and retrieval.
+- **Proposal Generation (`src/aether/planning/generator.py`):** `ProposalGenerator` produces logical step sequences and upfront sensitive action approval requirements (`email.send`, `slack.send_message`, `github.create_pull_request`, `files.delete`, `agents.delegate_external`) without invoking execution engines.
+- **Proposal Validation (`src/aether/planning/validation.py`):** `ProposalValidator` enforces workspace scoping, rejects unverified outcome claims prior to run, validates evidence presence, enforces compatible verification methods (`COMPATIBLE_VERIFICATION_METHODS`), prevents secret leakage across all nested fields, and checks approval boundaries.
+- **Persistence Boundary (`src/aether/personal/store.py`):** Additive SQLite schema (`intent_requests`, `proposal_context`, `mission_proposals`) providing versioned proposal history and retrieval with atomic transaction consistency (`save_intent_and_proposal`).
 - **API Boundary (`src/aether/server/routes.py`):**
-  - `POST /personal/intents`: Intent analysis and proposal generation endpoint.
-  - `GET /personal/proposals/{proposal_id}`: Proposal inspection endpoint.
-  - `GET /personal/proposals`: Workspace proposal listing endpoint.
+  - `POST /personal/intents`: Intent analysis and proposal generation endpoint with strict workspace authorization and input validation (`422` for empty input, `403` for cross-tenant attempts, `500` fail-closed persistence handling).
+  - `GET /personal/proposals/{proposal_id}`: Proposal inspection endpoint with workspace tenancy isolation (`403` for cross-tenant retrieval).
+  - `GET /personal/proposals`: Workspace proposal listing endpoint scoped strictly to active workspace (`403` for cross-tenant listing).
+
+---
+
+## VII. Phase A Macro-pass 1.1: Hardening, Trust Boundaries & Verification
+
+**Status:** Completed  
+**Baseline:** `7b3189624c98379932cb5361e8d00a341cd4049b`  
+**Verdict:** `MACRO_PASS_1_1 = GREEN`
+
+### Critical & High Remediation Matrix
+
+1. **Autonomy Execution Bypass Elimination:**
+   - Both `ActionExecutor.execute("autonomy.take_care_of_it")` and Personal Agent conversational triggers for autonomous loops ("Prenditene cura tu" / "take care of it") strictly route through `create_intent_and_proposal`.
+   - Returns explicit `status: "blocked_pending_acceptance"` with addressable proposal metadata. Zero autonomous engine stages or actions execute without acceptance.
+
+2. **External Worker Proposal Gating:**
+   - External worker delegation (`agents.delegate_external`) is classified into `IntentTier.DELEGATE`.
+   - Automatically requires upfront human approval in `RequiredApprovalSpec` and stops at the proposal boundary.
+
+3. **Workspace Authorization & Multi-Tenant Isolation:**
+   - All `/personal/intents` and `/personal/proposals` endpoints validate active workspace matching.
+   - Cross-tenant creation, listing, or retrieval yields HTTP `403 Forbidden`. Empty input yields HTTP `422 Unprocessable Entity`.
+
+4. **Atomic Persistence & Fail-Closed Failure Recovery:**
+   - `PersonalStore.save_intent_and_proposal` executes in a unified atomic transaction across `intent_requests`, `proposal_context`, and `mission_proposals`.
+   - Failures (e.g. disk full, lock contention) roll back cleanly, re-raise `RuntimeError`, and map to HTTP `500 Internal Server Error`, ensuring zero orphan proposals or missions.
+
+5. **Context Provenance Round-Trip Integrity:**
+   - `ContextProvenance.from_dict` safely returns `None` for empty or unrecognized payloads and defaults missing verification status to `unverified`.
+   - `PersonalStore.get_intent_request` and `get_proposal` restore typed `ContextProvenance` objects across SQLite serialization cycles.
+
+6. **Strict Ambiguity Blocking:**
+   - Any entity in `ResolutionState.AMBIGUOUS` or context containing ambiguity forces `ProposalStatus.NEEDS_CLARIFICATION` with blocking clarifications.
+   - `ProposalValidator` strictly invalidates any proposal claiming `READY_FOR_ACCEPTANCE` while unresolved or ambiguous context remains.
+
+7. **Fail-Closed Deserialization:**
+   - `ProposalValidationResult.from_dict({})` fails closed as `is_valid: False` and `status: INVALID` with explicit error descriptions.
+
+8. **Outcome Constraint Verification Method Compatibility:**
+   - `COMPATIBLE_VERIFICATION_METHODS` enforces semantic coherence between outcome kinds and verification methods (e.g. `pull_request_created` cannot be verified by `git_status`; requires `provider_evidence` or `manual_review`).
+
+9. **Comprehensive Deep Secret Scanning:**
+   - `ProposalValidator._scan_for_secrets` covers all fields across proposals, steps, constraints, outcome constraints, approval specs, entity metadata, retrieval failures, and evidence excerpts.
+   - Detects standard high-entropy secrets and test sentinel tokens (`sentinel_secret_`).
+
 
