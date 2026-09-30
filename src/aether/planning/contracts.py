@@ -68,7 +68,7 @@ class ContextProvenance:
     source_entity: str
     workspace_id: str
     locator: str | None = None
-    verification_status: str = "verified"  # verified, user_stated, inferred, unverified
+    verification_status: str = "unverified"  # verified, user_stated, inferred, unverified
     retrieved_at: str = field(default_factory=lambda: datetime.now(timezone.utc).isoformat())
     evidence_refs: list[str] = field(default_factory=list)
     metadata: dict[str, Any] = field(default_factory=dict)
@@ -614,7 +614,15 @@ class MissionProposal:
 
     @classmethod
     def from_dict(cls, data: dict[str, Any]) -> MissionProposal:
+        if not data.get("id"):
+            raise ValueError("MissionProposal data is missing required field 'id'")
+        if not data.get("intent_id"):
+            raise ValueError("MissionProposal data is missing required field 'intent_id'")
+        if not data.get("workspace_id"):
+            raise ValueError("MissionProposal data is missing required field 'workspace_id'")
+            
         status_raw = data.get("status", "draft")
+
         try:
             status = ProposalStatus(status_raw)
         except ValueError:
@@ -656,7 +664,7 @@ class MissionProposal:
 
         return cls(
             id=data.get("id") or f"prop-{uuid.uuid4().hex[:12]}",
-            intent_id=data.get("intent_id", ""),
+            intent_id=data["intent_id"],
             workspace_id=data.get("workspace_id", "default"),
             version=int(data.get("version", 1)),
             title=data.get("title", ""),

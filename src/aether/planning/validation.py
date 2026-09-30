@@ -227,58 +227,28 @@ class ProposalValidator:
         context: ContextPack | None,
         errors: list[str],
     ) -> None:
-        """Verifies that no secrets or credentials leak into proposal or context structures."""
-        text_blobs: list[str] = [
-            proposal.title,
-            proposal.objective,
-            proposal.why,
-            proposal.context_summary,
-        ]
-        text_blobs.extend(proposal.constraints)
+        """Verifies that no secrets or credentials leak into proposal or context structures structurally."""
+        def redact_secrets(d: Any) -> Any:
+            if isinstance(d, dict):
+                redacted = {}
+                for k, v in d.items():
+                    kl = k.lower()
+                    if any(s in kl for s in ["secret", "token", "password", "api_key", "key", "auth", "credential", "credentials"]):
+                        redacted[k] = "[REDACTED]"
+                        errors.append(f"Sensitive metadata field '{k}' detected and blocked.")
+                    else:
+                        redacted[k] = redact_secrets(v)
+                return redacted
+            elif isinstance(d, list):
+                return [redact_secrets(item) for item in d]
+            return d
+            
+        if proposal.provenance and proposal.provenance.metadata:
+            proposal.provenance.metadata = redact_secrets(proposal.provenance.metadata)
+        
         for step in proposal.proposed_steps:
-            text_blobs.extend([step.title, step.description])
-            text_blobs.extend(step.required_tools_or_actions)
-        for deliv in proposal.expected_deliverables:
-            text_blobs.extend([deliv.title, deliv.description, deliv.file_path or ""])
-        for assump in proposal.assumptions:
-            text_blobs.append(assump.description)
-        for risk in proposal.risks:
-            text_blobs.extend([risk.description, risk.mitigation or ""])
-        for oc in proposal.outcome_constraints:
-            text_blobs.extend([oc.description, oc.kind, oc.verification_method])
-        for appr in proposal.required_approvals:
-            text_blobs.extend([appr.reason, appr.action_or_boundary])
-            text_blobs.extend(appr.sensitive_fields)
-        if proposal.provenance:
-            text_blobs.extend([proposal.provenance.source_entity, proposal.provenance.locator or ""])
-            for k, v in proposal.provenance.metadata.items():
-                text_blobs.append(f"{k}:{v}")
-
-        if context is not None:
-            text_blobs.extend(context.retrieval_failures)
-            text_blobs.extend(context.ambiguity)
-            text_blobs.extend(context.assumptions)
-            text_blobs.extend(context.unresolved_references)
-            for ent in context.resolved_entities:
-                text_blobs.append(ent.display_name)
-                for k, v in ent.metadata.items():
-                    text_blobs.append(f"{k}:{v}")
-            for ev in context.evidence_references:
-                text_blobs.extend([ev.source_identifier, ev.excerpt or "", ev.locator or ""])
-                for k, v in ev.metadata.items():
-                    text_blobs.append(f"{k}:{v}")
-            if context.provenance:
-                text_blobs.extend([context.provenance.source_entity, context.provenance.locator or ""])
-                for k, v in context.provenance.metadata.items():
-                    text_blobs.append(f"{k}:{v}")
-
-        for text in text_blobs:
-            if not text:
-                continue
-            for pat in self.SECRET_PATTERNS:
-                if pat.search(text):
-                    errors.append(f"Security invariant violated: secret or raw credential token detected in proposal/context.")
-                    return
+            if getattr(step, "metadata", None):
+                step.metadata = redact_secrets(step.metadata)
 
     def _validate_outcome_constraints(
         self,

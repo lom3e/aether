@@ -1670,18 +1670,19 @@ class PersonalAgentService:
                 )
                 steps.append(step_err)
                 msg_fail = PersonalMessage(
+                    workspace_id=intent.workspace_id,
                     id=f"pmsg-{uuid.uuid4().hex[:12]}",
                     session_id=session_id or f"psess-{uuid.uuid4().hex[:8]}",
                     role="assistant",
                     content=f"❌ Unable to prepare proposal: {exc}",
-                    timestamp=datetime.now(timezone.utc).isoformat(),
+                    created_at=datetime.now(timezone.utc).isoformat(),
                     tier=intent.tier,
                     steps=steps,
                     metadata={"error": str(exc)},
                 )
                 if self.store:
                     try:
-                        self.store.save_message(msg_fail)
+                        self.store.add_message(msg_fail)
                     except Exception:
                         pass
                 return msg_fail

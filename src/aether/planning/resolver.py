@@ -221,7 +221,7 @@ class ContextResolver:
                     source_type="project",
                     source_identifier=proj_id,
                     workspace=intent.workspace_id,
-                    locator=p_str,
+                    locator=str(Path(p_str).relative_to(getattr(self.workspace, "root", Path(p_str).parent)) if getattr(self.workspace, "root", None) else Path(p_str).name),
                     verification_status="verified",
                     excerpt=f"Connected project: {proj_name} at {p_str}",
                     metadata={"project_type": project_info.get("type", "local")},
@@ -389,20 +389,21 @@ class ContextResolver:
         for p in detected_providers:
             matches = conn_map.get(p, [])
             if len(matches) == 1:
-                status_val = getattr(getattr(c, "status", None), "value", str(getattr(c, "status", "unknown")))
+                m = matches[0]
+                status_val = getattr(getattr(m, "status", None), "value", str(getattr(m, "status", "unknown")))
                 is_verified = (status_val == "verified")
                 ev_id = f"ev-conn-{uuid.uuid4().hex[:6]}"
                 evidence_refs.append(
                     EvidenceReference(
                         id=ev_id,
                         source_type="connection",
-                        source_identifier=str(getattr(c, "id", p)),
+                        source_identifier=str(getattr(m, "id", p)),
                         workspace=intent.workspace_id,
                         locator=f"connections/{getattr(c, 'id', p)}",
                         verification_status="verified" if is_verified else "unverified",
                         excerpt=f"Provider {p.capitalize()} connection: {status_val}",
                         metadata=mask_secrets_deep({
-                            "account_name": getattr(c, "account_name", ""),
+                            "account_name": getattr(m, "account_name", ""),
                             "status": status_val,
                         }),
                     )
@@ -412,8 +413,8 @@ class ContextResolver:
                 resolved_entities.append(
                     ResolvedEntity(
                         entity_type="connection",
-                        canonical_id=str(getattr(c, "id", p)),
-                        display_name=getattr(c, "account_name", p.capitalize()) or p.capitalize(),
+                        canonical_id=str(getattr(m, "id", p)),
+                        display_name=getattr(m, "account_name", p.capitalize()) or p.capitalize(),
                         workspace_scope=intent.workspace_id,
                         resolution_state=ResolutionState.MATCHED if is_verified else ResolutionState.UNRESOLVED,
                         confidence=0.9 if is_verified else 0.4,
@@ -491,7 +492,7 @@ class ContextResolver:
                         source_type="file",
                         source_identifier=str(found_path),
                         workspace=intent.workspace_id,
-                        locator=str(found_path),
+                        locator=str(found_path.relative_to(getattr(self.workspace, "root", found_path.parent)) if getattr(self.workspace, "root", None) else found_path.name),
                         verification_status="verified",
                         excerpt=f"File verified on disk ({found_path.stat().st_size} bytes)",
                         metadata={"size_bytes": found_path.stat().st_size},

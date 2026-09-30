@@ -20,6 +20,7 @@ from aether.actions.models import (
     ActionTier,
     sanitize_payload,
 )
+from aether.core.execution import ExecutionAuthority, UnauthorizedExecutionError, ActionClassification
 from aether.actions.registry import ActionRegistry
 from aether.actions.store import ActionStore
 from aether.activity.models import ActivityCategory, ActivityStatus
@@ -100,6 +101,7 @@ class ActionExecutor:
         input_data: dict[str, Any],
         auto_approve: bool = False,
         metadata: dict[str, Any] | None = None,
+        authority: ExecutionAuthority | None = None,
     ) -> ActionExecution:
         """
         Executes an action or queues it for user approval if confirmation is required.
@@ -107,6 +109,17 @@ class ActionExecutor:
         definition = self.registry.get(action_id)
         if not definition:
             raise ValueError(f"Action '{action_id}' not found in registry")
+
+        # Macro-pass 1.2: Enforce execution authority boundary
+        is_read_only = definition.permission_level == ActionPermissionLevel.READ_ONLY
+        if not is_read_only:
+            if not authority:
+                raise UnauthorizedExecutionError(f"Action '{action_id}' requires execution authority.")
+            if not isinstance(authority, ExecutionAuthority):
+                raise UnauthorizedExecutionError(f"Invalid authority type for '{action_id}'.")
+            if authority.workspace_id != workspace_id:
+                raise UnauthorizedExecutionError(f"Authority workspace '{authority.workspace_id}' does not match execution workspace '{workspace_id}'.")
+
 
         execution = ActionExecution(
             id=f"ax-{uuid.uuid4().hex[:12]}",

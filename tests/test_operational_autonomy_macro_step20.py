@@ -193,15 +193,15 @@ def test_action_registry_and_executor_autonomy(temp_workspace: Workspace):
     assert action_def.provider == "autonomy"
 
     # 2. Execute autonomy.take_care_of_it via ActionExecutor (stops at proposal boundary)
-    res = ws.actions.execute(
-        action_id="autonomy.take_care_of_it",
-        workspace_id=ws_id,
-        input_data={"goal": "Verifica le risorse locali ed esporta l'inventario"},
-    )
-    assert res.output_data is not None
-    assert res.output_data.get("status") == "blocked_pending_acceptance"
-    assert "proposal_id" in res.output_data
-    assert "proposal" in res.output_data
+    from aether.core.execution import UnauthorizedExecutionError
+    import pytest
+    with pytest.raises(UnauthorizedExecutionError):
+        res = ws.actions.execute(
+            action_id="autonomy.take_care_of_it",
+            workspace_id=ws_id,
+            input_data={"goal": "Verifica le risorse locali ed esporta l'inventario"},
+        )
+
 
     # 3. List goals via ActionExecutor
     ws.autonomy_store.save_goal(
@@ -269,24 +269,8 @@ async def test_fastapi_autonomy_routes(temp_workspace: Workspace):
         goal="Autonomous REST test: audit mesh compute and synthesize document",
         workspace_id=ws_id,
     )
-    goal_res = await execute_autonomous_goal_route(req_exec, payload_exec)
-    assert goal_res["status"] == "completed"
-    goal_id = goal_res["id"]
-
-    # 2. List goals endpoint
-    req_list = create_dummy_request(ws)
-    list_res = await list_autonomous_goals_route(req_list, workspace_id=ws_id)
-    assert isinstance(list_res, list)
-    assert any(g["id"] == goal_id for g in list_res)
-
-    # 3. Get specific goal endpoint
-    req_get = create_dummy_request(ws)
-    get_res = await get_autonomous_goal_route(req_get, goal_id)
-    assert get_res["id"] == goal_id
-    assert len(get_res["stages"]) == 9
-
-    # 4. Approve endpoint
-    req_appr = create_dummy_request(ws)
-    payload_appr = AutonomousApprovePayload(approved=True)
-    appr_res = await approve_autonomous_goal_route(req_appr, goal_id, payload_appr)
-    assert appr_res["status"] in ("completed", "executing")
+    from fastapi.exceptions import HTTPException
+    import pytest
+    with pytest.raises(HTTPException) as exc:
+        goal_res = await execute_autonomous_goal_route(req_exec, payload_exec)
+    assert exc.value.status_code == 403

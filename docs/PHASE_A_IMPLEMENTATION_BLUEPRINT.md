@@ -1055,3 +1055,15 @@ To deliver immediate value, establish end-to-end integration, and validate the a
    - Detects standard high-entropy secrets and test sentinel tokens (`sentinel_secret_`).
 
 
+
+
+## Macro-pass 1.1 Status: RED
+An independent forensic audit concluded Macro-pass 1.1 is RED.
+
+## Macro-pass 1.2: Execution Authorization Boundary
+- **Invariant**: No mutation, delegation, external execution, or autonomous execution occurs without valid `ExecutionAuthority` derived from an accepted `MissionProposal`.
+- **Enforcement**: Deep primitives (`MissionRuntime`, `ActionExecutor`, `ExternalAgentAdapter`) enforce the boundary. HTTP routes are not solely relied upon.
+- **Classification**: Actions default to `UNKNOWN` (requiring authority) unless explicitly marked `READ` or `SAFE`.
+- **Persistence**: Replaced `INSERT OR REPLACE` with `INSERT INTO`. Uniqueness enforced on `intent_id` and `version`.
+- **Contracts**: `MissionProposal.from_dict` fails closed. Provenance defaults to `unverified`.
+- **Secrets**: Structural secret redaction replaces naive regex scanning.

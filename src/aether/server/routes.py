@@ -6101,6 +6101,20 @@ async def execute_action_route(request: Request, payload: ExecuteActionPayload):
     if not ws:
         raise HTTPException(status_code=503, detail="Workspace not initialized.")
     ws_id = (payload.workspace_id or ws.name).strip()
+    
+    # Check if this requires execution authority
+    definition = ws.actions.registry.get(payload.action_id)
+    if not definition:
+        raise HTTPException(status_code=400, detail=f"Action '{payload.action_id}' not found.")
+    
+    from aether.actions.models import ActionPermissionLevel
+    is_read_only = definition.permission_level == ActionPermissionLevel.READ_ONLY
+    if not is_read_only:
+        raise HTTPException(
+            status_code=403, 
+            detail="Direct execution of mutating actions is unauthorized. Clients must generate and accept a MissionProposal."
+        )
+
     try:
         execution = ws.actions.execute(
             action_id=payload.action_id,
@@ -6111,6 +6125,7 @@ async def execute_action_route(request: Request, payload: ExecuteActionPayload):
         return execution.to_dict()
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc))
+
 
 
 @router.get("/actions/executions")
@@ -7603,9 +7618,12 @@ async def list_external_agents(request: Request):
 
 @router.post("/agents/external/invoke")
 async def invoke_external_agent(request: Request, payload: ExternalAgentInvokePayload):
-    """Invokes an external agent directly via HTTP, CLI, or MCP."""
-    from aether.agents.external import ExternalAgentAdapter, ExternalAgentConfig
-    from aether.core.execution import Task
+    """Invokes an external agent. (Macro-pass 1.2: Disabled directly for external delegation)."""
+    raise HTTPException(
+        status_code=403, 
+        detail="Direct external agent invocation is unauthorized. Clients must generate and accept a MissionProposal."
+    )
+
 
     team = getattr(request.app.state, "team", None)
     target_adapter = None
@@ -7867,16 +7885,14 @@ async def execute_autonomous_goal_route(
     payload: AutonomousExecutePayload,
 ):
     """
-    Executes an end-to-end operational autonomy mission ("Aether, take care of it").
-    Runs the 9-stage loop: intent → understand → plan → mesh allocation → workforce → actions → safety gate → deliverable → notify → learn.
+    Macro-pass 1.2: Raw autonomous execution is not permitted.
+    This route now throws an error indicating that clients must use Intent -> Proposal -> Accept.
     """
-    ws = getattr(request.app.state, "workspace", None)
-    if not ws:
-        raise HTTPException(status_code=503, detail="Workspace not initialized.")
-    ws_id = (payload.workspace_id or getattr(ws, "id", None) or ws.name).strip()
-    orchestrator = getattr(ws, "autonomy_orchestrator", None)
-    if not orchestrator:
-        raise HTTPException(status_code=503, detail="Autonomous goal orchestrator not available.")
+    raise HTTPException(
+        status_code=403,
+        detail="Direct autonomous execution is unauthorized. Clients must generate and accept a MissionProposal."
+    )
+
 
     goal = orchestrator.plan_and_execute(
         workspace_id=ws_id,

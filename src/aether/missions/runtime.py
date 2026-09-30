@@ -34,6 +34,7 @@ from aether.missions.models import (
 from aether.missions.graph_compiler import ExecutionGraphCompiler
 from aether.missions.reviewer import QualityGateEvaluation, QualityGateEvaluator
 from aether.missions.store import MissionStore
+from aether.core.execution import ExecutionAuthority, UnauthorizedExecutionError
 from aether.workspace.workspace import Workspace
 
 logger = logging.getLogger(__name__)
@@ -168,20 +169,28 @@ class MissionRuntime:
         from aether.missions.dry_run import MissionDryRunEngine
         return MissionDryRunEngine.analyze_mission(mission, self.workspace)
 
-    async def start_mission(self, mission_id: str, team_name: str | None = None) -> MissionExecution:
+    async def start_mission(
+        self,
+        mission_id: str,
+        team_name: str | None = None,
+        authority: ExecutionAuthority | None = None,
+    ) -> MissionExecution:
         """
         Starts execution of a mission.
-        Authoritative sequence:
-        1. Validates no active execution holds lease.
-        2. Creates or identifies execution.
-        3. Acquires durable SQLite lease.
-        4. Launches background runtime loop.
-        5. Exposes execution as running.
         """
+        if not authority:
+            raise UnauthorizedExecutionError(f"Starting mission {mission_id} requires execution authority.")
+        if not isinstance(authority, ExecutionAuthority):
+            raise UnauthorizedExecutionError(f"Invalid authority type for mission {mission_id}.")
+        # We'll check workspace in the async block when we fetch the mission.
+
         async with self._lock:
             mission = self.store.get_mission(mission_id)
             if not mission:
                 raise NotFoundError(f"Mission {mission_id} not found.")
+
+            if mission.workspace_id != authority.workspace_id:
+                raise UnauthorizedExecutionError(f"Authority workspace '{authority.workspace_id}' does not match mission workspace '{mission.workspace_id}'.")
 
             active = self.store.get_active_execution(mission_id)
             if active and active.status == ExecutionStatus.RUNNING and active.lease_owner:
@@ -210,6 +219,9 @@ class MissionRuntime:
             mission = self.store.get_mission(mission_id)
             if not mission:
                 raise NotFoundError(f"Mission {mission_id} not found.")
+
+            if mission.workspace_id != authority.workspace_id:
+                raise UnauthorizedExecutionError(f"Authority workspace '{authority.workspace_id}' does not match mission workspace '{mission.workspace_id}'.")
 
             active = self.store.get_active_execution(mission_id)
             if active and active.status == ExecutionStatus.RUNNING and active.lease_owner:
@@ -273,6 +285,9 @@ class MissionRuntime:
             mission = self.store.get_mission(mission_id)
             if not mission:
                 raise NotFoundError(f"Mission {mission_id} not found.")
+
+            if mission.workspace_id != authority.workspace_id:
+                raise UnauthorizedExecutionError(f"Authority workspace '{authority.workspace_id}' does not match mission workspace '{mission.workspace_id}'.")
 
             active = self.store.get_active_execution(mission_id)
             if not active:

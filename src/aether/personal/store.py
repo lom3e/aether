@@ -475,7 +475,7 @@ class PersonalStore:
         with self._transaction() as cursor:
             cursor.execute(
                 """
-                INSERT OR REPLACE INTO intent_requests (
+                INSERT INTO intent_requests (
                     id, workspace_id, session_id, raw_input, source_surface,
                     status, inferred_goal, urgency, constraints, requested_deliverables,
                     relevant_entities, ambiguity, provenance, created_at
@@ -502,7 +502,7 @@ class PersonalStore:
             ctx_id = f"ctx-{intent.id}"
             cursor.execute(
                 """
-                INSERT OR REPLACE INTO proposal_context (
+                INSERT INTO proposal_context (
                     id, intent_id, workspace_scope, confidence, resolved_entities,
                     evidence_references, unresolved_references, ambiguity, assumptions,
                     retrieval_failures, provenance, created_at
@@ -526,7 +526,7 @@ class PersonalStore:
 
             cursor.execute(
                 """
-                INSERT OR REPLACE INTO mission_proposals (
+                INSERT INTO mission_proposals (
                     id, intent_id, workspace_id, version, title, objective, why,
                     context_summary, proposed_steps, constraints, outcome_constraints,
                     expected_deliverables, checkpoints, risks, assumptions, confidence,
@@ -567,7 +567,7 @@ class PersonalStore:
         with self._transaction() as cursor:
             cursor.execute(
                 """
-                INSERT OR REPLACE INTO intent_requests (
+                INSERT INTO intent_requests (
                     id, workspace_id, session_id, raw_input, source_surface,
                     status, inferred_goal, urgency, constraints, requested_deliverables,
                     relevant_entities, ambiguity, provenance, created_at
@@ -621,7 +621,7 @@ class PersonalStore:
         with self._transaction() as cursor:
             cursor.execute(
                 """
-                INSERT OR REPLACE INTO proposal_context (
+                INSERT INTO proposal_context (
                     id, intent_id, workspace_scope, confidence, resolved_entities,
                     evidence_references, unresolved_references, ambiguity, assumptions,
                     retrieval_failures, provenance, created_at
@@ -662,12 +662,15 @@ class PersonalStore:
             "provenance": json.loads(row["provenance"]) if row["provenance"] else None,
         })
 
+
     def save_proposal(self, proposal: MissionProposal) -> MissionProposal:
         """Persists a MissionProposal record."""
-        with self._transaction() as cursor:
-            cursor.execute(
-                """
-                INSERT OR REPLACE INTO mission_proposals (
+        try:
+            with self._transaction() as cursor:
+                cursor.execute(
+                    """
+                    INSERT INTO mission_proposals (
+
                     id, intent_id, workspace_id, version, title, objective, why,
                     context_summary, proposed_steps, constraints, outcome_constraints,
                     expected_deliverables, checkpoints, risks, assumptions, confidence,
@@ -701,7 +704,10 @@ class PersonalStore:
                     proposal.updated_at,
                 ),
             )
+        except sqlite3.IntegrityError as exc:
+            raise ValueError(f"Proposal integrity violation (duplicate ID or intent_id/version): {exc}")
         return proposal
+
 
     def get_proposal(self, proposal_id: str) -> MissionProposal | None:
         """Retrieves a MissionProposal by ID."""

@@ -241,3 +241,25 @@ class AgentContext(ExecutionContext):
             metadata=context.metadata,
             messages=messages or [],
         )
+
+class ActionClassification(StrEnum):
+    READ = "read"
+    SAFE = "safe"
+    UNKNOWN = "unknown"
+    MUTATION = "mutation"
+    DELEGATE = "delegate"
+    EXTERNAL = "external"
+    AUTONOMOUS = "autonomous"
+
+class UnauthorizedExecutionError(Exception):
+    """Raised when an operation is attempted without proper ExecutionAuthority."""
+    pass
+
+@dataclass(frozen=True, slots=True)
+class ExecutionAuthority:
+    proposal_id: str
+    proposal_version: int
+    workspace_id: str
+    granted_at: str
+    _minted_internally: bool = field(init=False, default=True)
+

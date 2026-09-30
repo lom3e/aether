@@ -12,7 +12,8 @@ import urllib.parse
 import urllib.request
 
 from aether.agents.agent import Agent
-from aether.agents.lifecycle import AgentLifecycleState
+from aether.agents.lifecycle import AgentLifecycle
+from aether.core.execution import ExecutionAuthority, UnauthorizedExecutionError
 from aether.core.execution import ExecutionContext, ExecutionResult, ExecutionStatus, Task
 
 logger = logging.getLogger(__name__)
@@ -143,11 +144,25 @@ class ExternalAgentAdapter(Agent):
     def endpoint_url(self) -> str | None:
         return self.external_config.endpoint_url
 
-    def execute(self, task: Task, context: ExecutionContext | None = None) -> ExecutionResult:
+    def execute(
+        self,
+        task: Task,
+        context: ExecutionContext | None = None,
+        authority: ExecutionAuthority | None = None,
+    ) -> ExecutionResult:
         """
         Executes a task by dispatching it over the configured external protocol.
         """
+        if not authority:
+            raise UnauthorizedExecutionError(f"External agent {self.name} requires execution authority.")
+        if not isinstance(authority, ExecutionAuthority):
+            raise UnauthorizedExecutionError(f"Invalid authority type for external agent {self.name}.")
+        # Verify workspace if task provides it
+        if task.workspace_id and authority.workspace_id != task.workspace_id:
+            raise UnauthorizedExecutionError(f"Authority workspace '{authority.workspace_id}' does not match task workspace '{task.workspace_id}'.")
+
         self.lifecycle.start()
+
         start_time = time.time()
         meta = {
             "task_id": task.id,
