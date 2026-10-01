@@ -125,8 +125,9 @@ def test_canonical_mission_approval_notification():
 # 2. ActionExecutor Idempotency (Approve / Reject)
 # ---------------------------------------------------------------------------
 
-def test_action_executor_approve_idempotent(temp_workspace):
+def test_action_executor_approve_idempotent(temp_workspace, accepted_authority_factory):
     executor = temp_workspace.actions
+    _, auth = accepted_authority_factory(temp_workspace, title="Important Meeting")
 
     # Initial execution request requires approval (ACT tier)
     execution = executor.execute(
@@ -134,6 +135,7 @@ def test_action_executor_approve_idempotent(temp_workspace):
         workspace_id="p04_ws",
         input_data={"title": "Important Meeting", "start_time": "2026-10-01T10:00:00Z"},
         auto_approve=False,
+        authority=auth,
     )
     assert execution.status == ActionExecutionStatus.PENDING_APPROVAL
 
@@ -151,14 +153,16 @@ def test_action_executor_approve_idempotent(temp_workspace):
         executor.reject(execution.id, reason="Changed mind")
 
 
-def test_action_executor_reject_idempotent(temp_workspace):
+def test_action_executor_reject_idempotent(temp_workspace, accepted_authority_factory):
     executor = temp_workspace.actions
+    _, auth = accepted_authority_factory(temp_workspace, title="Risky Event")
 
     execution = executor.execute(
         action_id="calendar.create_event",
         workspace_id="p04_ws",
         input_data={"title": "Risky Event", "start_time": "2026-10-02T10:00:00Z"},
         auto_approve=False,
+        authority=auth,
     )
     assert execution.status == ActionExecutionStatus.PENDING_APPROVAL
 
@@ -248,10 +252,11 @@ async def test_mission_runtime_approve_and_reject_gate_idempotent(temp_workspace
 # ---------------------------------------------------------------------------
 
 @pytest.mark.asyncio
-async def test_canonical_approval_endpoints_action_flow(temp_workspace):
+async def test_canonical_approval_endpoints_action_flow(temp_workspace, accepted_authority_factory):
     """Test GET details, POST approve, and POST reject on /api/approvals/{id}."""
     executor = temp_workspace.actions
     notif_store = NotificationStore(db_path=temp_workspace.notifications_db_path)
+    _, auth = accepted_authority_factory(temp_workspace, title="Client Sync Review")
 
     # Create pending execution
     execution = executor.execute(
@@ -259,6 +264,7 @@ async def test_canonical_approval_endpoints_action_flow(temp_workspace):
         workspace_id=temp_workspace.name,
         input_data={"title": "Client Sync", "start_time": "2026-10-10T12:00:00Z"},
         auto_approve=False,
+        authority=auth,
     )
 
     # Create associated unread notification
@@ -309,15 +315,17 @@ async def test_canonical_approval_endpoints_action_flow(temp_workspace):
 
 
 @pytest.mark.asyncio
-async def test_canonical_approval_reject_flow(temp_workspace):
+async def test_canonical_approval_reject_flow(temp_workspace, accepted_authority_factory):
     executor = temp_workspace.actions
     notif_store = NotificationStore(db_path=temp_workspace.notifications_db_path)
+    _, auth = accepted_authority_factory(temp_workspace, title="Sync Review")
 
     execution = executor.execute(
         action_id="calendar.create_event",
         workspace_id=temp_workspace.name,
         input_data={"title": "Declined Sync", "start_time": "2026-10-10T12:00:00Z"},
         auto_approve=False,
+        authority=auth,
     )
 
     notif = Notification(
@@ -367,13 +375,16 @@ async def test_canonical_approval_unknown_target_404(temp_workspace):
 # 5. PersonalAgentService Truthful Step Statuses (Forensic Audit #14 & #15)
 # ---------------------------------------------------------------------------
 
-def test_personal_agent_truthful_act_and_do_flows(temp_workspace):
+def test_personal_agent_truthful_act_and_do_flows(temp_workspace, accepted_authority_factory):
     personal_svc = temp_workspace.personal
+    _, auth_act = accepted_authority_factory(temp_workspace, title="Schedule investor meeting")
+    _, auth_do = accepted_authority_factory(temp_workspace, title="Create notes file")
 
     # 1. ACT Flow with approval requirement
     res_act = personal_svc.process_prompt(
         workspace_id=temp_workspace.name,
         prompt="Schedule a meeting with investor tomorrow at 9am",
+        authority=auth_act,
     )
     assert res_act.tier == IntentTier.ACT
     assert res_act.action_execution_id is not None
@@ -386,6 +397,7 @@ def test_personal_agent_truthful_act_and_do_flows(temp_workspace):
     res_do = personal_svc.process_prompt(
         workspace_id=temp_workspace.name,
         prompt="Create a file named notes.md with project overview",
+        authority=auth_do,
     )
     assert res_do.tier == IntentTier.DO
     assert res_do.action_execution_id is not None

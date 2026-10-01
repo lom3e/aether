@@ -387,5 +387,78 @@ class ExecutionBoundary:
                 f"Unaccepted or revoked proposals cannot authorize execution."
             )
 
+        # Scope and constraint validation
+        if action_or_boundary:
+            act_clean = action_or_boundary.strip()
+            constraints = getattr(proposal, "constraints", []) or []
+
+            # 1. Negative constraint check (explicit deny/prohibit/disallow)
+            for c in constraints:
+                c_clean = str(c).strip()
+                for prefix in ("prohibit:", "deny:", "disallow:", "blocked:"):
+                    if c_clean.lower().startswith(prefix):
+                        prohibited_act = c_clean[len(prefix):].strip()
+                        if prohibited_act and (act_clean == prohibited_act or act_clean.startswith(f"{prohibited_act}.")):
+                            raise UnauthorizedExecutionError(
+                                f"Action '{act_clean}' is explicitly prohibited by proposal '{proposal.id}' constraints: '{c}'."
+                            )
+
+            # 2. Strict allow-list constraint check (if proposal explicitly specifies allowed actions/capabilities)
+            allowed_constraints = [
+                str(c).strip() for c in constraints
+                if str(c).strip().lower().startswith("allow:") or str(c).strip().lower().startswith("scope:")
+            ]
+            if allowed_constraints:
+                allowed_actions = set()
+                for c in allowed_constraints:
+                    prefix = "allow:" if c.lower().startswith("allow:") else "scope:"
+                    items = [a.strip() for a in c[len(prefix):].split(",") if a.strip()]
+                    allowed_actions.update(items)
+
+                base_act = act_clean.split(":")[0] if ":" in act_clean else act_clean
+                if act_clean not in allowed_actions and base_act not in allowed_actions:
+                    has_match = False
+                    for allowed in allowed_actions:
+                        if allowed.endswith(".*") and act_clean.startswith(allowed[:-2]):
+                            has_match = True
+                            break
+                        if allowed in ("*", "all"):
+                            has_match = True
+                            break
+                    if not has_match:
+                        raise UnauthorizedExecutionError(
+                            f"Execution of '{act_clean}' is outside the authorized scope of proposal '{proposal.id}'. "
+                            f"Authorized scope: {sorted(allowed_actions)}."
+                        )
+
+            # 3. Mission binding check
+            if act_clean.startswith("mission.") and ":" in act_clean:
+                target_mid = act_clean.split(":", 1)[1]
+                for c in constraints:
+                    c_clean = str(c).strip()
+                    for prefix in ("mission_id:", "bind_mission:"):
+                        if c_clean.lower().startswith(prefix):
+                            bound_mid = c_clean[len(prefix):].strip()
+                            if bound_mid and bound_mid != target_mid:
+                                raise UnauthorizedExecutionError(
+                                    f"Proposal '{proposal.id}' is bound to mission '{bound_mid}', "
+                                    f"cannot authorize execution for mission '{target_mid}'."
+                                )
+
+            # 4. Expiry constraint check
+            for c in constraints:
+                c_clean = str(c).strip()
+                if c_clean.lower().startswith("expires_at:"):
+                    exp_str = c_clean[len("expires_at:"):].strip()
+                    try:
+                        from datetime import datetime, timezone
+                        exp_dt = datetime.fromisoformat(exp_str)
+                        if datetime.now(timezone.utc) > exp_dt:
+                            raise UnauthorizedExecutionError(
+                                f"Proposal '{proposal.id}' execution authority expired at '{exp_str}'."
+                            )
+                    except (ValueError, TypeError):
+                        pass
+
         return proposal
 

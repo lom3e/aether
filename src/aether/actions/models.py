@@ -55,23 +55,6 @@ class ActionExecutionStatus(StrEnum):
     REJECTED = "rejected"
     EXPIRED = "expired"
     CANCELLED = "cancelled"
-    SUCCESS = "succeeded"
-    COMPLETED = "succeeded"
-    PENDING_APPROVAL = "waiting_approval"
-
-    def __eq__(self, other: object) -> bool:
-        if isinstance(other, ActionExecutionStatus):
-            return self.value == other.value
-        if isinstance(other, str):
-            try:
-                resolved = self.from_str(other)
-                return self.value == resolved.value
-            except ValueError:
-                return self.value == other
-        return super().__eq__(other)
-
-    __hash__ = StrEnum.__hash__
-
     @classmethod
     def from_str(cls, val: str) -> ActionExecutionStatus:
         if isinstance(val, cls):
@@ -95,6 +78,24 @@ class ActionExecutionStatus(StrEnum):
         if clean in aliases:
             return aliases[clean]
         raise ValueError(f"Unknown action execution status: '{val}'")
+
+    def __eq__(self, other: object) -> bool:
+        if isinstance(other, (str, ActionExecutionStatus)):
+            try:
+                parsed = ActionExecutionStatus.from_str(str(other))
+                return self.value == parsed.value
+            except ValueError:
+                return False
+        return super().__eq__(other)
+
+    def __hash__(self) -> int:
+        return hash(self.value)
+
+
+# Explicit legacy attribute aliases for backward compatibility without custom equality
+ActionExecutionStatus.SUCCESS = ActionExecutionStatus.SUCCEEDED  # type: ignore[attr-defined]
+ActionExecutionStatus.COMPLETED = ActionExecutionStatus.SUCCEEDED  # type: ignore[attr-defined]
+ActionExecutionStatus.PENDING_APPROVAL = ActionExecutionStatus.WAITING_APPROVAL  # type: ignore[attr-defined]
 
 
 VALID_ACTION_TRANSITIONS: dict[ActionExecutionStatus, set[ActionExecutionStatus]] = {

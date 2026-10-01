@@ -167,3 +167,75 @@ def test_external_agent_adapter_enforces_persistent_authority(tmp_path, accepted
     )
     res = adapter.execute(task_auth)
     assert res.success is True
+
+
+def test_authority_scope_and_constraint_enforcement(tmp_path, accepted_authority_factory):
+    """Verifies that ExecutionBoundary rejects execution outside authorized proposal scope and constraints."""
+    ws = Workspace.get_or_init(tmp_path / "ws_scope_test", "Scope WS")
+    reg = ActionRegistry()
+    store = ActionStore(tmp_path / "ws_scope_test" / "actions.db")
+    executor = ActionExecutor(
+        registry=reg,
+        store=store,
+        project_path=tmp_path / "ws_scope_test",
+        workspace=ws,
+        personal_store=ws.personal_store,
+    )
+
+    # 1. Proposal with strict allow-list scope
+    prop_scoped, auth_scoped = accepted_authority_factory(
+        ws,
+        title="Scoped Proposal",
+        constraints=["allow:notifications.configure_channel,notifications.list_channels"],
+    )
+
+    # In-scope action succeeds (or requires approval, but authority validates)
+    res_in_scope = executor.execute(
+        action_id="notifications.configure_channel",
+        workspace_id=ws.name,
+        input_data={"channel_type": "desktop", "enabled": True},
+        authority=auth_scoped,
+    )
+    assert res_in_scope is not None
+
+    # Out-of-scope action is REJECTED
+    with pytest.raises(UnauthorizedExecutionError) as exc_scope:
+        executor.execute(
+            action_id="notifications.send_briefing",
+            workspace_id=ws.name,
+            input_data={"channel": "test", "content": "hello"},
+            authority=auth_scoped,
+        )
+    assert "outside the authorized scope" in str(exc_scope.value)
+
+    # 2. Proposal with explicit negative constraint (deny/prohibit)
+    prop_prohibit, auth_prohibit = accepted_authority_factory(
+        ws,
+        title="Prohibited Action Proposal",
+        constraints=["prohibit:notifications.send_briefing"],
+    )
+
+    with pytest.raises(UnauthorizedExecutionError) as exc_deny:
+        executor.execute(
+            action_id="notifications.send_briefing",
+            workspace_id=ws.name,
+            input_data={"channel": "test", "content": "hello"},
+            authority=auth_prohibit,
+        )
+    assert "explicitly prohibited" in str(exc_deny.value)
+
+    # 3. Expired proposal constraint
+    prop_exp, auth_exp = accepted_authority_factory(
+        ws,
+        title="Expired Authority Proposal",
+        constraints=["expires_at:2020-01-01T00:00:00Z"],
+    )
+
+    with pytest.raises(UnauthorizedExecutionError) as exc_exp:
+        executor.execute(
+            action_id="notifications.configure_channel",
+            workspace_id=ws.name,
+            input_data={"channel_type": "desktop", "enabled": True},
+            authority=auth_exp,
+        )
+    assert "expired" in str(exc_exp.value)

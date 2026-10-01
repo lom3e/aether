@@ -198,6 +198,7 @@ def make_test_accepted_authority(
     workspace: Any,
     title: str = "Authorized Test Execution",
     objective: str = "Test execution of authorized actions and delegation",
+    constraints: list[str] | None = None,
 ) -> Any:
     """
     Standard fixture/helper for migrating legacy tests to the Phase A
@@ -229,6 +230,7 @@ def make_test_accepted_authority(
         raw_input=f"Authorized intent: {title}",
         source_surface="test_suite",
         created_at=datetime.now(timezone.utc).isoformat(),
+        constraints=list(constraints or []),
     ))
     proposal = MissionProposal(
         id=f"prop-{uuid.uuid4().hex[:10]}",
@@ -239,6 +241,7 @@ def make_test_accepted_authority(
         why="Automated test execution under Phase A lifecycle",
         context_summary="Test context pack",
         confidence=1.0,
+        constraints=list(constraints or []),
         status=ProposalStatus.READY_FOR_ACCEPTANCE,
     )
     p_store.save_proposal(proposal)
