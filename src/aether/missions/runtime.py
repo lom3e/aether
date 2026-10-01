@@ -34,7 +34,7 @@ from aether.missions.models import (
 from aether.missions.graph_compiler import ExecutionGraphCompiler
 from aether.missions.reviewer import QualityGateEvaluation, QualityGateEvaluator
 from aether.missions.store import MissionStore
-from aether.core.execution import ExecutionAuthority, UnauthorizedExecutionError
+from aether.core.execution import ExecutionAuthority, ExecutionBoundary, UnauthorizedExecutionError
 from aether.workspace.workspace import Workspace
 
 logger = logging.getLogger(__name__)
@@ -75,6 +75,7 @@ class MissionExecutionHandle:
     task: asyncio.Task[Any] | None = None
     heartbeat_task: asyncio.Task[Any] | None = None
     started_at: float = field(default_factory=time.time)
+    authority: ExecutionAuthority | None = None
 
 
 class MissionRuntime:
@@ -109,6 +110,11 @@ class MissionRuntime:
     @property
     def instance_id(self) -> str:
         return self._instance_id
+
+    def _resolve_personal_store(self, workspace_id: str | None = None) -> Any:
+        if hasattr(self.workspace, "personal_store") and self.workspace.personal_store:
+            return self.workspace.personal_store
+        return getattr(self.workspace, "personal", None)
 
     # ---------------------------------------------------------------------------
     # Lifecycle & Recovery
@@ -178,19 +184,34 @@ class MissionRuntime:
         """
         Starts execution of a mission.
         """
-        if not authority:
-            raise UnauthorizedExecutionError(f"Starting mission {mission_id} requires execution authority.")
-        if not isinstance(authority, ExecutionAuthority):
-            raise UnauthorizedExecutionError(f"Invalid authority type for mission {mission_id}.")
-        # We'll check workspace in the async block when we fetch the mission.
-
         async with self._lock:
             mission = self.store.get_mission(mission_id)
             if not mission:
                 raise NotFoundError(f"Mission {mission_id} not found.")
 
-            if mission.workspace_id != authority.workspace_id:
-                raise UnauthorizedExecutionError(f"Authority workspace '{authority.workspace_id}' does not match mission workspace '{mission.workspace_id}'.")
+            # Validate execution authority persistently against PersonalStore
+            effective_auth = authority
+            if effective_auth is None and mission.metadata:
+                if mission.metadata.get("authority"):
+                    try:
+                        effective_auth = ExecutionAuthority.from_dict(mission.metadata["authority"])
+                    except Exception:
+                        pass
+                elif mission.metadata.get("proposal_id"):
+                    prop_id = mission.metadata["proposal_id"]
+                    p_store = self._resolve_personal_store(mission.workspace_id)
+                    if p_store:
+                        prop = p_store.get_proposal(prop_id, workspace_id=mission.workspace_id)
+                        if prop and getattr(prop, "status", None) == "accepted":
+                            effective_auth = ExecutionBoundary.issue_authority(prop)
+
+            p_store = self._resolve_personal_store(mission.workspace_id)
+            ExecutionBoundary.validate_authority(
+                authority=effective_auth,
+                workspace_id=mission.workspace_id,
+                store=p_store,
+                action_or_boundary=f"mission.start:{mission_id}",
+            )
 
             active = self.store.get_active_execution(mission_id)
             if active and active.status == ExecutionStatus.RUNNING and active.lease_owner:
@@ -202,15 +223,20 @@ class MissionRuntime:
                 exec_milestones = self.store.get_execution_milestones(active.id)
                 has_pending = any(em.status in (MilestoneExecutionStatus.PENDING, MilestoneExecutionStatus.RUNNING) for em in exec_milestones)
                 if has_pending:
-                    return await self._launch_execution(active, mission, team_name)
+                    return await self._launch_execution(active, mission, team_name, authority=effective_auth)
 
             execution = self.store.create_execution(
                 mission_id=mission_id,
                 team_name=team_name or mission.team_name,
             )
-            return await self._launch_execution(execution, mission, team_name)
+            return await self._launch_execution(execution, mission, team_name, authority=effective_auth)
 
-    async def rerun_mission(self, mission_id: str, team_name: str | None = None) -> MissionExecution:
+    async def rerun_mission(
+        self,
+        mission_id: str,
+        team_name: str | None = None,
+        authority: ExecutionAuthority | None = None,
+    ) -> MissionExecution:
         """
         Dispatches a brand new Execution Run (Run #N+1) for a Mission.
         Preserves all past runs, past deliverables, and past activity records.
@@ -220,8 +246,25 @@ class MissionRuntime:
             if not mission:
                 raise NotFoundError(f"Mission {mission_id} not found.")
 
-            if mission.workspace_id != authority.workspace_id:
-                raise UnauthorizedExecutionError(f"Authority workspace '{authority.workspace_id}' does not match mission workspace '{mission.workspace_id}'.")
+            effective_auth = authority
+            if effective_auth is None:
+                past_execs = self.store.list_executions(mission_id) if hasattr(self.store, "list_executions") else []
+                if past_execs:
+                    for pe in sorted(past_execs, key=lambda x: x.run_number, reverse=True):
+                        if pe.metadata and pe.metadata.get("authority"):
+                            try:
+                                effective_auth = ExecutionAuthority.from_dict(pe.metadata["authority"])
+                                break
+                            except Exception:
+                                pass
+
+            p_store = self._resolve_personal_store(mission.workspace_id)
+            ExecutionBoundary.validate_authority(
+                authority=effective_auth,
+                workspace_id=mission.workspace_id,
+                store=p_store,
+                action_or_boundary=f"mission.rerun:{mission_id}",
+            )
 
             active = self.store.get_active_execution(mission_id)
             if active and active.status == ExecutionStatus.RUNNING and active.lease_owner:
@@ -231,7 +274,7 @@ class MissionRuntime:
                 mission_id=mission_id,
                 team_name=team_name or mission.team_name,
             )
-            return await self._launch_execution(execution, mission, team_name)
+            return await self._launch_execution(execution, mission, team_name, authority=effective_auth)
 
     async def pause_mission(self, mission_id: str, reason: str | None = None) -> MissionExecution:
         """
@@ -277,7 +320,11 @@ class MissionRuntime:
             return updated or active
 
 
-    async def resume_mission(self, mission_id: str) -> MissionExecution:
+    async def resume_mission(
+        self,
+        mission_id: str,
+        authority: ExecutionAuthority | None = None,
+    ) -> MissionExecution:
         """
         Resumes an interrupted execution from its first uncompleted milestone.
         """
@@ -286,12 +333,24 @@ class MissionRuntime:
             if not mission:
                 raise NotFoundError(f"Mission {mission_id} not found.")
 
-            if mission.workspace_id != authority.workspace_id:
-                raise UnauthorizedExecutionError(f"Authority workspace '{authority.workspace_id}' does not match mission workspace '{mission.workspace_id}'.")
-
             active = self.store.get_active_execution(mission_id)
             if not active:
                 raise NotFoundError(f"No execution found for mission {mission_id}.")
+
+            effective_auth = authority
+            if effective_auth is None and active.metadata and active.metadata.get("authority"):
+                try:
+                    effective_auth = ExecutionAuthority.from_dict(active.metadata["authority"])
+                except Exception:
+                    pass
+
+            p_store = self._resolve_personal_store(mission.workspace_id)
+            ExecutionBoundary.validate_authority(
+                authority=effective_auth,
+                workspace_id=mission.workspace_id,
+                store=p_store,
+                action_or_boundary=f"mission.resume:{mission_id}",
+            )
 
             if active.status == ExecutionStatus.RUNNING and active.id in self._active_executions:
                 return active
@@ -299,7 +358,7 @@ class MissionRuntime:
             if active.status not in (ExecutionStatus.INTERRUPTED, ExecutionStatus.PENDING):
                 raise ConflictError(f"Cannot resume execution in status {active.status.value}.")
 
-            return await self._launch_execution(active, mission, active.team_name)
+            return await self._launch_execution(active, mission, active.team_name, authority=effective_auth)
 
     async def cancel_mission(self, mission_id: str, reason: str | None = None) -> MissionExecution:
         """
@@ -343,7 +402,12 @@ class MissionRuntime:
             return updated or active
 
 
-    async def retry_mission(self, mission_id: str, milestone_id: str | None = None) -> MissionExecution:
+    async def retry_mission(
+        self,
+        mission_id: str,
+        milestone_id: str | None = None,
+        authority: ExecutionAuthority | None = None,
+    ) -> MissionExecution:
         """
         Resets failed milestone(s) to pending and resumes execution.
         """
@@ -351,6 +415,25 @@ class MissionRuntime:
             active = self.store.get_active_execution(mission_id)
             if not active:
                 raise NotFoundError(f"No execution found for mission {mission_id}.")
+
+            mission = self.store.get_mission(mission_id)
+            if not mission:
+                raise NotFoundError(f"Mission {mission_id} not found.")
+
+            effective_auth = authority
+            if effective_auth is None and active.metadata and active.metadata.get("authority"):
+                try:
+                    effective_auth = ExecutionAuthority.from_dict(active.metadata["authority"])
+                except Exception:
+                    pass
+
+            p_store = self._resolve_personal_store(mission.workspace_id)
+            ExecutionBoundary.validate_authority(
+                authority=effective_auth,
+                workspace_id=mission.workspace_id,
+                store=p_store,
+                action_or_boundary=f"mission.retry:{mission_id}",
+            )
 
             if milestone_id:
                 self.store.update_execution_milestone(
@@ -371,8 +454,7 @@ class MissionRuntime:
                         )
 
             self.store.update_execution(active.id, status=ExecutionStatus.INTERRUPTED, error_message=None)
-            mission = self.store.get_mission(mission_id)
-            return await self._launch_execution(active, mission, active.team_name)
+            return await self._launch_execution(active, mission, active.team_name, authority=effective_auth)
 
     async def approve_gate(
         self,
@@ -602,6 +684,7 @@ class MissionRuntime:
         execution: MissionExecution,
         mission: Mission,
         team_name: str | None = None,
+        authority: ExecutionAuthority | None = None,
     ) -> MissionExecution:
         """
         Acquires lease, creates in-memory handle, and starts execution background task.
@@ -618,6 +701,12 @@ class MissionRuntime:
                 "Another runner may actively hold the lease."
             )
 
+        if authority is not None:
+            if execution.metadata is None:
+                execution.metadata = {}
+            execution.metadata["authority"] = authority.to_dict()
+            self.store.update_execution(execution.id, metadata=execution.metadata)
+
         cancel_token = threading.Event()
         handle = MissionExecutionHandle(
             execution_id=execution.id,
@@ -625,6 +714,7 @@ class MissionRuntime:
             cancellation_token=cancel_token,
             owner_token=self._instance_id,
             started_at=time.time(),
+            authority=authority,
         )
 
         handle.heartbeat_task = asyncio.create_task(self._heartbeat_loop(execution.id, self._instance_id))
@@ -872,6 +962,7 @@ class MissionRuntime:
                     mission_id=mid,
                     parent_id=exec_id,
                     mode=None if (target_agent and _has_usable_runtime(self.workspace) and target_agent in getattr(self.workspace.runtime, "_agents", {})) else ExecutionMode.DELEGATE,
+                    authority=handle.authority,
                 )
 
                 if _has_usable_runtime(self.workspace):
@@ -1205,12 +1296,13 @@ class MissionRuntime:
                         created_files.clear()
                         rework_task = Task(
                             instruction=rework_instruction,
-                            agent_name=target_agent or "unknown",
+                            agent_name="Workforce Lead",
                             workspace_id=getattr(self.workspace, "name", None) or "default",
                             session_id=mid,
                             mission_id=mid,
                             parent_id=exec_id,
                             mode=ExecutionMode.DELEGATE,
+                            authority=handle.authority,
                         )
 
                         if _has_usable_runtime(self.workspace):

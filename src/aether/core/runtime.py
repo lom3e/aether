@@ -148,6 +148,7 @@ class Runtime:
             tool_registry=agent.tool_registry,
             skills=agent.resolve_skills(),
             tools=tuple(agent.tools),
+            authority=task.authority,
             metadata={
                 "agent_id": agent.id,
                 "agent_role": agent.role,
@@ -264,6 +265,7 @@ class Runtime:
                 workspace_id=ws_id,
                 input_data=action_args,
                 auto_approve=True,
+                authority=request.authority,
             )
             if execution.status == ActionExecutionStatus.FAILED:
                 return ExecutionResult(
@@ -339,10 +341,11 @@ class Runtime:
             workspace_id=ws_id,
             input_data=action_args,
             auto_approve=False,
+            authority=request.authority,
         )
 
         from aether.actions.models import ActionExecutionStatus
-        if execution.status in (ActionExecutionStatus.WAITING_APPROVAL, ActionExecutionStatus.PENDING_APPROVAL):
+        if execution.status in (ActionExecutionStatus.WAITING_APPROVAL,):
             if action_id == "email.send":
                 target_desc = f"Send email to **{action_args.get('to', '')}**\n\nSubject: {action_args.get('subject', '')}\n\n{action_args.get('body', '')}"
             elif action_id == "slack.send_message":
@@ -422,6 +425,21 @@ class Runtime:
         prompt = request.instruction
         ws_id = request.workspace_id or "default"
         cb = progress_callback or (lambda pct, msg: None)
+
+        # Macro-pass 1.2: Enforce execution authority boundary for delegated workforce
+        from aether.core.execution import ExecutionBoundary
+        p_store = None
+        if self.workspace and hasattr(self.workspace, "personal_store"):
+            p_store = self.workspace.personal_store
+        if not p_store and self.workspace and hasattr(self.workspace, "personal"):
+            p_store = getattr(self.workspace.personal, "store", None)
+
+        ExecutionBoundary.validate_authority(
+            authority=request.authority,
+            workspace_id=ws_id,
+            store=p_store,
+            action_or_boundary=f"workforce.delegate:{ws_id}",
+        )
 
         cb(15, "Inspecting workforce configuration and available agents")
 
@@ -551,6 +569,7 @@ class Runtime:
             parent_id=request.id,
             session_id=request.session_id,
             workspace_id=ws_id,
+            authority=request.authority,
         )
         mgr_result = coordinator.execute(wf_task)
 
@@ -648,12 +667,30 @@ class Runtime:
                 execution_id=request.id,
             )
 
+        from aether.tools.base import ToolClassification, ToolExecutionContext
+        from aether.core.execution import ExecutionBoundary, UnauthorizedExecutionError
+
+        classification = getattr(tool, "classification", ToolClassification.UNKNOWN)
+        if classification != ToolClassification.READ_ONLY:
+            p_store = None
+            if self.workspace and hasattr(self.workspace, "personal_store"):
+                p_store = self.workspace.personal_store
+            if not p_store and self.workspace and hasattr(self.workspace, "personal"):
+                p_store = getattr(self.workspace.personal, "store", None)
+            ExecutionBoundary.validate_authority(
+                authority=request.authority,
+                workspace_id=request.workspace_id or "default",
+                store=p_store,
+                action_or_boundary=f"tool:{tool.name}",
+            )
+
         try:
             import inspect
-            from aether.tools.base import ToolExecutionContext
 
             t_ctx = ToolExecutionContext(
                 task_id=request.id,
+                workspace_id=request.workspace_id,
+                authority=request.authority,
                 metadata=request.metadata or {},
             )
             sig = inspect.signature(tool.execute)

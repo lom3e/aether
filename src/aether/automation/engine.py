@@ -45,7 +45,7 @@ class AutomationEngine:
         self._recent_fingerprints: dict[str, float] = {}  # fingerprint -> timestamp
         self.dedup_window_seconds: float = dedup_window_seconds
 
-    async def _execute_single_step(self, step: PipelineStep, prompt: str, team: Any) -> tuple[str, str, str | None]:
+    async def _execute_single_step(self, step: PipelineStep, prompt: str, team: Any, authority: Any = None) -> tuple[str, str, str | None]:
         """Executes a single step via team or canonical runtime. Returns (status, output, error)."""
         if team and hasattr(team, "run"):
             result = await asyncio.to_thread(team.run, prompt, target_agent=step.agent_name)
@@ -56,11 +56,13 @@ class AutomationEngine:
 
         if hasattr(self.workspace, "runtime") and self.workspace.runtime:
             from aether.core.execution import ExecutionMode, ExecutionStatus, Task
+            ws_id = getattr(self.workspace, "name", None) or getattr(self.workspace, "id", "default")
             runtime_task = Task(
                 instruction=prompt,
-                workspace_id=getattr(self.workspace, "id", "default"),
+                workspace_id=ws_id,
                 agent_name=step.agent_name,
                 mode=ExecutionMode.DELEGATE,
+                authority=authority,
             )
             result = await asyncio.to_thread(self.workspace.runtime.execute, runtime_task)
             if result.status == ExecutionStatus.WAITING_FOR_APPROVAL:
@@ -77,11 +79,27 @@ class AutomationEngine:
         trigger_type: str = "manual",
         trigger_payload: dict[str, Any] | None = None,
         bypass_dedup: bool = False,
+        authority: Any = None,
     ) -> AutomationRunRecord:
         start_time = time.time()
         now_dt = datetime.now(timezone.utc)
         now_iso = now_dt.isoformat()
         payload = trigger_payload or {}
+
+        # Resolve execution authority if provided or in metadata
+        auth_obj = authority
+        if not auth_obj:
+            auth_meta = payload.get("authority") or (automation.metadata or {}).get("authority")
+            if auth_meta:
+                if isinstance(auth_meta, dict):
+                    from aether.core.execution import ExecutionAuthority
+                    try:
+                        auth_obj = ExecutionAuthority.from_dict(auth_meta)
+                    except Exception as auth_exc:
+                        logger.error("Failed to parse authority from metadata: %s", auth_exc)
+                        auth_obj = None
+                else:
+                    auth_obj = auth_meta
 
         # 1. Deduplication / Idempotency Check
         fingerprint = TriggerEvaluator.compute_fingerprint(
@@ -219,7 +237,7 @@ class AutomationEngine:
 
             for attempt in range(max_retries + 1):
                 try:
-                    step_status, step_output, step_err = await self._execute_single_step(step, prompt, team)
+                    step_status, step_output, step_err = await self._execute_single_step(step, prompt, team, authority=auth_obj)
                 except Exception as exc:
                     step_status = "failed"
                     step_output = ""

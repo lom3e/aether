@@ -11,7 +11,8 @@ import pytest
 from aether.agents.agent import Agent
 from aether.agents.external import ExternalAgentAdapter, ExternalAgentConfig
 from aether.agents.lifecycle import AgentLifecycleState
-from aether.core.execution import ExecutionContext, ExecutionResult, ExecutionStatus, Task
+from aether.core.execution import ExecutionContext, ExecutionResult, ExecutionStatus, Task, UnauthorizedExecutionError
+from aether.tools.base import ToolExecutionContext
 from aether.tools.mcp import MCPClient, MCPTool, create_mcp_tools, register_mcp_server
 from aether.tools.registry import ToolRegistry
 from aether.team.config import AgentConfig, Relationship, TeamConfig
@@ -20,6 +21,8 @@ from aether.actions.registry import ActionRegistry
 from aether.actions.executor import ActionExecutor
 from aether.actions.store import ActionStore
 from aether.personal.service import PersonalAgentService, IntentTier
+from aether.workspace.workspace import Workspace
+from conftest import make_test_accepted_authority
 
 
 class MockHttpWorkerHandler(http.server.BaseHTTPRequestHandler):
@@ -67,7 +70,9 @@ def http_worker_server():
     server.server_close()
 
 
-def test_external_agent_http_protocol(http_worker_server):
+def test_external_agent_http_protocol(http_worker_server, tmp_path):
+    ws = Workspace.get_or_init(tmp_path)
+    _, auth = make_test_accepted_authority(ws, title="HTTP Protocol External Agent")
     config = ExternalAgentConfig(
         name="cloud_analyst",
         role="deep_analyst",
@@ -77,9 +82,16 @@ def test_external_agent_http_protocol(http_worker_server):
         timeout_seconds=5.0,
     )
     adapter = ExternalAgentAdapter(config=config)
+    adapter.workspace = ws
 
-    task = Task(instruction="Analyze market volatility in Q3", id="task-ext-1")
-    result = adapter.execute(task)
+    # Negative check: fail-closed without authority
+    task_unauth = Task(instruction="Analyze market volatility in Q3", id="task-ext-unauth", workspace_id=ws.name)
+    with pytest.raises(UnauthorizedExecutionError):
+        adapter.execute(task_unauth)
+
+    # Positive check: succeeds with genuine accepted authority
+    task = Task(instruction="Analyze market volatility in Q3", id="task-ext-1", authority=auth, workspace_id=ws.name)
+    result = adapter.execute(task, authority=auth)
 
     assert result.success is True
     assert result.status == ExecutionStatus.COMPLETED
@@ -91,7 +103,9 @@ def test_external_agent_http_protocol(http_worker_server):
     assert adapter.lifecycle.state == AgentLifecycleState.COMPLETED
 
 
-def test_external_agent_http_error(http_worker_server):
+def test_external_agent_http_error(http_worker_server, tmp_path):
+    ws = Workspace.get_or_init(tmp_path)
+    _, auth = make_test_accepted_authority(ws, title="Failing HTTP Worker")
     config = ExternalAgentConfig(
         name="failing_worker",
         protocol="http",
@@ -99,9 +113,10 @@ def test_external_agent_http_error(http_worker_server):
         timeout_seconds=5.0,
     )
     adapter = ExternalAgentAdapter(config=config)
+    adapter.workspace = ws
 
-    task = Task(instruction="Will fail", id="task-ext-err")
-    result = adapter.execute(task)
+    task = Task(instruction="Will fail", id="task-ext-err", authority=auth, workspace_id=ws.name)
+    result = adapter.execute(task, authority=auth)
 
     assert result.success is False
     assert result.status == ExecutionStatus.FAILED
@@ -109,7 +124,9 @@ def test_external_agent_http_error(http_worker_server):
     assert adapter.lifecycle.state == AgentLifecycleState.FAILED
 
 
-def test_external_agent_command_protocol():
+def test_external_agent_command_protocol(tmp_path):
+    ws = Workspace.get_or_init(tmp_path)
+    _, auth = make_test_accepted_authority(ws, title="CLI Batch Processor")
     # Use python subprocess to simulate a CLI worker that reads JSON from stdin and prints JSON
     code = (
         "import sys, json; "
@@ -126,9 +143,10 @@ def test_external_agent_command_protocol():
         timeout_seconds=10.0,
     )
     adapter = ExternalAgentAdapter(config=config)
+    adapter.workspace = ws
 
-    task = Task(instruction="Process batch 42", id="task-cli-1")
-    result = adapter.execute(task)
+    task = Task(instruction="Process batch 42", id="task-cli-1", authority=auth, workspace_id=ws.name)
+    result = adapter.execute(task, authority=auth)
 
     assert result.success is True
     assert result.status == ExecutionStatus.COMPLETED
@@ -230,7 +248,9 @@ for line in sys.stdin:
         assert "Tax: 11.0" in reg_out
 
 
-def test_team_assembling_external_agent(http_worker_server):
+def test_team_assembling_external_agent(http_worker_server, tmp_path):
+    ws = Workspace.get_or_init(tmp_path)
+    _, auth = make_test_accepted_authority(ws, title="Team External Delegation")
     config = TeamConfig(
         name="hybrid_team",
         agents=[
@@ -258,30 +278,50 @@ def test_team_assembling_external_agent(http_worker_server):
     assert worker is not None
     assert isinstance(worker, ExternalAgentAdapter)
     assert worker.protocol == "http"
+    worker.workspace = ws
 
     # Verify delegation was wired to coordinator via AgentTool
     coordinator = team._agents.get("coordinator")
     assert coordinator is not None
     assert coordinator.tool_registry.has("cloud_worker")
+    coordinator.workspace = ws
 
     # Delegate directly through AgentTool
     tool = coordinator.tool_registry.get("cloud_worker")
-    res_str = tool.execute("Crunch numbers for Q4")
+    t_ctx = ToolExecutionContext(authority=auth, workspace_id=ws.name)
+    res_str = tool.execute("Crunch numbers for Q4", context=t_ctx)
     assert "Processed instruction: Crunch numbers for Q4" in res_str
 
 
 def test_action_executor_delegate_external(http_worker_server, tmp_path):
+    ws = Workspace.get_or_init(tmp_path)
+    _, auth = make_test_accepted_authority(ws, title="Delegate External Action")
     registry = ActionRegistry()
     action_def = registry.get("agents.delegate_external")
     assert action_def is not None
     assert action_def.tier.value == "act"
 
     store = ActionStore(tmp_path / "actions.db")
-    executor = ActionExecutor(registry=registry, store=store, project_path=tmp_path)
+    executor = ActionExecutor(registry=registry, store=store, project_path=tmp_path, workspace=ws, personal_store=ws.personal_store)
 
+    # Negative check: fail-closed without authority
+    with pytest.raises(UnauthorizedExecutionError):
+        executor.execute(
+            action_id="agents.delegate_external",
+            workspace_id=ws.name,
+            input_data={
+                "agent_name": "remote_bot",
+                "instruction": "Fetch remote logs",
+                "protocol": "http",
+                "endpoint_url": f"{http_worker_server}/execute",
+            },
+            auto_approve=True,
+        )
+
+    # Positive check: succeeds with genuine accepted authority
     exec_res = executor.execute(
         action_id="agents.delegate_external",
-        workspace_id="test_ws",
+        workspace_id=ws.name,
         input_data={
             "agent_name": "remote_bot",
             "instruction": "Fetch remote logs",
@@ -289,6 +329,7 @@ def test_action_executor_delegate_external(http_worker_server, tmp_path):
             "endpoint_url": f"{http_worker_server}/execute",
         },
         auto_approve=True,
+        authority=auth,
     )
 
     assert exec_res.status.value in ("succeeded", "success")
@@ -346,11 +387,14 @@ async def test_server_external_agent_and_mcp_routes(http_worker_server, tmp_path
     )
     team = Team(team_cfg, provider=MockProvider())
 
-    class MockApp:
-        def __init__(self, team):
-            self.state = type("State", (), {"team": team, "workspace": None})()
+    ws = Workspace.get_or_init(tmp_path)
+    _, auth = make_test_accepted_authority(ws, title="Server External Agent Route")
 
-    app = MockApp(team)
+    class MockApp:
+        def __init__(self, team, ws):
+            self.state = type("State", (), {"team": team, "workspace": ws})()
+
+    app = MockApp(team, ws)
 
     # 1. Test GET /api/agents/external
     req = Request({
@@ -365,12 +409,25 @@ async def test_server_external_agent_and_mcp_routes(http_worker_server, tmp_path
     assert agents[0]["name"] == "cloud_bot"
     assert agents[0]["protocol"] == "http"
 
-    # 2. Test POST /api/agents/external/invoke
+    # 2. Test POST /api/agents/external/invoke without authority -> 403
+    payload_unauth = ExternalAgentInvokePayload(
+        agent_name="cloud_bot",
+        instruction="Ping remote service",
+        protocol="http",
+        endpoint_url=f"{http_worker_server}/execute",
+    )
+    from fastapi.exceptions import HTTPException
+    with pytest.raises(HTTPException) as exc:
+        await invoke_external_agent(req, payload_unauth)
+    assert exc.value.status_code == 403
+
+    # 3. Test POST /api/agents/external/invoke with accepted authority -> succeeds
     payload = ExternalAgentInvokePayload(
         agent_name="cloud_bot",
         instruction="Ping remote service",
         protocol="http",
         endpoint_url=f"{http_worker_server}/execute",
+        authority=auth.to_dict(),
     )
     res = await invoke_external_agent(req, payload)
     assert res["success"] is True

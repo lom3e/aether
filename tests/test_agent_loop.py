@@ -2,13 +2,14 @@ from aether.agents.agent import Agent
 from aether.core.execution import Task, Message, ToolCall
 from aether.providers.base import AIProvider
 from aether.providers.types import ProviderResponse
-from aether.tools.base import Tool
+from aether.tools.base import Tool, ToolClassification
 from aether.tools.registry import ToolRegistry
 
 
 class DummyTool(Tool):
     name = "dummy_tool"
     description = "A dummy tool"
+    classification = ToolClassification.READ_ONLY
 
     def execute(self, input_data: str, context=None) -> str:
         return f"Processed: {input_data}"

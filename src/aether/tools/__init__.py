@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from aether.tools.base import Tool, ToolExecutionContext
+from aether.tools.base import Tool, ToolExecutionContext, ToolClassification
 from aether.tools.registry import ToolRegistry
 from aether.tools.cognitive_agent_tool import CognitiveAgentTool
 from aether.tools.decorator import tool, FunctionTool
@@ -16,6 +16,7 @@ from aether.tools.web_search import (
 __all__ = [
     "Tool",
     "ToolExecutionContext",
+    "ToolClassification",
     "ToolRegistry",
     "CognitiveAgentTool",
     "tool",

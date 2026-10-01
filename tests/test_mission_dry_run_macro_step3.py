@@ -299,17 +299,31 @@ def test_companion_dry_run_intent_and_execution(tmp_path: Path):
     assert intent.action_id == "missions.dry_run"
     assert intent.action_args["mission_id"] == "msn-audit-22"
 
-    # Process prompt in personal service
+    # Step 1: Prompt without authority produces a proposal
     msg = service.process_prompt(
         workspace_id=ws.id,
         prompt=prompt,
     )
+    assert msg.metadata.get("status") == "proposal_pending"
+    prop_id = msg.metadata["proposal_id"]
+    sess_id = msg.session_id
+
+    # Step 2: Accept proposal to obtain ExecutionAuthority
+    accepted_prop, authority = service.accept_proposal(prop_id, workspace_id=ws.id)
+
+    # Step 3: Run execution with authority
+    exec_msg = service.process_prompt(
+        workspace_id=ws.id,
+        prompt=prompt,
+        session_id=sess_id,
+        authority=authority,
+    )
 
     # Response should contain rich formatted markdown pre-flight report
-    assert "Pre-flight Inspection" in msg.content
-    assert "Readiness Score" in msg.content
-    assert "Scan Dependencies" in msg.content
-    assert "Would you like to proceed" in msg.content
+    assert "Pre-flight Inspection" in exec_msg.content
+    assert "Readiness Score" in exec_msg.content
+    assert "Scan Dependencies" in exec_msg.content
+    assert "Would you like to proceed" in exec_msg.content
 
 
 # ---------------------------------------------------------------------------

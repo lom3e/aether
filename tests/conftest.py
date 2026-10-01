@@ -192,3 +192,74 @@ def aether_server(tmp_path_factory):
 
     os.environ.pop("AETHER_E2E_BASE_URL", None)
     os.environ.pop("AETHER_E2E_TOKEN", None)
+
+
+def make_test_accepted_authority(
+    workspace: Any,
+    title: str = "Authorized Test Execution",
+    objective: str = "Test execution of authorized actions and delegation",
+) -> Any:
+    """
+    Standard fixture/helper for migrating legacy tests to the Phase A
+    Intent -> Proposal -> Acceptance -> Execution lifecycle.
+    Durably creates and accepts a valid MissionProposal in workspace.personal_store.
+    """
+    from datetime import datetime, timezone
+    import uuid
+    from aether.planning.contracts import IntentRequest, MissionProposal, ProposalStatus
+
+    ws_id = getattr(workspace, "name", None) or getattr(workspace, "id", None) or "test_ws"
+    p_store = getattr(workspace, "personal_store", None)
+    if not p_store:
+        from aether.personal.store import PersonalStore
+        root = getattr(workspace, "root", None) or getattr(workspace, "project_path", None)
+        if root:
+            p_store = PersonalStore(root / "personal.db")
+        else:
+            p_store = PersonalStore(":memory:")
+        try:
+            workspace.personal_store = p_store
+        except Exception:
+            pass
+
+    intent_id = f"intent-{uuid.uuid4().hex[:10]}"
+    p_store.save_intent_request(IntentRequest(
+        id=intent_id,
+        workspace_id=ws_id,
+        raw_input=f"Authorized intent: {title}",
+        source_surface="test_suite",
+        created_at=datetime.now(timezone.utc).isoformat(),
+    ))
+    proposal = MissionProposal(
+        id=f"prop-{uuid.uuid4().hex[:10]}",
+        intent_id=intent_id,
+        workspace_id=ws_id,
+        title=title,
+        objective=objective,
+        why="Automated test execution under Phase A lifecycle",
+        context_summary="Test context pack",
+        confidence=1.0,
+        status=ProposalStatus.READY_FOR_ACCEPTANCE,
+    )
+    p_store.save_proposal(proposal)
+
+    from unittest.mock import Mock
+    from aether.personal.service import PersonalAgentService
+    personal_svc = getattr(workspace, "personal", None)
+    if not personal_svc or isinstance(personal_svc, Mock):
+        personal_svc = PersonalAgentService(workspace=workspace, store=p_store)
+        try:
+            workspace.personal = personal_svc
+        except Exception:
+            pass
+
+    accepted_prop, authority = personal_svc.accept_proposal(
+        proposal_id=proposal.id,
+        workspace_id=ws_id,
+    )
+    return accepted_prop, authority
+
+
+@pytest.fixture
+def accepted_authority_factory():
+    return make_test_accepted_authority

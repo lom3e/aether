@@ -239,6 +239,7 @@ class AutomationScheduler:
         self,
         automation_id: str,
         payload: dict[str, Any] | None = None,
+        authority: Any = None,
     ) -> AutomationRunRecord | None:
         """Manually triggers an automation immediately, guarding against rapid concurrent double-triggers."""
         if automation_id in self._active_runs:
@@ -259,6 +260,7 @@ class AutomationScheduler:
                 automation=auto,
                 trigger_type="manual",
                 trigger_payload=payload or {},
+                authority=authority,
             )
         finally:
             self._active_runs.discard(auto.id)

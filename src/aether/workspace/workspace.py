@@ -369,6 +369,8 @@ class Workspace:
                 connection_service=self.connections,
                 project_path=self.project_path or self.root,
                 safety_policy=safety_policy,
+                workspace=self,
+                personal_store=self.personal_store,
             )
         return self._get_or_create("actions", _factory)
 
@@ -857,7 +859,7 @@ class Workspace:
         return None
 
     @classmethod
-    def get_or_init(cls, root: str | Path, name: str) -> "Workspace":
+    def get_or_init(cls, root: str | Path, name: str = "default") -> "Workspace":
         """
         Get an existing Workspace at root, or init a new one if it doesn't exist.
         """

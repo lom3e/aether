@@ -19,7 +19,7 @@ from abc import ABC, abstractmethod
 from dataclasses import dataclass
 from typing import Any
 
-from aether.tools.base import Tool
+from aether.tools.base import Tool, ToolClassification
 from aether.tools.decorator import tool
 
 
@@ -183,6 +183,7 @@ def create_web_search_tool(
     @tool(
         name="search_web",
         description="Search the web for up-to-date information, facts, articles, and documentation.",
+        classification=ToolClassification.READ_ONLY,
     )
     def search_web(query: str, max_results: int = 5) -> str:
         clean_q = str(query).strip()

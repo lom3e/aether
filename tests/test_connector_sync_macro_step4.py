@@ -180,7 +180,7 @@ def test_sync_all_connectors(tmp_path: Path):
 # 4. ActionRegistry & ActionExecutor Integration Tests
 # ---------------------------------------------------------------------------
 
-def test_connections_sync_action(tmp_path: Path):
+def test_connections_sync_action(tmp_path: Path, accepted_authority_factory):
     """Verifies executing connections.sync via ActionExecutor."""
     ws = Workspace.get_or_init(tmp_path / "ws_sync_act", "Sync Action WS")
 
@@ -188,11 +188,14 @@ def test_connections_sync_action(tmp_path: Path):
     connector = ws.connections.get_calendar_connector(ws.id)
     connector.create_event(title="Quarterly Board Briefing", start_time="2026-11-01T15:00:00Z")
 
+    _, auth = accepted_authority_factory(ws)
+
     execution = ws.actions.execute(
         action_id="connections.sync",
         workspace_id=ws.id,
         input_data={"provider": "calendar"},
         auto_approve=True,
+        authority=auth,
     )
 
     assert execution.status == ActionExecutionStatus.SUCCESS
@@ -222,12 +225,22 @@ def test_companion_sync_intent_and_response(tmp_path: Path):
     assert intent.action_id == "connections.sync"
     assert intent.action_args.get("provider") == "calendar"
 
+    # Step 1: Prompt without authority produces a proposal
     msg = service.process_prompt(workspace_id=ws.id, prompt=prompt)
+    assert msg.metadata.get("status") == "proposal_pending"
+    prop_id = msg.metadata["proposal_id"]
+    sess_id = msg.session_id
 
-    assert "External Connections Synchronized" in msg.content
-    assert "Calendar" in msg.content
-    assert "SYNCED" in msg.content
-    assert "persistent workforce memory and knowledge" in msg.content
+    # Step 2: Accept proposal to obtain ExecutionAuthority
+    accepted_prop, authority = service.accept_proposal(prop_id, workspace_id=ws.id)
+
+    # Step 3: Run execution with authority
+    exec_msg = service.process_prompt(workspace_id=ws.id, prompt=prompt, session_id=sess_id, authority=authority)
+
+    assert "External Connections Synchronized" in exec_msg.content
+    assert "Calendar" in exec_msg.content
+    assert "SYNCED" in exec_msg.content
+    assert "persistent workforce memory and knowledge" in exec_msg.content
 
 
 # ---------------------------------------------------------------------------

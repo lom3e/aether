@@ -187,11 +187,12 @@ def test_client_automation_bi_and_executive_report():
         assert "Next Actions" in report
 
 
-def test_action_executor_client_and_bi_actions():
+def test_action_executor_client_and_bi_actions(accepted_authority_factory):
     """Verify ActionExecutor running client automation and BI actions."""
     with tempfile.TemporaryDirectory() as tmpdir:
         ws = Workspace.get_or_init(tmpdir, name="action-client-ws")
         executor = ws.actions
+        _, auth = accepted_authority_factory(ws, title="Client Automation")
 
         # 1. client.create_profile
         res_create = executor.execute(
@@ -204,15 +205,16 @@ def test_action_executor_client_and_bi_actions():
                 "tone": "authoritative",
                 "target_audience": "Healthcare CIOs",
             },
+            authority=auth,
         )
-        assert res_create.status.value == "success"
+        assert res_create.status in ("success", "succeeded")
         client_data = res_create.output_data["client"]
         client_id = client_data["id"]
         assert client_data["name"] == "Omni Health Tech"
 
         # 2. client.list_profiles
         res_list = executor.execute("client.list_profiles", ws.id, {})
-        assert res_list.status.value == "success"
+        assert res_list.status in ("success", "succeeded")
         assert len(res_list.output_data["clients"]) >= 1
 
         # 3. client.create_review_link
@@ -224,8 +226,9 @@ def test_action_executor_client_and_bi_actions():
                 "deliverable_title": "HIPAA Compliance Social Batch",
                 "deliverable_type": "content_batch",
             },
+            authority=auth,
         )
-        assert res_rev.status.value == "success"
+        assert res_rev.status in ("success", "succeeded")
         rev_data = res_rev.output_data["review"]
         token = rev_data["token"]
         assert rev_data["status"] == "pending"
@@ -235,8 +238,9 @@ def test_action_executor_client_and_bi_actions():
             "client.submit_review",
             ws.id,
             {"token": token, "decision": "approved", "feedback": "Approved for dissemination."},
+            authority=auth,
         )
-        assert res_sub.status.value == "success"
+        assert res_sub.status in ("success", "succeeded")
         assert res_sub.output_data["review"]["status"] == "approved"
 
         # 5. client.generate_report
@@ -244,8 +248,9 @@ def test_action_executor_client_and_bi_actions():
             "client.generate_report",
             ws.id,
             {"client_id": client_id},
+            authority=auth,
         )
-        assert res_rep.status.value == "success"
+        assert res_rep.status in ("success", "succeeded")
         assert "Executive Client Report: Omni Health Tech" in res_rep.output_data["report_markdown"]
 
         # 6. analytics.get_campaign_bi
@@ -254,7 +259,7 @@ def test_action_executor_client_and_bi_actions():
             ws.id,
             {"campaign_id": "camp-test-analytics"},
         )
-        assert res_bi.status.value == "success"
+        assert res_bi.status in ("success", "succeeded")
         assert res_bi.output_data["bi"]["campaign_id"] == "camp-test-analytics"
 
 

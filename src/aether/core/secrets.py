@@ -52,12 +52,14 @@ EXACT_SECRET_KEYS: frozenset[str] = frozenset({
     "bot_token", "webhook_secret", "private_key", "privatekey",
     "auth_token", "authtoken", "credential", "credentials", "signing_secret",
     "smtp_pass", "smtp_password", "bearer_token", "app_token",
+    "code_verifier", "verifier",
 })
 
 SECRET_AFFIXES: tuple[str, ...] = (
     "_token", "token_", "_secret", "secret_", "_password", "password_",
     "_key", "key_", "api_key", "private_key", "client_secret",
     "webhook_secret", "refresh_token", "access_token", "bot_token",
+    "_verifier", "verifier_",
 )
 
 

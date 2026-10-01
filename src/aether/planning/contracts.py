@@ -48,10 +48,13 @@ class ProposalStatus(StrEnum):
     """Lifecycle status of a MissionProposal."""
     DRAFT = "draft"
     READY_FOR_ACCEPTANCE = "ready_for_acceptance"
+    ACCEPTED = "accepted"
     NEEDS_CLARIFICATION = "needs_clarification"
     INVALID = "invalid"
     FAILED = "failed"
     EXPIRED = "expired"
+    REVOKED = "revoked"
+    SUPERSEDED = "superseded"
 
 
 class ProposalValidationStatus(StrEnum):
@@ -88,12 +91,13 @@ class ContextProvenance:
     def from_dict(cls, data: dict[str, Any] | None) -> ContextProvenance | None:
         if not data or not isinstance(data, dict):
             return None
-        recognized = {"source_entity", "workspace_id", "locator", "verification_status", "evidence_refs", "metadata"}
-        if not any(k in data for k in recognized):
+        if not data.get("source_entity") and not data.get("workspace_id"):
             return None
+        if not data.get("source_entity") or not data.get("workspace_id"):
+            raise ValueError("ContextProvenance missing required 'source_entity' or 'workspace_id'")
         return cls(
-            source_entity=data.get("source_entity", "system"),
-            workspace_id=data.get("workspace_id", "default"),
+            source_entity=data["source_entity"],
+            workspace_id=data["workspace_id"],
             locator=data.get("locator"),
             verification_status=data.get("verification_status") or "unverified",
             retrieved_at=data.get("retrieved_at") or datetime.now(timezone.utc).isoformat(),
@@ -130,11 +134,13 @@ class EvidenceReference:
 
     @classmethod
     def from_dict(cls, data: dict[str, Any]) -> EvidenceReference:
+        if not data.get("id") or not data.get("source_type") or not data.get("workspace"):
+            raise ValueError("EvidenceReference missing required field 'id', 'source_type', or 'workspace'")
         return cls(
-            id=data.get("id") or f"ev-{uuid.uuid4().hex[:8]}",
-            source_type=data.get("source_type", "user_stated"),
+            id=data["id"],
+            source_type=data["source_type"],
             source_identifier=data.get("source_identifier", ""),
-            workspace=data.get("workspace", "default"),
+            workspace=data["workspace"],
             locator=data.get("locator"),
             verification_status=data.get("verification_status", "unverified"),
             retrieved_at=data.get("retrieved_at") or datetime.now(timezone.utc).isoformat(),
@@ -169,17 +175,19 @@ class ResolvedEntity:
 
     @classmethod
     def from_dict(cls, data: dict[str, Any]) -> ResolvedEntity:
+        if not data.get("entity_type") or not data.get("workspace_scope"):
+            raise ValueError("ResolvedEntity missing required 'entity_type' or 'workspace_scope'")
         state_raw = data.get("resolution_state", "unresolved")
         try:
             state = ResolutionState(state_raw)
         except ValueError:
-            state = ResolutionState.UNRESOLVED
+            raise ValueError(f"Invalid ResolutionState '{state_raw}' in ResolvedEntity")
 
         return cls(
-            entity_type=data.get("entity_type", "entity"),
+            entity_type=data["entity_type"],
             canonical_id=data.get("canonical_id"),
             display_name=data.get("display_name", ""),
-            workspace_scope=data.get("workspace_scope", "default"),
+            workspace_scope=data["workspace_scope"],
             resolution_state=state,
             confidence=float(data.get("confidence", 0.0)),
             evidence_references=list(data.get("evidence_references") or []),
@@ -215,6 +223,8 @@ class ContextPack:
 
     @classmethod
     def from_dict(cls, data: dict[str, Any]) -> ContextPack:
+        if not data.get("workspace_scope"):
+            raise ValueError("ContextPack missing required 'workspace_scope'")
         entities = [
             ResolvedEntity.from_dict(e) if isinstance(e, dict) else e
             for e in (data.get("resolved_entities") or [])
@@ -229,7 +239,7 @@ class ContextPack:
             else (data.get("provenance") if isinstance(data.get("provenance"), ContextProvenance) else None)
         )
         return cls(
-            workspace_scope=data.get("workspace_scope", "default"),
+            workspace_scope=data["workspace_scope"],
             resolved_entities=entities,
             evidence_references=evidence,
             confidence=float(data.get("confidence", 0.0)),
@@ -328,15 +338,17 @@ class IntentRequest:
 
     @classmethod
     def from_dict(cls, data: dict[str, Any]) -> IntentRequest:
+        if not data.get("id") or not data.get("workspace_id") or not data.get("raw_input"):
+            raise ValueError("IntentRequest missing required field 'id', 'workspace_id', or 'raw_input'")
         prov = (
             ContextProvenance.from_dict(data.get("provenance"))
             if isinstance(data.get("provenance"), dict)
             else (data.get("provenance") if isinstance(data.get("provenance"), ContextProvenance) else None)
         )
         return cls(
-            id=data.get("id") or f"intent-{uuid.uuid4().hex[:12]}",
-            workspace_id=data.get("workspace_id", "default"),
-            raw_input=data.get("raw_input", ""),
+            id=data["id"],
+            workspace_id=data["workspace_id"],
+            raw_input=data["raw_input"],
             source_surface=data.get("source_surface", "api"),
             created_at=data.get("created_at"),
             session_id=data.get("session_id"),
@@ -620,13 +632,16 @@ class MissionProposal:
             raise ValueError("MissionProposal data is missing required field 'intent_id'")
         if not data.get("workspace_id"):
             raise ValueError("MissionProposal data is missing required field 'workspace_id'")
-            
-        status_raw = data.get("status", "draft")
+        if "version" not in data or data.get("version") is None:
+            raise ValueError("MissionProposal data is missing required field 'version'")
 
+        status_raw = data.get("status")
+        if not status_raw:
+            raise ValueError("MissionProposal data is missing required field 'status'")
         try:
             status = ProposalStatus(status_raw)
         except ValueError:
-            status = ProposalStatus.DRAFT
+            raise ValueError(f"Invalid ProposalStatus '{status_raw}' in MissionProposal data")
 
         steps = [
             ProposedStep.from_dict(s) if isinstance(s, dict) else s
@@ -663,10 +678,10 @@ class MissionProposal:
         )
 
         return cls(
-            id=data.get("id") or f"prop-{uuid.uuid4().hex[:12]}",
+            id=data["id"],
             intent_id=data["intent_id"],
-            workspace_id=data.get("workspace_id", "default"),
-            version=int(data.get("version", 1)),
+            workspace_id=data["workspace_id"],
+            version=int(data["version"]),
             title=data.get("title", ""),
             objective=data.get("objective", ""),
             why=data.get("why", ""),

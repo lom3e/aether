@@ -14,7 +14,7 @@ from typing import Any
 import uuid
 
 from aether.actions.executor import ActionExecutor
-from aether.actions.models import ActionExecutionStatus
+from aether.actions.models import ActionExecutionStatus, ActionPermissionLevel
 from aether.activity.models import ActivityCategory, ActivityStatus
 from aether.activity.service import ActivityService
 from aether.notifications.models import NotificationPriority, NotificationType
@@ -24,6 +24,8 @@ from aether.core.execution import (
     ExecutionStatus,
     Task,
     ExecutionRequest,
+    ExecutionAuthority,
+    ExecutionBoundary,
 )
 from aether.missions.models import Deliverable, MilestoneStatus, MissionStatus
 from aether.personal.events import PersonalEventHub, get_personal_event_hub
@@ -44,6 +46,7 @@ from aether.planning.contracts import (
     ContextPack,
     IntentRequest,
     MissionProposal,
+    ProposalStatus,
     ProposalValidationResult,
 )
 from aether.planning.generator import ProposalGenerator
@@ -59,8 +62,8 @@ class PersonalAgentService:
     def __init__(
         self,
         store: PersonalStore,
-        action_executor: ActionExecutor,
-        activity_service: ActivityService,
+        action_executor: ActionExecutor | None = None,
+        activity_service: ActivityService | None = None,
         intelligence_service: Any = None,
         mission_store: Any = None,
         connection_service: Any = None,
@@ -183,6 +186,71 @@ class PersonalAgentService:
                 raise RuntimeError(f"Durable persistence failed: {exc}") from exc
 
         return intent, context_pack, proposal, validation_result
+
+    def accept_proposal(
+        self,
+        proposal_id: str,
+        workspace_id: str,
+        expected_version: int | None = None,
+        actor: str = "user",
+    ) -> tuple[MissionProposal, ExecutionAuthority]:
+        """
+        Explicitly accepts a MissionProposal (Phase A Macro-pass 1.2).
+        Validates proposal status, verifies workspace ownership and version matching,
+        performs atomic transition to ACCEPTED, and issues an authoritative ExecutionAuthority.
+        Zero execution side effects: does not execute actions or start missions.
+        """
+        if not self.store:
+            raise RuntimeError("PersonalStore is not available to accept proposal.")
+
+        ws_id = workspace_id.strip()
+        proposal = self.store.get_proposal(proposal_id, workspace_id=ws_id)
+        if not proposal:
+            raise ValueError(f"Proposal '{proposal_id}' not found in workspace '{ws_id}'.")
+
+        if proposal.workspace_id != ws_id:
+            raise ValueError(f"Proposal workspace '{proposal.workspace_id}' does not match '{ws_id}'.")
+
+        if expected_version is not None and proposal.version != expected_version:
+            raise ValueError(
+                f"Proposal version conflict: expected v{expected_version}, but proposal is at v{proposal.version}."
+            )
+
+        if proposal.status == ProposalStatus.ACCEPTED:
+            authority = ExecutionBoundary.issue_authority(proposal)
+            return proposal, authority
+
+        allowed_pre_states = [ProposalStatus.DRAFT, ProposalStatus.READY_FOR_ACCEPTANCE]
+        if proposal.status not in allowed_pre_states:
+            raise ValueError(
+                f"Proposal '{proposal_id}' cannot be accepted because it is in status '{proposal.status}'. "
+                f"Must be in {allowed_pre_states}."
+            )
+
+        # Re-run validation to ensure proposal is valid prior to acceptance
+        validator = ProposalValidator()
+        val_res = validator.validate(proposal)
+        if not val_res.is_valid:
+            err_str = "; ".join(val_res.errors) if val_res.errors else "Unknown validation failure"
+            raise ValueError(f"Proposal '{proposal_id}' cannot be accepted because it is invalid: {err_str}")
+
+        accepted_proposal = self.store.transition_proposal_status(
+            proposal_id=proposal_id,
+            workspace_id=ws_id,
+            from_status=allowed_pre_states,
+            to_status=ProposalStatus.ACCEPTED,
+        )
+
+        authority = ExecutionBoundary.issue_authority(accepted_proposal)
+
+        logger.info(
+            "Proposal '%s' accepted by actor '%s' in workspace '%s'. Issued authority v%d.",
+            proposal_id,
+            actor,
+            ws_id,
+            authority.proposal_version,
+        )
+        return accepted_proposal, authority
 
     def classify_intent(
         self,
@@ -1309,6 +1377,7 @@ class PersonalAgentService:
         prompt: str,
         session_id: str | None = None,
         is_voice: bool = False,
+        authority: ExecutionAuthority | None = None,
     ) -> PersonalMessage:
         """Processes user input, orchestrates execution steps, and returns response."""
         now_iso = datetime.now(timezone.utc).isoformat()
@@ -1401,7 +1470,68 @@ class PersonalAgentService:
             except Exception as e:
                 logger.warning(f"Unified intelligence retrieval skipped: {e}")
 
-        # 6. Tier execution & dispatch via canonical Aether Runtime
+        # 6. Proposal Generation Boundary for mutating intents (DO / ACT / DELEGATE)
+        # Only ANSWER (read-only) may proceed directly without authority.
+        # All mutation-capable tiers must go through the proposal lifecycle.
+        requires_proposal = intent.tier in (IntentTier.DO, IntentTier.ACT, IntentTier.DELEGATE)
+
+        if requires_proposal and not authority:
+            # Generate proposal via canonical Phase A pipeline
+            try:
+                _, _, proposal, val_res = self.create_intent_and_proposal(
+                    raw_input=prompt,
+                    workspace_id=workspace_id,
+                    session_id=session_id,
+                    source_surface="companion" if is_voice else "api",
+                )
+                response_text = proposal.to_human_markdown()
+                msg_metadata = {
+                    "status": "proposal_pending",
+                    "proposal_id": proposal.id,
+                    "proposal_version": proposal.version,
+                    "proposal": proposal.to_dict(),
+                    "validation": val_res.to_dict(),
+                }
+                step_prop = PersonalStep(
+                    id=f"step-{uuid.uuid4().hex[:8]}",
+                    title=f"Prepared proposal: {proposal.title}",
+                    status="completed" if intent.tier == IntentTier.DELEGATE else "waiting_acceptance",
+                    category="delegation" if intent.tier == IntentTier.DELEGATE else "proposal",
+                    details={"proposal_id": proposal.id, "version": proposal.version},
+                )
+                steps.append(step_prop)
+                self.event_hub.publish(
+                    workspace_id=workspace_id,
+                    event_type="step_update",
+                    data={"session_id": session_id, "step": step_prop.to_dict()},
+                )
+            except Exception as pe:
+                logger.error("Failed to generate proposal for intent: %s", pe)
+                response_text = f"Failed to formulate proposal: {pe}"
+                msg_metadata = {"status": "proposal_failed", "error": str(pe)}
+
+            resp_msg = PersonalMessage(
+                id=f"msg-{uuid.uuid4().hex[:12]}",
+                session_id=session_id,
+                workspace_id=workspace_id,
+                role="assistant",
+                content=response_text,
+                tier=intent.tier,
+                steps=steps,
+                action_execution_id=None,
+                mission_id=None,
+                metadata=msg_metadata,
+                created_at=datetime.now(timezone.utc).isoformat(),
+            )
+            self.store.add_message(resp_msg)
+            self.event_hub.publish(
+                workspace_id=workspace_id,
+                event_type="assistant_message",
+                data=resp_msg.to_dict(),
+            )
+            return resp_msg
+
+        # 7. Tier execution & dispatch via canonical Aether Runtime
         exec_request = Task(
             instruction=prompt,
             workspace_id=workspace_id,
@@ -1410,6 +1540,7 @@ class PersonalAgentService:
             action_id=intent.action_id,
             action_args=intent.action_args,
             context_data={"recent_history": recent_history, "intel_context": intel_context},
+            authority=authority,
         )
 
         action_execution_id = None
@@ -1969,7 +2100,7 @@ class PersonalAgentService:
         # 1. Pending approvals
         pending_executions = self.action_executor.store.list_executions(
             workspace_id=workspace_id,
-            status=ActionExecutionStatus.PENDING_APPROVAL.value,
+            status=ActionExecutionStatus.WAITING_APPROVAL.value,
         )
         pending_approvals = []
         for p in pending_executions:

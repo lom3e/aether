@@ -231,17 +231,19 @@ def test_workspace_content_properties():
         assert isinstance(ws.content_engine, ContentRepurposingEngine)
 
 
-def test_action_executor_content_actions():
+def test_action_executor_content_actions(accepted_authority_factory):
     """Verify ActionExecutor running content repurposing and campaign actions."""
     with tempfile.TemporaryDirectory() as tmpdir:
         ws = Workspace.get_or_init(tmpdir, name="action-content-ws")
         executor = ws.actions
+        _, auth = accepted_authority_factory(ws, title="Content Campaign")
 
         # 1. content.create_campaign
         res_camp = executor.execute(
             "content.create_campaign",
             ws.id,
             {"name": "Autumn Expansion", "description": "Workforce campaign", "objectives": ["Goal A"]},
+            authority=auth,
         )
         assert res_camp.status.value in ("succeeded", "success")
         camp_data = res_camp.output_data["campaign"]
@@ -258,6 +260,7 @@ def test_action_executor_content_actions():
                 "campaign_id": camp_id,
                 "target_platforms": ["linkedin", "twitter_thread"],
             },
+            authority=auth,
         )
         assert res_rep.status.value in ("succeeded", "success")
         variants = res_rep.output_data["variants"]
@@ -274,6 +277,7 @@ def test_action_executor_content_actions():
             "content.schedule_variant",
             ws.id,
             {"variant_id": var_id, "scheduled_at": "2026-11-15T09:00:00Z"},
+            authority=auth,
         )
         assert res_sched.status.value in ("succeeded", "success")
         assert res_sched.output_data["variant"]["status"] == "scheduled"

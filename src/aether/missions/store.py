@@ -1531,7 +1531,7 @@ class MissionStore:
         with self._get_connection() as conn:
             conn.execute(
                 """
-                INSERT OR REPLACE INTO mission_executions (
+                INSERT INTO mission_executions (
                     id, mission_id, run_number, status, current_milestone_id,
                     team_name, started_at, completed_at, interrupted_at,
                     duration_seconds, error_message, error_details,
@@ -1539,6 +1539,27 @@ class MissionStore:
                     pending_approval, approval_history, milestone_states, metadata,
                     created_at, updated_at
                 ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                ON CONFLICT(id) DO UPDATE SET
+                    mission_id = excluded.mission_id,
+                    run_number = excluded.run_number,
+                    status = excluded.status,
+                    current_milestone_id = excluded.current_milestone_id,
+                    team_name = excluded.team_name,
+                    started_at = excluded.started_at,
+                    completed_at = excluded.completed_at,
+                    interrupted_at = excluded.interrupted_at,
+                    duration_seconds = excluded.duration_seconds,
+                    error_message = excluded.error_message,
+                    error_details = excluded.error_details,
+                    lease_owner = excluded.lease_owner,
+                    lease_expires_at = excluded.lease_expires_at,
+                    heartbeat_at = excluded.heartbeat_at,
+                    recovery_state = excluded.recovery_state,
+                    pending_approval = excluded.pending_approval,
+                    approval_history = excluded.approval_history,
+                    milestone_states = excluded.milestone_states,
+                    metadata = excluded.metadata,
+                    updated_at = excluded.updated_at
                 """,
                 (
                     execution.id,

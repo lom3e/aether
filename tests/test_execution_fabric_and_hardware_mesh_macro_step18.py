@@ -300,10 +300,11 @@ def test_fabric_engine_topology_and_routing(temp_workspace: Workspace):
     assert snapshot.active_workloads == 3
 
 
-def test_action_registry_and_executor(temp_workspace: Workspace):
+def test_action_registry_and_executor(temp_workspace: Workspace, accepted_authority_factory):
     """Verifies all 6 fabric actions registered in ActionRegistry and executed."""
     ws = temp_workspace
     ws_id = ws.name
+    _, auth = accepted_authority_factory(ws)
 
     # Action 1: fabric.list_nodes
     res_list = ws.actions.execute("fabric.list_nodes", ws_id, {})
@@ -320,48 +321,68 @@ def test_action_registry_and_executor(temp_workspace: Workspace):
     assert snapshot["total_cores"] > 0
 
     # Action 3: fabric.register_node
-    res_reg = ws.actions.execute("fabric.register_node", ws_id, {
-        "name": "Edge-Orin-Nano",
-        "role": "worker",
-        "endpoint": "http://192.168.1.80:8000",
-        "capabilities": {
-            "cpu_brand": "ARM Cortex-A78AE",
-            "cpu_cores": 6,
-            "ram_total_gb": 8.0,
-            "ram_free_gb": 4.0,
-            "gpu_name": "NVIDIA Ampere (1024 cores)",
-            "gpu_vram_gb": 8.0,
-            "accelerator_type": "cuda",
-            "os_name": "linux",
-            "architecture": "aarch64",
+    res_reg = ws.actions.execute(
+        "fabric.register_node",
+        ws_id,
+        {
+            "name": "Edge-Orin-Nano",
+            "role": "worker",
+            "endpoint": "http://192.168.1.80:8000",
+            "capabilities": {
+                "cpu_brand": "ARM Cortex-A78AE",
+                "cpu_cores": 6,
+                "ram_total_gb": 8.0,
+                "ram_free_gb": 4.0,
+                "gpu_name": "NVIDIA Ampere (1024 cores)",
+                "gpu_vram_gb": 8.0,
+                "accelerator_type": "cuda",
+                "os_name": "linux",
+                "architecture": "aarch64",
+            },
+            "tags": ["jetson", "edge"],
         },
-        "tags": ["jetson", "edge"],
-    })
+        authority=auth,
+    )
     assert res_reg.output_data is not None
     edge_node = res_reg.output_data["node"]
     edge_id = edge_node["id"]
     assert edge_node["name"] == "Edge-Orin-Nano"
 
     # Action 4: fabric.node_heartbeat
-    res_hb = ws.actions.execute("fabric.node_heartbeat", ws_id, {
-        "node_id": edge_id,
-        "ping_ms": 5.4,
-    })
+    res_hb = ws.actions.execute(
+        "fabric.node_heartbeat",
+        ws_id,
+        {
+            "node_id": edge_id,
+            "ping_ms": 5.4,
+        },
+        authority=auth,
+    )
     assert res_hb.output_data is not None
 
     # Action 5: fabric.route_workload
-    res_route = ws.actions.execute("fabric.route_workload", ws_id, {
-        "workload_name": "Edge Sensor Telemetry Filter",
-        "tier": "background_batch",
-        "min_cores": 2,
-    })
+    res_route = ws.actions.execute(
+        "fabric.route_workload",
+        ws_id,
+        {
+            "workload_name": "Edge Sensor Telemetry Filter",
+            "tier": "background_batch",
+            "min_cores": 2,
+        },
+        authority=auth,
+    )
     assert res_route.output_data is not None
     assert "assignment" in res_route.output_data
 
     # Action 6: fabric.delete_node
-    res_del = ws.actions.execute("fabric.delete_node", ws_id, {
-        "node_id": edge_id,
-    })
+    res_del = ws.actions.execute(
+        "fabric.delete_node",
+        ws_id,
+        {
+            "node_id": edge_id,
+        },
+        authority=auth,
+    )
     assert res_del.output_data is not None
 
 

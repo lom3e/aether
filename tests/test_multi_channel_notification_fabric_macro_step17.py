@@ -12,6 +12,7 @@ from typing import Any
 import pytest
 from starlette.requests import Request
 
+from aether.actions.models import ActionExecutionStatus
 from aether.actions.registry import ActionRegistry
 from aether.notifications import (
     ChannelType,
@@ -304,7 +305,7 @@ def test_notification_service_briefing_and_channels():
         store.close()
 
 
-def test_action_registry_and_executor(temp_workspace: Workspace):
+def test_action_registry_and_executor(temp_workspace: Workspace, accepted_authority_factory):
     """Verify registration and execution of all 7 notification fabric actions."""
     registry = ActionRegistry()
     assert registry.get("notifications.send_briefing") is not None
@@ -315,6 +316,7 @@ def test_action_registry_and_executor(temp_workspace: Workspace):
     assert registry.get("notifications.configure_rule") is not None
     assert registry.get("notifications.get_delivery_history") is not None
 
+    _, auth = accepted_authority_factory(temp_workspace)
     executor = temp_workspace.actions
 
     # 1. list_channels
@@ -324,7 +326,7 @@ def test_action_registry_and_executor(temp_workspace: Workspace):
         input_data={},
         auto_approve=True,
     )
-    assert res_chan.status.value == "success"
+    assert res_chan.status in (ActionExecutionStatus.SUCCESS, ActionExecutionStatus.SUCCEEDED)
     assert len(res_chan.output_data["channels"]) >= 5
 
     # 2. configure_channel
@@ -333,8 +335,9 @@ def test_action_registry_and_executor(temp_workspace: Workspace):
         workspace_id=temp_workspace.id,
         input_data={"channel_type": "desktop", "enabled": True, "config": {"sound": "Glass"}},
         auto_approve=True,
+        authority=auth,
     )
-    assert res_cfg.status.value == "success"
+    assert res_cfg.status in (ActionExecutionStatus.SUCCESS, ActionExecutionStatus.SUCCEEDED)
     assert res_cfg.output_data["channel"]["channel_type"] == "desktop"
 
     # 3. test_channel
@@ -343,8 +346,9 @@ def test_action_registry_and_executor(temp_workspace: Workspace):
         workspace_id=temp_workspace.id,
         input_data={"channel_type": "desktop"},
         auto_approve=True,
+        authority=auth,
     )
-    assert res_test.status.value == "success"
+    assert res_test.status in (ActionExecutionStatus.SUCCESS, ActionExecutionStatus.SUCCEEDED)
     assert res_test.output_data["receipt"]["channel_type"] == "desktop"
 
     # 4. send_briefing
@@ -357,8 +361,9 @@ def test_action_registry_and_executor(temp_workspace: Workspace):
             "highlights": ["Zero errors"],
         },
         auto_approve=True,
+        authority=auth,
     )
-    assert res_brf.status.value == "success"
+    assert res_brf.status in (ActionExecutionStatus.SUCCESS, ActionExecutionStatus.SUCCEEDED)
     assert res_brf.output_data["briefing"]["title"] == "Action Execution Briefing"
 
     # 5. list_rules & configure_rule
@@ -368,7 +373,7 @@ def test_action_registry_and_executor(temp_workspace: Workspace):
         input_data={},
         auto_approve=True,
     )
-    assert res_rules.status.value == "success"
+    assert res_rules.status in (ActionExecutionStatus.SUCCESS, ActionExecutionStatus.SUCCEEDED)
     assert len(res_rules.output_data["rules"]) >= 3
 
     res_new_rule = executor.execute(
@@ -376,8 +381,9 @@ def test_action_registry_and_executor(temp_workspace: Workspace):
         workspace_id=temp_workspace.id,
         input_data={"name": "Execution Alert", "event_types": ["action_failed"], "min_priority": "high"},
         auto_approve=True,
+        authority=auth,
     )
-    assert res_new_rule.status.value == "success"
+    assert res_new_rule.status in (ActionExecutionStatus.SUCCESS, ActionExecutionStatus.SUCCEEDED)
     assert res_new_rule.output_data["rule"]["name"] == "Execution Alert"
 
     # 6. get_delivery_history
@@ -387,7 +393,7 @@ def test_action_registry_and_executor(temp_workspace: Workspace):
         input_data={"limit": 10},
         auto_approve=True,
     )
-    assert res_hist.status.value == "success"
+    assert res_hist.status in (ActionExecutionStatus.SUCCESS, ActionExecutionStatus.SUCCEEDED)
     assert len(res_hist.output_data["receipts"]) >= 1
 
 

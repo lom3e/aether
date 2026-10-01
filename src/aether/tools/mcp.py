@@ -11,7 +11,7 @@ import urllib.error
 import urllib.parse
 import urllib.request
 
-from aether.tools.base import Tool, ToolExecutionContext
+from aether.tools.base import Tool, ToolClassification, ToolExecutionContext
 from aether.tools.registry import ToolRegistry
 
 logger = logging.getLogger(__name__)
@@ -283,6 +283,7 @@ class MCPTool(Tool):
     ) -> None:
         self.name = name
         self.description = description or f"Execute MCP tool '{name}'"
+        self.classification = ToolClassification.EXTERNAL_MUTATION
         self.input_schema = input_schema or {}
         self._client = client
 

@@ -85,6 +85,8 @@ class ActionExecutor:
         connection_service: Any = None,
         project_path: Any = None,
         safety_policy: ActionSafetyPolicy | None = None,
+        workspace: Any = None,
+        personal_store: Any = None,
     ) -> None:
         self.registry = registry
         self.store = store
@@ -92,7 +94,20 @@ class ActionExecutor:
         self.connection_service = connection_service
         self.project_path = Path(project_path) if project_path else None
         self.safety_policy = safety_policy or ActionSafetyPolicy()
+        self.workspace = workspace
+        self.personal_store = personal_store
         self._approval_lock = threading.RLock()
+
+    def _resolve_personal_store(self, workspace_id: str) -> Any:
+        if self.personal_store is not None:
+            return self.personal_store
+        if self.workspace is not None and hasattr(self.workspace, "personal_store"):
+            return self.workspace.personal_store
+        from aether.workspace.workspace import Workspace
+        ws = Workspace._active_workspaces.get(workspace_id)
+        if ws is not None and hasattr(ws, "personal_store"):
+            return ws.personal_store
+        return None
 
     def execute(
         self,
@@ -111,15 +126,39 @@ class ActionExecutor:
             raise ValueError(f"Action '{action_id}' not found in registry")
 
         # Macro-pass 1.2: Enforce execution authority boundary
+        # UNKNOWN permission level always fails closed
+        if definition.permission_level == ActionPermissionLevel.UNKNOWN:
+            raise UnauthorizedExecutionError(f"Action '{action_id}' has unknown permission level and cannot execute.")
+
         is_read_only = definition.permission_level == ActionPermissionLevel.READ_ONLY
+
+        # HARD BOUNDARY: All non-read-only actions require persistently validated authority
+        # This check must occur BEFORE any queueing, approval path, or execution.
         if not is_read_only:
             if not authority:
-                raise UnauthorizedExecutionError(f"Action '{action_id}' requires execution authority.")
+                raise UnauthorizedExecutionError(
+                    f"Action '{action_id}' (permission_level={definition.permission_level.value}) requires execution authority."
+                )
             if not isinstance(authority, ExecutionAuthority):
-                raise UnauthorizedExecutionError(f"Invalid authority type for '{action_id}'.")
-            if authority.workspace_id != workspace_id:
-                raise UnauthorizedExecutionError(f"Authority workspace '{authority.workspace_id}' does not match execution workspace '{workspace_id}'.")
+                raise UnauthorizedExecutionError(
+                    f"Invalid authority type for '{action_id}': expected ExecutionAuthority, got {type(authority).__name__}."
+                )
+            # Persistent validation against proposal store
+            p_store = self._resolve_personal_store(workspace_id)
+            from aether.core.execution import ExecutionBoundary
+            ExecutionBoundary.validate_authority(
+                authority=authority,
+                workspace_id=workspace_id,
+                store=p_store,
+                action_or_boundary=action_id,
+            )
 
+        # Persist authority context into execution metadata for later revalidation (approve path)
+        exec_meta = dict(metadata or {})
+        if authority is not None:
+            exec_meta["authority"] = authority.to_dict()
+            exec_meta["proposal_id"] = authority.proposal_id
+            exec_meta["proposal_version"] = authority.proposal_version
 
         execution = ActionExecution(
             id=f"ax-{uuid.uuid4().hex[:12]}",
@@ -127,9 +166,10 @@ class ActionExecutor:
             workspace_id=workspace_id,
             provider=definition.provider,
             input_data=dict(input_data),
-            metadata=dict(metadata or {}),
+            metadata=exec_meta,
         )
 
+        # HITL approval logic (separate from proposal authorization)
         requires_gate = (
             definition.requires_confirmation
             or definition.tier == ActionTier.ACT
@@ -212,12 +252,32 @@ class ActionExecutor:
             if execution.status == ActionExecutionStatus.FAILED:
                 raise ValueError(f"Cannot approve execution '{execution_id}': action has already failed.")
 
-            if execution.status not in (ActionExecutionStatus.WAITING_APPROVAL, ActionExecutionStatus.PENDING_APPROVAL):
+            if execution.status not in (ActionExecutionStatus.WAITING_APPROVAL,):
                 raise ValueError(f"Cannot approve execution in status '{execution.status.value}'")
 
             definition = self.registry.get(execution.action_id)
             if not definition:
                 raise ValueError(f"Action '{execution.action_id}' not found")
+
+            # Macro-pass 1.2: Revalidate persisted authority prior to dispatch
+            # For non-read-only actions, authority metadata MUST be present — fail closed otherwise.
+            is_read_only = definition.permission_level == ActionPermissionLevel.READ_ONLY
+            auth_data = execution.metadata.get("authority")
+            if not is_read_only:
+                if not auth_data:
+                    raise UnauthorizedExecutionError(
+                        f"Cannot approve execution '{execution_id}': no persisted authority metadata. "
+                        f"Non-read-only actions require validated execution authority."
+                    )
+                from aether.core.execution import ExecutionAuthority, ExecutionBoundary
+                authority_obj = ExecutionAuthority.from_dict(auth_data)
+                p_store = self._resolve_personal_store(execution.workspace_id)
+                ExecutionBoundary.validate_authority(
+                    authority=authority_obj,
+                    workspace_id=execution.workspace_id,
+                    store=p_store,
+                    action_or_boundary=execution.action_id,
+                )
 
             execution.transition_to(ActionExecutionStatus.APPROVED)
             execution.approved_by = approver
@@ -242,7 +302,7 @@ class ActionExecutor:
             if execution.status in (ActionExecutionStatus.APPROVED, ActionExecutionStatus.RUNNING):
                 raise ValueError(f"Cannot decline execution '{execution_id}': action was already approved.")
 
-            if execution.status not in (ActionExecutionStatus.WAITING_APPROVAL, ActionExecutionStatus.PENDING_APPROVAL):
+            if execution.status not in (ActionExecutionStatus.WAITING_APPROVAL,):
                 raise ValueError(f"Cannot reject execution in status '{execution.status.value}'")
 
             definition = self.registry.get(execution.action_id)
@@ -707,6 +767,11 @@ class ActionExecutor:
                 if isinstance(team_agent, ExternalAgentAdapter):
                     target_adapter = team_agent
 
+            auth_obj = None
+            if execution.metadata.get("authority"):
+                from aether.core.execution import ExecutionAuthority
+                auth_obj = ExecutionAuthority.from_dict(execution.metadata["authority"])
+
             if target_adapter is None:
                 if not endpoint_url and not command and protocol != "mcp":
                     endpoint_url = os.environ.get("AETHER_EXTERNAL_AGENT_URL")
@@ -720,15 +785,18 @@ class ActionExecutor:
                     timeout_seconds=timeout_seconds,
                     auth_token=auth_token,
                 )
-                target_adapter = ExternalAgentAdapter(config=cfg)
+                target_adapter = ExternalAgentAdapter(config=cfg, workspace=self.workspace or ws)
+            elif not getattr(target_adapter, "workspace", None) and (self.workspace or ws):
+                target_adapter.workspace = self.workspace or ws
 
             task = Task(
                 instruction=instruction,
                 agent_name=agent_name,
                 context_data=context_data,
                 workspace_id=ws_id,
+                authority=auth_obj,
             )
-            res = target_adapter.execute(task)
+            res = target_adapter.execute(task, authority=auth_obj)
             return {
                 "success": res.success,
                 "status": str(res.status.value) if res.status else ("completed" if res.success else "failed"),

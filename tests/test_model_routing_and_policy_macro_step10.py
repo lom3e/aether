@@ -226,15 +226,17 @@ def test_policy_service_autopilot_tiers(temp_ws: Workspace):
 # 5. ActionExecutor Policy Governance Integration
 # ---------------------------------------------------------------------------
 
-def test_action_executor_with_policy_governance(temp_ws: Workspace):
+def test_action_executor_with_policy_governance(temp_ws: Workspace, accepted_authority_factory):
     registry = ActionRegistry()
     action_store = ActionStore(f"{temp_ws.data_dir}/actions.db")
     safety_policy = ActionSafetyPolicy(policy_service=temp_ws.policy)
+    _, auth = accepted_authority_factory(temp_ws)
     executor = ActionExecutor(
         registry=registry,
         store=action_store,
         project_path=temp_ws.root,
         safety_policy=safety_policy,
+        personal_store=temp_ws.personal_store,
     )
     ws_id = temp_ws.name
 
@@ -254,6 +256,7 @@ def test_action_executor_with_policy_governance(temp_ws: Workspace):
         workspace_id=ws_id,
         input_data={"path": "important.txt"},
         auto_approve=True,
+        authority=auth,
     )
     assert blocked_res.status == ActionExecutionStatus.FAILED
     assert "strictly prohibited" in blocked_res.error_message
@@ -274,6 +277,7 @@ def test_action_executor_with_policy_governance(temp_ws: Workspace):
         workspace_id=ws_id,
         input_data={"autopilot_tier": "autonomous", "monthly_spending_cap": 800.0},
         auto_approve=True,
+        authority=auth,
     )
     assert update_res.status.value in ("success", "succeeded", "executed", "completed")
     assert update_res.output_data["policy"]["autopilot_tier"] == "autonomous"

@@ -2534,6 +2534,7 @@ class ToggleAutomationPayload(BaseModel):
 
 class TriggerAutomationPayload(BaseModel):
     payload: dict[str, Any] = Field(default_factory=dict)
+    authority: dict[str, Any] | None = None
 
 
 class BuildNlAutomationPayload(BaseModel):
@@ -2680,15 +2681,27 @@ async def trigger_automation_endpoint(request: Request, automation_id: str, data
         raise HTTPException(status_code=500, detail="Workspace not initialized")
     scheduler = getattr(request.app.state, "scheduler", None)
     payload = data.payload if data else {}
+    auth_data = data.authority if data else None
+    if not auth_data and isinstance(payload, dict):
+        auth_data = payload.get("authority")
+
+    authority = None
+    if auth_data:
+        from aether.core.execution import ExecutionAuthority
+        try:
+            authority = ExecutionAuthority.from_dict(auth_data) if isinstance(auth_data, dict) else auth_data
+        except Exception:
+            authority = None
+
     if scheduler:
-        run_record = await scheduler.trigger_now(automation_id, payload)
+        run_record = await scheduler.trigger_now(automation_id, payload, authority=authority)
     else:
         from aether.automation.engine import AutomationEngine
         auto = ws.automations.get_automation(automation_id)
         if not auto:
             raise HTTPException(status_code=404, detail="Automation not found")
         engine = AutomationEngine(workspace=ws, event_bus=getattr(request.app.state, "event_bus", None))
-        run_record = await engine.execute_automation(auto, trigger_type="manual", trigger_payload=payload)
+        run_record = await engine.execute_automation(auto, trigger_type="manual", trigger_payload=payload, authority=authority)
 
     if not run_record:
         raise HTTPException(status_code=404, detail="Automation not found or failed to trigger")
@@ -3983,6 +3996,7 @@ async def list_mission_activities(request: Request, mission_id: str):
 
 class MissionActionStartPayload(BaseModel):
     team_name: str | None = None
+    authority: dict[str, Any] | None = None
 
 
 class MissionActionPausePayload(BaseModel):
@@ -4055,9 +4069,45 @@ async def dry_run_adhoc_mission_route(request: Request, payload: dict[str, Any])
 async def start_mission_route(request: Request, mission_id: str, payload: MissionActionStartPayload | None = None):
     runtime = _resolve_mission_runtime(request)
     from aether.missions.runtime import NotFoundError, ConflictError
+    from aether.core.execution import ExecutionAuthority, UnauthorizedExecutionError
     team_name = payload.team_name if payload else None
+
+    auth_obj = None
+    if payload and payload.authority:
+        try:
+            auth_obj = ExecutionAuthority.from_dict(payload.authority) if isinstance(payload.authority, dict) else payload.authority
+        except Exception:
+            auth_obj = None
+
+    mission = runtime.store.get_mission(mission_id)
+    if not mission:
+        raise HTTPException(status_code=404, detail=f"Mission {mission_id} not found.")
+
+    if not auth_obj and mission.metadata:
+        if mission.metadata.get("authority"):
+            try:
+                auth_obj = ExecutionAuthority.from_dict(mission.metadata["authority"])
+            except Exception:
+                pass
+        elif mission.metadata.get("proposal_id"):
+            prop_id = mission.metadata["proposal_id"]
+            ws = getattr(request.app.state, "workspace", None)
+            p_store = getattr(ws, "personal_store", None)
+            if not p_store and ws and hasattr(ws, "personal"):
+                p_store = getattr(ws.personal, "store", None)
+            if p_store:
+                prop = p_store.get_proposal(prop_id, workspace_id=mission.workspace_id)
+                if prop:
+                    from aether.planning.contracts import ProposalStatus
+                    if prop.status == ProposalStatus.ACCEPTED:
+                        from aether.core.execution import ExecutionBoundary
+                        auth_obj = ExecutionBoundary.issue_authority(prop)
+                    elif prop.status in (ProposalStatus.READY_FOR_ACCEPTANCE, ProposalStatus.VALIDATED):
+                        if ws and hasattr(ws, "personal"):
+                            _, auth_obj = ws.personal.accept_proposal(prop.id, workspace_id=mission.workspace_id)
+
     try:
-        execution = await runtime.start_mission(mission_id, team_name=team_name)
+        execution = await runtime.start_mission(mission_id, team_name=team_name, authority=auth_obj)
         mission = runtime.store.get_mission(mission_id)
         return {
             "execution": execution.to_dict(),
@@ -4067,6 +4117,8 @@ async def start_mission_route(request: Request, mission_id: str, payload: Missio
         raise HTTPException(status_code=404, detail=str(e))
     except ConflictError as e:
         raise HTTPException(status_code=409, detail=str(e))
+    except UnauthorizedExecutionError as e:
+        raise HTTPException(status_code=403, detail=str(e))
     except ValueError as e:
         raise HTTPException(status_code=422, detail=str(e))
     except Exception as e:
@@ -4077,6 +4129,7 @@ async def start_mission_route(request: Request, mission_id: str, payload: Missio
 async def rerun_mission_route(request: Request, mission_id: str, payload: MissionActionStartPayload | None = None):
     runtime = _resolve_mission_runtime(request)
     from aether.missions.runtime import NotFoundError, ConflictError
+    from aether.core.execution import UnauthorizedExecutionError
     team_name = payload.team_name if payload else None
     try:
         execution = await runtime.rerun_mission(mission_id, team_name=team_name)
@@ -4089,6 +4142,8 @@ async def rerun_mission_route(request: Request, mission_id: str, payload: Missio
         raise HTTPException(status_code=404, detail=str(e))
     except ConflictError as e:
         raise HTTPException(status_code=409, detail=str(e))
+    except UnauthorizedExecutionError as e:
+        raise HTTPException(status_code=403, detail=str(e))
     except ValueError as e:
         raise HTTPException(status_code=422, detail=str(e))
     except Exception as e:
@@ -4121,6 +4176,7 @@ async def pause_mission_route(request: Request, mission_id: str, payload: Missio
 async def resume_mission_route(request: Request, mission_id: str):
     runtime = _resolve_mission_runtime(request)
     from aether.missions.runtime import NotFoundError, ConflictError
+    from aether.core.execution import UnauthorizedExecutionError
     try:
         execution = await runtime.resume_mission(mission_id)
         mission = runtime.store.get_mission(mission_id)
@@ -4132,6 +4188,8 @@ async def resume_mission_route(request: Request, mission_id: str):
         raise HTTPException(status_code=404, detail=str(e))
     except ConflictError as e:
         raise HTTPException(status_code=409, detail=str(e))
+    except UnauthorizedExecutionError as e:
+        raise HTTPException(status_code=403, detail=str(e))
     except ValueError as e:
         raise HTTPException(status_code=422, detail=str(e))
     except Exception as e:
@@ -4164,6 +4222,7 @@ async def cancel_mission_route(request: Request, mission_id: str, payload: Missi
 async def retry_mission_route(request: Request, mission_id: str, payload: MissionActionRetryPayload | None = None):
     runtime = _resolve_mission_runtime(request)
     from aether.missions.runtime import NotFoundError, ConflictError
+    from aether.core.execution import UnauthorizedExecutionError
     milestone_id = payload.milestone_id if payload else None
     try:
         execution = await runtime.retry_mission(mission_id, milestone_id=milestone_id)
@@ -4176,6 +4235,8 @@ async def retry_mission_route(request: Request, mission_id: str, payload: Missio
         raise HTTPException(status_code=404, detail=str(e))
     except ConflictError as e:
         raise HTTPException(status_code=409, detail=str(e))
+    except UnauthorizedExecutionError as e:
+        raise HTTPException(status_code=403, detail=str(e))
     except ValueError as e:
         raise HTTPException(status_code=422, detail=str(e))
     except Exception as e:
@@ -5802,6 +5863,7 @@ class ExecuteActionPayload(BaseModel):
     input_data: dict[str, Any] = Field(default_factory=dict)
     auto_approve: bool = False
     workspace_id: str | None = None
+    authority: dict[str, Any] | None = None
 
 
 class ApproveActionPayload(BaseModel):
@@ -5951,6 +6013,44 @@ async def get_proposal_route(request: Request, proposal_id: str):
             detail=f"Forbidden: Proposal '{proposal_id}' belongs to another workspace.",
         )
     return proposal.to_dict()
+
+
+class AcceptProposalPayload(BaseModel):
+    expected_version: int | None = None
+    actor: str = "user"
+
+
+@router.post("/personal/proposals/{proposal_id}/accept")
+async def accept_proposal_route(
+    request: Request,
+    proposal_id: str,
+    payload: AcceptProposalPayload | None = None,
+):
+    """
+    Explicitly accepts a MissionProposal (Phase A Macro-pass 1.2).
+    Transitions proposal status to ACCEPTED and issues an authoritative ExecutionAuthority.
+    """
+    ws = getattr(request.app.state, "workspace", None)
+    if not ws:
+        raise HTTPException(status_code=503, detail="Workspace not initialized.")
+    expected_ver = payload.expected_version if payload else None
+    actor = payload.actor if payload else "user"
+    try:
+        accepted_proposal, authority = ws.personal.accept_proposal(
+            proposal_id=proposal_id,
+            workspace_id=ws.name,
+            expected_version=expected_ver,
+            actor=actor,
+        )
+        return {
+            "status": "accepted",
+            "proposal": accepted_proposal.to_dict(),
+            "authority": authority.to_dict(),
+        }
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=str(exc))
 
 
 @router.get("/personal/proposals")
@@ -6107,11 +6207,37 @@ async def execute_action_route(request: Request, payload: ExecuteActionPayload):
     if not definition:
         raise HTTPException(status_code=400, detail=f"Action '{payload.action_id}' not found.")
     
-    from aether.actions.models import ActionPermissionLevel
+    from aether.actions.models import ActionPermissionLevel, ActionTier
     is_read_only = definition.permission_level == ActionPermissionLevel.READ_ONLY
-    if not is_read_only:
+    requires_gate = (
+        definition.requires_confirmation
+        or definition.tier == ActionTier.ACT
+        or definition.permission_level in (
+            ActionPermissionLevel.EXTERNAL_MUTATION,
+            ActionPermissionLevel.SENSITIVE_MUTATION,
+        )
+    )
+
+    auth_obj = None
+    if payload.authority:
+        try:
+            from aether.core.execution import ExecutionAuthority, ExecutionBoundary
+            auth_obj = ExecutionAuthority.from_dict(payload.authority)
+            p_store = getattr(ws, "personal_store", None)
+            if not p_store and hasattr(ws, "personal"):
+                p_store = getattr(ws.personal, "store", None)
+            ExecutionBoundary.validate_authority(
+                authority=auth_obj,
+                workspace_id=ws_id,
+                store=p_store,
+                action_or_boundary=payload.action_id,
+            )
+        except Exception as auth_err:
+            raise HTTPException(status_code=403, detail=f"Execution authority validation failed: {auth_err}")
+
+    if not is_read_only and not auth_obj:
         raise HTTPException(
-            status_code=403, 
+            status_code=403,
             detail="Direct execution of mutating actions is unauthorized. Clients must generate and accept a MissionProposal."
         )
 
@@ -6121,6 +6247,7 @@ async def execute_action_route(request: Request, payload: ExecuteActionPayload):
             workspace_id=ws_id,
             input_data=payload.input_data,
             auto_approve=payload.auto_approve,
+            authority=auth_obj,
         )
         return execution.to_dict()
     except ValueError as exc:
@@ -7595,6 +7722,7 @@ class ExternalAgentInvokePayload(BaseModel):
     timeout_seconds: float = 60.0
     auth_token: str | None = None
     context_data: dict[str, Any] = Field(default_factory=dict)
+    authority: dict[str, Any] | None = None
 
 
 @router.get("/agents/external")
@@ -7618,12 +7746,30 @@ async def list_external_agents(request: Request):
 
 @router.post("/agents/external/invoke")
 async def invoke_external_agent(request: Request, payload: ExternalAgentInvokePayload):
-    """Invokes an external agent. (Macro-pass 1.2: Disabled directly for external delegation)."""
-    raise HTTPException(
-        status_code=403, 
-        detail="Direct external agent invocation is unauthorized. Clients must generate and accept a MissionProposal."
-    )
+    """Invokes an external agent with validated execution authority derived from an accepted MissionProposal."""
+    if not payload.authority:
+        raise HTTPException(
+            status_code=403,
+            detail="Direct external agent invocation is unauthorized. Clients must generate and accept a MissionProposal."
+        )
 
+    ws = getattr(request.app.state, "workspace", None)
+    ws_id = getattr(ws, "name", None) or "default"
+    from aether.core.execution import ExecutionAuthority, ExecutionBoundary, UnauthorizedExecutionError
+    try:
+        auth_obj = ExecutionAuthority.from_dict(payload.authority)
+        p_store = getattr(ws, "personal_store", None)
+        ExecutionBoundary.validate_authority(
+            authority=auth_obj,
+            workspace_id=ws_id,
+            store=p_store,
+            action_or_boundary=f"agent.external:{payload.agent_name}",
+        )
+    except (UnauthorizedExecutionError, ValueError) as exc:
+        raise HTTPException(status_code=403, detail=str(exc))
+
+    from aether.agents.external import ExternalAgentAdapter, ExternalAgentConfig
+    from aether.core.execution import Task
 
     team = getattr(request.app.state, "team", None)
     target_adapter = None
@@ -7641,14 +7787,18 @@ async def invoke_external_agent(request: Request, payload: ExternalAgentInvokePa
             timeout_seconds=payload.timeout_seconds,
             auth_token=payload.auth_token,
         )
-        target_adapter = ExternalAgentAdapter(config=cfg)
+        target_adapter = ExternalAgentAdapter(config=cfg, workspace=ws)
+    elif not getattr(target_adapter, "workspace", None) and ws:
+        target_adapter.workspace = ws
 
     task = Task(
         instruction=payload.instruction,
         agent_name=payload.agent_name,
         context_data=payload.context_data,
+        workspace_id=ws_id,
+        authority=auth_obj,
     )
-    res = target_adapter.execute(task)
+    res = target_adapter.execute(task, authority=auth_obj)
     return res.to_dict()
 
 
@@ -7662,6 +7812,8 @@ class MCPCallPayload(BaseModel):
     endpoint_url: str | None = None
     command: list[str] | str | None = None
     auth_token: str | None = None
+    workspace_id: str | None = None
+    authority: dict[str, Any] | None = None
 
 
 @router.get("/tools/mcp")
@@ -7704,8 +7856,44 @@ async def list_mcp_tools(
 
 @router.post("/tools/mcp/call")
 async def call_mcp_tool(request: Request, payload: MCPCallPayload):
-    """Executes a tool on an MCP server."""
+    """Executes a tool on an MCP server with execution authority boundary validation."""
     from aether.tools.mcp import MCPClient
+    from aether.core.execution import ExecutionBoundary, ExecutionAuthority, UnauthorizedExecutionError
+
+    ws = getattr(request.app.state, "workspace", None)
+    ws_id = payload.workspace_id or (getattr(ws, "id", None) or getattr(ws, "name", None) or "default")
+
+    if not payload.authority:
+        raise HTTPException(
+            status_code=403,
+            detail=f"MCP tool execution '{payload.tool_name}' requires valid execution authority.",
+        )
+
+    auth_data = payload.authority
+    try:
+        auth_obj = ExecutionAuthority(
+            proposal_id=auth_data.get("proposal_id", ""),
+            proposal_version=int(auth_data.get("proposal_version", 1)),
+            workspace_id=auth_data.get("workspace_id", ws_id),
+            granted_at=auth_data.get("granted_at", ""),
+            expires_at=auth_data.get("expires_at"),
+        )
+    except Exception as exc:
+        raise HTTPException(status_code=403, detail=f"Invalid execution authority: {exc}")
+
+    p_store = getattr(ws, "personal_store", None)
+    if not p_store and ws and hasattr(ws, "personal"):
+        p_store = getattr(ws.personal, "store", None)
+
+    try:
+        ExecutionBoundary.validate_authority(
+            authority=auth_obj,
+            workspace_id=ws_id,
+            store=p_store,
+            action_or_boundary=f"mcp.tool:{payload.tool_name}",
+        )
+    except UnauthorizedExecutionError as exc:
+        raise HTTPException(status_code=403, detail=str(exc))
 
     client = MCPClient(
         endpoint_url=payload.endpoint_url,
@@ -7873,6 +8061,7 @@ class AutonomousExecutePayload(BaseModel):
     workspace_id: str | None = None
     context: dict[str, Any] | None = None
     auto_approve_safe: bool = True
+    authority: dict[str, Any] | None = None
 
 
 class AutonomousApprovePayload(BaseModel):
@@ -7885,20 +8074,43 @@ async def execute_autonomous_goal_route(
     payload: AutonomousExecutePayload,
 ):
     """
-    Macro-pass 1.2: Raw autonomous execution is not permitted.
-    This route now throws an error indicating that clients must use Intent -> Proposal -> Accept.
+    Executes an autonomous goal with validated execution authority derived from an accepted MissionProposal.
+    If no authority is provided, fails closed with 403 Forbidden.
     """
-    raise HTTPException(
-        status_code=403,
-        detail="Direct autonomous execution is unauthorized. Clients must generate and accept a MissionProposal."
-    )
+    ws = getattr(request.app.state, "workspace", None)
+    if not ws:
+        raise HTTPException(status_code=503, detail="Workspace not initialized.")
+    ws_id = (payload.workspace_id or getattr(ws, "id", None) or ws.name).strip()
 
+    if not payload.authority:
+        raise HTTPException(
+            status_code=403,
+            detail="Direct autonomous execution is unauthorized. Clients must generate and accept a MissionProposal.",
+        )
+
+    from aether.core.execution import ExecutionAuthority, ExecutionBoundary, UnauthorizedExecutionError
+    try:
+        authority_obj = ExecutionAuthority.from_dict(payload.authority)
+        p_store = getattr(ws, "personal_store", None)
+        ExecutionBoundary.validate_authority(
+            authority=authority_obj,
+            workspace_id=ws_id,
+            store=p_store,
+            action_or_boundary="autonomy.execute",
+        )
+    except (UnauthorizedExecutionError, ValueError) as exc:
+        raise HTTPException(status_code=403, detail=str(exc))
+
+    orchestrator = getattr(ws, "autonomy_orchestrator", None)
+    if not orchestrator:
+        raise HTTPException(status_code=500, detail="Autonomy orchestrator not available.")
 
     goal = orchestrator.plan_and_execute(
         workspace_id=ws_id,
         goal_prompt=payload.goal,
         context=payload.context or {},
         auto_approve_safe=payload.auto_approve_safe,
+        authority=authority_obj,
     )
     return goal.to_dict()
 

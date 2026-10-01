@@ -6,7 +6,7 @@ from uuid import uuid4
 from aether.core.delegation import DelegationContext, DelegationError
 from aether.planning.delegation import DelegationRequest, DelegationResult
 from aether.planning.types import Goal
-from aether.tools.base import Tool, ToolExecutionContext
+from aether.tools.base import Tool, ToolClassification, ToolExecutionContext
 
 
 class CognitiveAgentTool(Tool):
@@ -25,6 +25,7 @@ class CognitiveAgentTool(Tool):
         self.description = (
             f"Delegate a cognitive goal to the '{agent.name}' agent (role: {agent.role})."
         )
+        self.classification = ToolClassification.LOCAL_MUTATION
         self._agent = agent
         self._delegation_context = delegation_context
 

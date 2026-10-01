@@ -158,11 +158,18 @@ def test_package_installation_and_cleanup(temp_ws: Workspace):
 # 4. ActionExecutor Marketplace Actions
 # ---------------------------------------------------------------------------
 
-def test_action_executor_marketplace_actions(temp_ws: Workspace):
+def test_action_executor_marketplace_actions(temp_ws: Workspace, accepted_authority_factory):
     registry = ActionRegistry()
     store = ActionStore(temp_ws.root / ".aether" / "actions.db")
     safety = ActionSafetyPolicy()
-    executor = ActionExecutor(registry=registry, store=store, project_path=temp_ws.root, safety_policy=safety)
+    _, auth = accepted_authority_factory(temp_ws)
+    executor = ActionExecutor(
+        registry=registry,
+        store=store,
+        project_path=temp_ws.root,
+        safety_policy=safety,
+        personal_store=temp_ws.personal_store,
+    )
 
     # 1. marketplace.list
     res_list = executor.execute("marketplace.list", temp_ws.name, {})
@@ -182,6 +189,7 @@ def test_action_executor_marketplace_actions(temp_ws: Workspace):
         temp_ws.name,
         {"package_id": "tool-sql-introspect"},
         auto_approve=True,
+        authority=auth,
     )
     assert res_install.status == ActionExecutionStatus.SUCCESS
     assert res_install.output_data["package_id"] == "tool-sql-introspect"
@@ -194,6 +202,7 @@ def test_action_executor_marketplace_actions(temp_ws: Workspace):
         temp_ws.name,
         {"package_id": "tool-sql-introspect"},
         auto_approve=True,
+        authority=auth,
     )
     assert res_uninstall.status == ActionExecutionStatus.SUCCESS
     assert res_uninstall.output_data["package_id"] == "tool-sql-introspect"

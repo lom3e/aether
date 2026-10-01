@@ -15,7 +15,7 @@ from typing import TYPE_CHECKING
 from aether.core.interrupts import RequireApproval
 from aether.core.security import OperationType, PathSandbox
 from aether.errors import FilesystemToolError
-from aether.tools.base import Tool
+from aether.tools.base import Tool, ToolClassification
 from aether.tools.decorator import tool
 
 if TYPE_CHECKING:
@@ -33,6 +33,7 @@ def create_filesystem_tools(
     @tool(
         name="list_directory",
         description="List files and subdirectories within a directory in the workspace sandbox.",
+        classification=ToolClassification.READ_ONLY,
     )
     def list_directory(path: str = ".") -> str:
         target = sandbox.validate_path(path, operation=OperationType.LIST, must_exist=True)
@@ -62,6 +63,7 @@ def create_filesystem_tools(
     @tool(
         name="read_file",
         description="Read the text content of a file in the workspace sandbox.",
+        classification=ToolClassification.READ_ONLY,
     )
     def read_file(path: str) -> str:
         target = sandbox.validate_path(path, operation=OperationType.READ, must_exist=True)
@@ -76,6 +78,7 @@ def create_filesystem_tools(
     @tool(
         name="write_file",
         description="Create or overwrite a file in the workspace sandbox with the specified content.",
+        classification=ToolClassification.LOCAL_MUTATION,
     )
     def write_file(path: str, content: str, context: Any | None = None) -> str:
         target = sandbox.validate_path(path, operation=OperationType.WRITE)
@@ -119,6 +122,7 @@ def create_filesystem_tools(
     @tool(
         name="patch_file",
         description="Replace specific text content in an existing file in the workspace sandbox.",
+        classification=ToolClassification.LOCAL_MUTATION,
     )
     def patch_file(path: str, search_content: str, replace_content: str, context: Any | None = None) -> str:
         target = sandbox.validate_path(path, operation=OperationType.PATCH, must_exist=True)
@@ -167,6 +171,7 @@ def create_filesystem_tools(
     @tool(
         name="delete_file",
         description="Delete a file from the workspace sandbox. Requires human confirmation before deletion.",
+        classification=ToolClassification.SENSITIVE_MUTATION,
     )
     def delete_file(path: str, confirmed: bool = False, context: Any | None = None) -> str:
         target = sandbox.validate_path(path, operation=OperationType.DELETE, must_exist=True)

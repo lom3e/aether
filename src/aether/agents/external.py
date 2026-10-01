@@ -127,6 +127,7 @@ class ExternalAgentAdapter(Agent):
                 color=color,
             )
 
+        self.workspace = agent_kwargs.pop("workspace", None)
         super().__init__(
             name=self.external_config.name,
             role=self.external_config.role,
@@ -153,13 +154,22 @@ class ExternalAgentAdapter(Agent):
         """
         Executes a task by dispatching it over the configured external protocol.
         """
-        if not authority:
-            raise UnauthorizedExecutionError(f"External agent {self.name} requires execution authority.")
-        if not isinstance(authority, ExecutionAuthority):
-            raise UnauthorizedExecutionError(f"Invalid authority type for external agent {self.name}.")
-        # Verify workspace if task provides it
-        if task.workspace_id and authority.workspace_id != task.workspace_id:
-            raise UnauthorizedExecutionError(f"Authority workspace '{authority.workspace_id}' does not match task workspace '{task.workspace_id}'.")
+        effective_auth = authority or getattr(task, "authority", None) or (getattr(context, "authority", None) if context else None)
+        ws_id = getattr(task, "workspace_id", None) or getattr(effective_auth, "workspace_id", None) or "default"
+
+        from aether.core.execution import ExecutionBoundary
+        ws = getattr(self, "workspace", None)
+        if not ws:
+            from aether.workspace.workspace import Workspace
+            ws = Workspace.get(ws_id)
+        p_store = getattr(ws, "personal_store", None)
+
+        ExecutionBoundary.validate_authority(
+            authority=effective_auth,
+            workspace_id=ws_id,
+            store=p_store,
+            action_or_boundary=f"agent.external:{self.name}",
+        )
 
         self.lifecycle.start()
 

@@ -219,7 +219,7 @@ def test_fts5_bm25_ranked_queries_and_scope_filtering(tmp_path):
     assert len(res_other) == 0
 
 
-def test_knowledge_actions_registry_and_executor(mock_doc_server, tmp_path):
+def test_knowledge_actions_registry_and_executor(mock_doc_server, tmp_path, accepted_authority_factory):
     """Verifies knowledge.search and knowledge.ingest_url actions in ActionRegistry and ActionExecutor."""
     registry = ActionRegistry()
     assert "knowledge.search" in registry.list_actions()
@@ -238,18 +238,34 @@ def test_knowledge_actions_registry_and_executor(mock_doc_server, tmp_path):
     # Test execution via ActionExecutor
     mock_ws = MagicMock()
     mock_ws.name = "default"
+    mock_ws.id = "default"
     mock_knowledge = KnowledgeStore(str(tmp_path / "exec_knowledge.db"))
     mock_ws.knowledge_db_path = tmp_path / "exec_knowledge.db"
     mock_ws.default_team = MagicMock()
     mock_ws.default_team.knowledge = mock_knowledge
+    from aether.personal.store import PersonalStore
+    mock_ws.personal_store = PersonalStore(str(tmp_path / "personal.db"))
+    mock_ws.personal = None
     action_store = ActionStore(str(tmp_path / "action.db"))
-    executor = ActionExecutor(registry=registry, store=action_store, project_path=tmp_path)
+
+    _, auth = accepted_authority_factory(mock_ws)
+    executor = ActionExecutor(
+        registry=registry,
+        store=action_store,
+        project_path=tmp_path,
+        personal_store=mock_ws.personal_store,
+    )
 
     # Ingest URL action
     url = f"{mock_doc_server}/docs/api"
     with pytest.MonkeyPatch().context() as m:
         m.setattr("aether.workspace.workspace.Workspace.get", lambda ws_id: mock_ws)
-        pending = executor.execute("knowledge.ingest_url", workspace_id="default", input_data={"url": url})
+        pending = executor.execute(
+            "knowledge.ingest_url",
+            workspace_id="default",
+            input_data={"url": url},
+            authority=auth,
+        )
         assert pending.status == ActionExecutionStatus.PENDING_APPROVAL
         res_ingest = executor.approve(pending.id)
         assert res_ingest.status == ActionExecutionStatus.SUCCESS

@@ -288,7 +288,7 @@ def test_flight_recorder_timeline_export(tmp_path: Path):
 # 4. ActionRegistry & ActionExecutor Tests
 # ===========================================================================
 
-def test_mission_actions_registry_and_executor(tmp_path: Path):
+def test_mission_actions_registry_and_executor(tmp_path: Path, accepted_authority_factory):
     """Verifies ActionRegistry and ActionExecutor for playbooks and timeline export."""
     registry = ActionRegistry()
     assert "mission.list_playbooks" in registry.list_actions()
@@ -310,9 +310,18 @@ def test_mission_actions_registry_and_executor(tmp_path: Path):
     mock_ws.id = "default"
     mock_mstore = MissionStore(tmp_path / "action_missions.db")
     mock_ws.missions = mock_mstore
+    from aether.personal.store import PersonalStore
+    mock_ws.personal_store = PersonalStore(str(tmp_path / "personal.db"))
+    mock_ws.personal = None
 
+    _, auth = accepted_authority_factory(mock_ws)
     action_store = ActionStore(str(tmp_path / "action.db"))
-    executor = ActionExecutor(registry=registry, store=action_store, project_path=tmp_path)
+    executor = ActionExecutor(
+        registry=registry,
+        store=action_store,
+        project_path=tmp_path,
+        personal_store=mock_ws.personal_store,
+    )
 
     with pytest.MonkeyPatch().context() as m:
         m.setattr("aether.workspace.workspace.Workspace.get", lambda ws_id: mock_ws)
@@ -327,6 +336,7 @@ def test_mission_actions_registry_and_executor(tmp_path: Path):
             "mission.instantiate_playbook",
             workspace_id="default",
             input_data={"playbook_id": "code-security-audit", "params": {"target": "src/security"}},
+            authority=auth,
         )
         assert pending_inst.status == ActionExecutionStatus.PENDING_APPROVAL
         res_inst = executor.approve(pending_inst.id)

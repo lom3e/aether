@@ -109,6 +109,7 @@ class Task:
     context_data: dict[str, Any] = field(default_factory=dict)
     expected_output: str | None = None
     metadata: dict[str, Any] = field(default_factory=dict)
+    authority: ExecutionAuthority | None = None
 
 
 # Canonical alias for unified execution requests
@@ -131,6 +132,7 @@ class ExecutionContext:
     tools: tuple[str, ...] = ()
     provider_config: dict[str, Any] = field(default_factory=dict)
     metadata: dict[str, Any] = field(default_factory=dict)
+    authority: ExecutionAuthority | None = None
 
 
 class ExecutionStatus(StrEnum):
@@ -239,6 +241,7 @@ class AgentContext(ExecutionContext):
             tools=context.tools,
             provider_config=context.provider_config,
             metadata=context.metadata,
+            authority=context.authority,
             messages=messages or [],
         )
 
@@ -257,9 +260,132 @@ class UnauthorizedExecutionError(Exception):
 
 @dataclass(frozen=True, slots=True)
 class ExecutionAuthority:
+    """
+    Opaque execution reference bound to an accepted MissionProposal.
+    ExecutionAuthority is an internal reference token, NOT proof of authorization.
+    All execution sinks MUST validate the authority against persistent storage via ExecutionBoundary.
+    """
     proposal_id: str
     proposal_version: int
     workspace_id: str
     granted_at: str
-    _minted_internally: bool = field(init=False, default=True)
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "proposal_id": self.proposal_id,
+            "proposal_version": self.proposal_version,
+            "workspace_id": self.workspace_id,
+            "granted_at": self.granted_at,
+        }
+
+    @classmethod
+    def from_dict(cls, data: dict[str, Any]) -> ExecutionAuthority:
+        if not isinstance(data, dict):
+            raise UnauthorizedExecutionError("ExecutionAuthority data must be a dictionary.")
+        for k in ("proposal_id", "proposal_version", "workspace_id", "granted_at"):
+            if k not in data or data[k] is None:
+                raise UnauthorizedExecutionError(f"ExecutionAuthority missing required field '{k}'.")
+        return cls(
+            proposal_id=str(data["proposal_id"]),
+            proposal_version=int(data["proposal_version"]),
+            workspace_id=str(data["workspace_id"]),
+            granted_at=str(data["granted_at"]),
+        )
+
+
+class ExecutionBoundary:
+    """
+    Canonical persistent execution boundary.
+    Merely possessing or constructing an ExecutionAuthority object is never sufficient.
+    validate_authority() revalidates existence, workspace ownership, version match,
+    and ACCEPTED lifecycle state against persistent storage before any mutation or delegation.
+    """
+
+    @classmethod
+    def issue_authority(cls, proposal: Any) -> ExecutionAuthority:
+        """Issues an ExecutionAuthority for an ACCEPTED proposal."""
+        from aether.planning.contracts import ProposalStatus
+        status_val = getattr(proposal, "status", None)
+        if isinstance(status_val, ProposalStatus):
+            status_str = status_val.value
+        else:
+            status_str = str(status_val) if status_val is not None else ""
+        if status_str != ProposalStatus.ACCEPTED.value:
+            raise UnauthorizedExecutionError(
+                f"Cannot issue ExecutionAuthority for proposal '{getattr(proposal, 'id', 'unknown')}' in status '{status_str}'. "
+                f"Must be '{ProposalStatus.ACCEPTED.value}'."
+            )
+        from datetime import datetime, timezone
+        return ExecutionAuthority(
+            proposal_id=proposal.id,
+            proposal_version=proposal.version,
+            workspace_id=proposal.workspace_id,
+            granted_at=datetime.now(timezone.utc).isoformat(),
+        )
+
+    @classmethod
+    def validate_authority(
+        cls,
+        authority: ExecutionAuthority | None,
+        workspace_id: str,
+        store: Any,
+        action_or_boundary: str | None = None,
+    ) -> Any:
+        """
+        Validates the authority against persistent proposal state in PersonalStore.
+        Revalidates:
+        1. authority is provided and is an ExecutionAuthority instance
+        2. authority.workspace_id matches workspace_id
+        3. proposal exists in store
+        4. proposal belongs to workspace_id
+        5. proposal.version matches authority.proposal_version
+        6. proposal.status is ACCEPTED (not DRAFT, REVOKED, SUPERSEDED, etc.)
+        """
+        op_name = action_or_boundary or "operation"
+        if not authority:
+            raise UnauthorizedExecutionError(f"Execution of '{op_name}' requires valid execution authority.")
+        if not isinstance(authority, ExecutionAuthority):
+            raise UnauthorizedExecutionError(
+                f"Invalid authority type for '{op_name}': expected ExecutionAuthority, got {type(authority).__name__}."
+            )
+        if authority.workspace_id != workspace_id:
+            raise UnauthorizedExecutionError(
+                f"Authority workspace '{authority.workspace_id}' does not match execution workspace '{workspace_id}' for '{op_name}'."
+            )
+
+        # Resolve personal_store from store or workspace
+        personal_store = getattr(store, "personal_store", store)
+        if personal_store is None or not hasattr(personal_store, "get_proposal"):
+            raise UnauthorizedExecutionError(
+                f"No persistent PersonalStore available to validate execution authority for '{op_name}'."
+            )
+
+        proposal = personal_store.get_proposal(authority.proposal_id, workspace_id=workspace_id)
+        if not proposal:
+            raise UnauthorizedExecutionError(
+                f"Referenced proposal '{authority.proposal_id}' does not exist in workspace '{workspace_id}'."
+            )
+        if proposal.workspace_id != workspace_id:
+            raise UnauthorizedExecutionError(
+                f"Proposal workspace '{proposal.workspace_id}' does not match execution workspace '{workspace_id}'."
+            )
+        if proposal.version != authority.proposal_version:
+            raise UnauthorizedExecutionError(
+                f"Authority version {authority.proposal_version} does not match persisted proposal version {proposal.version}."
+            )
+
+        from aether.planning.contracts import ProposalStatus
+        status_val = getattr(proposal, "status", None)
+        if isinstance(status_val, ProposalStatus):
+            status_str = status_val.value
+        else:
+            status_str = str(status_val) if status_val is not None else ""
+
+        if status_str != ProposalStatus.ACCEPTED.value:
+            raise UnauthorizedExecutionError(
+                f"Proposal '{proposal.id}' is not in '{ProposalStatus.ACCEPTED.value}' state (current status: '{status_str}'). "
+                f"Unaccepted or revoked proposals cannot authorize execution."
+            )
+
+        return proposal
 

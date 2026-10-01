@@ -40,15 +40,37 @@ class FakeTeam:
 
 
 @pytest.fixture
-def workspace_with_runtime(tmp_path: Path):
+def workspace_with_runtime(tmp_path: Path, accepted_authority_factory):
     db_file = tmp_path / "test_missions.db"
     store = MissionStore(db_file)
 
     ws = MagicMock(spec=Workspace)
+    ws.name = "default"
+    ws.id = "default"
     ws.missions = store
     ws.conversations = MagicMock()
     ws.conversations_db_path = str(db_file)
     ws.runtime = None
+
+    from aether.personal.store import PersonalStore
+    p_store = PersonalStore(str(tmp_path / "personal.db"))
+    ws.personal_store = p_store
+    ws.personal = None
+
+    orig_create_mission = store.create_mission
+
+    def create_mission_with_authority(*args, **kwargs):
+        title = kwargs.get("title") or (args[0] if len(args) > 0 else "Test Mission")
+        _, auth = accepted_authority_factory(ws, title=title)
+        meta = dict(kwargs.get("metadata") or {})
+        if "authority" not in meta:
+            meta["authority"] = auth.to_dict()
+            meta["proposal_id"] = auth.proposal_id
+            meta["proposal_version"] = auth.proposal_version
+        kwargs["metadata"] = meta
+        return orig_create_mission(*args, **kwargs)
+
+    store.create_mission = create_mission_with_authority
 
     events_received = []
     def broadcaster(payload):

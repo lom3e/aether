@@ -61,7 +61,7 @@ class MockTeam:
 
 
 @pytest.fixture
-def test_workspace(tmp_path: Path):
+def test_workspace(tmp_path: Path, accepted_authority_factory):
     root = tmp_path / "ws"
     ws = WorkspaceRegistry.create_workspace(
         name="Mission Test Workspace",
@@ -71,6 +71,21 @@ def test_workspace(tmp_path: Path):
 
     mock_team = MockTeam()
     ws.load_team = MagicMock(return_value=mock_team)
+
+    orig_create_mission = ws.missions.create_mission
+
+    def create_mission_with_authority(*args, **kwargs):
+        title = kwargs.get("title") or (args[0] if len(args) > 0 else "Mission")
+        _, auth = accepted_authority_factory(ws, title=title)
+        meta = dict(kwargs.get("metadata") or {})
+        if "authority" not in meta:
+            meta["authority"] = auth.to_dict()
+            meta["proposal_id"] = auth.proposal_id
+            meta["proposal_version"] = auth.proposal_version
+        kwargs["metadata"] = meta
+        return orig_create_mission(*args, **kwargs)
+
+    ws.missions.create_mission = create_mission_with_authority
 
     runtime = MissionRuntime(ws)
     app.state.workspace = ws

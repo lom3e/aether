@@ -127,9 +127,20 @@ def test_companion_automation_intent_and_approval(tmp_path: Path):
         prompt=prompt,
     )
 
-    # Response should contain the proposal summary and require approval
-    assert "Proposed Automation" in msg.content or "Draft" in msg.content
+    # Response should contain the proposal summary and require acceptance
+    assert "Proposal" in msg.content or "Proposed Automation" in msg.content or "Draft" in msg.content
     assert msg.tier == IntentTier.ACT
+
+    # Accept the proposal to issue execution authority
+    prop_id = msg.metadata.get("proposal_id")
+    _, authority = service.accept_proposal(prop_id, workspace_id=ws.id)
+
+    # Now execute with authority
+    msg_exec = service.process_prompt(
+        workspace_id=ws.id,
+        prompt=prompt,
+        authority=authority,
+    )
 
     # Check pending approvals
     overview = service.get_overview(ws.id)
@@ -148,7 +159,7 @@ def test_companion_automation_intent_and_approval(tmp_path: Path):
 # ---------------------------------------------------------------------------
 
 @pytest.mark.asyncio
-async def test_webhook_automation_lifecycle(tmp_path: Path):
+async def test_webhook_automation_lifecycle(tmp_path: Path, accepted_authority_factory):
     """Verify webhook endpoint authentication, payload ingestion, and execution."""
     ws = Workspace.get_or_init(tmp_path / "ws_webhook", "Webhook WS")
 
@@ -202,7 +213,7 @@ async def test_webhook_automation_lifecycle(tmp_path: Path):
         await webhook_automation_endpoint(missing_req, "unknown-slug")
     assert "404" in str(excinfo.value)
 
-    # C. Test Valid Webhook Call -> 200 OK + Execution
+    # C1. Test Valid Webhook Call without authority -> fails closed
     valid_req = Request({
         "type": "http",
         "method": "POST",
@@ -217,11 +228,31 @@ async def test_webhook_automation_lifecycle(tmp_path: Path):
 
     res = await webhook_automation_endpoint(valid_req, "github-push")
     assert res["status"] == "ok"
-    assert res["run_status"] in ("completed", "succeeded")
+    # Background trigger without accepted proposal authority must fail closed
+    assert res["run_status"] == "failed"
 
-    # Verify run record in store
+    # C2. Test Valid Webhook Call with accepted proposal authority
+    _, auth = accepted_authority_factory(ws, title="Webhook Execution")
+    auto.metadata["authority"] = auth.to_dict()
+    ws.automations.save_automation(auto)
+
+    valid_req2 = Request({
+        "type": "http",
+        "method": "POST",
+        "path": "/api/automations/webhooks/github-push",
+        "headers": [(b"x-aether-webhook-secret", b"super-secret-token")],
+        "app": app,
+        "query_string": b"",
+    })
+    valid_req2._receive = valid_receive
+
+    res2 = await webhook_automation_endpoint(valid_req2, "github-push")
+    assert res2["status"] == "ok"
+    assert res2["run_status"] in ("completed", "succeeded")
+
+    # Verify run records in store
     runs = ws.automations.list_runs(automation_id=auto.id)
-    assert len(runs) == 1
+    assert len(runs) >= 1
     assert runs[0].trigger_type == "webhook"
 
 
@@ -387,7 +418,7 @@ def test_suggestions_engine_pattern_discovery(tmp_path: Path):
 # ---------------------------------------------------------------------------
 
 @pytest.mark.asyncio
-async def test_truthful_execution_and_notifications(tmp_path: Path):
+async def test_truthful_execution_and_notifications(tmp_path: Path, accepted_authority_factory):
     """Verify AutomationEngine executes through canonical Runtime and dispatches notifications without fake simulation."""
     ws = Workspace.get_or_init(tmp_path / "ws_truth", "Truthful WS")
     engine = AutomationEngine(workspace=ws)
@@ -402,7 +433,16 @@ async def test_truthful_execution_and_notifications(tmp_path: Path):
     )
     ws.automations.save_automation(auto)
 
-    run = await engine.execute_automation(auto, trigger_type="manual")
+    # 1. Un-authorized execution fails closed
+    run_unauth = await engine.execute_automation(auto, trigger_type="manual")
+    assert run_unauth.status == RunStatus.FAILED
+
+    # 2. Authorized execution with accepted proposal authority succeeds
+    _, auth = accepted_authority_factory(ws, title="Truthful Weekly Check")
+    auto.metadata["authority"] = auth.to_dict()
+    ws.automations.save_automation(auto)
+
+    run = await engine.execute_automation(auto, trigger_type="manual", bypass_dedup=True)
     assert run.status in (RunStatus.SUCCEEDED, RunStatus.COMPLETED, "succeeded", "completed")
     assert run.output_result is not None
     assert "[Simulated execution" not in run.output_result

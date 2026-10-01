@@ -221,6 +221,20 @@ class ProposalValidator:
             },
         )
 
+    SENSITIVE_KEY_SUBSTRINGS = (
+        "token",
+        "secret",
+        "password",
+        "api_key",
+        "auth",
+        "credential",
+        "private_key",
+        "access_key",
+        "refresh_token",
+        "client_secret",
+        "authorization",
+    )
+
     def _scan_for_secrets(
         self,
         proposal: MissionProposal,
@@ -228,27 +242,29 @@ class ProposalValidator:
         errors: list[str],
     ) -> None:
         """Verifies that no secrets or credentials leak into proposal or context structures structurally."""
-        def redact_secrets(d: Any) -> Any:
-            if isinstance(d, dict):
-                redacted = {}
-                for k, v in d.items():
-                    kl = k.lower()
-                    if any(s in kl for s in ["secret", "token", "password", "api_key", "key", "auth", "credential", "credentials"]):
-                        redacted[k] = "[REDACTED]"
-                        errors.append(f"Sensitive metadata field '{k}' detected and blocked.")
-                    else:
-                        redacted[k] = redact_secrets(v)
-                return redacted
-            elif isinstance(d, list):
-                return [redact_secrets(item) for item in d]
-            return d
-            
-        if proposal.provenance and proposal.provenance.metadata:
-            proposal.provenance.metadata = redact_secrets(proposal.provenance.metadata)
-        
-        for step in proposal.proposed_steps:
-            if getattr(step, "metadata", None):
-                step.metadata = redact_secrets(step.metadata)
+        def check_structure(obj: Any, path: str = "root") -> None:
+            if isinstance(obj, dict):
+                for k, v in obj.items():
+                    kl = str(k).lower()
+                    field_path = f"{path}.{k}"
+                    if any(s in kl for s in self.SENSITIVE_KEY_SUBSTRINGS):
+                        errors.append(f"Security invariant violated: Sensitive key '{k}' detected at '{field_path}'.")
+                    check_structure(v, field_path)
+            elif isinstance(obj, (list, tuple, set)):
+                for idx, item in enumerate(obj):
+                    check_structure(item, f"{path}[{idx}]")
+            elif isinstance(obj, str):
+                for pattern in self.SECRET_PATTERNS:
+                    if pattern.search(obj):
+                        errors.append(f"Security invariant violated: Secret credential pattern detected in value at '{path}'.")
+                        break
+
+        # Check proposal serialized dictionary
+        check_structure(proposal.to_dict(), path="proposal")
+
+        # Check context if provided
+        if context is not None:
+            check_structure(context.to_dict(), path="context")
 
     def _validate_outcome_constraints(
         self,

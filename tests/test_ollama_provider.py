@@ -53,9 +53,10 @@ def _mock_urlopen(response_bytes: bytes) -> MagicMock:
 
 class TestOllamaProviderDefaults:
     def test_default_endpoint(self) -> None:
-        p = OllamaProvider()
-        assert p._endpoint == "http://localhost:11434/api/chat"
-        assert p._model == "llama3"
+        with patch.object(OllamaProvider, "get_available_models", return_value=[]):
+            p = OllamaProvider()
+            assert p._endpoint == "http://localhost:11434/api/chat"
+            assert p._model == "llama3"
 
     def test_custom_config(self) -> None:
         cfg = ProviderConfig(base_url="http://myserver:11434", model="mistral")

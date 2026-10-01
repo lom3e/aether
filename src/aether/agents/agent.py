@@ -942,6 +942,7 @@ class Agent:
             tool_registry=self.tool_registry,
             skills=self.resolve_skills(),
             tools=tuple(self.tools),
+            authority=task.authority,
         )
 
     def _build_metadata(

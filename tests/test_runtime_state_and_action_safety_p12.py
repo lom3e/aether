@@ -160,45 +160,51 @@ def test_terminal_states_immutable(temp_workspace):
 # 2. ActionExecutor Safety, Truthfulness, and Idempotency
 # ---------------------------------------------------------------------------
 
-def test_action_executor_auto_approval_audit_trail(temp_workspace):
+def test_action_executor_auto_approval_audit_trail(temp_workspace, accepted_authority_factory):
     """Safe actions auto-approved must record auto_approved=True and approved_by='safety_policy'."""
     executor = temp_workspace.actions
+    _, auth = accepted_authority_factory(temp_workspace, title="Create Note")
 
     execution = executor.execute(
         action_id="files.create_document",
         workspace_id="p12_ws",
         input_data={"filename": "notes.md", "content": "hello world"},
         auto_approve=True,
+        authority=auth,
     )
     assert execution.status == ActionExecutionStatus.SUCCEEDED
     assert execution.metadata.get("auto_approved") is True
     assert execution.approved_by == "safety_policy"
 
 
-def test_action_executor_external_action_cannot_be_silently_auto_approved(temp_workspace):
+def test_action_executor_external_action_cannot_be_silently_auto_approved(temp_workspace, accepted_authority_factory):
     """External actions (e.g. calendar/github) must pause in waiting_approval even if auto_approve=True."""
     executor = temp_workspace.actions
+    _, auth = accepted_authority_factory(temp_workspace, title="Team Sync")
 
     execution = executor.execute(
         action_id="calendar.create_event",
         workspace_id="p12_ws",
         input_data={"title": "Team Sync", "start_time": "2026-10-01T10:00:00Z"},
         auto_approve=True,  # Safety policy should refuse blind auto-approval for EXTERNAL actions
+        authority=auth,
     )
     assert execution.status == ActionExecutionStatus.WAITING_APPROVAL
     assert execution.is_waiting_approval() is True
     assert execution.metadata.get("requires_approval") is True
 
 
-def test_action_executor_approve_reject_idempotency(temp_workspace):
+def test_action_executor_approve_reject_idempotency(temp_workspace, accepted_authority_factory):
     """Verify approve and reject idempotency and cross-decision rejection."""
     executor = temp_workspace.actions
+    _, auth = accepted_authority_factory(temp_workspace, title="Client Meeting")
 
     execution = executor.execute(
         action_id="calendar.create_event",
         workspace_id="p12_ws",
         input_data={"title": "Client Meeting", "start_time": "2026-10-01T12:00:00Z"},
         auto_approve=False,
+        authority=auth,
     )
     assert execution.status == ActionExecutionStatus.WAITING_APPROVAL
 
@@ -217,15 +223,17 @@ def test_action_executor_approve_reject_idempotency(temp_workspace):
         executor.reject(execution.id, reason="Changed mind")
 
 
-def test_action_executor_reject_flow(temp_workspace):
+def test_action_executor_reject_flow(temp_workspace, accepted_authority_factory):
     """Verify reject transitions to REJECTED and forbids subsequent approval."""
     executor = temp_workspace.actions
+    _, auth = accepted_authority_factory(temp_workspace, title="Spam Meeting")
 
     execution = executor.execute(
         action_id="calendar.create_event",
         workspace_id="p12_ws",
         input_data={"title": "Spam Meeting", "start_time": "2026-10-01T12:00:00Z"},
         auto_approve=False,
+        authority=auth,
     )
     assert execution.status == ActionExecutionStatus.WAITING_APPROVAL
 
@@ -243,9 +251,10 @@ def test_action_executor_reject_flow(temp_workspace):
         executor.approve(execution.id, approver="bob")
 
 
-def test_action_executor_failure_propagation_no_false_success(temp_workspace):
+def test_action_executor_failure_propagation_no_false_success(temp_workspace, accepted_authority_factory):
     """If an action connector or handler fails, executor must transition to FAILED and mask secrets."""
     executor = temp_workspace.actions
+    _, auth = accepted_authority_factory(temp_workspace, title="Failing Action")
 
     # Mock connector execution returning success=False
     mock_connector_res = MagicMock()
@@ -270,6 +279,7 @@ def test_action_executor_failure_propagation_no_false_success(temp_workspace):
             workspace_id="p12_ws",
             input_data={"auth_token": "secret_token_xyz"},
             auto_approve=True,
+            authority=auth,
         )
 
         assert execution.status == ActionExecutionStatus.FAILED
@@ -360,11 +370,12 @@ async def test_deliverable_approval_succeeds_if_file_exists_on_disk(temp_workspa
 # 4. Personal Agent Service Step Truthfulness & Notification Suppression
 # ---------------------------------------------------------------------------
 
-def test_personal_agent_do_tier_failure_suppresses_completed_notification(temp_workspace):
+def test_personal_agent_do_tier_failure_suppresses_completed_notification(temp_workspace, accepted_authority_factory):
     """When a DO tier action fails, the response must report error and NOT notify ACTION_COMPLETED."""
     agent_svc = temp_workspace.personal
     notif_svc = temp_workspace.notifications
     initial_completed_count = len([n for n in notif_svc.store.list("p12_ws") if n.type == NotificationType.ACTION_COMPLETED])
+    _, auth = accepted_authority_factory(temp_workspace, title="Create report file")
 
     # Mock runtime.execute to simulate DO tier failure
     failing_result = ExecutionResult(
@@ -385,7 +396,7 @@ def test_personal_agent_do_tier_failure_suppresses_completed_notification(temp_w
         )
 
         with patch.object(agent_svc, "classify_intent", return_value=intent):
-            msg = agent_svc.process_prompt("p12_ws", "create a file named report.txt")
+            msg = agent_svc.process_prompt("p12_ws", "create a file named report.txt", authority=auth)
 
             # Must NOT report success in conversational text
             assert "taken care of it" not in msg.content.lower()
@@ -401,9 +412,10 @@ def test_personal_agent_do_tier_failure_suppresses_completed_notification(temp_w
             assert after_completed_count == initial_completed_count
 
 
-def test_personal_agent_act_tier_waiting_approval_truthful(temp_workspace):
+def test_personal_agent_act_tier_waiting_approval_truthful(temp_workspace, accepted_authority_factory):
     """When an ACT tier action pauses for approval, step must be waiting_approval, not completed."""
     agent_svc = temp_workspace.personal
+    _, auth = accepted_authority_factory(temp_workspace, title="Schedule calendar event")
 
     waiting_result = ExecutionResult(
         success=True,
@@ -423,7 +435,7 @@ def test_personal_agent_act_tier_waiting_approval_truthful(temp_workspace):
         )
 
         with patch.object(agent_svc, "classify_intent", return_value=intent):
-            msg = agent_svc.process_prompt("p12_ws", "schedule a calendar meeting with client")
+            msg = agent_svc.process_prompt("p12_ws", "schedule a calendar meeting with client", authority=auth)
 
             # Check that an approval step exists with waiting_approval (or pending_approval) status
             appr_step = next((s for s in msg.steps if "approval" in s.title.lower()), None)

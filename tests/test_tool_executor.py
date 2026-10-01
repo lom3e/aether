@@ -4,12 +4,13 @@ import pytest
 
 from aether.engine.result import UnitExecutionStatus
 from aether.engine.units import UnitType
-from aether.tools.base import Tool, ToolExecutionContext
+from aether.tools.base import Tool, ToolExecutionContext, ToolClassification
 from aether.tools.executor import ToolExecutor
 
 
 class DummyTool(Tool):
     name = "dummy_tool"
+    classification = ToolClassification.READ_ONLY
 
     def execute(self, input_data: str, context: ToolExecutionContext | None = None) -> str:
         if input_data == "fail":

@@ -1871,8 +1871,8 @@ class ActionRegistry:
                 id="notifications.send_briefing",
                 name="Send Notification Briefing",
                 description="Dispatches a structured executive briefing across multi-channel notification fabric.",
-                tier=ActionTier.DO,
-                permission_level=ActionPermissionLevel.READ_ONLY,
+                tier=ActionTier.ACT,
+                permission_level=ActionPermissionLevel.EXTERNAL_MUTATION,
                 requires_confirmation=False,
                 provider="notifications",
                 input_schema={
@@ -1931,8 +1931,8 @@ class ActionRegistry:
                 id="notifications.test_channel",
                 name="Test Notification Channel",
                 description="Dispatches a live verification test alert through a specific delivery channel.",
-                tier=ActionTier.DO,
-                permission_level=ActionPermissionLevel.READ_ONLY,
+                tier=ActionTier.ACT,
+                permission_level=ActionPermissionLevel.EXTERNAL_MUTATION,
                 requires_confirmation=False,
                 provider="notifications",
                 input_schema={

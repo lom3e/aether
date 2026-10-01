@@ -5,6 +5,24 @@ from dataclasses import dataclass, field
 from typing import Any
 
 
+from enum import StrEnum
+
+
+class ToolClassification(StrEnum):
+    READ_ONLY = "read_only"
+    LOCAL_MUTATION = "local_mutation"
+    EXTERNAL_MUTATION = "external_mutation"
+    SENSITIVE_MUTATION = "sensitive_mutation"
+    UNKNOWN = "unknown"
+
+    @classmethod
+    def from_str(cls, val: str) -> ToolClassification:
+        try:
+            return cls(str(val).lower().strip())
+        except (ValueError, AttributeError):
+            return cls.UNKNOWN
+
+
 @dataclass(slots=True)
 class ToolExecutionContext:
     """
@@ -13,6 +31,9 @@ class ToolExecutionContext:
 
     agent_name: str | None = None
     task_id: str | None = None
+    workspace_id: str | None = None
+    authority: Any = None
+    store: Any = None
     metadata: dict[str, Any] = field(default_factory=dict)
     artifacts: list[dict[str, Any]] = field(default_factory=list)
 
@@ -24,6 +45,7 @@ class Tool(ABC):
 
     name: str
     description: str = ""
+    classification: ToolClassification = ToolClassification.UNKNOWN
 
     @abstractmethod
     def execute(self, input_data: str, context: ToolExecutionContext | None = None) -> str:

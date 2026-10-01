@@ -202,10 +202,11 @@ def test_ambient_watcher_file_change_evaluation(temp_workspace: Workspace):
     assert "Text Monitor" in sug2.title
 
 
-def test_proactive_action_executor_handlers(temp_workspace: Workspace):
+def test_proactive_action_executor_handlers(temp_workspace: Workspace, accepted_authority_factory):
     """Verify ActionExecutor running proactive suggestions and watcher actions."""
     registry = temp_workspace.action_registry
     executor = temp_workspace.actions
+    _, auth = accepted_authority_factory(temp_workspace)
 
     assert registry.get("proactive.list_suggestions") is not None
     assert registry.get("proactive.generate_suggestions") is not None
@@ -226,8 +227,9 @@ def test_proactive_action_executor_handlers(temp_workspace: Workspace):
             "action_id": "knowledge.search",
         },
         auto_approve=True,
+        authority=auth,
     )
-    assert res_w.status.value == "success"
+    assert res_w.status.value in ("success", "succeeded")
     watcher_id = res_w.output_data["watcher"]["id"]
 
     # 2. List watchers
@@ -237,7 +239,7 @@ def test_proactive_action_executor_handlers(temp_workspace: Workspace):
         input_data={},
         auto_approve=True,
     )
-    assert res_list_w.status.value == "success"
+    assert res_list_w.status.value in ("success", "succeeded")
     assert len(res_list_w.output_data["watchers"]) >= 1
 
     # 3. Check watchers
@@ -246,8 +248,9 @@ def test_proactive_action_executor_handlers(temp_workspace: Workspace):
         workspace_id=temp_workspace.id,
         input_data={},
         auto_approve=True,
+        authority=auth,
     )
-    assert res_check.status.value == "success"
+    assert res_check.status.value in ("success", "succeeded")
     assert "results" in res_check.output_data
 
     # 4. Generate suggestions
@@ -256,8 +259,9 @@ def test_proactive_action_executor_handlers(temp_workspace: Workspace):
         workspace_id=temp_workspace.id,
         input_data={},
         auto_approve=True,
+        authority=auth,
     )
-    assert res_gen.status.value == "success"
+    assert res_gen.status.value in ("success", "succeeded")
 
     # Seed suggestion to test accept/dismiss
     sug = temp_workspace.proactive_store.save_suggestion(
@@ -274,8 +278,9 @@ def test_proactive_action_executor_handlers(temp_workspace: Workspace):
         workspace_id=temp_workspace.id,
         input_data={"suggestion_id": sug.id},
         auto_approve=True,
+        authority=auth,
     )
-    assert res_acc.status.value == "success"
+    assert res_acc.status.value in ("success", "succeeded")
     assert res_acc.output_data["suggestion"]["status"] == "applied"
 
 

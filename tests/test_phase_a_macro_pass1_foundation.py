@@ -750,13 +750,27 @@ async def test_api_personal_intents_and_proposals_flow(tmp_path):
 
 def test_autonomy_take_care_of_it_blocks_at_proposal_boundary(tmp_path):
     """Verifies autonomy.take_care_of_it stops at proposal boundary with zero execution bypass."""
+    from conftest import make_test_accepted_authority
+    from aether.core.execution import UnauthorizedExecutionError
+
     ws = Workspace(tmp_path)
     initial_mission_count = len(ws.missions.list_missions(ws.name))
 
+    # Without authority: execution fails closed (LOCAL_MUTATION)
+    with pytest.raises(UnauthorizedExecutionError):
+        ws.actions.execute(
+            action_id="autonomy.take_care_of_it",
+            workspace_id=ws.name,
+            input_data={"goal": "Refactor authentication and deploy to staging"},
+        )
+
+    # With genuine accepted proposal authority: executes and creates proposal without bypass
+    _, auth = make_test_accepted_authority(ws, title="Autonomy proposal")
     res = ws.actions.execute(
         action_id="autonomy.take_care_of_it",
         workspace_id=ws.name,
         input_data={"goal": "Refactor authentication and deploy to staging"},
+        authority=auth,
     )
     assert res.output_data is not None
     assert res.output_data.get("status") == "blocked_pending_acceptance"

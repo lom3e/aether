@@ -32,7 +32,7 @@ from aether.connections.base import (
 )
 from aether.connections.http import HttpConnector
 from aether.connections.models import ConnectionStatus
-from aether.tools.base import Tool, ToolExecutionContext
+from aether.tools.base import Tool, ToolClassification, ToolExecutionContext
 from aether.tools.registry import ToolRegistry
 
 logger = logging.getLogger(__name__)
@@ -78,6 +78,14 @@ class OpenAPITool(Tool):
         self.http_connector = http_connector or HttpConnector(auth_metadata=self.auth_metadata)
         self.permission_level = permission_level
         self.requires_confirmation = requires_confirmation
+        level_map = {
+            ActionPermissionLevel.READ_ONLY: ToolClassification.READ_ONLY,
+            ActionPermissionLevel.LOCAL_MUTATION: ToolClassification.LOCAL_MUTATION,
+            ActionPermissionLevel.EXTERNAL_MUTATION: ToolClassification.EXTERNAL_MUTATION,
+            ActionPermissionLevel.SENSITIVE_MUTATION: ToolClassification.SENSITIVE_MUTATION,
+            ActionPermissionLevel.UNKNOWN: ToolClassification.UNKNOWN,
+        }
+        self.classification = level_map.get(permission_level, ToolClassification.UNKNOWN)
 
     def to_json_schema(self) -> dict[str, Any]:
         """

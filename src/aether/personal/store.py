@@ -71,6 +71,12 @@ class PersonalStore:
             conn.execute("ROLLBACK;")
             raise
 
+    @contextmanager
+    def transaction(self) -> Generator[sqlite3.Cursor, None, None]:
+        """Public context manager for atomic multi-operation transactions."""
+        with self._transaction() as cursor:
+            yield cursor
+
     def _init_db(self) -> None:
         with self._transaction() as cursor:
             cursor.execute(
@@ -205,6 +211,7 @@ class PersonalStore:
             )
             cursor.execute("CREATE INDEX IF NOT EXISTS idx_mp_ws ON mission_proposals(workspace_id, status);")
             cursor.execute("CREATE INDEX IF NOT EXISTS idx_mp_intent ON mission_proposals(intent_id);")
+            cursor.execute("CREATE UNIQUE INDEX IF NOT EXISTS idx_mp_intent_version ON mission_proposals(intent_id, version);")
 
     def save_session(self, session: PersonalSession) -> PersonalSession:
         """Saves or updates session metadata."""
@@ -709,10 +716,16 @@ class PersonalStore:
         return proposal
 
 
-    def get_proposal(self, proposal_id: str) -> MissionProposal | None:
-        """Retrieves a MissionProposal by ID."""
+    def get_proposal(self, proposal_id: str, workspace_id: str | None = None) -> MissionProposal | None:
+        """Retrieves a MissionProposal by ID, optionally scoped by workspace."""
         conn = self._get_connection()
-        row = conn.execute("SELECT * FROM mission_proposals WHERE id = ?", (proposal_id,)).fetchone()
+        if workspace_id:
+            row = conn.execute(
+                "SELECT * FROM mission_proposals WHERE id = ? AND workspace_id = ?",
+                (proposal_id, workspace_id),
+            ).fetchone()
+        else:
+            row = conn.execute("SELECT * FROM mission_proposals WHERE id = ?", (proposal_id,)).fetchone()
         if not row:
             return None
         return MissionProposal.from_dict({
@@ -740,6 +753,51 @@ class PersonalStore:
             "created_at": row["created_at"],
             "updated_at": row["updated_at"],
         })
+
+    def transition_proposal_status(
+        self,
+        proposal_id: str,
+        workspace_id: str,
+        from_status: Any,
+        to_status: Any,
+    ) -> MissionProposal:
+        """
+        Atomically transitions a MissionProposal from an expected status to a target status.
+        Fails if proposal not found, belongs to another workspace, or current status does not match from_status.
+        """
+        target_status_val = to_status.value if hasattr(to_status, "value") else str(to_status)
+        if isinstance(from_status, (list, tuple, set)):
+            allowed = [s.value if hasattr(s, "value") else str(s) for s in from_status]
+        else:
+            allowed = [from_status.value if hasattr(from_status, "value") else str(from_status)]
+
+        with self._transaction() as cursor:
+            row = cursor.execute(
+                "SELECT * FROM mission_proposals WHERE id = ? AND workspace_id = ?",
+                (proposal_id, workspace_id),
+            ).fetchone()
+            if not row:
+                raise ValueError(f"Proposal '{proposal_id}' not found in workspace '{workspace_id}'.")
+
+            curr_status = row["status"]
+            if curr_status not in allowed:
+                raise ValueError(
+                    f"Proposal '{proposal_id}' cannot transition from '{curr_status}' to '{target_status_val}'. "
+                    f"Expected current status in: {allowed}."
+                )
+
+            now = datetime.now(timezone.utc).isoformat()
+            cursor.execute(
+                "UPDATE mission_proposals SET status = ?, updated_at = ? WHERE id = ? AND workspace_id = ? AND status = ?",
+                (target_status_val, now, proposal_id, workspace_id, curr_status),
+            )
+            if cursor.rowcount == 0:
+                raise ValueError(f"Concurrent status transition conflict for proposal '{proposal_id}'.")
+
+        res = self.get_proposal(proposal_id, workspace_id=workspace_id)
+        if not res:
+            raise ValueError(f"Proposal '{proposal_id}' disappeared after transition.")
+        return res
 
     def list_proposals(self, workspace_id: str, limit: int = 20) -> list[MissionProposal]:
         """Lists latest MissionProposals for a workspace."""

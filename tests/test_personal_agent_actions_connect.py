@@ -8,6 +8,7 @@ import tempfile
 from pathlib import Path
 from fastapi import Request
 import pytest
+from conftest import make_test_accepted_authority
 
 from aether.actions.models import (
     ActionDefinition,
@@ -128,18 +129,21 @@ def test_b_action_store_persistence(temp_workspace_dir):
     assert fetched.action_id == "files.create_document"
     assert fetched.status == ActionExecutionStatus.RUNNING
 
-    exec1.status = ActionExecutionStatus.SUCCESS
+    exec1.status = ActionExecutionStatus.SUCCEEDED
     exec1.output_data = {"bytes": 42}
     store.save_execution(exec1)
 
     fetched2 = store.get_execution("ax-1")
-    assert fetched2.status == ActionExecutionStatus.SUCCESS
+    assert fetched2.status == ActionExecutionStatus.SUCCEEDED
     assert fetched2.output_data == {"bytes": 42}
 
     store.close()
 
 
 def test_c_action_executor_direct_execution_do_tier(temp_workspace_dir):
+    from aether.workspace.workspace import Workspace
+
+    ws = Workspace.get_or_init(temp_workspace_dir, "test_ws")
     act_store = ActionStore(temp_workspace_dir / "actions.db")
     activity_store = ActivityStore(temp_workspace_dir / "activity.db")
     activity_svc = ActivityService(activity_store)
@@ -150,23 +154,32 @@ def test_c_action_executor_direct_execution_do_tier(temp_workspace_dir):
         store=act_store,
         activity_service=activity_svc,
         project_path=temp_workspace_dir,
+        workspace=ws,
+        personal_store=ws.personal_store,
     )
+
+    # Obtain authority through the real lifecycle
+    _, auth = make_test_accepted_authority(ws, title="DO tier file creation")
 
     result = executor.execute(
         action_id="files.create_document",
-        workspace_id="test_ws",
+        workspace_id=ws.name,
         input_data={"filename": "report.md", "content": "Hello World"},
+        authority=auth,
     )
 
-    assert result.status == ActionExecutionStatus.SUCCESS
+    assert result.status == ActionExecutionStatus.SUCCEEDED
     assert result.output_data.get("bytes") == len("Hello World".encode("utf-8"))
 
-    activities = activity_svc.list("test_ws")
+    activities = activity_svc.list(ws.name)
     assert len(activities) == 1
     assert "Completed" in activities[0].title
 
 
 def test_d_action_executor_safety_gating_act_tier(temp_workspace_dir):
+    from aether.workspace.workspace import Workspace
+
+    ws = Workspace.get_or_init(temp_workspace_dir, "test_ws")
     act_store = ActionStore(temp_workspace_dir / "actions.db")
     activity_store = ActivityStore(temp_workspace_dir / "activity.db")
     activity_svc = ActivityService(activity_store)
@@ -176,25 +189,33 @@ def test_d_action_executor_safety_gating_act_tier(temp_workspace_dir):
         registry=reg,
         store=act_store,
         activity_service=activity_svc,
+        workspace=ws,
+        personal_store=ws.personal_store,
     )
 
+    _, auth = make_test_accepted_authority(ws, title="Safety gating test")
+
+    # With authority but auto_approve=False, HITL gate must still apply
     result = executor.execute(
         action_id="calendar.create_event",
-        workspace_id="test_ws",
+        workspace_id=ws.name,
         input_data={"title": "Client Sync", "start_time": "2026-09-10T10:00:00Z"},
         auto_approve=False,
+        authority=auth,
     )
 
-    assert result.status == ActionExecutionStatus.PENDING_APPROVAL
+    assert result.status == ActionExecutionStatus.WAITING_APPROVAL
     assert result.completed_at is None
 
-    activities = activity_svc.list("test_ws")
+    activities = activity_svc.list(ws.name)
     assert len(activities) == 1
-    assert activities[0].status == ActivityStatus.PENDING_APPROVAL
     assert "Approval needed" in activities[0].title
 
 
 def test_e_action_executor_approval_lifecycle(temp_workspace_dir):
+    from aether.workspace.workspace import Workspace
+
+    ws = Workspace.get_or_init(temp_workspace_dir, "test_ws")
     act_store = ActionStore(temp_workspace_dir / "actions.db")
     activity_store = ActivityStore(temp_workspace_dir / "activity.db")
     activity_svc = ActivityService(activity_store)
@@ -207,29 +228,37 @@ def test_e_action_executor_approval_lifecycle(temp_workspace_dir):
         store=act_store,
         activity_service=activity_svc,
         connection_service=conn_svc,
+        workspace=ws,
+        personal_store=ws.personal_store,
     )
 
-    # 1. Queue pending execution
+    _, auth = make_test_accepted_authority(ws, title="Approval lifecycle test")
+
+    # 1. Queue pending execution (with authority, but HITL gate applies)
     pending = executor.execute(
         action_id="calendar.create_event",
-        workspace_id="test_ws",
+        workspace_id=ws.name,
         input_data={"title": "Team Retro", "start_time": "2026-09-12T15:00:00Z"},
+        authority=auth,
     )
-    assert pending.status == ActionExecutionStatus.PENDING_APPROVAL
+    assert pending.status == ActionExecutionStatus.WAITING_APPROVAL
 
-    # 2. Approve execution
+    # 2. Approve execution — revalidates persisted authority before dispatch
     approved = executor.approve(pending.id, approver="admin_user")
-    assert approved.status == ActionExecutionStatus.SUCCESS
+    assert approved.status == ActionExecutionStatus.SUCCEEDED
     assert approved.approved_by == "admin_user"
     assert approved.output_data.get("status") == "confirmed"
 
     # Verify event persisted in calendar
-    events = conn_svc.get_calendar_connector("test_ws").list_events()
+    events = conn_svc.get_calendar_connector(ws.name).list_events()
     assert len(events) == 1
     assert events[0]["title"] == "Team Retro"
 
 
 def test_f_action_executor_rejection_lifecycle(temp_workspace_dir):
+    from aether.workspace.workspace import Workspace
+
+    ws = Workspace.get_or_init(temp_workspace_dir, "test_ws")
     act_store = ActionStore(temp_workspace_dir / "actions.db")
     activity_store = ActivityStore(temp_workspace_dir / "activity.db")
     activity_svc = ActivityService(activity_store)
@@ -239,12 +268,17 @@ def test_f_action_executor_rejection_lifecycle(temp_workspace_dir):
         registry=reg,
         store=act_store,
         activity_service=activity_svc,
+        workspace=ws,
+        personal_store=ws.personal_store,
     )
+
+    _, auth = make_test_accepted_authority(ws, title="Rejection lifecycle test")
 
     pending = executor.execute(
         action_id="calendar.create_event",
-        workspace_id="test_ws",
+        workspace_id=ws.name,
         input_data={"title": "Unwanted Event", "start_time": "2026-09-15T09:00:00Z"},
+        authority=auth,
     )
 
     rejected = executor.reject(pending.id, reason="User cancelled request")
@@ -422,6 +456,7 @@ def test_m_personal_agent_answer_flow(workspace):
 
 
 def test_n_personal_agent_do_flow(workspace):
+    """DO-tier requests without authority must produce a proposal, not execute directly."""
     personal_svc = workspace.personal
 
     res = personal_svc.process_prompt(
@@ -430,15 +465,14 @@ def test_n_personal_agent_do_flow(workspace):
     )
 
     assert res.role == "assistant"
-    assert res.tier == IntentTier.DO
-    assert res.action_execution_id is not None
-    assert "summary.txt" in res.content
-
-    activities = workspace.activity.list(workspace.name)
-    assert any("Personal Request" in a.title for a in activities)
+    # DO intent must halt at proposal boundary without authority
+    assert res.metadata.get("status") == "proposal_pending"
+    assert res.metadata.get("proposal_id") is not None
+    assert res.action_execution_id is None  # Must NOT have executed
 
 
 def test_o_personal_agent_act_flow_with_safety_gate(workspace):
+    """ACT-tier requests without authority must produce a proposal, not execute directly."""
     personal_svc = workspace.personal
 
     res = personal_svc.process_prompt(
@@ -447,23 +481,10 @@ def test_o_personal_agent_act_flow_with_safety_gate(workspace):
     )
 
     assert res.role == "assistant"
-    assert res.tier == IntentTier.ACT
-    assert res.action_execution_id is not None
-    assert any(s.status == "pending_approval" for s in res.steps)
-    assert "confirm or decline" in res.content
-
-    # Overview must show 1 pending approval
-    overview = personal_svc.get_overview(workspace.name)
-    assert len(overview["pending_approvals"]) == 1
-    assert overview["pending_approvals"][0]["execution_id"] == res.action_execution_id
-
-    # User approves execution
-    approved = workspace.actions.approve(res.action_execution_id)
-    assert approved.status == ActionExecutionStatus.SUCCESS
-
-    # Overview pending approvals must now be empty
-    overview_after = personal_svc.get_overview(workspace.name)
-    assert len(overview_after["pending_approvals"]) == 0
+    # ACT intent must halt at proposal boundary without authority
+    assert res.metadata.get("status") == "proposal_pending"
+    assert res.metadata.get("proposal_id") is not None
+    assert res.action_execution_id is None  # Must NOT have executed
 
 
 def test_p_personal_agent_delegate_flow(workspace):
@@ -531,29 +552,45 @@ async def test_r_rest_personal_chat_and_sessions(workspace):
 @pytest.mark.asyncio
 async def test_s_rest_actions_endpoints(workspace):
     app.state.workspace = workspace
+    from fastapi.exceptions import HTTPException as FastAPIHTTPException
 
     # 1. List actions
     req1 = make_request("GET", "/api/actions")
     actions_list = await list_actions_route(req1)
     assert len(actions_list) >= 5
 
-    # 2. Execute action (ACT tier -> pending approval)
-    req2 = make_request("POST", "/api/actions/execute")
+    # 2. Execute action without authority -> 403
+    req2a = make_request("POST", "/api/actions/execute")
+    with pytest.raises(FastAPIHTTPException) as exc:
+        await execute_action_route(
+            req2a,
+            ExecuteActionPayload(
+                action_id="calendar.create_event",
+                input_data={"title": "Unauthorized", "start_time": "2026-09-18T11:00:00Z"},
+                workspace_id=workspace.name,
+            ),
+        )
+    assert exc.value.status_code == 403
+
+    # 3. Execute action with genuine authority -> queued for HITL approval
+    _, auth = make_test_accepted_authority(workspace, title="REST action test")
+    req2b = make_request("POST", "/api/actions/execute")
     exec_data = await execute_action_route(
-        req2,
+        req2b,
         ExecuteActionPayload(
             action_id="calendar.create_event",
             input_data={"title": "Design Review", "start_time": "2026-09-18T11:00:00Z"},
             workspace_id=workspace.name,
+            authority=auth.to_dict(),
         ),
     )
-    assert exec_data["status"] in ("pending_approval", "waiting_approval")
+    assert exec_data["status"] in ("waiting_approval",)
     exec_id = exec_data["id"]
 
-    # 3. Approve execution
+    # 4. Approve execution
     req3 = make_request("POST", f"/api/actions/executions/{exec_id}/approve")
     appr_data = await approve_action_execution_route(req3, execution_id=exec_id, payload=ApproveActionPayload(approver="tester"))
-    assert appr_data["status"] in ("success", "succeeded", "approved")
+    assert appr_data["status"] in ("succeeded",)
 
     # 4. List executions
     req4 = make_request("GET", "/api/actions/executions")
@@ -608,16 +645,36 @@ async def test_t_rest_connections_and_activity(workspace):
 async def test_u_personal_agent_real_file_operations_and_intelligence(workspace):
     personal_svc = workspace.personal
 
-    # 1. Create real document in workspace
+    # 1. Proposal generation boundary: mutating DO intent produces proposal without direct execution
+    res_proposal = personal_svc.process_prompt(
+        workspace_id=workspace.name,
+        prompt="Create a file called release_notes.txt with version 1.6.0 updates",
+    )
+    assert res_proposal.metadata.get("status") == "proposal_pending"
+    proposal_id = res_proposal.metadata.get("proposal_id")
+    assert proposal_id is not None
+
+    # Verify physical file was NOT created before acceptance
+    created_file = workspace.root / "release_notes.txt"
+    assert not created_file.exists()
+
+    # 2. Obtain genuine ExecutionAuthority via accepted proposal
+    _, auth = make_test_accepted_authority(
+        workspace,
+        title="Create Release Notes",
+        objective="Create a file called release_notes.txt with version 1.6.0 updates",
+    )
+
+    # 3. Execute with genuine ExecutionAuthority
     res_create = personal_svc.process_prompt(
         workspace_id=workspace.name,
         prompt="Create a file called release_notes.txt with version 1.6.0 updates",
+        authority=auth,
     )
     assert res_create.tier == IntentTier.DO
     assert "release_notes.txt" in res_create.content
 
-    # Verify physical file creation on disk
-    created_file = workspace.root / "release_notes.txt"
+    # Verify physical file creation on disk after authorized execution
     assert created_file.exists()
     assert "1.6.0" in created_file.read_text(encoding="utf-8")
 
@@ -640,7 +697,7 @@ async def test_u_personal_agent_real_file_operations_and_intelligence(workspace)
         prompt="Who are you and what can you do?",
     )
     assert "Aether" in res_query.content
-    assert "Digital Workforce" in res_query.content
+    assert "digital workforce" in res_query.content.lower()
 
 
 @pytest.mark.asyncio

@@ -7,7 +7,7 @@ from uuid import uuid4
 
 from aether.core.delegation import DelegationContext, DelegationError
 from aether.core.execution import Task
-from aether.tools.base import Tool, ToolExecutionContext
+from aether.tools.base import Tool, ToolClassification, ToolExecutionContext
 
 
 class AgentTool(Tool):
@@ -28,6 +28,7 @@ class AgentTool(Tool):
         self.description = (
             f"Delegate a task to the '{agent.name}' agent (role: {agent.role})."
         )
+        self.classification = ToolClassification.LOCAL_MUTATION
         self._agent = agent
         self._delegation_context = delegation_context
 
@@ -72,6 +73,8 @@ class AgentTool(Tool):
             agent_name=self._agent.name,
             instruction=actual_instruction,
             id=uuid4().hex,
+            workspace_id=context.workspace_id if context else None,
+            authority=context.authority if context else None,
             metadata={
                 "parent_task_id": parent_task_id,
                 "session_id": parent_task_id,

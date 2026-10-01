@@ -9,7 +9,8 @@ from unittest.mock import MagicMock
 import pytest
 
 from aether.coordination.events import EventEmitter
-from aether.core.execution import ExecutionResult
+from aether.core.execution import ExecutionResult, UnauthorizedExecutionError
+from aether.personal.store import PersonalStore
 from aether.missions.models import (
     Deliverable,
     ExecutionStatus,
@@ -51,12 +52,15 @@ class VerificationTeam:
 
 
 @pytest.mark.asyncio
-async def test_phase_a_runtime_persistence_privacy_and_multirun(tmp_path: Path):
+async def test_phase_a_runtime_persistence_privacy_and_multirun(tmp_path: Path, accepted_authority_factory):
     db_file = tmp_path / "phase_a_verification.db"
     store = MissionStore(db_file)
 
+    p_store = PersonalStore(tmp_path / "personal.db")
     ws = MagicMock(spec=Workspace)
     ws.missions = store
+    ws.personal_store = p_store
+    ws.name = "default"
     ws.conversations = MagicMock()
     ws.conversations_db_path = str(db_file)
     ws.root = tmp_path
@@ -81,8 +85,13 @@ async def test_phase_a_runtime_persistence_privacy_and_multirun(tmp_path: Path):
     )
     assert len(mission.id) == 32
 
-    # 2. Real Execution Run #1
-    exec1 = await runtime.start_mission(mission.id)
+    # Negative assertion: start_mission without authority fails closed
+    with pytest.raises(UnauthorizedExecutionError):
+        await runtime.start_mission(mission.id, authority=None)
+
+    # 2. Real Execution Run #1 with genuine accepted proposal authority
+    _, auth = accepted_authority_factory(ws, title="Phase A Verification Mission")
+    exec1 = await runtime.start_mission(mission.id, authority=auth)
     handle1 = runtime._active_executions.get(exec1.id)
     assert handle1 is not None
     await handle1.task

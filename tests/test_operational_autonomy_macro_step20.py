@@ -13,8 +13,10 @@ from typing import Any
 
 import pytest
 from starlette.requests import Request
+from conftest import make_test_accepted_authority
 
 from aether.actions.models import ActionTier
+from aether.core.execution import UnauthorizedExecutionError
 from aether.autonomy.engine import AutonomousGoalOrchestrator
 from aether.autonomy.models import (
     AutonomousGoal,
@@ -110,9 +112,19 @@ def test_full_autonomous_operational_loop(temp_workspace: Workspace):
     orchestrator = ws.autonomy_orchestrator
 
     goal_prompt = "Prenditene cura tu: analizza l'infrastruttura e genera il report di conformità"
+    # Negative assertion: fails closed without authority
+    with pytest.raises(UnauthorizedExecutionError):
+        orchestrator.plan_and_execute(
+            workspace_id=ws_id,
+            goal_prompt=goal_prompt,
+        )
+
+    # Positive execution with genuine accepted proposal authority
+    _, auth = make_test_accepted_authority(ws, title="Autonomous Operational Loop", objective=goal_prompt)
     goal = orchestrator.plan_and_execute(
         workspace_id=ws_id,
         goal_prompt=goal_prompt,
+        authority=auth,
     )
 
     # Status must be completed
@@ -192,16 +204,27 @@ def test_action_registry_and_executor_autonomy(temp_workspace: Workspace):
     assert action_def.tier == ActionTier.DO
     assert action_def.provider == "autonomy"
 
-    # 2. Execute autonomy.take_care_of_it via ActionExecutor (stops at proposal boundary)
-    from aether.core.execution import UnauthorizedExecutionError
-    import pytest
+    # 2. Execute autonomy.take_care_of_it via ActionExecutor
+    # Negative assertion: fails closed without authority (LOCAL_MUTATION)
     with pytest.raises(UnauthorizedExecutionError):
-        res = ws.actions.execute(
+        ws.actions.execute(
             action_id="autonomy.take_care_of_it",
             workspace_id=ws_id,
             input_data={"goal": "Verifica le risorse locali ed esporta l'inventario"},
         )
 
+    # Positive assertion: with authority, executes and stops at proposal boundary
+    _, auth = make_test_accepted_authority(ws, title="Autonomy Action Proposal")
+    res = ws.actions.execute(
+        action_id="autonomy.take_care_of_it",
+        workspace_id=ws_id,
+        input_data={"goal": "Verifica le risorse locali ed esporta l'inventario"},
+        authority=auth,
+    )
+    assert res.output_data is not None
+    assert res.output_data.get("status") == "blocked_pending_acceptance"
+    assert "proposal_id" in res.output_data
+    assert "proposal" in res.output_data
 
     # 3. List goals via ActionExecutor
     ws.autonomy_store.save_goal(
@@ -263,14 +286,66 @@ async def test_fastapi_autonomy_routes(temp_workspace: Workspace):
     ws = temp_workspace
     ws_id = ws.name
 
-    # 1. Execute goal endpoint
+    # 1. Execute goal endpoint - without authority, fails closed with 403
     req_exec = create_dummy_request(ws)
-    payload_exec = AutonomousExecutePayload(
+    payload_unauth = AutonomousExecutePayload(
         goal="Autonomous REST test: audit mesh compute and synthesize document",
         workspace_id=ws_id,
     )
     from fastapi.exceptions import HTTPException
     import pytest
     with pytest.raises(HTTPException) as exc:
-        goal_res = await execute_autonomous_goal_route(req_exec, payload_exec)
+        await execute_autonomous_goal_route(req_exec, payload_unauth)
     assert exc.value.status_code == 403
+
+    # Now create and accept a proposal to obtain genuine ExecutionAuthority
+    from aether.planning.contracts import IntentRequest, MissionProposal, ProposalStatus
+    from datetime import datetime, timezone
+    ws.personal_store.save_intent_request(IntentRequest(
+        id="intent-auto-1",
+        workspace_id=ws_id,
+        raw_input="Autonomous REST test",
+        source_surface="test",
+        created_at=datetime.now(timezone.utc).isoformat(),
+    ))
+    proposal = MissionProposal(
+        id="prop-auto-1",
+        intent_id="intent-auto-1",
+        workspace_id=ws_id,
+        title="Autonomous Goal Proposal",
+        objective="audit mesh compute and synthesize document",
+        why="Testing autonomous route",
+        context_summary="Context",
+        confidence=1.0,
+        status=ProposalStatus.READY_FOR_ACCEPTANCE,
+    )
+    ws.personal_store.save_proposal(proposal)
+    accepted_prop, auth = ws.personal.accept_proposal(proposal.id, ws_id)
+
+    # Execute with genuine authority
+    payload_exec = AutonomousExecutePayload(
+        goal="Autonomous REST test: audit mesh compute and synthesize document",
+        workspace_id=ws_id,
+        authority=auth.to_dict(),
+    )
+    goal_res = await execute_autonomous_goal_route(req_exec, payload_exec)
+    assert goal_res["status"] == "completed"
+    goal_id = goal_res["id"]
+
+    # 2. List goals endpoint
+    req_list = create_dummy_request(ws)
+    list_res = await list_autonomous_goals_route(req_list, workspace_id=ws_id)
+    assert isinstance(list_res, list)
+    assert any(g["id"] == goal_id for g in list_res)
+
+    # 3. Get specific goal endpoint
+    req_get = create_dummy_request(ws)
+    get_res = await get_autonomous_goal_route(req_get, goal_id)
+    assert get_res["id"] == goal_id
+    assert len(get_res["stages"]) == 9
+
+    # 4. Approve endpoint
+    req_appr = create_dummy_request(ws)
+    payload_appr = AutonomousApprovePayload(approved=True)
+    appr_res = await approve_autonomous_goal_route(req_appr, goal_id, payload_appr)
+    assert appr_res["status"] in ("completed", "executing")

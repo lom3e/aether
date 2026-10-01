@@ -15,8 +15,9 @@ class ToolExecutor:
     Tool-level execution foundation.
 
     The executor wraps the tool execution to provide a standardized Result contract,
-    error handling, and execution timing.
+    error handling, execution timing, and authorization boundary enforcement.
     """
+    store: Any = None
 
     def execute(
         self,
@@ -27,6 +28,28 @@ class ToolExecutor:
         start_time = time.perf_counter()
 
         try:
+            from aether.tools.base import ToolClassification
+            from aether.core.execution import ExecutionBoundary, ExecutionAuthority, UnauthorizedExecutionError
+
+            classification = getattr(tool, "classification", ToolClassification.UNKNOWN)
+            if classification != ToolClassification.READ_ONLY:
+                if not context or not context.authority:
+                    raise UnauthorizedExecutionError(
+                        f"Tool '{tool.name}' (classification={getattr(classification, 'value', str(classification))}) requires valid execution authority."
+                    )
+                if not isinstance(context.authority, ExecutionAuthority):
+                    raise UnauthorizedExecutionError(
+                        f"Invalid authority type for tool '{tool.name}': expected ExecutionAuthority, got {type(context.authority).__name__}."
+                    )
+                target_store = getattr(context, "store", None) or self.store
+                if target_store and context.workspace_id:
+                    ExecutionBoundary.validate_authority(
+                        authority=context.authority,
+                        workspace_id=context.workspace_id,
+                        store=target_store,
+                        action_or_boundary=f"tool:{tool.name}",
+                    )
+
             output = tool.execute(input_data, context)
 
             execution_time_ms = (time.perf_counter() - start_time) * 1000
@@ -44,7 +67,7 @@ class ToolExecutor:
                     "agent_name": context.agent_name if context else None,
                 }
             )
-        except AgentInterrupt:
+        except (AgentInterrupt, UnauthorizedExecutionError):
             raise
         except Exception as exc:
             execution_time_ms = (time.perf_counter() - start_time) * 1000

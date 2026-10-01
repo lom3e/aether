@@ -86,7 +86,7 @@ def test_runtime_execute_answer_mode_diagnostic_fallback():
     assert "test_ws" in result.output
 
 
-def test_runtime_execute_do_mode(tmp_path):
+def test_runtime_execute_do_mode(tmp_path, accepted_authority_factory):
     from aether.actions.registry import ActionRegistry
     from aether.actions.store import ActionStore
     from aether.actions.executor import ActionExecutor
@@ -101,44 +101,44 @@ def test_runtime_execute_do_mode(tmp_path):
         activity_service=activity_svc,
         project_path=tmp_path,
     )
-    runtime = Runtime(action_executor=executor)
+    from aether.workspace.workspace import Workspace
+    ws = Workspace.init(tmp_path / "ws_do", name="test_ws")
+    _, auth = accepted_authority_factory(ws, title="Create Note")
+
+    runtime = ws.runtime
 
     task = Task(
         instruction="Create a note",
         mode=ExecutionMode.DO,
         action_id="files.create_document",
         action_args={"filename": "note.txt", "content": "Hello Aether runtime"},
-        workspace_id="test_ws",
+        workspace_id=ws.name,
+        authority=auth,
     )
     result = runtime.execute(task)
 
     assert result.success is True
     assert result.status == ExecutionStatus.COMPLETED
-    assert (tmp_path / "note.txt").exists()
-    assert (tmp_path / "note.txt").read_text() == "Hello Aether runtime"
+    assert (ws.root / "note.txt").exists()
+    assert (ws.root / "note.txt").read_text() == "Hello Aether runtime"
     assert len(result.deliverables) == 1
     assert result.deliverables[0]["name"] == "note.txt"
 
 
-def test_runtime_execute_act_mode_requires_approval(tmp_path):
-    from aether.actions.registry import ActionRegistry
-    from aether.actions.store import ActionStore
-    from aether.actions.executor import ActionExecutor
+def test_runtime_execute_act_mode_requires_approval(tmp_path, accepted_authority_factory):
+    from aether.workspace.workspace import Workspace
+    ws = Workspace.init(tmp_path / "ws_act", name="test_ws")
+    _, auth = accepted_authority_factory(ws, title="Schedule a meeting")
 
-    act_store = ActionStore(f"sqlite:///{tmp_path}/actions.db")
-    executor = ActionExecutor(
-        registry=ActionRegistry(),
-        store=act_store,
-        project_path=tmp_path,
-    )
-    runtime = Runtime(action_executor=executor)
+    runtime = ws.runtime
 
     task = Task(
         instruction="Schedule a meeting",
         mode=ExecutionMode.ACT,
         action_id="calendar.create_event",
         action_args={"title": "Team Sync", "start_time": "2026-10-01T10:00:00Z"},
-        workspace_id="test_ws",
+        workspace_id=ws.name,
+        authority=auth,
     )
     result = runtime.execute(task)
 
@@ -150,12 +150,13 @@ def test_runtime_execute_act_mode_requires_approval(tmp_path):
 
 def test_runtime_execute_tool_mode():
     from aether.tools.registry import ToolRegistry
-    from aether.tools.base import Tool
+    from aether.tools.base import Tool, ToolClassification
 
     class PingTool(Tool):
         name = "ping"
         description = "Pings"
-        def execute(self, arguments, context):
+        classification = ToolClassification.READ_ONLY
+        def execute(self, arguments, context=None):
             return "pong: " + arguments.get("msg", "")
 
     registry = ToolRegistry()

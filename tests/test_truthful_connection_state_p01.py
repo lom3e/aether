@@ -248,7 +248,7 @@ def test_6_calendar_truthful_local_naming_and_status(temp_dirs):
     assert conn.verification_method == "local_storage"
 
 
-def test_7_action_executor_truthful_gate_and_operation_auditing(temp_dirs):
+def test_7_action_executor_truthful_gate_and_operation_auditing(temp_dirs, accepted_authority_factory):
     """
     ActionExecutor:
     - Blocks execution when connection is NOT_CONFIGURED or VERIFICATION_FAILED
@@ -256,6 +256,10 @@ def test_7_action_executor_truthful_gate_and_operation_auditing(temp_dirs):
     - Calls record_operation_success to update last_successful_operation
     """
     conn_db, act_db, action_db = temp_dirs
+    from aether.workspace.workspace import Workspace
+    ws = Workspace.init(Path(conn_db).parent / "ws_p01", name="ws-test")
+    _, auth = accepted_authority_factory(ws, title="Slack Send")
+
     conn_store = ConnectionStore(conn_db)
     act_store = ActivityStore(act_db)
     action_store = ActionStore(action_db)
@@ -283,7 +287,7 @@ def test_7_action_executor_truthful_gate_and_operation_auditing(temp_dirs):
     )
 
     # 1. Unconfigured -> Fails cleanly with RuntimeError
-    exec1 = executor.execute("slack.send_message", "ws-test", {"channel": "#general", "text": "Hi"}, auto_approve=True)
+    exec1 = executor.execute("slack.send_message", "ws-test", {"channel": "#general", "text": "Hi"}, auto_approve=True, authority=auth)
     assert exec1.status == ActionExecutionStatus.FAILED
     assert "not configured" in exec1.error_message.lower()
 
@@ -303,7 +307,7 @@ def test_7_action_executor_truthful_gate_and_operation_auditing(temp_dirs):
     mock_resp.read.return_value = b"ok"
 
     with patch("urllib.request.urlopen", return_value=mock_resp):
-        exec2 = executor.execute("slack.send_message", "ws-test", {"channel": "#general", "text": "Hi"}, auto_approve=True)
+        exec2 = executor.execute("slack.send_message", "ws-test", {"channel": "#general", "text": "Hi"}, auto_approve=True, authority=auth)
         assert exec2.status == ActionExecutionStatus.SUCCESS
 
         # Assert connection is now marked VERIFIED with last_successful_operation

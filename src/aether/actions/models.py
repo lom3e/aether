@@ -35,13 +35,14 @@ class ActionPermissionLevel(StrEnum):
     LOCAL_MUTATION = "local_mutation"
     EXTERNAL_MUTATION = "external_mutation"
     SENSITIVE_MUTATION = "sensitive_mutation"
+    UNKNOWN = "unknown"
 
     @classmethod
     def from_str(cls, val: str) -> ActionPermissionLevel:
         try:
             return cls(val.lower().strip())
-        except ValueError:
-            return cls.LOCAL_MUTATION
+        except (ValueError, AttributeError):
+            return cls.UNKNOWN
 
 
 class ActionExecutionStatus(StrEnum):
@@ -54,11 +55,22 @@ class ActionExecutionStatus(StrEnum):
     REJECTED = "rejected"
     EXPIRED = "expired"
     CANCELLED = "cancelled"
-
-    # Backward compatibility aliases
-    PENDING_APPROVAL = "waiting_approval"
     SUCCESS = "succeeded"
     COMPLETED = "succeeded"
+    PENDING_APPROVAL = "waiting_approval"
+
+    def __eq__(self, other: object) -> bool:
+        if isinstance(other, ActionExecutionStatus):
+            return self.value == other.value
+        if isinstance(other, str):
+            try:
+                resolved = self.from_str(other)
+                return self.value == resolved.value
+            except ValueError:
+                return self.value == other
+        return super().__eq__(other)
+
+    __hash__ = StrEnum.__hash__
 
     @classmethod
     def from_str(cls, val: str) -> ActionExecutionStatus:
@@ -83,21 +95,6 @@ class ActionExecutionStatus(StrEnum):
         if clean in aliases:
             return aliases[clean]
         raise ValueError(f"Unknown action execution status: '{val}'")
-
-    def __eq__(self, other: object) -> bool:
-        if isinstance(other, str):
-            norm = other.lower().strip()
-            if self.value == "waiting_approval" and norm in ("waiting_approval", "pending_approval"):
-                return True
-            if self.value == "succeeded" and norm in ("succeeded", "success", "completed"):
-                return True
-            if self.value == "cancelled" and norm in ("cancelled", "canceled"):
-                return True
-            return self.value == norm
-        return super().__eq__(other)
-
-    def __hash__(self) -> int:
-        return hash(self.value)
 
 
 VALID_ACTION_TRANSITIONS: dict[ActionExecutionStatus, set[ActionExecutionStatus]] = {

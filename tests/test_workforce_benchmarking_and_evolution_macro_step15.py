@@ -196,10 +196,11 @@ def test_evolution_engine_evaluation_and_regression(temp_workspace: Workspace):
     assert lb[0]["target_id"] == "writer"
 
 
-def test_benchmarking_action_executor(temp_workspace: Workspace):
+def test_benchmarking_action_executor(temp_workspace: Workspace, accepted_authority_factory):
     """Test action registry and action executor handlers for benchmarking actions."""
     registry = temp_workspace.action_registry
     executor = temp_workspace.actions
+    _, auth = accepted_authority_factory(temp_workspace)
 
     assert registry.get("benchmarking.run_suite") is not None
     assert registry.get("benchmarking.get_leaderboard") is not None
@@ -213,8 +214,9 @@ def test_benchmarking_action_executor(temp_workspace: Workspace):
         workspace_id=temp_workspace.id,
         input_data={"target_type": "agent", "target_id": "auditor", "quality_score": 0.89},
         auto_approve=True,
+        authority=auth,
     )
-    assert exec_run.status.value == "success"
+    assert exec_run.status.value in ("success", "succeeded")
     assert "benchmark_run" in exec_run.output_data
 
     # 2. Get leaderboard
@@ -224,7 +226,7 @@ def test_benchmarking_action_executor(temp_workspace: Workspace):
         input_data={},
         auto_approve=True,
     )
-    assert exec_lb.status.value == "success"
+    assert exec_lb.status.value in ("success", "succeeded")
     assert len(exec_lb.output_data["leaderboard"]) >= 1
 
     # 3. List proposals
@@ -234,7 +236,7 @@ def test_benchmarking_action_executor(temp_workspace: Workspace):
         input_data={},
         auto_approve=True,
     )
-    assert exec_props.status.value == "success"
+    assert exec_props.status.value in ("success", "succeeded")
     assert "proposals" in exec_props.output_data
 
     # 4. List regression alerts
@@ -244,7 +246,7 @@ def test_benchmarking_action_executor(temp_workspace: Workspace):
         input_data={},
         auto_approve=True,
     )
-    assert exec_alerts.status.value == "success"
+    assert exec_alerts.status.value in ("success", "succeeded")
     assert "alerts" in exec_alerts.output_data
 
 

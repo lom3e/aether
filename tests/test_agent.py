@@ -3,12 +3,13 @@ from aether.agents.lifecycle import AgentLifecycleState
 from aether.core.execution import Task
 from aether.core.runtime import Runtime
 from aether.providers.mock import MockProvider
-from aether.tools.base import Tool, ToolExecutionContext
+from aether.tools.base import Tool, ToolExecutionContext, ToolClassification
 from aether.tools.registry import ToolRegistry
 
 
 class DummyTool(Tool):
     name = "dummy_tool"
+    classification = ToolClassification.READ_ONLY
 
     def execute(self, input_data: str, context: ToolExecutionContext | None = None) -> str:
         if input_data == "fail":

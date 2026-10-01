@@ -205,7 +205,7 @@ def test_active_runtime_learned_guidance_in_agent(temp_ws: Workspace):
     assert "[REGRESSION RISK]" in combined_system
 
 
-def test_action_executor_learning_actions(temp_ws: Workspace):
+def test_action_executor_learning_actions(temp_ws: Workspace, accepted_authority_factory):
     """Verifies ActionRegistry and ActionExecutor dispatch real learning actions."""
     registry = ActionRegistry()
     action_store = ActionStore(f"{temp_ws.data_dir}/actions.db")
@@ -215,6 +215,7 @@ def test_action_executor_learning_actions(temp_ws: Workspace):
         project_path=temp_ws.root,
     )
     ws_id = temp_ws.name
+    _, auth = accepted_authority_factory(temp_ws, title="Learning Actions")
 
     # 1. learning.record_correction
     exec_res = executor.execute(
@@ -228,6 +229,7 @@ def test_action_executor_learning_actions(temp_ws: Workspace):
             "auto_verify": True,
         },
         auto_approve=True,
+        authority=auth,
     )
     assert exec_res.status.value in ("success", "succeeded", "executed", "completed")
     output = exec_res.output_data or {}

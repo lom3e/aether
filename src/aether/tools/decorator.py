@@ -113,6 +113,9 @@ def _build_schema(func: Callable, tool_name: str, tool_description: str) -> dict
 # FunctionTool — internal wrapper class
 # ---------------------------------------------------------------------------
 
+from aether.tools.base import Tool, ToolExecutionContext, ToolClassification
+
+
 class FunctionTool(Tool):
     """
     A Tool constructed from a plain Python function via the @tool decorator.
@@ -126,11 +129,17 @@ class FunctionTool(Tool):
         tool_name: str,
         tool_description: str,
         schema: dict[str, Any],
+        classification: ToolClassification | str = ToolClassification.UNKNOWN,
     ) -> None:
         self.name = tool_name
         self.description = tool_description
         self._func = func
         self._schema = schema
+        self.classification = (
+            ToolClassification.from_str(classification)
+            if isinstance(classification, str)
+            else (classification or ToolClassification.UNKNOWN)
+        )
         # Preserve original function metadata
         self.__doc__ = func.__doc__
         self.__module__ = getattr(func, "__module__", None)
@@ -199,6 +208,7 @@ def tool(
     *,
     description: str = "",
     name: str = "",
+    classification: ToolClassification | str = ToolClassification.UNKNOWN,
 ) -> FunctionTool | Callable[[Callable], FunctionTool]:
     """
     Decorator that transforms a plain Python function into an Aether :class:`Tool`.
@@ -208,7 +218,7 @@ def tool(
         @tool
         def my_tool(x: int) -> str: ...
 
-        @tool(description="My tool", name="custom_name")
+        @tool(description="My tool", name="custom_name", classification=ToolClassification.LOCAL_MUTATION)
         def my_tool(x: int) -> str: ...
 
     Parameters
@@ -220,6 +230,8 @@ def tool(
         Falls back to the function's docstring if not provided.
     name:
         Override the tool name. Defaults to ``func.__name__``.
+    classification:
+        Security/permission classification of the tool.
 
     Returns
     -------
@@ -231,7 +243,7 @@ def tool(
         tool_name = name or f.__name__
         tool_description = description or (inspect.getdoc(f) or "")
         schema = _build_schema(f, tool_name, tool_description)
-        return FunctionTool(f, tool_name, tool_description, schema)
+        return FunctionTool(f, tool_name, tool_description, schema, classification=classification)
 
     # @tool  (no parentheses)
     if func is not None:

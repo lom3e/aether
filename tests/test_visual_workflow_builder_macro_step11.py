@@ -212,11 +212,12 @@ def test_workflow_store_sqlite_crud(temp_ws: Workspace):
 # 5. ActionExecutor Workflow Actions
 # ---------------------------------------------------------------------------
 
-def test_action_executor_workflow_actions(temp_ws: Workspace):
+def test_action_executor_workflow_actions(temp_ws: Workspace, accepted_authority_factory):
     registry = ActionRegistry()
     store = ActionStore(temp_ws.root / ".aether" / "actions.db")
     safety = ActionSafetyPolicy()
     executor = ActionExecutor(registry=registry, store=store, project_path=temp_ws.root, safety_policy=safety)
+    _, auth = accepted_authority_factory(temp_ws, title="Workflow Actions")
 
     # 1. workflow.list when empty
     res_list = executor.execute("workflow.list", temp_ws.name, {})
@@ -249,13 +250,13 @@ def test_action_executor_workflow_actions(temp_ws: Workspace):
     assert res_list_2.output_data["workflows"][0]["id"] == "wf_audit_pipeline"
 
     # 3. workflow.compile
-    res_compile = executor.execute("workflow.compile", temp_ws.name, {"workflow_id": "wf_audit_pipeline", "target_type": "mission"}, auto_approve=True)
+    res_compile = executor.execute("workflow.compile", temp_ws.name, {"workflow_id": "wf_audit_pipeline", "target_type": "mission"}, auto_approve=True, authority=auth)
     assert res_compile.status == ActionExecutionStatus.SUCCESS
     assert res_compile.output_data["workflow_id"] == "wf_audit_pipeline"
     assert "compiled_id" in res_compile.output_data
 
     # 4. workflow.run
-    res_run = executor.execute("workflow.run", temp_ws.name, {"workflow_id": "wf_audit_pipeline"}, auto_approve=True)
+    res_run = executor.execute("workflow.run", temp_ws.name, {"workflow_id": "wf_audit_pipeline"}, auto_approve=True, authority=auth)
     assert res_run.status == ActionExecutionStatus.SUCCESS
     assert res_run.output_data["status"] == "ready"
     assert "mission_id" in res_run.output_data

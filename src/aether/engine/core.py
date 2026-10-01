@@ -68,6 +68,8 @@ class ExecutionEngine:
             tool_context = ToolExecutionContext(
                 agent_name=context.agent_name,
                 task_id=context.task.id,
+                workspace_id=getattr(context.task, "workspace_id", None),
+                authority=getattr(context, "authority", None) or getattr(context.task, "authority", None),
                 metadata=context.metadata if hasattr(context, "metadata") and context.metadata is not None else {},
                 artifacts=context.artifacts if hasattr(context, "artifacts") and context.artifacts is not None else [],
             )
@@ -196,6 +198,8 @@ class ExecutionEngine:
         tool_context = ToolExecutionContext(
             agent_name=context.agent_name,
             task_id=context.task.id,
+            workspace_id=getattr(context.task, "workspace_id", None),
+            authority=getattr(context, "authority", None) or getattr(context.task, "authority", None),
         )
         return self.tool_executor.execute(tool, unit.input_data, tool_context)
 

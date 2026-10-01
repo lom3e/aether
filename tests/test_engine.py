@@ -9,12 +9,13 @@ from aether.engine.plan import ExecutionPlanState
 from aether.engine.result import UnitExecutionStatus
 from aether.engine.units import UnitType, SkillUnit, ToolUnit
 from aether.skills.skill import Skill
-from aether.tools.base import Tool, ToolExecutionContext
+from aether.tools.base import Tool, ToolExecutionContext, ToolClassification
 from aether.tools.registry import ToolRegistry
 
 
 class DummyTool(Tool):
     name = "dummy_tool"
+    classification = ToolClassification.READ_ONLY
 
     def execute(self, input_data: str, context: ToolExecutionContext | None = None) -> str:
         return f"processed: {input_data}"

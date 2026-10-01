@@ -67,10 +67,27 @@ class AutonomousGoalOrchestrator:
         goal_prompt: str,
         context: dict[str, Any] | None = None,
         auto_approve_safe: bool = True,
+        authority: Any = None,
     ) -> AutonomousGoal:
         """
         Executes an end-to-end operational loop from high-level goal to verified deliverable and learning.
+        Requires persistently validated ExecutionAuthority — fails closed without it.
         """
+        # Macro-pass 1.2: Authority validation gate — execution requires validated authority
+        from aether.core.execution import ExecutionAuthority, ExecutionBoundary, UnauthorizedExecutionError
+        if not authority or not isinstance(authority, ExecutionAuthority):
+            raise UnauthorizedExecutionError(
+                "AutonomousGoalOrchestrator.plan_and_execute() requires validated ExecutionAuthority. "
+                "Submit a proposal and obtain acceptance first."
+            )
+        p_store = getattr(self.workspace, "personal_store", None)
+        ExecutionBoundary.validate_authority(
+            authority=authority,
+            workspace_id=workspace_id,
+            store=p_store,
+            action_or_boundary="autonomy.plan_and_execute",
+        )
+
         now_iso = datetime.now(timezone.utc).isoformat()
         goal_id = f"autogoal-{uuid.uuid4().hex[:10]}"
         context = context or {}
@@ -242,12 +259,22 @@ class AutonomousGoalOrchestrator:
 
         try:
             if hasattr(self.workspace, "actions") and self.workspace.actions:
-                exec_res = self.workspace.actions.execute(action_id, workspace_id, action_args)
+                exec_res = self.workspace.actions.execute(action_id, workspace_id, action_args, authority=authority)
                 if hasattr(exec_res, "status") and str(exec_res.status).lower() in ("waiting_approval", "pending_approval"):
                     s5.status = "waiting_approval"
                     goal.status = AutonomousGoalStatus.PENDING_APPROVAL
                     goal.approval_execution_id = getattr(exec_res, "id", None)
                     s5.result = {"execution_id": goal.approval_execution_id, "action_id": action_id}
+                    if self.store:
+                        self.store.save_goal(goal)
+                    return goal
+                if hasattr(exec_res, "status") and str(exec_res.status).lower() == "failed":
+                    s5.status = "failed"
+                    s5.error = getattr(exec_res, "error_message", None) or "Action execution failed"
+                    s5.result = exec_res.to_dict() if hasattr(exec_res, "to_dict") else {"status": "failed"}
+                    s5.completed_at = datetime.now(timezone.utc).isoformat()
+                    goal.status = AutonomousGoalStatus.FAILED
+                    goal.error = s5.error
                     if self.store:
                         self.store.save_goal(goal)
                     return goal
@@ -257,10 +284,16 @@ class AutonomousGoalOrchestrator:
             s5.status = "completed"
             s5.completed_at = datetime.now(timezone.utc).isoformat()
         except Exception as e:
-            logger.warning(f"Action execution non-fatal issue: {e}")
-            s5.result = {"error": str(e), "status": "executed_with_fallback"}
-            s5.status = "completed"
+            logger.error(f"Action execution failure: {e}")
+            s5.status = "failed"
+            s5.error = str(e)
+            s5.result = {"error": str(e), "status": "failed"}
             s5.completed_at = datetime.now(timezone.utc).isoformat()
+            goal.status = AutonomousGoalStatus.FAILED
+            goal.error = str(e)
+            if self.store:
+                self.store.save_goal(goal)
+            raise
 
         # STAGE 6: SAFETY_VERIFICATION
         goal.active_stage_index = 5

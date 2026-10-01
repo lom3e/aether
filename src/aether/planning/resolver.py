@@ -212,7 +212,15 @@ class ContextResolver:
         if project_info and project_info.get("exists"):
             proj_name = project_info.get("name") or "active_project"
             proj_id = project_info.get("id") or proj_name
-            p_str = str(project_path) if project_path else ""
+            ws_root = getattr(self.workspace, "root", None)
+            rel_locator = proj_name
+            if project_path and ws_root:
+                try:
+                    rel_locator = str(Path(project_path).relative_to(Path(ws_root)))
+                except ValueError:
+                    rel_locator = Path(project_path).name
+            elif project_path:
+                rel_locator = Path(project_path).name
 
             ev_id = f"ev-proj-{uuid.uuid4().hex[:6]}"
             evidence_refs.append(
@@ -221,10 +229,10 @@ class ContextResolver:
                     source_type="project",
                     source_identifier=proj_id,
                     workspace=intent.workspace_id,
-                    locator=str(Path(p_str).relative_to(getattr(self.workspace, "root", Path(p_str).parent)) if getattr(self.workspace, "root", None) else Path(p_str).name),
+                    locator=rel_locator,
                     verification_status="verified",
-                    excerpt=f"Connected project: {proj_name} at {p_str}",
-                    metadata={"project_type": project_info.get("type", "local")},
+                    excerpt=f"Connected project: {proj_name} at {rel_locator}",
+                    metadata={"project_type": project_info.get("type", "local"), "relative_path": rel_locator},
                 )
             )
 
@@ -256,7 +264,7 @@ class ContextResolver:
                     resolution_state=ResolutionState.MATCHED,
                     confidence=0.95,
                     evidence_references=[ev_id],
-                    metadata={"path": p_str},
+                    metadata={"relative_path": rel_locator},
                 )
             )
 
@@ -399,7 +407,7 @@ class ContextResolver:
                         source_type="connection",
                         source_identifier=str(getattr(m, "id", p)),
                         workspace=intent.workspace_id,
-                        locator=f"connections/{getattr(c, 'id', p)}",
+                        locator=f"connections/{getattr(m, 'id', p)}",
                         verification_status="verified" if is_verified else "unverified",
                         excerpt=f"Provider {p.capitalize()} connection: {status_val}",
                         metadata=mask_secrets_deep({
@@ -485,29 +493,39 @@ class ContextResolver:
                     break
 
             if found_path:
+                rel_file_locator = f_name
+                ws_root = getattr(self.workspace, "root", None)
+                if ws_root:
+                    try:
+                        rel_file_locator = str(found_path.relative_to(Path(ws_root)))
+                    except ValueError:
+                        rel_file_locator = found_path.name
+                else:
+                    rel_file_locator = found_path.name
+
                 ev_id = f"ev-file-{uuid.uuid4().hex[:6]}"
                 evidence_refs.append(
                     EvidenceReference(
                         id=ev_id,
                         source_type="file",
-                        source_identifier=str(found_path),
+                        source_identifier=rel_file_locator,
                         workspace=intent.workspace_id,
-                        locator=str(found_path.relative_to(getattr(self.workspace, "root", found_path.parent)) if getattr(self.workspace, "root", None) else found_path.name),
+                        locator=rel_file_locator,
                         verification_status="verified",
                         excerpt=f"File verified on disk ({found_path.stat().st_size} bytes)",
-                        metadata={"size_bytes": found_path.stat().st_size},
+                        metadata={"size_bytes": found_path.stat().st_size, "relative_path": rel_file_locator},
                     )
                 )
                 resolved_entities.append(
                     ResolvedEntity(
                         entity_type="file",
-                        canonical_id=str(found_path),
+                        canonical_id=rel_file_locator,
                         display_name=f_name,
                         workspace_scope=intent.workspace_id,
                         resolution_state=ResolutionState.MATCHED,
                         confidence=0.95,
                         evidence_references=[ev_id],
-                        metadata={"path": str(found_path)},
+                        metadata={"relative_path": rel_file_locator},
                     )
                 )
             else:
