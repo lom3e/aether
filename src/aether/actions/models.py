@@ -79,18 +79,6 @@ class ActionExecutionStatus(StrEnum):
             return aliases[clean]
         raise ValueError(f"Unknown action execution status: '{val}'")
 
-    def __eq__(self, other: object) -> bool:
-        if isinstance(other, (str, ActionExecutionStatus)):
-            try:
-                parsed = ActionExecutionStatus.from_str(str(other))
-                return self.value == parsed.value
-            except ValueError:
-                return False
-        return super().__eq__(other)
-
-    def __hash__(self) -> int:
-        return hash(self.value)
-
 
 # Explicit legacy attribute aliases for backward compatibility without custom equality
 ActionExecutionStatus.SUCCESS = ActionExecutionStatus.SUCCEEDED  # type: ignore[attr-defined]

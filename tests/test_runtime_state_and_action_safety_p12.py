@@ -78,12 +78,12 @@ def test_canonical_action_execution_statuses():
     assert ActionExecutionStatus.EXPIRED.value == "expired"
     assert ActionExecutionStatus.CANCELLED.value == "cancelled"
 
-    # Backward compatibility equality
-    assert ActionExecutionStatus.WAITING_APPROVAL == "pending_approval"
+    # Standard StrEnum equality (no implicit string-comparison hacks)
     assert ActionExecutionStatus.WAITING_APPROVAL == "waiting_approval"
-    assert ActionExecutionStatus.SUCCEEDED == "success"
     assert ActionExecutionStatus.SUCCEEDED == "succeeded"
-    assert ActionExecutionStatus.SUCCEEDED == "completed"
+    assert ActionExecutionStatus.WAITING_APPROVAL != "pending_approval"
+    assert ActionExecutionStatus.SUCCEEDED != "success"
+    assert ActionExecutionStatus.SUCCEEDED != "completed"
 
     # from_str parsing
     assert ActionExecutionStatus.from_str("pending_approval") == ActionExecutionStatus.WAITING_APPROVAL
