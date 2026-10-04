@@ -55,6 +55,18 @@ class HttpConnector(BaseConnector):
         ]
 
     @property
+    def can_read(self) -> bool:
+        return True
+
+    @property
+    def can_write(self) -> bool:
+        return True
+
+    @property
+    def can_sync(self) -> bool:
+        return False
+
+    @property
     def credential_requirements(self) -> list[CredentialRequirement]:
         return [
             CredentialRequirement(
@@ -256,6 +268,14 @@ class HttpConnector(BaseConnector):
                 full_url = f"{base_url}/{url.lstrip('/')}"
             else:
                 raise ConnectorError(f"Relative URL provided without base_url: '{url}'", provider=self.provider)
+        elif base_url:
+            parsed_base = urllib.parse.urlparse(base_url)
+            parsed_target = urllib.parse.urlparse(full_url)
+            if parsed_base.netloc and parsed_target.netloc != parsed_base.netloc:
+                raise ConnectorError(
+                    f"Target host '{parsed_target.netloc}' does not match configured base_url host '{parsed_base.netloc}'. Cannot attach connector credentials to different host.",
+                    provider=self.provider,
+                )
 
         parsed = urllib.parse.urlparse(full_url)
         if parsed.scheme not in ("http", "https"):

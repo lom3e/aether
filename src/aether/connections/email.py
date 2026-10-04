@@ -51,6 +51,18 @@ class EmailConnector(BaseConnector):
         return ["email.send", "email.verify"]
 
     @property
+    def can_read(self) -> bool:
+        return False
+
+    @property
+    def can_write(self) -> bool:
+        return True
+
+    @property
+    def can_sync(self) -> bool:
+        return False
+
+    @property
     def credential_requirements(self) -> list[CredentialRequirement]:
         return [
             CredentialRequirement(

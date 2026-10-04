@@ -534,7 +534,7 @@ def test_disconnect_and_revoke(temp_ws):
 # 14. Local Aether calendar remains strictly separate from Google Calendar
 # ---------------------------------------------------------------------------
 
-def test_local_calendar_strictly_separate(temp_ws):
+def test_local_calendar_strictly_separate(temp_ws, accepted_authority_factory):
     ws = temp_ws
     # 1. Local calendar
     local_connector = ws.connections.get_calendar_connector(ws.id)
@@ -560,7 +560,8 @@ def test_local_calendar_strictly_separate(temp_ws):
 
     # Action execution for calendar.create_event uses local
     executor = ws.actions
-    act_res = executor.execute("calendar.create_event", ws.id, {"title": "Action Standup", "start_time": "2026-09-26T11:00:00Z"}, auto_approve=True)
+    _, auth = accepted_authority_factory(ws, title="Action Standup")
+    act_res = executor.execute("calendar.create_event", ws.id, {"title": "Action Standup", "start_time": "2026-09-26T11:00:00Z"}, auto_approve=True, authority=auth)
     if act_res.status == ActionExecutionStatus.PENDING_APPROVAL:
         act_res = executor.approve(act_res.id)
     assert act_res.status == ActionExecutionStatus.SUCCESS

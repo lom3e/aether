@@ -134,6 +134,27 @@ class BaseConnector(ABC):
         ...
 
     @property
+    def can_read(self) -> bool:
+        """Whether this connector supports reading operations."""
+        return any(
+            any(kw in op.lower() for kw in ("read", "list", "get", "inspect", "search"))
+            for op in self.capabilities
+        )
+
+    @property
+    def can_write(self) -> bool:
+        """Whether this connector supports write / mutation operations."""
+        return any(
+            any(kw in op.lower() for kw in ("write", "create", "update", "delete", "send", "post", "put", "patch", "execute"))
+            for op in self.capabilities
+        )
+
+    @property
+    def can_sync(self) -> bool:
+        """Whether this connector supports automated synchronization into memory/knowledge."""
+        return False
+
+    @property
     @abstractmethod
     def credential_requirements(self) -> list[CredentialRequirement]:
         """List of credential requirements needed by this connector."""

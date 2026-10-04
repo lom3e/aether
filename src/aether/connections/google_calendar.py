@@ -17,6 +17,7 @@ import json
 import logging
 import os
 import secrets
+import threading
 import time
 from typing import Any, TYPE_CHECKING
 import urllib.error
@@ -320,6 +321,10 @@ class GoogleCalendarConnector(BaseConnector):
         ]
 
     @property
+    def can_sync(self) -> bool:
+        return True
+
+    @property
     def credential_requirements(self) -> list[CredentialRequirement]:
         return [
             CredentialRequirement(
@@ -349,6 +354,16 @@ class GoogleCalendarConnector(BaseConnector):
     # Token Management
     # ---------------------------------------------------------------------------
 
+    _refresh_locks: dict[str, threading.Lock] = {}
+    _global_refresh_lock: threading.Lock = threading.Lock()
+
+    @classmethod
+    def _get_refresh_lock(cls, key: str) -> threading.Lock:
+        with cls._global_refresh_lock:
+            if key not in cls._refresh_locks:
+                cls._refresh_locks[key] = threading.Lock()
+            return cls._refresh_locks[key]
+
     def _is_token_expired(self) -> bool:
         expiry_str = self.auth_metadata.get("token_expiry")
         if not expiry_str:
@@ -362,41 +377,48 @@ class GoogleCalendarConnector(BaseConnector):
             return False
 
     def refresh_access_token(self) -> str:
-        """Refreshes the access token using the stored refresh_token."""
+        """Refreshes the access token using the stored refresh_token with concurrency lock."""
         refresh_token = self.auth_metadata.get("refresh_token")
         if not refresh_token:
             raise ConnectorAuthError("Cannot refresh Google access token: no refresh_token stored.")
 
-        client_id = (
-            self.auth_metadata.get("client_id")
-            or os.environ.get("GOOGLE_CLIENT_ID")
-            or os.environ.get("AETHER_GOOGLE_CLIENT_ID")
-            or "aether-desktop-client.apps.googleusercontent.com"
-        )
-        client_secret = (
-            self.auth_metadata.get("client_secret")
-            or os.environ.get("GOOGLE_CLIENT_SECRET")
-            or os.environ.get("AETHER_GOOGLE_CLIENT_SECRET")
-            or ""
-        )
+        lock_key = refresh_token
+        lock = self._get_refresh_lock(lock_key)
+        with lock:
+            # Double-checked locking: re-check if token was refreshed by concurrent caller
+            if not self._is_token_expired() and self.auth_metadata.get("access_token"):
+                return self.auth_metadata["access_token"]
 
-        payload = {
-            "client_id": client_id,
-            "refresh_token": refresh_token,
-            "grant_type": "refresh_token",
-        }
-        if client_secret:
-            payload["client_secret"] = client_secret
+            client_id = (
+                self.auth_metadata.get("client_id")
+                or os.environ.get("GOOGLE_CLIENT_ID")
+                or os.environ.get("AETHER_GOOGLE_CLIENT_ID")
+                or "aether-desktop-client.apps.googleusercontent.com"
+            )
+            client_secret = (
+                self.auth_metadata.get("client_secret")
+                or os.environ.get("GOOGLE_CLIENT_SECRET")
+                or os.environ.get("AETHER_GOOGLE_CLIENT_SECRET")
+                or ""
+            )
 
-        req = urllib.request.Request(
-            GOOGLE_TOKEN_URL,
-            data=urllib.parse.urlencode(payload).encode("utf-8"),
-            headers={
-                "Content-Type": "application/x-www-form-urlencoded",
-                "User-Agent": "Aether/1.0",
-            },
-            method="POST",
-        )
+            payload = {
+                "client_id": client_id,
+                "refresh_token": refresh_token,
+                "grant_type": "refresh_token",
+            }
+            if client_secret:
+                payload["client_secret"] = client_secret
+
+            req = urllib.request.Request(
+                GOOGLE_TOKEN_URL,
+                data=urllib.parse.urlencode(payload).encode("utf-8"),
+                headers={
+                    "Content-Type": "application/x-www-form-urlencoded",
+                    "User-Agent": "Aether/1.0",
+                },
+                method="POST",
+            )
 
         try:
             with urllib.request.urlopen(req, timeout=10.0) as resp:

@@ -54,6 +54,10 @@ class CalendarConnector(BaseConnector):
         return ["calendar.create_event", "calendar.list_events"]
 
     @property
+    def can_sync(self) -> bool:
+        return True
+
+    @property
     def credential_requirements(self) -> list[CredentialRequirement]:
         return []
 
@@ -424,10 +428,11 @@ class ConnectionService:
             self.store.save_connection(conn)
 
     def disconnect(self, workspace_id: str, provider: str) -> None:
-        """Disconnects a service."""
+        """Disconnects a service, revoking remote tokens where supported and purging credentials."""
         conn = self.store.get_connection_by_provider(workspace_id, provider)
+        p = provider.lower().strip()
         if conn:
-            if provider.lower().strip() == "google_calendar" and conn.auth_metadata:
+            if p == "google_calendar" and conn.auth_metadata:
                 try:
                     connector = GoogleCalendarConnector(auth_metadata=conn.auth_metadata)
                     connector.revoke()
@@ -435,8 +440,21 @@ class ConnectionService:
                     logger.warning("Failed to revoke Google token during disconnect: %s", exc)
                 conn.auth_metadata["access_token"] = ""
                 conn.auth_metadata["refresh_token"] = ""
+            elif conn.auth_metadata:
+                # Purge any secret_refs stored in SecretStore
+                from aether.core.secrets import is_secret_ref
+                for k, v in list(conn.auth_metadata.items()):
+                    if isinstance(v, str) and is_secret_ref(v) and self.secret_store:
+                        try:
+                            self.secret_store.delete_secret(v)
+                        except Exception:
+                            pass
+                    conn.auth_metadata[k] = ""
+
             conn.status = ConnectionStatus.DISCONNECTED
             conn.last_verified_at = None
+            conn.last_successful_operation = None
+            conn.last_verification_error = None
             conn.updated_at = datetime.now(timezone.utc).isoformat()
             self.store.save_connection(conn)
 

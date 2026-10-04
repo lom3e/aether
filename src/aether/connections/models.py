@@ -84,6 +84,24 @@ class Connection:
             ConnectionStatus.VERIFICATION_FAILED,
         )
 
+    @property
+    def can_read(self) -> bool:
+        return any(
+            any(kw in op.lower() for kw in ("read", "list", "get", "inspect", "search"))
+            for op in self.capabilities
+        )
+
+    @property
+    def can_write(self) -> bool:
+        return any(
+            any(kw in op.lower() for kw in ("write", "create", "update", "delete", "send", "post", "put", "patch", "execute"))
+            for op in self.capabilities
+        )
+
+    @property
+    def can_sync(self) -> bool:
+        return self.provider.lower().strip() in ("calendar", "google_calendar", "github", "notion")
+
     def to_dict(self, mask_secrets: bool = True) -> dict[str, Any]:
         meta = dict(self.auth_metadata or {})
         if mask_secrets:
@@ -98,6 +116,9 @@ class Connection:
             "status": self.status.value if isinstance(self.status, ConnectionStatus) else str(self.status),
             "scopes": self.scopes,
             "capabilities": self.capabilities,
+            "can_read": self.can_read,
+            "can_write": self.can_write,
+            "can_sync": self.can_sync,
             "auth_metadata": meta,
             "last_synced_at": self.last_synced_at,
             "last_verified_at": self.last_verified_at,

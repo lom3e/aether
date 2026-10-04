@@ -87,7 +87,9 @@ class ConnectorSyncEngine:
             return cls._sync_google_calendar(workspace, opts)
         elif prov == "github":
             return cls._sync_github(workspace, opts)
-        elif prov in ("slack", "email", "http"):
+        elif prov == "notion":
+            return cls._sync_notion(workspace, opts)
+        elif prov in ("slack", "email", "http", "telegram", "openapi"):
             return ConnectorSyncResult(
                 provider=prov,
                 status="unsupported",
@@ -98,9 +100,9 @@ class ConnectorSyncEngine:
         else:
             return ConnectorSyncResult(
                 provider=prov,
-                status="skipped",
+                status="unsupported",
                 items_synced=0,
-                summary=f"Connector '{prov}' does not require ingestion sync.",
+                summary=f"Connector '{prov}' does not support ingestion synchronization.",
                 synced_at=datetime.now(timezone.utc).isoformat(),
             )
 
@@ -467,9 +469,34 @@ class ConnectorSyncEngine:
                 logger.warning(f"Could not fetch GitHub issues for {owner}/{repo}: {e}")
 
         else:
-            # Token verified, general GitHub account profile sync
-            synced_count = 1
-            details["items"].append({"type": "account", "status": "authenticated"})
+            token = meta.get("token") or ""
+            if token:
+                try:
+                    user_data = connector.client.get_authenticated_user(token=token)
+                    login = user_data.get("login") or "authenticated_user"
+                    account_mem = WorkforceMemory(
+                        id=f"mem_gh_account_{login}",
+                        workspace_id=workspace.id,
+                        category=MemoryCategory.PROJECT,
+                        summary=f"GitHub User: @{login}",
+                        content=f"Connected GitHub account @{login}. Name: {user_data.get('name', login)}. Public repos: {user_data.get('public_repos', 0)}.",
+                        provenance=MemoryProvenance(
+                            source_entity="github_sync",
+                            source_id=login,
+                            author_agent="GitHubConnector",
+                            verification_status="verified",
+                            evidence={"login": login, "html_url": user_data.get("html_url", "")},
+                        ),
+                        confidence=1.0,
+                        tags=["github", "account", login],
+                        created_at=now_iso,
+                        updated_at=now_iso,
+                    )
+                    workspace.memory.create_memory(account_mem)
+                    synced_count += 1
+                    details["items"].append({"type": "account", "login": login, "status": "authenticated"})
+                except Exception as exc:
+                    logger.warning(f"Could not fetch GitHub user profile: {exc}")
 
         conn.last_synced_at = now_iso
         conn.updated_at = now_iso
@@ -490,6 +517,124 @@ class ConnectorSyncEngine:
             status="synced",
             items_synced=synced_count,
             summary=f"Synced {synced_count} GitHub items into workspace knowledge and memory.",
+            details=details,
+            synced_at=now_iso,
+        )
+
+    # ---------------------------------------------------------------------------
+    # Notion Sync
+    # ---------------------------------------------------------------------------
+
+    @classmethod
+    def _sync_notion(cls, workspace: "Workspace", options: dict[str, Any]) -> ConnectorSyncResult:
+        """
+        Synchronizes Notion workspace pages into WorkforceMemoryStore and KnowledgeStore.
+        Requires active and verified Notion connection.
+        """
+        now_iso = datetime.now(timezone.utc).isoformat()
+        conn = workspace.connections.get_connection(workspace.id, "notion")
+        if not conn or not conn.is_verified:
+            return ConnectorSyncResult(
+                provider="notion",
+                status="skipped",
+                items_synced=0,
+                summary="Notion connection is not active or verified. Sync skipped.",
+                synced_at=now_iso,
+            )
+
+        try:
+            connector = workspace.connections.get_notion_connector(workspace.id)
+            query = str(options.get("query") or "").strip()
+            limit = min(int(options.get("limit", 20)), 50)
+            search_res = connector.search(query=query, filter_type="page", page_size=limit)
+        except Exception as e:
+            logger.error(f"Failed to search Notion pages for sync: {e}")
+            return ConnectorSyncResult(
+                provider="notion",
+                status="error",
+                items_synced=0,
+                summary=f"Notion sync failed: {e}",
+                synced_at=now_iso,
+            )
+
+        pages = search_res.get("results", []) if isinstance(search_res, dict) else []
+        synced_count = 0
+        details = {"pages": []}
+
+        for page in pages:
+            page_id = page.get("id") or ""
+            page_url = page.get("url") or ""
+            props = page.get("properties") or {}
+            title = "Untitled Page"
+            for p_val in props.values():
+                if isinstance(p_val, dict) and p_val.get("type") == "title":
+                    title_parts = p_val.get("title") or []
+                    if title_parts and isinstance(title_parts, list):
+                        title = "".join(t.get("plain_text", "") for t in title_parts) or title
+                    break
+
+            content = f"Notion document '{title}' (ID: {page_id}). URL: {page_url}"
+
+            mem = WorkforceMemory(
+                id=f"mem_notion_{page_id.replace('-', '')}",
+                workspace_id=workspace.id,
+                category=MemoryCategory.PROJECT,
+                summary=f"Notion Page: {title}",
+                content=content,
+                provenance=MemoryProvenance(
+                    source_entity="notion_sync",
+                    source_id=page_id,
+                    author_agent="NotionConnector",
+                    verification_status="verified",
+                    evidence={"page_id": page_id, "url": page_url},
+                ),
+                confidence=1.0,
+                tags=["notion", "page", "knowledge"],
+                created_at=now_iso,
+                updated_at=now_iso,
+            )
+
+            try:
+                saved_mem = workspace.memory.create_memory(mem)
+                if hasattr(workspace, "knowledge_graph") and workspace.knowledge_graph:
+                    try:
+                        from aether.knowledge.graph.builder import KnowledgeGraphBuilder
+                        KnowledgeGraphBuilder.compile_memory(saved_mem, workspace.knowledge_graph)
+                    except Exception:
+                        pass
+            except Exception as mem_err:
+                logger.warning(f"Error persisting Notion memory for {page_id}: {mem_err}")
+
+            try:
+                if hasattr(workspace, "knowledge") and workspace.knowledge:
+                    from aether.knowledge.ingestion import DocumentIngester
+                    doc_content = f"# Notion Page: {title}\n- **Page ID:** {page_id}\n- **URL:** {page_url}\n"
+                    DocumentIngester(workspace.knowledge).ingest_text(doc_content, source_name=f"notion:{page_id}", scope="workspace")
+            except Exception as kn_err:
+                logger.warning(f"Error ingesting Notion knowledge chunk for {page_id}: {kn_err}")
+
+            synced_count += 1
+            details["pages"].append({"id": page_id, "title": title, "url": page_url})
+
+        conn.last_synced_at = now_iso
+        conn.updated_at = now_iso
+        workspace.connections.save_connection(conn)
+
+        if hasattr(workspace, "activity") and workspace.activity:
+            workspace.activity.log(
+                workspace_id=workspace.id,
+                title="Synced Notion Pages",
+                description=f"Synchronized {synced_count} pages from Notion into workforce memory and knowledge.",
+                category=ActivityCategory.CONNECTION,
+                status=ActivityStatus.COMPLETED,
+                link_view="connections",
+            )
+
+        return ConnectorSyncResult(
+            provider="notion",
+            status="synced",
+            items_synced=synced_count,
+            summary=f"Synced {synced_count} Notion pages into workforce memory and knowledge.",
             details=details,
             synced_at=now_iso,
         )

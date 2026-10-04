@@ -344,32 +344,32 @@ def test_http_format_validation():
 def test_http_live_check_status_codes():
     import urllib.error
     conn = HTTPConnector()
-    creds = {"base_url": "https://api.example.com"}
+    creds = {"base_url": "https://example.com"}
 
     # 401 Unauthorized
     with patch("urllib.request.urlopen") as mock_url:
-        mock_url.side_effect = urllib.error.HTTPError("https://api.example.com", 401, "Unauthorized", {}, None)
+        mock_url.side_effect = urllib.error.HTTPError("https://example.com", 401, "Unauthorized", {}, None)
         valid, msg = conn.verify(creds, live_check=True)
         assert not valid
         assert "401" in msg or "auth" in msg.lower()
 
     # 404 Not Found
     with patch("urllib.request.urlopen") as mock_url:
-        mock_url.side_effect = urllib.error.HTTPError("https://api.example.com", 404, "Not Found", {}, None)
+        mock_url.side_effect = urllib.error.HTTPError("https://example.com", 404, "Not Found", {}, None)
         valid, msg = conn.verify(creds, live_check=True)
         assert not valid
         assert "404" in msg or "not found" in msg.lower()
 
     # 429 Rate Limit
     with patch("urllib.request.urlopen") as mock_url:
-        mock_url.side_effect = urllib.error.HTTPError("https://api.example.com", 429, "Too Many Requests", {}, None)
+        mock_url.side_effect = urllib.error.HTTPError("https://example.com", 429, "Too Many Requests", {}, None)
         valid, msg = conn.verify(creds, live_check=True)
         assert not valid
         assert "429" in msg or "rate limit" in msg.lower()
 
     # 500 Server Error
     with patch("urllib.request.urlopen") as mock_url:
-        mock_url.side_effect = urllib.error.HTTPError("https://api.example.com", 500, "Internal Server Error", {}, None)
+        mock_url.side_effect = urllib.error.HTTPError("https://example.com", 500, "Internal Server Error", {}, None)
         valid, msg = conn.verify(creds, live_check=True)
         assert not valid
         assert "500" in msg or "server error" in msg.lower()

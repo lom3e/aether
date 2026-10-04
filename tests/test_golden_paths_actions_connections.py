@@ -165,7 +165,7 @@ def test_golden_path_a_github_read(test_stack):
 # 2. Golden Path B: GitHub Mutation (Create Issue with Approval Flow)
 # ===========================================================================
 
-def test_golden_path_b_github_create_issue_approval_flow(test_stack):
+def test_golden_path_b_github_create_issue_approval_flow(test_stack, accepted_authority_factory):
     stack = test_stack
     ws_id = stack["workspace"].name
 
@@ -181,7 +181,8 @@ def test_golden_path_b_github_create_issue_approval_flow(test_stack):
     assert action_def.requires_confirmation is True
     assert action_def.permission_level == ActionPermissionLevel.EXTERNAL_MUTATION
 
-    # Trigger action through executor
+    # Trigger action through executor with authorized proposal
+    _, auth = accepted_authority_factory(stack["workspace"], title="Create Issue")
     execution = stack["action_exec"].execute(
         action_id="github.create_issue",
         input_data={
@@ -191,6 +192,7 @@ def test_golden_path_b_github_create_issue_approval_flow(test_stack):
             "body": "Issue description verifying approval workflow.",
         },
         workspace_id=ws_id,
+        authority=auth,
     )
 
     # 1. Action MUST require approval and not execute immediately
@@ -249,9 +251,20 @@ def test_golden_path_c_email_smtp_approval_flow(test_stack):
     )
 
     # Test via Personal Agent classification & execution
+    prompt_email = "Invia una email a client@partner.org con oggetto 'Resoconto Sprint' e corpo 'Tutte le azioni sono state verificate.'"
+    res_prop = stack["personal_svc"].process_prompt(
+        workspace_id=ws_id,
+        prompt=prompt_email,
+    )
+    assert res_prop.metadata.get("status") == "proposal_pending"
+    prop_id = res_prop.metadata["proposal_id"]
+
+    # Accept proposal to get authority
+    accepted_prop, auth = stack["personal_svc"].accept_proposal(prop_id, workspace_id=ws_id)
     res = stack["personal_svc"].process_prompt(
         workspace_id=ws_id,
-        prompt="Invia una email a client@partner.org con oggetto 'Resoconto Sprint' e corpo 'Tutte le azioni sono state verificate.'",
+        prompt=prompt_email,
+        authority=auth,
     )
 
     assert res.tier == IntentTier.ACT
@@ -307,9 +320,20 @@ def test_golden_path_d_slack_message_approval_flow(test_stack):
     )
 
     # Ask personal agent to send message to Slack
+    prompt_slack = "Scrivi su Slack nel canale #engineering 'Deploy di Aether v2 completato con successo.'"
+    res_prop = stack["personal_svc"].process_prompt(
+        workspace_id=ws_id,
+        prompt=prompt_slack,
+    )
+    assert res_prop.metadata.get("status") == "proposal_pending"
+    prop_id = res_prop.metadata["proposal_id"]
+
+    # Accept proposal to get authority
+    accepted_prop, auth = stack["personal_svc"].accept_proposal(prop_id, workspace_id=ws_id)
     res = stack["personal_svc"].process_prompt(
         workspace_id=ws_id,
-        prompt="Scrivi su Slack nel canale #engineering 'Deploy di Aether v2 completato con successo.'",
+        prompt=prompt_slack,
+        authority=auth,
     )
 
     assert res.tier == IntentTier.ACT
@@ -349,7 +373,7 @@ def test_golden_path_d_slack_message_approval_flow(test_stack):
 # 5. Golden Path E: OpenAPI Tool Generation & Direct Execution
 # ===========================================================================
 
-def test_golden_path_e_openapi_tool_generation_and_execution(test_stack):
+def test_golden_path_e_openapi_tool_generation_and_execution(test_stack, accepted_authority_factory):
     stack = test_stack
     ws_id = stack["workspace"].name
 
@@ -408,7 +432,7 @@ def test_golden_path_e_openapi_tool_generation_and_execution(test_stack):
         action_registry=stack["action_reg"],
         spec_or_path=sample_spec,
         base_url="https://api.inventory.company.internal/v1",
-        auth_metadata={"auth_type": "bearer", "token": "secret-inventory-token-xyz"},
+        auth_metadata={"auth_type": "bearer", "token": "secret-inventory-token-xyz", "allow_internal": True},
     )
 
     assert len(tools) == 3
@@ -447,10 +471,12 @@ def test_golden_path_e_openapi_tool_generation_and_execution(test_stack):
         assert call_req.headers["Authorization"] == "Bearer secret-inventory-token-xyz"
 
     # 3. Execute mutation OpenAPI action (requires confirmation -> approval -> execution)
+    _, auth = accepted_authority_factory(stack["workspace"], title="Create Inventory Item")
     create_exec = stack["action_exec"].execute(
         action_id="openapi.createitem",
         input_data={"name": "Ergonomic Keyboard", "sku": "KEY-02", "quantity": 30},
         workspace_id=ws_id,
+        authority=auth,
     )
 
     assert create_exec.status == ActionExecutionStatus.PENDING_APPROVAL
@@ -475,7 +501,7 @@ def test_golden_path_e_openapi_tool_generation_and_execution(test_stack):
 # 6. Truthful Failure: Unconfigured Connectors Never Simulate Success
 # ===========================================================================
 
-def test_truthful_failure_unconfigured_connectors(test_stack):
+def test_truthful_failure_unconfigured_connectors(test_stack, accepted_authority_factory):
     stack = test_stack
     ws_id = stack["workspace"].name
 
@@ -491,10 +517,12 @@ def test_truthful_failure_unconfigured_connectors(test_stack):
 
     # 2. Email action with unconfigured connection
     # Note: email.send requires confirmation, so approve it to trigger the real send attempt
+    _, auth_email = accepted_authority_factory(stack["workspace"], title="Send Email")
     exec_email = stack["action_exec"].execute(
         action_id="email.send",
         input_data={"to": "someone@example.com", "subject": "Test", "body": "Hello"},
         workspace_id=ws_id,
+        authority=auth_email,
     )
     assert exec_email.status == ActionExecutionStatus.PENDING_APPROVAL
     approved_email = stack["action_exec"].approve(exec_email.id)
@@ -502,10 +530,12 @@ def test_truthful_failure_unconfigured_connectors(test_stack):
     assert "not configured" in (approved_email.error_message or "").lower()
 
     # 3. Slack action with unconfigured connection
+    _, auth_slack = accepted_authority_factory(stack["workspace"], title="Send Slack Message")
     exec_slack = stack["action_exec"].execute(
         action_id="slack.send_message",
         input_data={"channel": "#general", "text": "Test"},
         workspace_id=ws_id,
+        authority=auth_slack,
     )
     assert exec_slack.status == ActionExecutionStatus.PENDING_APPROVAL
     approved_slack = stack["action_exec"].approve(exec_slack.id)
@@ -515,10 +545,12 @@ def test_truthful_failure_unconfigured_connectors(test_stack):
     # 4. Calendar event creation when disconnected
     stack["conn_svc"].disconnect(ws_id, "calendar")
 
+    _, auth_cal = accepted_authority_factory(stack["workspace"], title="Create Calendar Event")
     exec_cal = stack["action_exec"].execute(
         action_id="calendar.create_event",
         input_data={"title": "Important meeting", "start_time": "2026-10-01T10:00:00Z"},
         workspace_id=ws_id,
+        authority=auth_cal,
     )
     assert exec_cal.status == ActionExecutionStatus.PENDING_APPROVAL
     approved_cal = stack["action_exec"].approve(exec_cal.id)

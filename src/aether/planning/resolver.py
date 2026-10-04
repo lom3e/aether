@@ -400,6 +400,7 @@ class ContextResolver:
                 m = matches[0]
                 status_val = getattr(getattr(m, "status", None), "value", str(getattr(m, "status", "unknown")))
                 is_verified = (status_val == "verified")
+                is_configured = (status_val in ("verified", "configured"))
                 ev_id = f"ev-conn-{uuid.uuid4().hex[:6]}"
                 evidence_refs.append(
                     EvidenceReference(
@@ -416,16 +417,16 @@ class ContextResolver:
                         }),
                     )
                 )
-                if not is_verified:
-                    ambiguities.append(f"Connection '{p.capitalize()}' is in status '{status_val}' (not verified).")
+                if not is_configured:
+                    ambiguities.append(f"Connection '{p.capitalize()}' is in status '{status_val}'.")
                 resolved_entities.append(
                     ResolvedEntity(
                         entity_type="connection",
                         canonical_id=str(getattr(m, "id", p)),
                         display_name=getattr(m, "account_name", p.capitalize()) or p.capitalize(),
                         workspace_scope=intent.workspace_id,
-                        resolution_state=ResolutionState.MATCHED if is_verified else ResolutionState.UNRESOLVED,
-                        confidence=0.9 if is_verified else 0.4,
+                        resolution_state=ResolutionState.MATCHED if is_configured else ResolutionState.UNRESOLVED,
+                        confidence=0.9 if is_verified else (0.75 if is_configured else 0.4),
                         evidence_references=[ev_id],
                         metadata={"provider": p, "status": status_val},
                     )
@@ -467,8 +468,11 @@ class ContextResolver:
     ) -> None:
         """Resolves file paths or document names mentioned in intent."""
         prompt = intent.raw_input
+        # Strip email addresses and URLs so email domains and web hosts are not mistaken for local files
+        prompt_clean = re.sub(r'[\w\.-]+@[\w\.-]+', '', prompt)
+        prompt_clean = re.sub(r'https?://[^\s]+', '', prompt_clean)
         # Find explicit filenames like doc.txt, main.py, data/report.pdf
-        file_candidates = re.findall(r"\b([a-zA-Z0-9_\-\./]+\.[a-zA-Z0-9]{1,5})\b", prompt)
+        file_candidates = re.findall(r"\b([a-zA-Z0-9_\-\./]+\.[a-zA-Z0-9]{1,5})\b", prompt_clean)
         if not file_candidates:
             return
 

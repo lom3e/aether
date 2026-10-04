@@ -629,11 +629,9 @@ class ActionExecutor:
             filename = inp.get("filename", "untitled.txt")
             content = inp.get("content", "")
             ws = self._get_workspace(ws_id)
-            sandbox = ws.sandbox if (ws and hasattr(ws, "sandbox")) else None
-            if not sandbox:
-                from aether.core.security import PathSandbox
-                base_dir = self.project_path or (ws.root if ws else None) or Path.cwd()
-                sandbox = PathSandbox(base_dir, auto_create=True)
+            from aether.core.security import PathSandbox
+            base_dir = self.project_path or (ws.root if ws else None) or Path.cwd()
+            sandbox = PathSandbox(base_dir, auto_create=True)
             try:
                 target_path = sandbox.resolve(filename)
                 target_path.parent.mkdir(parents=True, exist_ok=True)
@@ -651,17 +649,19 @@ class ActionExecutor:
         elif action_id == "files.read_document":
             filename = inp.get("filename", "")
             ws = self._get_workspace(ws_id)
-            sandbox = ws.sandbox if (ws and hasattr(ws, "sandbox")) else None
-            if not sandbox:
-                from aether.core.security import PathSandbox
-                base_dir = self.project_path or (ws.root if ws else None) or Path.cwd()
-                sandbox = PathSandbox(base_dir, auto_create=True)
+            from aether.core.security import PathSandbox
+            base_dir = self.project_path or (ws.root if ws else None) or Path.cwd()
+            sandbox = PathSandbox(base_dir, auto_create=True)
             try:
                 target_path = sandbox.resolve(filename)
-                if target_path.exists() and target_path.is_file():
-                    content = target_path.read_text(encoding="utf-8", errors="replace")
-                    return {"filename": filename, "path": str(target_path), "content": content, "exists": True}
-                return {"filename": filename, "content": "", "exists": False, "error": "File not found"}
+                if not (target_path.exists() and target_path.is_file()):
+                    # Fallback check for files_dir if not in project root
+                    if ws and hasattr(ws, "files_dir") and (ws.files_dir / filename).is_file():
+                        target_path = ws.files_dir / filename
+                    else:
+                        return {"filename": filename, "content": "", "exists": False, "error": "File not found"}
+                content = target_path.read_text(encoding="utf-8", errors="replace")
+                return {"filename": filename, "path": str(target_path), "content": content, "exists": True}
             except Exception as e:
                 return {"filename": filename, "path": "", "content": "", "exists": False, "error": str(e)}
 

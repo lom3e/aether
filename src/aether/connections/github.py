@@ -72,6 +72,10 @@ class GitHubConnector(BaseConnector):
         ]
 
     @property
+    def can_sync(self) -> bool:
+        return True
+
+    @property
     def credential_requirements(self) -> list[CredentialRequirement]:
         return [
             CredentialRequirement(
