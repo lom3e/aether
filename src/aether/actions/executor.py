@@ -711,13 +711,10 @@ class ActionExecutor:
             from aether.missions.models import Milestone, Mission
             from aether.workspace.workspace import Workspace
 
-            ws = None
             try:
-                ws = Workspace.get(ws_id) if hasattr(Workspace, "get") else None
-                if not ws and self.project_path:
-                    ws = Workspace.get_or_init(self.project_path)
+                ws = self._get_workspace(ws_id)
             except Exception:
-                pass
+                ws = None
 
             mid = inp.get("mission_id")
             mission = None
@@ -745,13 +742,10 @@ class ActionExecutor:
             from aether.connections.sync import ConnectorSyncEngine
             from aether.workspace.workspace import Workspace
 
-            ws = None
             try:
-                ws = Workspace.get(ws_id) if hasattr(Workspace, "get") else None
-                if not ws and self.project_path:
-                    ws = Workspace.get_or_init(self.project_path)
+                ws = self._get_workspace(ws_id)
             except Exception:
-                pass
+                ws = None
 
             if not ws:
                 raise ValueError(f"Workspace '{ws_id}' not found for connection sync.")
@@ -794,13 +788,10 @@ class ActionExecutor:
             # Try to resolve configured agent from team if exists
             target_adapter = None
             from aether.workspace.workspace import Workspace
-            ws = None
             try:
-                ws = Workspace.get(ws_id) if hasattr(Workspace, "get") else None
-                if not ws and self.project_path:
-                    ws = Workspace.get_or_init(self.project_path)
+                ws = self._get_workspace(ws_id)
             except Exception:
-                pass
+                ws = None
 
             if ws and hasattr(ws, "team") and ws.team:
                 team_agent = ws.team._agents.get(agent_name)
@@ -860,13 +851,10 @@ class ActionExecutor:
         # 12. Knowledge Base actions
         elif action_id == "knowledge.search":
             from aether.workspace.workspace import Workspace
-            ws = None
             try:
-                ws = Workspace.get(ws_id) if hasattr(Workspace, "get") else None
-                if not ws and self.project_path:
-                    ws = Workspace.get_or_init(self.project_path)
+                ws = self._get_workspace(ws_id)
             except Exception:
-                pass
+                ws = None
 
             team = getattr(ws, "default_team", None) or (ws.load_team() if ws else None)
             knowledge_store = getattr(team, "knowledge", None) if team else None
@@ -890,13 +878,10 @@ class ActionExecutor:
         elif action_id == "knowledge.ingest_url":
             from aether.workspace.workspace import Workspace
             from aether.knowledge.ingestion import DocumentIngester
-            ws = None
             try:
-                ws = Workspace.get(ws_id) if hasattr(Workspace, "get") else None
-                if not ws and self.project_path:
-                    ws = Workspace.get_or_init(self.project_path)
+                ws = self._get_workspace(ws_id)
             except Exception:
-                pass
+                ws = None
 
             team = getattr(ws, "default_team", None) or (ws.load_team() if ws else None)
             knowledge_store = getattr(team, "knowledge", None) if team else None
@@ -923,13 +908,10 @@ class ActionExecutor:
         elif action_id == "knowledge.ingest_file":
             from aether.workspace.workspace import Workspace
             from aether.knowledge.ingestion import DocumentIngester
-            ws = None
             try:
-                ws = Workspace.get(ws_id) if hasattr(Workspace, "get") else None
-                if not ws and self.project_path:
-                    ws = Workspace.get_or_init(self.project_path)
+                ws = self._get_workspace(ws_id)
             except Exception:
-                pass
+                ws = None
 
             team = getattr(ws, "default_team", None) or (ws.load_team() if ws else None)
             knowledge_store = getattr(team, "knowledge", None) if team else None
@@ -956,13 +938,10 @@ class ActionExecutor:
         elif action_id == "mission.list_playbooks":
             from aether.missions.playbooks import get_playbook_registry
             from aether.workspace.workspace import Workspace
-            ws = None
             try:
-                ws = Workspace.get(ws_id) if hasattr(Workspace, "get") else None
-                if not ws and self.project_path:
-                    ws = Workspace.get_or_init(self.project_path)
+                ws = self._get_workspace(ws_id)
             except Exception:
-                pass
+                ws = None
             mstore = getattr(ws, "missions", None) if ws else None
             registry = get_playbook_registry(store=mstore)
             cat = inp.get("category")
@@ -975,13 +954,10 @@ class ActionExecutor:
         elif action_id == "mission.instantiate_playbook":
             from aether.missions.playbooks import get_playbook_registry
             from aether.workspace.workspace import Workspace
-            ws = None
             try:
-                ws = Workspace.get(ws_id) if hasattr(Workspace, "get") else None
-                if not ws and self.project_path:
-                    ws = Workspace.get_or_init(self.project_path)
+                ws = self._get_workspace(ws_id)
             except Exception:
-                pass
+                ws = None
             mstore = getattr(ws, "missions", None) if ws else None
             if not mstore:
                 raise ValueError("Mission store is not available in current workspace.")
@@ -1006,13 +982,10 @@ class ActionExecutor:
         elif action_id == "mission.export_timeline":
             from aether.missions.replay import ReplayCompiler
             from aether.workspace.workspace import Workspace
-            ws = None
             try:
-                ws = Workspace.get(ws_id) if hasattr(Workspace, "get") else None
-                if not ws and self.project_path:
-                    ws = Workspace.get_or_init(self.project_path)
+                ws = self._get_workspace(ws_id)
             except Exception:
-                pass
+                ws = None
             mstore = getattr(ws, "missions", None) if ws else None
             if not mstore:
                 raise ValueError("Mission store is not available in current workspace.")
@@ -1029,13 +1002,10 @@ class ActionExecutor:
 
         elif action_id == "learning.record_correction":
             from aether.workspace.workspace import Workspace
-            ws = None
             try:
-                ws = Workspace.get(ws_id) if hasattr(Workspace, "get") else None
-                if not ws and self.project_path:
-                    ws = Workspace.get_or_init(self.project_path)
+                ws = self._get_workspace(ws_id)
             except Exception:
-                pass
+                ws = None
             learning_svc = getattr(ws, "learning", None) if ws else None
             if not learning_svc:
                 raise ValueError("Learning service is not available in current workspace.")
@@ -1066,13 +1036,10 @@ class ActionExecutor:
 
         elif action_id == "learning.verify_correction":
             from aether.workspace.workspace import Workspace
-            ws = None
             try:
-                ws = Workspace.get(ws_id) if hasattr(Workspace, "get") else None
-                if not ws and self.project_path:
-                    ws = Workspace.get_or_init(self.project_path)
+                ws = self._get_workspace(ws_id)
             except Exception:
-                pass
+                ws = None
             learning_svc = getattr(ws, "learning", None) if ws else None
             if not learning_svc:
                 raise ValueError("Learning service is not available in current workspace.")
@@ -1089,13 +1056,10 @@ class ActionExecutor:
 
         elif action_id == "learning.list_lessons":
             from aether.workspace.workspace import Workspace
-            ws = None
             try:
-                ws = Workspace.get(ws_id) if hasattr(Workspace, "get") else None
-                if not ws and self.project_path:
-                    ws = Workspace.get_or_init(self.project_path)
+                ws = self._get_workspace(ws_id)
             except Exception:
-                pass
+                ws = None
             learning_store = getattr(ws, "learning_store", None) if ws else None
             if not learning_store:
                 raise ValueError("Learning store is not available in current workspace.")
@@ -1116,13 +1080,10 @@ class ActionExecutor:
 
         elif action_id == "learning.get_insights":
             from aether.workspace.workspace import Workspace
-            ws = None
             try:
-                ws = Workspace.get(ws_id) if hasattr(Workspace, "get") else None
-                if not ws and self.project_path:
-                    ws = Workspace.get_or_init(self.project_path)
+                ws = self._get_workspace(ws_id)
             except Exception:
-                pass
+                ws = None
             learning_svc = getattr(ws, "learning", None) if ws else None
             if not learning_svc:
                 raise ValueError("Learning service is not available in current workspace.")
@@ -1132,13 +1093,10 @@ class ActionExecutor:
 
         elif action_id == "policy.get_policy":
             from aether.workspace.workspace import Workspace
-            ws = None
             try:
-                ws = Workspace.get(ws_id) if hasattr(Workspace, "get") else None
-                if not ws and self.project_path:
-                    ws = Workspace.get_or_init(self.project_path)
+                ws = self._get_workspace(ws_id)
             except Exception:
-                pass
+                ws = None
             policy_svc = getattr(ws, "policy", None) if ws else None
             if not policy_svc:
                 raise ValueError("Policy service is not available in current workspace.")
@@ -1147,13 +1105,10 @@ class ActionExecutor:
 
         elif action_id == "policy.update_policy":
             from aether.workspace.workspace import Workspace
-            ws = None
             try:
-                ws = Workspace.get(ws_id) if hasattr(Workspace, "get") else None
-                if not ws and self.project_path:
-                    ws = Workspace.get_or_init(self.project_path)
+                ws = self._get_workspace(ws_id)
             except Exception:
-                pass
+                ws = None
             policy_svc = getattr(ws, "policy", None) if ws else None
             if not policy_svc:
                 raise ValueError("Policy service is not available in current workspace.")
@@ -1162,13 +1117,10 @@ class ActionExecutor:
 
         elif action_id == "routing.get_status":
             from aether.workspace.workspace import Workspace
-            ws = None
             try:
-                ws = Workspace.get(ws_id) if hasattr(Workspace, "get") else None
-                if not ws and self.project_path:
-                    ws = Workspace.get_or_init(self.project_path)
+                ws = self._get_workspace(ws_id)
             except Exception:
-                pass
+                ws = None
             router = getattr(ws, "model_router", None) if ws else None
             if not router:
                 from aether.routing.router import ModelRouter
@@ -1179,13 +1131,10 @@ class ActionExecutor:
 
         elif action_id == "workflow.list":
             from aether.workspace.workspace import Workspace
-            ws = None
             try:
-                ws = Workspace.get(ws_id) if hasattr(Workspace, "get") else None
-                if not ws and self.project_path:
-                    ws = Workspace.get_or_init(self.project_path)
+                ws = self._get_workspace(ws_id)
             except Exception:
-                pass
+                ws = None
             wf_store = getattr(ws, "workflows", None) if ws else None
             if not wf_store:
                 raise ValueError("Workflow store is not available in current workspace.")
@@ -1198,13 +1147,10 @@ class ActionExecutor:
         elif action_id == "workflow.compile":
             from aether.workflows.compiler import WorkflowCompiler
             from aether.workspace.workspace import Workspace
-            ws = None
             try:
-                ws = Workspace.get(ws_id) if hasattr(Workspace, "get") else None
-                if not ws and self.project_path:
-                    ws = Workspace.get_or_init(self.project_path)
+                ws = self._get_workspace(ws_id)
             except Exception:
-                pass
+                ws = None
             wf_store = getattr(ws, "workflows", None) if ws else None
             if not wf_store:
                 raise ValueError("Workflow store is not available in current workspace.")
@@ -1243,13 +1189,10 @@ class ActionExecutor:
         elif action_id == "workflow.run":
             from aether.workflows.compiler import WorkflowCompiler
             from aether.workspace.workspace import Workspace
-            ws = None
             try:
-                ws = Workspace.get(ws_id) if hasattr(Workspace, "get") else None
-                if not ws and self.project_path:
-                    ws = Workspace.get_or_init(self.project_path)
+                ws = self._get_workspace(ws_id)
             except Exception:
-                pass
+                ws = None
             wf_store = getattr(ws, "workflows", None) if ws else None
             m_store = getattr(ws, "missions", None) if ws else None
             if not wf_store or not m_store:
@@ -1271,13 +1214,10 @@ class ActionExecutor:
 
         elif action_id == "marketplace.list":
             from aether.workspace.workspace import Workspace
-            ws = None
             try:
-                ws = Workspace.get(ws_id) if hasattr(Workspace, "get") else None
-                if not ws and self.project_path:
-                    ws = Workspace.get_or_init(self.project_path)
+                ws = self._get_workspace(ws_id)
             except Exception:
-                pass
+                ws = None
             eco_store = getattr(ws, "ecosystem", None) if ws else None
             if not eco_store:
                 from aether.ecosystem.store import EcosystemStore
@@ -1296,13 +1236,10 @@ class ActionExecutor:
 
         elif action_id == "marketplace.inspect":
             from aether.workspace.workspace import Workspace
-            ws = None
             try:
-                ws = Workspace.get(ws_id) if hasattr(Workspace, "get") else None
-                if not ws and self.project_path:
-                    ws = Workspace.get_or_init(self.project_path)
+                ws = self._get_workspace(ws_id)
             except Exception:
-                pass
+                ws = None
             eco_store = getattr(ws, "ecosystem", None) if ws else None
             if not eco_store:
                 raise ValueError("Ecosystem store is not available.")
@@ -1319,13 +1256,10 @@ class ActionExecutor:
 
         elif action_id == "marketplace.install":
             from aether.workspace.workspace import Workspace
-            ws = None
             try:
-                ws = Workspace.get(ws_id) if hasattr(Workspace, "get") else None
-                if not ws and self.project_path:
-                    ws = Workspace.get_or_init(self.project_path)
+                ws = self._get_workspace(ws_id)
             except Exception:
-                pass
+                ws = None
             if not ws:
                 raise ValueError("Active workspace required to install marketplace package.")
             eco_store = getattr(ws, "ecosystem", None)
@@ -1343,13 +1277,10 @@ class ActionExecutor:
 
         elif action_id == "marketplace.uninstall":
             from aether.workspace.workspace import Workspace
-            ws = None
             try:
-                ws = Workspace.get(ws_id) if hasattr(Workspace, "get") else None
-                if not ws and self.project_path:
-                    ws = Workspace.get_or_init(self.project_path)
+                ws = self._get_workspace(ws_id)
             except Exception:
-                pass
+                ws = None
             if not ws:
                 raise ValueError("Active workspace required to uninstall marketplace package.")
             eco_store = getattr(ws, "ecosystem", None)
@@ -1366,13 +1297,10 @@ class ActionExecutor:
         elif action_id == "content.repurpose":
             from aether.workspace.workspace import Workspace
             from aether.content.models import RepurposeRequest, PlatformType, ContentTone
-            ws = None
             try:
-                ws = Workspace.get(ws_id) if hasattr(Workspace, "get") else None
-                if not ws and self.project_path:
-                    ws = Workspace.get_or_init(self.project_path)
+                ws = self._get_workspace(ws_id)
             except Exception:
-                pass
+                ws = None
             if not ws:
                 raise ValueError("Active workspace required to repurpose content.")
             content_store = getattr(ws, "content", None)
@@ -1406,13 +1334,10 @@ class ActionExecutor:
         elif action_id == "content.create_campaign":
             from aether.workspace.workspace import Workspace
             from aether.content.models import Campaign
-            ws = None
             try:
-                ws = Workspace.get(ws_id) if hasattr(Workspace, "get") else None
-                if not ws and self.project_path:
-                    ws = Workspace.get_or_init(self.project_path)
+                ws = self._get_workspace(ws_id)
             except Exception:
-                pass
+                ws = None
             if not ws:
                 raise ValueError("Active workspace required to create campaign.")
             content_store = getattr(ws, "content", None)
@@ -1431,13 +1356,10 @@ class ActionExecutor:
 
         elif action_id == "content.list_campaigns":
             from aether.workspace.workspace import Workspace
-            ws = None
             try:
-                ws = Workspace.get(ws_id) if hasattr(Workspace, "get") else None
-                if not ws and self.project_path:
-                    ws = Workspace.get_or_init(self.project_path)
+                ws = self._get_workspace(ws_id)
             except Exception:
-                pass
+                ws = None
             if not ws:
                 raise ValueError("Active workspace required to list campaigns.")
             content_store = getattr(ws, "content", None)
@@ -1451,13 +1373,10 @@ class ActionExecutor:
         elif action_id == "content.schedule_variant":
             from aether.workspace.workspace import Workspace
             from aether.content.models import ContentStatus
-            ws = None
             try:
-                ws = Workspace.get(ws_id) if hasattr(Workspace, "get") else None
-                if not ws and self.project_path:
-                    ws = Workspace.get_or_init(self.project_path)
+                ws = self._get_workspace(ws_id)
             except Exception:
-                pass
+                ws = None
             if not ws:
                 raise ValueError("Active workspace required to schedule variant.")
             content_store = getattr(ws, "content", None)
@@ -1477,13 +1396,10 @@ class ActionExecutor:
 
         elif action_id == "content.list_variants":
             from aether.workspace.workspace import Workspace
-            ws = None
             try:
-                ws = Workspace.get(ws_id) if hasattr(Workspace, "get") else None
-                if not ws and self.project_path:
-                    ws = Workspace.get_or_init(self.project_path)
+                ws = self._get_workspace(ws_id)
             except Exception:
-                pass
+                ws = None
             if not ws:
                 raise ValueError("Active workspace required to list variants.")
             content_store = getattr(ws, "content", None)
@@ -1500,13 +1416,10 @@ class ActionExecutor:
         elif action_id == "client.create_profile":
             from aether.workspace.workspace import Workspace
             from aether.client.models import ClientProfile, BrandStyleGuide
-            ws = None
             try:
-                ws = Workspace.get(ws_id) if hasattr(Workspace, "get") else None
-                if not ws and self.project_path:
-                    ws = Workspace.get_or_init(self.project_path)
+                ws = self._get_workspace(ws_id)
             except Exception:
-                pass
+                ws = None
             if not ws:
                 raise ValueError("Active workspace required to create client profile.")
             client_store = getattr(ws, "client_store", None)
@@ -1529,13 +1442,10 @@ class ActionExecutor:
 
         elif action_id == "client.list_profiles":
             from aether.workspace.workspace import Workspace
-            ws = None
             try:
-                ws = Workspace.get(ws_id) if hasattr(Workspace, "get") else None
-                if not ws and self.project_path:
-                    ws = Workspace.get_or_init(self.project_path)
+                ws = self._get_workspace(ws_id)
             except Exception:
-                pass
+                ws = None
             if not ws:
                 raise ValueError("Active workspace required to list clients.")
             client_store = getattr(ws, "client_store", None)
@@ -1547,13 +1457,10 @@ class ActionExecutor:
 
         elif action_id == "client.create_review_link":
             from aether.workspace.workspace import Workspace
-            ws = None
             try:
-                ws = Workspace.get(ws_id) if hasattr(Workspace, "get") else None
-                if not ws and self.project_path:
-                    ws = Workspace.get_or_init(self.project_path)
+                ws = self._get_workspace(ws_id)
             except Exception:
-                pass
+                ws = None
             if not ws:
                 raise ValueError("Active workspace required to create review link.")
             client_store = getattr(ws, "client_store", None)
@@ -1573,13 +1480,10 @@ class ActionExecutor:
         elif action_id == "client.submit_review":
             from aether.workspace.workspace import Workspace
             from aether.client.models import ReviewStatus
-            ws = None
             try:
-                ws = Workspace.get(ws_id) if hasattr(Workspace, "get") else None
-                if not ws and self.project_path:
-                    ws = Workspace.get_or_init(self.project_path)
+                ws = self._get_workspace(ws_id)
             except Exception:
-                pass
+                ws = None
             if not ws:
                 raise ValueError("Active workspace required to submit review decision.")
             client_store = getattr(ws, "client_store", None)
@@ -1597,13 +1501,10 @@ class ActionExecutor:
 
         elif action_id == "client.generate_report":
             from aether.workspace.workspace import Workspace
-            ws = None
             try:
-                ws = Workspace.get(ws_id) if hasattr(Workspace, "get") else None
-                if not ws and self.project_path:
-                    ws = Workspace.get_or_init(self.project_path)
+                ws = self._get_workspace(ws_id)
             except Exception:
-                pass
+                ws = None
             if not ws:
                 raise ValueError("Active workspace required to generate client report.")
             client_store = getattr(ws, "client_store", None)
@@ -1622,13 +1523,10 @@ class ActionExecutor:
 
         elif action_id == "analytics.get_campaign_bi":
             from aether.workspace.workspace import Workspace
-            ws = None
             try:
-                ws = Workspace.get(ws_id) if hasattr(Workspace, "get") else None
-                if not ws and self.project_path:
-                    ws = Workspace.get_or_init(self.project_path)
+                ws = self._get_workspace(ws_id)
             except Exception:
-                pass
+                ws = None
             if not ws:
                 raise ValueError("Active workspace required for campaign business intelligence.")
             client_engine = getattr(ws, "client_engine", None)
@@ -1643,13 +1541,10 @@ class ActionExecutor:
         elif action_id == "benchmarking.run_suite":
             from aether.workspace.workspace import Workspace
             from aether.benchmarking.models import BenchmarkTargetType
-            ws = None
             try:
-                ws = Workspace.get(ws_id) if hasattr(Workspace, "get") else None
-                if not ws and self.project_path:
-                    ws = Workspace.get_or_init(self.project_path)
+                ws = self._get_workspace(ws_id)
             except Exception:
-                pass
+                ws = None
             if not ws:
                 raise ValueError("Active workspace required to run benchmark suite.")
             bm_store = getattr(ws, "benchmarking_store", None)
@@ -1685,13 +1580,10 @@ class ActionExecutor:
 
         elif action_id == "benchmarking.get_leaderboard":
             from aether.workspace.workspace import Workspace
-            ws = None
             try:
-                ws = Workspace.get(ws_id) if hasattr(Workspace, "get") else None
-                if not ws and self.project_path:
-                    ws = Workspace.get_or_init(self.project_path)
+                ws = self._get_workspace(ws_id)
             except Exception:
-                pass
+                ws = None
             if not ws:
                 raise ValueError("Active workspace required for benchmark leaderboard.")
             bm_store = getattr(ws, "benchmarking_store", None)
@@ -1706,13 +1598,10 @@ class ActionExecutor:
 
         elif action_id == "benchmarking.list_proposals":
             from aether.workspace.workspace import Workspace
-            ws = None
             try:
-                ws = Workspace.get(ws_id) if hasattr(Workspace, "get") else None
-                if not ws and self.project_path:
-                    ws = Workspace.get_or_init(self.project_path)
+                ws = self._get_workspace(ws_id)
             except Exception:
-                pass
+                ws = None
             if not ws:
                 raise ValueError("Active workspace required to list evolution proposals.")
             bm_store = getattr(ws, "benchmarking_store", None)
@@ -1728,13 +1617,10 @@ class ActionExecutor:
         elif action_id == "benchmarking.apply_proposal":
             from aether.workspace.workspace import Workspace
             from aether.benchmarking.models import ProposalStatus
-            ws = None
             try:
-                ws = Workspace.get(ws_id) if hasattr(Workspace, "get") else None
-                if not ws and self.project_path:
-                    ws = Workspace.get_or_init(self.project_path)
+                ws = self._get_workspace(ws_id)
             except Exception:
-                pass
+                ws = None
             if not ws:
                 raise ValueError("Active workspace required to apply evolution proposal.")
             bm_store = getattr(ws, "benchmarking_store", None)
@@ -1756,13 +1642,10 @@ class ActionExecutor:
 
         elif action_id == "benchmarking.list_regression_alerts":
             from aether.workspace.workspace import Workspace
-            ws = None
             try:
-                ws = Workspace.get(ws_id) if hasattr(Workspace, "get") else None
-                if not ws and self.project_path:
-                    ws = Workspace.get_or_init(self.project_path)
+                ws = self._get_workspace(ws_id)
             except Exception:
-                pass
+                ws = None
             if not ws:
                 raise ValueError("Active workspace required to list regression alerts.")
             bm_store = getattr(ws, "benchmarking_store", None)
@@ -1776,13 +1659,10 @@ class ActionExecutor:
 
         elif action_id == "proactive.list_suggestions":
             from aether.workspace.workspace import Workspace
-            ws = None
             try:
-                ws = Workspace.get(ws_id) if hasattr(Workspace, "get") else None
-                if not ws and self.project_path:
-                    ws = Workspace.get_or_init(self.project_path)
+                ws = self._get_workspace(ws_id)
             except Exception:
-                pass
+                ws = None
             if not ws:
                 raise ValueError("Active workspace required to list proactive suggestions.")
             pro_store = getattr(ws, "proactive_store", None)
@@ -1794,13 +1674,10 @@ class ActionExecutor:
 
         elif action_id == "proactive.generate_suggestions":
             from aether.workspace.workspace import Workspace
-            ws = None
             try:
-                ws = Workspace.get(ws_id) if hasattr(Workspace, "get") else None
-                if not ws and self.project_path:
-                    ws = Workspace.get_or_init(self.project_path)
+                ws = self._get_workspace(ws_id)
             except Exception:
-                pass
+                ws = None
             if not ws:
                 raise ValueError("Active workspace required to generate proactive suggestions.")
             pro_engine = getattr(ws, "proactive_engine", None)
@@ -1813,13 +1690,10 @@ class ActionExecutor:
         elif action_id == "proactive.accept_suggestion":
             from aether.workspace.workspace import Workspace
             from aether.proactive.models import SuggestionStatus
-            ws = None
             try:
-                ws = Workspace.get(ws_id) if hasattr(Workspace, "get") else None
-                if not ws and self.project_path:
-                    ws = Workspace.get_or_init(self.project_path)
+                ws = self._get_workspace(ws_id)
             except Exception:
-                pass
+                ws = None
             if not ws:
                 raise ValueError("Active workspace required to accept suggestion.")
             pro_store = getattr(ws, "proactive_store", None)
@@ -1850,13 +1724,10 @@ class ActionExecutor:
         elif action_id == "proactive.dismiss_suggestion":
             from aether.workspace.workspace import Workspace
             from aether.proactive.models import SuggestionStatus
-            ws = None
             try:
-                ws = Workspace.get(ws_id) if hasattr(Workspace, "get") else None
-                if not ws and self.project_path:
-                    ws = Workspace.get_or_init(self.project_path)
+                ws = self._get_workspace(ws_id)
             except Exception:
-                pass
+                ws = None
             if not ws:
                 raise ValueError("Active workspace required to dismiss suggestion.")
             pro_store = getattr(ws, "proactive_store", None)
@@ -1869,13 +1740,10 @@ class ActionExecutor:
 
         elif action_id == "proactive.list_watchers":
             from aether.workspace.workspace import Workspace
-            ws = None
             try:
-                ws = Workspace.get(ws_id) if hasattr(Workspace, "get") else None
-                if not ws and self.project_path:
-                    ws = Workspace.get_or_init(self.project_path)
+                ws = self._get_workspace(ws_id)
             except Exception:
-                pass
+                ws = None
             if not ws:
                 raise ValueError("Active workspace required to list ambient watchers.")
             pro_store = getattr(ws, "proactive_store", None)
@@ -1888,13 +1756,10 @@ class ActionExecutor:
         elif action_id == "proactive.create_watcher":
             from aether.workspace.workspace import Workspace
             from aether.proactive.models import Watcher, WatcherType
-            ws = None
             try:
-                ws = Workspace.get(ws_id) if hasattr(Workspace, "get") else None
-                if not ws and self.project_path:
-                    ws = Workspace.get_or_init(self.project_path)
+                ws = self._get_workspace(ws_id)
             except Exception:
-                pass
+                ws = None
             if not ws:
                 raise ValueError("Active workspace required to create ambient watcher.")
             pro_store = getattr(ws, "proactive_store", None)
@@ -1920,13 +1785,10 @@ class ActionExecutor:
 
         elif action_id == "proactive.check_watchers":
             from aether.workspace.workspace import Workspace
-            ws = None
             try:
-                ws = Workspace.get(ws_id) if hasattr(Workspace, "get") else None
-                if not ws and self.project_path:
-                    ws = Workspace.get_or_init(self.project_path)
+                ws = self._get_workspace(ws_id)
             except Exception:
-                pass
+                ws = None
             if not ws:
                 raise ValueError("Active workspace required to check ambient watchers.")
             pro_engine = getattr(ws, "proactive_engine", None)
@@ -1946,13 +1808,10 @@ class ActionExecutor:
         # ---------------------------------------------------------------------
         elif action_id.startswith("notifications."):
             from aether.workspace.workspace import Workspace
-            ws = None
             try:
-                ws = Workspace.get(ws_id) if hasattr(Workspace, "get") else None
-                if not ws and self.project_path:
-                    ws = Workspace.get_or_init(self.project_path)
+                ws = self._get_workspace(ws_id)
             except Exception:
-                pass
+                ws = None
             if not ws:
                 raise ValueError("Active workspace required for notification fabric actions.")
             notif_svc = getattr(ws, "notifications", None)
@@ -2020,13 +1879,10 @@ class ActionExecutor:
         # ---------------------------------------------------------------------
         elif action_id.startswith("fabric."):
             from aether.workspace.workspace import Workspace
-            ws = None
             try:
-                ws = Workspace.get(ws_id) if hasattr(Workspace, "get") else None
-                if not ws and self.project_path:
-                    ws = Workspace.get_or_init(self.project_path)
+                ws = self._get_workspace(ws_id)
             except Exception:
-                pass
+                ws = None
             if not ws:
                 raise ValueError("Active workspace required for execution fabric actions.")
             fab_engine = getattr(ws, "fabric_engine", None)
@@ -2076,13 +1932,10 @@ class ActionExecutor:
 
         elif action_id.startswith("autonomy."):
             from aether.workspace.workspace import Workspace
-            ws = None
             try:
-                ws = Workspace.get(ws_id) if hasattr(Workspace, "get") else None
-                if not ws and self.project_path:
-                    ws = Workspace.get_or_init(self.project_path)
+                ws = self._get_workspace(ws_id)
             except Exception:
-                pass
+                ws = None
             if not ws:
                 raise ValueError("Active workspace required for operational autonomy actions.")
             orchestrator = getattr(ws, "autonomy_orchestrator", None)

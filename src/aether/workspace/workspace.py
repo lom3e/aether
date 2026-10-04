@@ -87,11 +87,12 @@ class Workspace:
         self._instances: dict[str, Any] = {}
         self.protection_status: str = "ready"
 
-        # Register in active workspaces registry
+        # Register in active workspaces registry by canonical root path and unique id only
         Workspace._active_workspaces[str(self.root)] = self
         try:
-            Workspace._active_workspaces[self.name] = self
-            Workspace._active_workspaces[self.id] = self
+            ws_id = self.id
+            if ws_id:
+                Workspace._active_workspaces[ws_id] = self
         except Exception:
             pass
 
@@ -807,10 +808,13 @@ class Workspace:
         ws.knowledge_dir.mkdir(parents=True, exist_ok=True)
         ws.files_dir.mkdir(parents=True, exist_ok=True)
 
+        import uuid
+        ws_id = f"ws-{uuid.uuid4().hex[:10]}"
         # Create aether.yaml manifest
         manifest = {
             "version": "1.0",
             "workspace": {
+                "id": ws_id,
                 "name": name,
                 "default_team": "default"
             }
@@ -821,16 +825,12 @@ class Workspace:
 
         _save_last_workspace(ws.root)
         cls._active_workspaces[str(ws.root)] = ws
-        try:
-            cls._active_workspaces[ws.name] = ws
-            cls._active_workspaces[ws.id] = ws
-        except Exception:
-            pass
+        cls._active_workspaces[ws_id] = ws
         return ws
 
     @classmethod
     def get(cls, name_or_id: str | Path | None) -> "Workspace | None":
-        """Retrieve an active Workspace by ID, name, or path, or initialize from existing path."""
+        """Retrieve an active Workspace by ID or path, or find matching active workspace."""
         if not name_or_id:
             return None
         key = str(name_or_id).strip()
@@ -844,12 +844,19 @@ class Workspace:
                 return cls._active_workspaces[resolved]
         except Exception:
             pass
-        for ws in list(cls._active_workspaces.values()):
+        matches = []
+        for ws in set(cls._active_workspaces.values()):
             try:
-                if ws.id == key or ws.name == key or ws.root.name == key:
+                if ws.id == key:
                     return ws
+                if ws.name == key or ws.root.name == key:
+                    matches.append(ws)
             except Exception:
                 pass
+        if len(matches) == 1:
+            return matches[0]
+        elif len(matches) > 1:
+            return matches[0]
         try:
             p = Path(key).resolve()
             if p.exists() and (p / "aether.yaml").exists():
@@ -995,6 +1002,34 @@ class Workspace:
         for k, v in list(self._active_workspaces.items()):
             if v is self:
                 self._active_workspaces.pop(k, None)
+
+    def recover_on_startup(self) -> dict[str, Any]:
+        """
+        Runs crash recovery across actions, automations, and missions for this workspace.
+        """
+        summary: dict[str, Any] = {"recovered_actions": 0, "recovered_runs": 0, "recovered_missions": []}
+        try:
+            if hasattr(self, "action_store"):
+                summary["recovered_actions"] = self.action_store.recover_interrupted_executions()
+        except Exception:
+            pass
+
+        try:
+            if hasattr(self, "automations") and hasattr(self.automations, "recover_interrupted_runs"):
+                summary["recovered_runs"] = self.automations.recover_interrupted_runs()
+        except Exception:
+            pass
+
+        try:
+            from aether.missions.store import MissionStore
+            missions_db = self.data_dir / "missions.db"
+            if missions_db.exists():
+                m_store = self._get_or_create("mission_store", lambda: MissionStore(str(missions_db)))
+                summary["recovered_missions"] = m_store.recover_stale_executions()
+        except Exception:
+            pass
+
+        return summary
 
     def __enter__(self) -> "Workspace":
         return self

@@ -408,7 +408,18 @@ class ExecutionBoundary:
             raise UnauthorizedExecutionError(
                 f"Invalid authority type for '{op_name}': expected ExecutionAuthority, got {type(authority).__name__}."
             )
-        if authority.workspace_id != workspace_id:
+        ws_matches = (authority.workspace_id == workspace_id)
+        if not ws_matches:
+            from aether.workspace.workspace import Workspace
+            ws_inst = Workspace.get(workspace_id)
+            if ws_inst and authority.workspace_id in (ws_inst.id, ws_inst.name, ws_inst.root.name, str(ws_inst.root)):
+                ws_matches = True
+            else:
+                auth_ws_inst = Workspace.get(authority.workspace_id)
+                if auth_ws_inst and workspace_id in (auth_ws_inst.id, auth_ws_inst.name, auth_ws_inst.root.name, str(auth_ws_inst.root)):
+                    ws_matches = True
+
+        if not ws_matches:
             raise UnauthorizedExecutionError(
                 f"Authority workspace '{authority.workspace_id}' does not match execution workspace '{workspace_id}' for '{op_name}'."
             )
@@ -438,12 +449,20 @@ class ExecutionBoundary:
                 f"No persistent PersonalStore available to validate execution authority for '{op_name}'."
             )
 
-        proposal = personal_store.get_proposal(authority.proposal_id, workspace_id=workspace_id)
+        proposal = personal_store.get_proposal(authority.proposal_id, workspace_id=authority.workspace_id)
+        if not proposal:
+            proposal = personal_store.get_proposal(authority.proposal_id, workspace_id=workspace_id)
         if not proposal:
             raise UnauthorizedExecutionError(
                 f"Referenced proposal '{authority.proposal_id}' does not exist in workspace '{workspace_id}'."
             )
-        if proposal.workspace_id != workspace_id:
+        prop_ws_matches = (proposal.workspace_id == workspace_id or proposal.workspace_id == authority.workspace_id)
+        if not prop_ws_matches:
+            from aether.workspace.workspace import Workspace
+            ws_chk = Workspace.get(workspace_id)
+            if ws_chk and proposal.workspace_id in (ws_chk.id, ws_chk.name, ws_chk.root.name):
+                prop_ws_matches = True
+        if not prop_ws_matches:
             raise UnauthorizedExecutionError(
                 f"Proposal workspace '{proposal.workspace_id}' does not match execution workspace '{workspace_id}'."
             )
@@ -499,6 +518,12 @@ class ExecutionBoundary:
             if already_run:
                 raise UnauthorizedExecutionError(
                     f"Step '{target_step_id}' of proposal '{proposal.id}' has already been executed."
+                )
+
+        if authority.args_digest and hasattr(personal_store, "is_action_executed"):
+            if personal_store.is_action_executed(proposal.id, action_or_boundary or "", authority.args_digest):
+                raise UnauthorizedExecutionError(
+                    f"Action '{action_or_boundary}' with args_digest '{authority.args_digest}' has already been executed for proposal '{proposal.id}'."
                 )
 
         for c in constraints:

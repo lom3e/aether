@@ -40,6 +40,39 @@ def test_action_store_crash_recovery_preserves_waiting_approval(tmp_path: Path):
     db_path = tmp_path / "actions.db"
     store = ActionStore(db_path)
 
+    from aether.personal.store import PersonalStore
+    from aether.planning.contracts import IntentRequest, MissionProposal, ProposedStep, ProposalStatus
+    from aether.core.execution import ExecutionBoundary
+
+    p_store = PersonalStore(tmp_path / "personal.db")
+    p_store.save_intent_request(IntentRequest(
+        id="intent-test-1",
+        workspace_id="ws-test",
+        raw_input="Deploy database service",
+        source_surface="test",
+    ))
+    prop = MissionProposal(
+        id="prop-test-1",
+        intent_id="intent-test-1",
+        workspace_id="ws-test",
+        title="Deploy database",
+        objective="Deploy service",
+        why="Testing recovery",
+        context_summary="",
+        proposed_steps=[
+            ProposedStep(
+                id="step-dep-1",
+                order_idx=0,
+                title="Deploy service",
+                description="Deploy",
+                required_tools_or_actions=["test.deploy"],
+            )
+        ],
+        status=ProposalStatus.ACCEPTED,
+    )
+    p_store.save_proposal(prop)
+    auth = ExecutionBoundary.issue_authority(prop)
+
     # 1. Seed executions in various states
     e_running = ActionExecution(
         id="exec-run-1",
@@ -61,6 +94,7 @@ def test_action_store_crash_recovery_preserves_waiting_approval(tmp_path: Path):
         workspace_id="ws-test",
         status=ActionExecutionStatus.WAITING_APPROVAL,
         input_data={"service": "database"},
+        metadata={"authority": auth.to_dict()},
     )
     e_succeeded = ActionExecution(
         id="exec-succ-1",
@@ -117,7 +151,7 @@ def test_action_store_crash_recovery_preserves_waiting_approval(tmp_path: Path):
         ),
         handler=lambda inp, ws: {"deployed": inp["service"]},
     )
-    executor = ActionExecutor(registry=reg, store=store)
+    executor = ActionExecutor(registry=reg, store=store, personal_store=p_store)
     approved = executor.approve("exec-wait-1", approver="admin_post_restart")
     assert approved.status == ActionExecutionStatus.SUCCEEDED
     assert approved.output_data == {"deployed": "database"}

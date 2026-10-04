@@ -43,17 +43,13 @@ class PersonalStore:
 
     def _get_connection(self) -> sqlite3.Connection:
         if not hasattr(self._local, "conn") or self._local.conn is None:
-            conn = sqlite3.connect(
-                str(self.db_path),
+            from aether.core.sqlite import get_sqlite_connection
+            conn = get_sqlite_connection(
+                self.db_path,
                 timeout=10.0,
                 check_same_thread=False,
                 isolation_level=None,
             )
-            conn.row_factory = sqlite3.Row
-            conn.execute("PRAGMA journal_mode = WAL;")
-            conn.execute("PRAGMA synchronous = NORMAL;")
-            conn.execute("PRAGMA busy_timeout = 5000;")
-            conn.execute("PRAGMA foreign_keys = ON;")
             with self._conns_lock:
                 self._all_conns.add(conn)
             self._local.conn = conn
@@ -777,6 +773,21 @@ class PersonalStore:
             "SELECT 1 FROM proposal_executed_steps WHERE proposal_id = ? AND step_id = ?",
             (proposal_id, step_id),
         ).fetchone()
+        return row is not None
+
+    def is_action_executed(self, proposal_id: str, action_id: str, args_digest: str | None = None) -> bool:
+        """Checks if an action with identical args_digest has already been executed for this proposal."""
+        conn = self._get_connection()
+        if args_digest:
+            row = conn.execute(
+                "SELECT 1 FROM proposal_executed_steps WHERE proposal_id = ? AND action_id = ? AND args_digest = ?",
+                (proposal_id, action_id, args_digest),
+            ).fetchone()
+        else:
+            row = conn.execute(
+                "SELECT 1 FROM proposal_executed_steps WHERE proposal_id = ? AND action_id = ?",
+                (proposal_id, action_id),
+            ).fetchone()
         return row is not None
 
     def record_step_executed(

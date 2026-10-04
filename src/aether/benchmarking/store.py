@@ -28,9 +28,8 @@ class BenchmarkingStore:
         self._init_db()
 
     def _get_connection(self) -> sqlite3.Connection:
-        conn = sqlite3.connect(self.db_path)
-        conn.row_factory = sqlite3.Row
-        return conn
+        from aether.core.sqlite import get_sqlite_connection
+        return get_sqlite_connection(self.db_path)
 
     def _init_db(self) -> None:
         with self._get_connection() as conn:

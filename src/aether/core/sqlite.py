@@ -9,7 +9,7 @@ from pathlib import Path
 
 
 from contextlib import contextmanager
-from typing import Generator
+from typing import Any, Generator
 
 
 def configure_sqlite_connection(conn: sqlite3.Connection) -> sqlite3.Connection:
@@ -37,15 +37,23 @@ def get_sqlite_connection(
     timeout: float = 10.0,
     row_factory: type | None = sqlite3.Row,
     check_same_thread: bool = True,
+    isolation_level: Any = "",
+    **kwargs: Any,
 ) -> sqlite3.Connection:
     """Create and configure a SQLite connection with robust concurrency pragmas."""
     path_str = str(db_path)
     is_uri = path_str.startswith("file:")
+    connect_kwargs: dict[str, Any] = {
+        "timeout": timeout,
+        "uri": is_uri,
+        "check_same_thread": check_same_thread,
+        **kwargs,
+    }
+    if isolation_level != "":
+        connect_kwargs["isolation_level"] = isolation_level
     conn = sqlite3.connect(
         path_str,
-        timeout=timeout,
-        uri=is_uri,
-        check_same_thread=check_same_thread,
+        **connect_kwargs,
     )
     if row_factory is not None:
         conn.row_factory = row_factory

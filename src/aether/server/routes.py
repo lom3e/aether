@@ -8001,7 +8001,7 @@ async def call_mcp_tool(request: Request, payload: MCPCallPayload):
     from aether.core.execution import ExecutionBoundary, ExecutionAuthority, UnauthorizedExecutionError
 
     ws = getattr(request.app.state, "workspace", None)
-    ws_id = payload.workspace_id or (getattr(ws, "id", None) or getattr(ws, "name", None) or "default")
+    ws_id = payload.workspace_id or (getattr(ws, "name", None) or getattr(ws, "id", None) or "default")
 
     if not payload.authority:
         raise HTTPException(

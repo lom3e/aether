@@ -31,17 +31,13 @@ class ActionStore:
 
     def _get_connection(self) -> sqlite3.Connection:
         if not hasattr(self._local, "conn") or self._local.conn is None:
-            conn = sqlite3.connect(
-                str(self.db_path),
+            from aether.core.sqlite import get_sqlite_connection
+            conn = get_sqlite_connection(
+                self.db_path,
                 timeout=10.0,
                 check_same_thread=False,
                 isolation_level=None,
             )
-            conn.row_factory = sqlite3.Row
-            conn.execute("PRAGMA journal_mode = WAL;")
-            conn.execute("PRAGMA synchronous = NORMAL;")
-            conn.execute("PRAGMA busy_timeout = 5000;")
-            conn.execute("PRAGMA foreign_keys = ON;")
             with self._conns_lock:
                 self._all_conns.add(conn)
             self._local.conn = conn
@@ -163,7 +159,7 @@ class ActionStore:
                 SET status = 'failed',
                     error_message = 'Action execution interrupted by application restart/crash',
                     completed_at = ?
-                WHERE status IN ('running', 'queued');
+                WHERE status IN ('running', 'queued', 'approved');
                 """,
                 (now,),
             )
