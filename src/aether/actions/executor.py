@@ -167,6 +167,8 @@ class ActionExecutor:
                 workspace_id=workspace_id,
                 store=p_store,
                 action_or_boundary=action_id,
+                input_data=input_data,
+                step_id=authority.step_id if authority else None,
             )
 
         # Persist authority context into execution metadata for later revalidation (approve path)
@@ -293,6 +295,8 @@ class ActionExecutor:
                     workspace_id=execution.workspace_id,
                     store=p_store,
                     action_or_boundary=execution.action_id,
+                    input_data=execution.input_data,
+                    step_id=authority_obj.step_id if authority_obj else None,
                 )
 
             execution.transition_to(ActionExecutionStatus.APPROVED)
@@ -375,6 +379,24 @@ class ActionExecutor:
             execution.output_data = result or {}
             execution.completed_at = datetime.now(timezone.utc).isoformat()
             self.store.save_execution(execution)
+
+            # Record executed step for proposal idempotency if authority is present
+            if execution.metadata.get("authority"):
+                try:
+                    auth_meta = execution.metadata["authority"]
+                    p_id = auth_meta.get("proposal_id")
+                    st_id = auth_meta.get("step_id") or execution.action_id
+                    p_store = self._resolve_personal_store(execution.workspace_id)
+                    if p_store and hasattr(p_store, "record_step_executed") and p_id:
+                        from aether.core.execution import compute_args_digest
+                        p_store.record_step_executed(
+                            proposal_id=p_id,
+                            step_id=st_id,
+                            action_id=execution.action_id,
+                            args_digest=compute_args_digest(execution.input_data),
+                        )
+                except Exception:
+                    pass
 
             if self.activity_service:
                 act_title = (
@@ -791,7 +813,17 @@ class ActionExecutor:
                 auth_obj = ExecutionAuthority.from_dict(execution.metadata["authority"])
 
             if target_adapter is None:
-                if not endpoint_url and not command and protocol != "mcp":
+                # Local commands must be pre-registered in workspace team configuration
+                if command or protocol in ("cli", "command", "process"):
+                    raise UnauthorizedExecutionError(
+                        f"External agent '{agent_name}' with local command execution must be pre-registered in workspace team configuration."
+                    )
+                # Validate endpoint_url against SSRF
+                if endpoint_url:
+                    from aether.core.security import validate_public_url
+                    validate_public_url(endpoint_url)
+
+                if not endpoint_url and protocol != "mcp":
                     endpoint_url = os.environ.get("AETHER_EXTERNAL_AGENT_URL")
 
                 cfg = ExternalAgentConfig(
@@ -799,7 +831,7 @@ class ActionExecutor:
                     role=inp.get("role", "external_worker"),
                     protocol=protocol,
                     endpoint_url=endpoint_url,
-                    command=command,
+                    command=None,
                     timeout_seconds=timeout_seconds,
                     auth_token=auth_token,
                 )

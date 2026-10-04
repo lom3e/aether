@@ -594,6 +594,7 @@ class MissionProposal:
     clarification_requirements: list[ClarificationRequirement] = field(default_factory=list)
     provenance: ContextProvenance | None = None
     status: ProposalStatus = ProposalStatus.DRAFT
+    executed_steps: list[str] = field(default_factory=list)
     created_at: str = field(default_factory=lambda: datetime.now(timezone.utc).isoformat())
     updated_at: str = field(default_factory=lambda: datetime.now(timezone.utc).isoformat())
 
@@ -620,6 +621,7 @@ class MissionProposal:
             "clarification_requirements": [c.to_dict() for c in self.clarification_requirements],
             "provenance": self.provenance.to_dict() if self.provenance else None,
             "status": self.status.value if isinstance(self.status, ProposalStatus) else str(self.status),
+            "executed_steps": list(self.executed_steps),
             "created_at": self.created_at,
             "updated_at": self.updated_at,
         }
@@ -699,6 +701,7 @@ class MissionProposal:
             clarification_requirements=clarifs,
             provenance=prov,
             status=status,
+            executed_steps=list(data.get("executed_steps") or []),
             created_at=data.get("created_at") or datetime.now(timezone.utc).isoformat(),
             updated_at=data.get("updated_at") or datetime.now(timezone.utc).isoformat(),
         )

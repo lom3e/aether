@@ -569,7 +569,7 @@ class ActionRegistry:
                 description="Delegates a task or instruction to an external agent or worker over HTTP, CLI, or MCP.",
                 tier=ActionTier.ACT,
                 permission_level=ActionPermissionLevel.EXTERNAL_MUTATION,
-                requires_confirmation=False,
+                requires_confirmation=True,
                 provider="external_agents",
                 input_schema={
                     "type": "object",
@@ -605,7 +605,7 @@ class ActionRegistry:
                 description="Sends a direct message or alert to an authorized Telegram chat via the bot.",
                 tier=ActionTier.ACT,
                 permission_level=ActionPermissionLevel.EXTERNAL_MUTATION,
-                requires_confirmation=False,
+                requires_confirmation=True,
                 provider="telegram",
                 input_schema={
                     "type": "object",

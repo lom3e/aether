@@ -48,12 +48,21 @@ class TelegramBridge:
                 exec_id = data.split(":", 1)[1]
                 try:
                     res = workspace.action_executor.approve_execution(exec_id)
-                    connector.answer_callback_query(cb_id, "✅ Azione approvata ed eseguita!")
-                    connector.edit_message_text(
-                        chat_id=chat_id,
-                        message_id=message_id,
-                        text=f"✅ *Azione Approvata ed Eseguita con Successo*\nID: `{exec_id}`\nRisultato: `{res.status.value}`",
-                    )
+                    from aether.actions.models import ActionExecutionStatus
+                    if res.status == ActionExecutionStatus.SUCCEEDED:
+                        connector.answer_callback_query(cb_id, "✅ Azione approvata ed eseguita!")
+                        connector.edit_message_text(
+                            chat_id=chat_id,
+                            message_id=message_id,
+                            text=f"✅ *Azione Approvata ed Eseguita con Successo*\nID: `{exec_id}`\nRisultato: `{res.status.value}`",
+                        )
+                    else:
+                        connector.answer_callback_query(cb_id, "⚠️ Azione approvata ma fallita durante l'esecuzione.", show_alert=True)
+                        connector.edit_message_text(
+                            chat_id=chat_id,
+                            message_id=message_id,
+                            text=f"⚠️ *Azione Approvata ma Fallita durante l'Esecuzione*\nID: `{exec_id}`\nStato: `{res.status.value}`\nErrore: `{res.error_message or 'Errore durante esecuzione'}`",
+                        )
                     return {"status": "approved", "execution_id": exec_id}
                 except Exception as exc:
                     connector.answer_callback_query(cb_id, f"Errore: {exc}", show_alert=True)

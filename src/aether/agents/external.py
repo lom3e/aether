@@ -350,7 +350,8 @@ class ExternalAgentAdapter(Agent):
         if not cmd:
             raise ValueError(f"External agent '{self.name}' has no command configured.")
 
-        cmd_list = cmd if isinstance(cmd, list) else [cmd]
+        import shlex
+        cmd_list = [str(c) for c in cmd] if isinstance(cmd, list) else shlex.split(str(cmd))
         payload = {
             "task_id": task.id,
             "instruction": task.instruction,
@@ -377,7 +378,7 @@ class ExternalAgentAdapter(Agent):
                 cwd=self.external_config.cwd,
                 env=env,
                 timeout=self.external_config.timeout_seconds,
-                shell=isinstance(cmd, str),
+                shell=False,
             )
 
             if proc.returncode != 0:

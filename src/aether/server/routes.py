@@ -5726,24 +5726,142 @@ async def accept_proactive_suggestion_route(request: Request, suggestion_id: str
         raise HTTPException(status_code=404, detail="Suggestion not found.")
 
     from aether.proactive.models import SuggestionStatus
+    from aether.actions.models import ActionPermissionLevel, ActionExecutionStatus
+
     executed_action = {}
     if sug.proposed_action_id and hasattr(ws, "actions"):
-        try:
-            exec_res = ws.actions.execute(
-                action_id=sug.proposed_action_id,
-                workspace_id=ws.id,
-                input_data=sug.proposed_action_args,
-                auto_approve=True,
-            )
-            executed_action = exec_res.output_data
-        except Exception as exc:
-            executed_action = {"error": str(exc)}
+        definition = ws.actions.registry.get(sug.proposed_action_id) if hasattr(ws.actions, "registry") else None
+        is_read_only = definition and definition.permission_level == ActionPermissionLevel.READ_ONLY
 
-    updated = ws.proactive_store.update_suggestion_status(suggestion_id, SuggestionStatus.APPLIED)
-    return {
-        "suggestion": updated.to_dict() if updated else sug.to_dict(),
-        "executed_action": executed_action,
-    }
+        if is_read_only:
+            try:
+                exec_res = ws.actions.execute(
+                    action_id=sug.proposed_action_id,
+                    workspace_id=ws.id,
+                    input_data=sug.proposed_action_args or {},
+                    auto_approve=False,
+                )
+                executed_action = exec_res.output_data or {}
+                if exec_res.status == ActionExecutionStatus.SUCCEEDED:
+                    updated = ws.proactive_store.update_suggestion_status(suggestion_id, SuggestionStatus.APPLIED)
+                    return {
+                        "suggestion": updated.to_dict() if updated else sug.to_dict(),
+                        "executed_action": executed_action,
+                        "status": "applied",
+                    }
+                else:
+                    updated = ws.proactive_store.update_suggestion_status(suggestion_id, SuggestionStatus.ACCEPTED)
+                    return {
+                        "suggestion": updated.to_dict() if updated else sug.to_dict(),
+                        "executed_action": {"error": exec_res.error_message or "Execution failed"},
+                        "status": "failed",
+                    }
+            except Exception as exc:
+                updated = ws.proactive_store.update_suggestion_status(suggestion_id, SuggestionStatus.ACCEPTED)
+                return {
+                    "suggestion": updated.to_dict() if updated else sug.to_dict(),
+                    "executed_action": {"error": str(exc)},
+                    "status": "failed",
+                }
+        else:
+            # Mutating action: must follow Intent -> Proposal -> Acceptance -> Authority lifecycle
+            try:
+                import uuid
+                from datetime import datetime, timezone
+                from aether.planning.contracts import IntentRequest, MissionProposal, ProposalStatus, ProposedStep
+                from aether.core.execution import compute_args_digest, ExecutionBoundary
+
+                intent_id = f"intent-sug-{uuid.uuid4().hex[:8]}"
+                prop_id = f"prop-sug-{uuid.uuid4().hex[:8]}"
+                p_store = getattr(ws, "personal_store", None)
+                if not p_store and hasattr(ws, "personal"):
+                    p_store = getattr(ws.personal, "store", None)
+
+                if not p_store:
+                    raise RuntimeError("No PersonalStore available for proposal lifecycle.")
+
+                digest = compute_args_digest(sug.proposed_action_args or {})
+                step = ProposedStep(
+                    id="step-1",
+                    order_idx=0,
+                    title=f"Execute proactive suggestion: {sug.title}",
+                    description=sug.description,
+                    required_tools_or_actions=[sug.proposed_action_id],
+                )
+                p_store.save_intent_request(IntentRequest(
+                    id=intent_id,
+                    workspace_id=ws.id,
+                    raw_input=f"Apply proactive suggestion: {sug.title}",
+                    source_surface="proactive_suggestions",
+                    created_at=datetime.now(timezone.utc).isoformat(),
+                ))
+                proposal = MissionProposal(
+                    id=prop_id,
+                    intent_id=intent_id,
+                    workspace_id=ws.id,
+                    title=sug.title or f"Proactive Suggestion: {sug.proposed_action_id}",
+                    objective=sug.description or "Execute proactive action",
+                    why="User accepted proactive suggestion",
+                    context_summary="Proactive engine recommendation",
+                    proposed_steps=[step],
+                    constraints=[f"allow:{sug.proposed_action_id}", f"args_digest:{digest}", "single_use"],
+                    confidence=1.0,
+                    status=ProposalStatus.READY_FOR_ACCEPTANCE,
+                )
+                p_store.save_proposal(proposal)
+
+                # Explicitly accept proposal to issue valid ExecutionAuthority
+                if hasattr(ws, "personal") and ws.personal:
+                    accepted_prop, authority = ws.personal.accept_proposal(prop_id, ws.id)
+                else:
+                    p_store.transition_proposal_status(prop_id, ws.id, ProposalStatus.READY_FOR_ACCEPTANCE, ProposalStatus.ACCEPTED)
+                    accepted_prop = p_store.get_proposal(prop_id, ws.id)
+                    authority = ExecutionBoundary.issue_authority(accepted_prop)
+
+                # Execute with genuine authority (auto_approve=False so confirmation gating is respected)
+                exec_res = ws.actions.execute(
+                    action_id=sug.proposed_action_id,
+                    workspace_id=ws.id,
+                    input_data=sug.proposed_action_args or {},
+                    auto_approve=False,
+                    authority=authority,
+                )
+
+                if exec_res.status == ActionExecutionStatus.SUCCEEDED:
+                    updated = ws.proactive_store.update_suggestion_status(suggestion_id, SuggestionStatus.APPLIED)
+                    return {
+                        "suggestion": updated.to_dict() if updated else sug.to_dict(),
+                        "executed_action": exec_res.output_data or {},
+                        "status": "applied",
+                    }
+                elif exec_res.status == ActionExecutionStatus.WAITING_APPROVAL:
+                    updated = ws.proactive_store.update_suggestion_status(suggestion_id, SuggestionStatus.ACCEPTED)
+                    return {
+                        "suggestion": updated.to_dict() if updated else sug.to_dict(),
+                        "executed_action": {"execution_id": exec_res.id, "status": "waiting_approval"},
+                        "status": "waiting_approval",
+                    }
+                else:
+                    updated = ws.proactive_store.update_suggestion_status(suggestion_id, SuggestionStatus.ACCEPTED)
+                    return {
+                        "suggestion": updated.to_dict() if updated else sug.to_dict(),
+                        "executed_action": {"error": exec_res.error_message or "Execution failed"},
+                        "status": "failed",
+                    }
+            except Exception as exc:
+                updated = ws.proactive_store.update_suggestion_status(suggestion_id, SuggestionStatus.ACCEPTED)
+                return {
+                    "suggestion": updated.to_dict() if updated else sug.to_dict(),
+                    "executed_action": {"error": str(exc)},
+                    "status": "failed",
+                }
+    else:
+        updated = ws.proactive_store.update_suggestion_status(suggestion_id, SuggestionStatus.ACCEPTED)
+        return {
+            "suggestion": updated.to_dict() if updated else sug.to_dict(),
+            "executed_action": {},
+            "status": "accepted",
+        }
 
 
 @router.post("/proactive/suggestions/{suggestion_id}/dismiss")
@@ -7762,6 +7880,7 @@ async def invoke_external_agent(request: Request, payload: ExternalAgentInvokePa
             workspace_id=ws_id,
             store=p_store,
             action_or_boundary=f"agent.external:{payload.agent_name}",
+            input_data={"instruction": payload.instruction, "context_data": payload.context_data},
         )
     except (UnauthorizedExecutionError, ValueError) as exc:
         raise HTTPException(status_code=403, detail=str(exc))
@@ -7777,11 +7896,23 @@ async def invoke_external_agent(request: Request, payload: ExternalAgentInvokePa
             target_adapter = candidate
 
     if target_adapter is None:
+        if payload.command or payload.protocol in ("cli", "command", "process"):
+            raise HTTPException(
+                status_code=403,
+                detail=f"External agent '{payload.agent_name}' with local command execution must be pre-registered in workspace team configuration."
+            )
+        if payload.endpoint_url:
+            from aether.core.security import validate_public_url
+            try:
+                validate_public_url(payload.endpoint_url)
+            except Exception as e:
+                raise HTTPException(status_code=400, detail=f"SSRF validation failed for endpoint_url: {e}")
+
         cfg = ExternalAgentConfig(
             name=payload.agent_name,
             protocol=payload.protocol,
             endpoint_url=payload.endpoint_url,
-            command=payload.command,
+            command=None,
             timeout_seconds=payload.timeout_seconds,
             auth_token=payload.auth_token,
         )
@@ -7823,12 +7954,23 @@ async def list_mcp_tools(
     """Queries an MCP server for its advertised tools and capabilities."""
     from aether.tools.mcp import MCPClient
 
-    if not endpoint_url and not command:
+    if not endpoint_url:
+        if command:
+            raise HTTPException(
+                status_code=403,
+                detail="Arbitrary subprocess command execution via MCP query parameter is disabled.",
+            )
         return {"tools": [], "server_info": {}, "connected": False}
+
+    from aether.core.security import validate_public_url
+    try:
+        validate_public_url(endpoint_url)
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=f"SSRF validation failed: {e}")
 
     client = MCPClient(
         endpoint_url=endpoint_url,
-        command=command.split() if command else None,
+        command=None,
         timeout_seconds=10.0,
     )
     try:
@@ -7869,13 +8011,7 @@ async def call_mcp_tool(request: Request, payload: MCPCallPayload):
 
     auth_data = payload.authority
     try:
-        auth_obj = ExecutionAuthority(
-            proposal_id=auth_data.get("proposal_id", ""),
-            proposal_version=int(auth_data.get("proposal_version", 1)),
-            workspace_id=auth_data.get("workspace_id", ws_id),
-            granted_at=auth_data.get("granted_at", ""),
-            expires_at=auth_data.get("expires_at"),
-        )
+        auth_obj = ExecutionAuthority.from_dict(auth_data) if isinstance(auth_data, dict) else auth_data
     except Exception as exc:
         raise HTTPException(status_code=403, detail=f"Invalid execution authority: {exc}")
 
@@ -7889,13 +8025,27 @@ async def call_mcp_tool(request: Request, payload: MCPCallPayload):
             workspace_id=ws_id,
             store=p_store,
             action_or_boundary=f"mcp.tool:{payload.tool_name}",
+            input_data=payload.arguments,
         )
     except UnauthorizedExecutionError as exc:
         raise HTTPException(status_code=403, detail=str(exc))
 
+    if payload.command:
+        raise HTTPException(
+            status_code=403,
+            detail="Arbitrary subprocess command execution via MCP API is disabled. MCP tools must be pre-registered.",
+        )
+
+    if payload.endpoint_url:
+        from aether.core.security import validate_public_url
+        try:
+            validate_public_url(payload.endpoint_url)
+        except Exception as e:
+            raise HTTPException(status_code=400, detail=f"SSRF validation failed: {e}")
+
     client = MCPClient(
         endpoint_url=payload.endpoint_url,
-        command=payload.command,
+        command=None,
         auth_token=payload.auth_token,
         timeout_seconds=30.0,
     )

@@ -193,6 +193,9 @@ class PersonalAgentService:
         workspace_id: str,
         expected_version: int | None = None,
         actor: str = "user",
+        expires_at: str | None = None,
+        step_id: str | None = None,
+        args_digest: str | None = None,
     ) -> tuple[MissionProposal, ExecutionAuthority]:
         """
         Explicitly accepts a MissionProposal (Phase A Macro-pass 1.2).
@@ -217,7 +220,9 @@ class PersonalAgentService:
             )
 
         if proposal.status == ProposalStatus.ACCEPTED:
-            authority = ExecutionBoundary.issue_authority(proposal)
+            authority = ExecutionBoundary.issue_authority(
+                proposal, expires_at=expires_at, step_id=step_id, args_digest=args_digest
+            )
             return proposal, authority
 
         allowed_pre_states = [ProposalStatus.DRAFT, ProposalStatus.READY_FOR_ACCEPTANCE]
@@ -241,7 +246,9 @@ class PersonalAgentService:
             to_status=ProposalStatus.ACCEPTED,
         )
 
-        authority = ExecutionBoundary.issue_authority(accepted_proposal)
+        authority = ExecutionBoundary.issue_authority(
+            accepted_proposal, expires_at=expires_at, step_id=step_id, args_digest=args_digest
+        )
 
         logger.info(
             "Proposal '%s' accepted by actor '%s' in workspace '%s'. Issued authority v%d.",
@@ -1855,20 +1862,32 @@ class PersonalAgentService:
                     input_data=intent.action_args,
                     auto_approve=True,
                 )
-                events = execution.output_data.get("events", [])
-                steps.append(
-                    PersonalStep(
-                        id=f"step-{uuid.uuid4().hex[:8]}",
-                        title="Querying calendar events",
-                        status="completed",
-                        category="action",
+                from aether.actions.models import ActionExecutionStatus
+                if execution.status == ActionExecutionStatus.SUCCEEDED:
+                    events = execution.output_data.get("events", [])
+                    steps.append(
+                        PersonalStep(
+                            id=f"step-{uuid.uuid4().hex[:8]}",
+                            title="Querying calendar events",
+                            status="completed",
+                            category="action",
+                        )
                     )
-                )
-                if events:
-                    lines = [f"- **{e.get('title')}** ({e.get('start_time', '')[:16]})" for e in events]
-                    response_text = "Ecco i tuoi prossimi impegni in calendario:\n\n" + "\n".join(lines)
+                    if events:
+                        lines = [f"- **{e.get('title')}** ({e.get('start_time', '')[:16]})" for e in events]
+                        response_text = "Ecco i tuoi prossimi impegni in calendario:\n\n" + "\n".join(lines)
+                    else:
+                        response_text = "Non hai eventi programmati in calendario al momento."
                 else:
-                    response_text = "Non hai eventi programmati in calendario al momento."
+                    steps.append(
+                        PersonalStep(
+                            id=f"step-{uuid.uuid4().hex[:8]}",
+                            title="Querying calendar events",
+                            status="failed",
+                            category="action",
+                        )
+                    )
+                    response_text = f"Errore durante l'accesso al calendario: {execution.error_message or 'Operazione fallita.'}"
 
             elif intent.action_id == "files.read_document":
                 execution = self.action_executor.execute(
@@ -1878,19 +1897,31 @@ class PersonalAgentService:
                     auto_approve=True,
                 )
                 filename = intent.action_args.get("filename", "file")
-                steps.append(
-                    PersonalStep(
-                        id=f"step-{uuid.uuid4().hex[:8]}",
-                        title=f"Reading document: {filename}",
-                        status="completed",
-                        category="action",
+                from aether.actions.models import ActionExecutionStatus
+                if execution.status == ActionExecutionStatus.SUCCEEDED:
+                    steps.append(
+                        PersonalStep(
+                            id=f"step-{uuid.uuid4().hex[:8]}",
+                            title=f"Reading document: {filename}",
+                            status="completed",
+                            category="action",
+                        )
                     )
-                )
-                if execution.output_data.get("exists"):
-                    content = execution.output_data.get("content", "")
-                    response_text = f"Content of `{filename}`:\n\n```\n{content}\n```"
+                    if execution.output_data.get("exists"):
+                        content = execution.output_data.get("content", "")
+                        response_text = f"Content of `{filename}`:\n\n```\n{content}\n```"
+                    else:
+                        response_text = f"File `{filename}` was not found in the workspace project directory."
                 else:
-                    response_text = f"File `{filename}` was not found in the workspace project directory."
+                    steps.append(
+                        PersonalStep(
+                            id=f"step-{uuid.uuid4().hex[:8]}",
+                            title=f"Reading document: {filename}",
+                            status="failed",
+                            category="action",
+                        )
+                    )
+                    response_text = f"Errore durante la lettura del documento `{filename}`: {execution.error_message or 'Operazione fallita.'}"
 
             else:
                 steps.append(

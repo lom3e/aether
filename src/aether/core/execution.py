@@ -258,6 +258,19 @@ class UnauthorizedExecutionError(Exception):
     """Raised when an operation is attempted without proper ExecutionAuthority."""
     pass
 
+def compute_args_digest(input_data: dict[str, Any] | None) -> str:
+    """Computes a deterministic SHA-256 digest of action/tool arguments."""
+    import hashlib
+    import json
+    if not input_data:
+        return hashlib.sha256(b"{}").hexdigest()
+    try:
+        canonical = json.dumps(input_data, sort_keys=True, default=str).encode("utf-8")
+    except Exception:
+        canonical = str(sorted(input_data.items())).encode("utf-8")
+    return hashlib.sha256(canonical).hexdigest()
+
+
 @dataclass(frozen=True, slots=True)
 class ExecutionAuthority:
     """
@@ -269,14 +282,24 @@ class ExecutionAuthority:
     proposal_version: int
     workspace_id: str
     granted_at: str
+    expires_at: str | None = None
+    step_id: str | None = None
+    args_digest: str | None = None
 
     def to_dict(self) -> dict[str, Any]:
-        return {
+        d = {
             "proposal_id": self.proposal_id,
             "proposal_version": self.proposal_version,
             "workspace_id": self.workspace_id,
             "granted_at": self.granted_at,
         }
+        if self.expires_at is not None:
+            d["expires_at"] = self.expires_at
+        if self.step_id is not None:
+            d["step_id"] = self.step_id
+        if self.args_digest is not None:
+            d["args_digest"] = self.args_digest
+        return d
 
     @classmethod
     def from_dict(cls, data: dict[str, Any]) -> ExecutionAuthority:
@@ -290,6 +313,9 @@ class ExecutionAuthority:
             proposal_version=int(data["proposal_version"]),
             workspace_id=str(data["workspace_id"]),
             granted_at=str(data["granted_at"]),
+            expires_at=str(data["expires_at"]) if data.get("expires_at") else None,
+            step_id=str(data["step_id"]) if data.get("step_id") else None,
+            args_digest=str(data["args_digest"]) if data.get("args_digest") else None,
         )
 
 
@@ -302,7 +328,13 @@ class ExecutionBoundary:
     """
 
     @classmethod
-    def issue_authority(cls, proposal: Any) -> ExecutionAuthority:
+    def issue_authority(
+        cls,
+        proposal: Any,
+        expires_at: str | None = None,
+        step_id: str | None = None,
+        args_digest: str | None = None,
+    ) -> ExecutionAuthority:
         """Issues an ExecutionAuthority for an ACCEPTED proposal."""
         from aether.planning.contracts import ProposalStatus
         status_val = getattr(proposal, "status", None)
@@ -316,11 +348,34 @@ class ExecutionBoundary:
                 f"Must be '{ProposalStatus.ACCEPTED.value}'."
             )
         from datetime import datetime, timezone
+
+        # Extract expiry from constraints if not explicitly passed
+        authority_expiry = expires_at
+        if not authority_expiry:
+            for c in getattr(proposal, "constraints", []) or []:
+                c_clean = str(c).strip()
+                if c_clean.lower().startswith("expires_at:"):
+                    authority_expiry = c_clean[len("expires_at:"):].strip()
+                    break
+
+        # Extract args_digest from constraints if not explicitly passed
+        authority_digest = args_digest
+        if not authority_digest:
+            for c in getattr(proposal, "constraints", []) or []:
+                c_clean = str(c).strip()
+                if c_clean.lower().startswith("args_digest:"):
+                    raw = c_clean[len("args_digest:"):].strip()
+                    authority_digest = raw.split(":")[-1].strip()
+                    break
+
         return ExecutionAuthority(
             proposal_id=proposal.id,
             proposal_version=proposal.version,
             workspace_id=proposal.workspace_id,
             granted_at=datetime.now(timezone.utc).isoformat(),
+            expires_at=authority_expiry,
+            step_id=step_id,
+            args_digest=authority_digest,
         )
 
     @classmethod
@@ -330,16 +385,21 @@ class ExecutionBoundary:
         workspace_id: str,
         store: Any,
         action_or_boundary: str | None = None,
+        input_data: dict[str, Any] | None = None,
+        step_id: str | None = None,
     ) -> Any:
         """
         Validates the authority against persistent proposal state in PersonalStore.
         Revalidates:
         1. authority is provided and is an ExecutionAuthority instance
         2. authority.workspace_id matches workspace_id
-        3. proposal exists in store
-        4. proposal belongs to workspace_id
+        3. authority.expires_at is validated (fails closed on expired or malformed)
+        4. proposal exists in store and belongs to workspace_id
         5. proposal.version matches authority.proposal_version
         6. proposal.status is ACCEPTED (not DRAFT, REVOKED, SUPERSEDED, etc.)
+        7. Negative and allowed-scope constraints (explicit or derived from proposed steps)
+        8. Arguments digest binding (against authority.args_digest and args_digest constraints)
+        9. Step execution idempotency and single_use constraints
         """
         op_name = action_or_boundary or "operation"
         if not authority:
@@ -352,6 +412,24 @@ class ExecutionBoundary:
             raise UnauthorizedExecutionError(
                 f"Authority workspace '{authority.workspace_id}' does not match execution workspace '{workspace_id}' for '{op_name}'."
             )
+
+        # 1. Authority expiration check
+        if authority.expires_at:
+            try:
+                from datetime import datetime, timezone
+                auth_exp_dt = datetime.fromisoformat(authority.expires_at)
+                if auth_exp_dt.tzinfo is None:
+                    auth_exp_dt = auth_exp_dt.replace(tzinfo=timezone.utc)
+                if datetime.now(timezone.utc) > auth_exp_dt:
+                    raise UnauthorizedExecutionError(
+                        f"Execution authority for proposal '{authority.proposal_id}' expired at '{authority.expires_at}'."
+                    )
+            except UnauthorizedExecutionError:
+                raise
+            except Exception as e:
+                raise UnauthorizedExecutionError(
+                    f"Execution authority for proposal '{authority.proposal_id}' has invalid expiration '{authority.expires_at}': {e}"
+                )
 
         # Resolve personal_store from store or workspace
         personal_store = getattr(store, "personal_store", store)
@@ -387,23 +465,71 @@ class ExecutionBoundary:
                 f"Unaccepted or revoked proposals cannot authorize execution."
             )
 
-        # Scope and constraint validation
+        constraints = getattr(proposal, "constraints", []) or []
+
+        # 2. Proposal expiration constraints check
+        for c in constraints:
+            c_clean = str(c).strip()
+            if c_clean.lower().startswith("expires_at:"):
+                exp_str = c_clean[len("expires_at:"):].strip()
+                try:
+                    from datetime import datetime, timezone
+                    exp_dt = datetime.fromisoformat(exp_str)
+                    if exp_dt.tzinfo is None:
+                        exp_dt = exp_dt.replace(tzinfo=timezone.utc)
+                    if datetime.now(timezone.utc) > exp_dt:
+                        raise UnauthorizedExecutionError(
+                            f"Proposal '{proposal.id}' execution authority expired at '{exp_str}'."
+                        )
+                except UnauthorizedExecutionError:
+                    raise
+                except (ValueError, TypeError) as e:
+                    raise UnauthorizedExecutionError(
+                        f"Proposal '{proposal.id}' has invalid expires_at constraint '{exp_str}': {e}"
+                    )
+
+        # 3. Step idempotency and single-use checks
+        target_step_id = step_id or authority.step_id
+        if target_step_id:
+            already_run = False
+            if hasattr(proposal, "executed_steps") and target_step_id in proposal.executed_steps:
+                already_run = True
+            elif hasattr(personal_store, "is_step_executed") and personal_store.is_step_executed(proposal.id, target_step_id):
+                already_run = True
+            if already_run:
+                raise UnauthorizedExecutionError(
+                    f"Step '{target_step_id}' of proposal '{proposal.id}' has already been executed."
+                )
+
+        for c in constraints:
+            c_clean = str(c).strip().lower()
+            if c_clean in ("single_use", "once", "single-use"):
+                has_run = False
+                if hasattr(proposal, "executed_steps") and proposal.executed_steps:
+                    has_run = True
+                elif hasattr(personal_store, "list_executed_steps") and personal_store.list_executed_steps(proposal.id):
+                    has_run = True
+                if has_run:
+                    raise UnauthorizedExecutionError(
+                        f"Proposal '{proposal.id}' has single_use constraint and has already executed an action."
+                    )
+
+        # 4. Scope and constraint validation
         if action_or_boundary:
             act_clean = action_or_boundary.strip()
-            constraints = getattr(proposal, "constraints", []) or []
 
-            # 1. Negative constraint check (explicit deny/prohibit/disallow)
+            # A. Negative constraint check (explicit deny/prohibit/disallow)
             for c in constraints:
                 c_clean = str(c).strip()
                 for prefix in ("prohibit:", "deny:", "disallow:", "blocked:"):
                     if c_clean.lower().startswith(prefix):
                         prohibited_act = c_clean[len(prefix):].strip()
-                        if prohibited_act and (act_clean == prohibited_act or act_clean.startswith(f"{prohibited_act}.")):
+                        if prohibited_act and (act_clean == prohibited_act or act_clean.startswith(f"{prohibited_act}.") or act_clean.startswith(f"{prohibited_act}:")):
                             raise UnauthorizedExecutionError(
                                 f"Action '{act_clean}' is explicitly prohibited by proposal '{proposal.id}' constraints: '{c}'."
                             )
 
-            # 2. Strict allow-list constraint check (if proposal explicitly specifies allowed actions/capabilities)
+            # B. Strict allow-list constraint check (explicit or derived)
             allowed_constraints = [
                 str(c).strip() for c in constraints
                 if str(c).strip().lower().startswith("allow:") or str(c).strip().lower().startswith("scope:")
@@ -414,24 +540,50 @@ class ExecutionBoundary:
                     prefix = "allow:" if c.lower().startswith("allow:") else "scope:"
                     items = [a.strip() for a in c[len(prefix):].split(",") if a.strip()]
                     allowed_actions.update(items)
+            else:
+                # Derive allowed actions from proposal's proposed_steps and required_approvals
+                derived_actions = set()
+                for s in getattr(proposal, "proposed_steps", []) or []:
+                    for req in getattr(s, "required_tools_or_actions", []) or []:
+                        if req and str(req).strip():
+                            derived_actions.add(str(req).strip())
+                for req_appr in getattr(proposal, "required_approvals", []) or []:
+                    act = getattr(req_appr, "action_or_boundary", None)
+                    if act and str(act).strip():
+                        derived_actions.add(str(act).strip())
+                allowed_actions = derived_actions
 
+            if allowed_actions:
                 base_act = act_clean.split(":")[0] if ":" in act_clean else act_clean
-                if act_clean not in allowed_actions and base_act not in allowed_actions:
-                    has_match = False
+                has_match = False
+                if act_clean in allowed_actions or base_act in allowed_actions:
+                    has_match = True
+                else:
                     for allowed in allowed_actions:
-                        if allowed.endswith(".*") and act_clean.startswith(allowed[:-2]):
-                            has_match = True
-                            break
                         if allowed in ("*", "all"):
                             has_match = True
                             break
-                    if not has_match:
-                        raise UnauthorizedExecutionError(
-                            f"Execution of '{act_clean}' is outside the authorized scope of proposal '{proposal.id}'. "
-                            f"Authorized scope: {sorted(allowed_actions)}."
-                        )
+                        if allowed.endswith(".*") and act_clean.startswith(allowed[:-2]):
+                            has_match = True
+                            break
+                        if ":" in act_clean and act_clean.split(":", 1)[0] == allowed:
+                            has_match = True
+                            break
+                        if ":" in allowed and allowed.split(":", 1)[0] == act_clean:
+                            has_match = True
+                            break
+                        # Handle agent.external and agents.delegate_external equivalence
+                        if (act_clean.startswith("agent.external") and "agents.delegate_external" in allowed_actions) or \
+                           (act_clean == "agents.delegate_external" and any(a.startswith("agent.external") for a in allowed_actions)):
+                            has_match = True
+                            break
+                if not has_match:
+                    raise UnauthorizedExecutionError(
+                        f"Execution of '{act_clean}' is outside the authorized scope of proposal '{proposal.id}'. "
+                        f"Authorized scope: {sorted(allowed_actions)}."
+                    )
 
-            # 3. Mission binding check
+            # C. Mission binding check
             if act_clean.startswith("mission.") and ":" in act_clean:
                 target_mid = act_clean.split(":", 1)[1]
                 for c in constraints:
@@ -445,20 +597,56 @@ class ExecutionBoundary:
                                     f"cannot authorize execution for mission '{target_mid}'."
                                 )
 
-            # 4. Expiry constraint check
-            for c in constraints:
-                c_clean = str(c).strip()
-                if c_clean.lower().startswith("expires_at:"):
-                    exp_str = c_clean[len("expires_at:"):].strip()
-                    try:
-                        from datetime import datetime, timezone
-                        exp_dt = datetime.fromisoformat(exp_str)
-                        if datetime.now(timezone.utc) > exp_dt:
+        # 5. Argument binding / digest verification
+        computed_digest = compute_args_digest(input_data) if input_data is not None else None
+
+        if authority.args_digest:
+            if input_data is None:
+                raise UnauthorizedExecutionError(
+                    f"Execution authority for proposal '{proposal.id}' is bound to args_digest '{authority.args_digest}', "
+                    f"but no arguments were provided for verification."
+                )
+            if computed_digest != authority.args_digest:
+                raise UnauthorizedExecutionError(
+                    f"Execution arguments digest mismatch for proposal '{proposal.id}'. "
+                    f"Expected '{authority.args_digest}', got '{computed_digest}'."
+                )
+
+        for c in constraints:
+            c_clean = str(c).strip()
+            if c_clean.lower().startswith("args_digest:"):
+                expected_digest = c_clean[len("args_digest:"):].strip()
+                if ":" in expected_digest:
+                    parts = expected_digest.split(":", 1)
+                    target_scope = parts[0].strip()
+                    digest_val = parts[1].strip()
+                    applies = False
+                    if action_or_boundary and (action_or_boundary == target_scope or action_or_boundary.split(":")[0] == target_scope):
+                        applies = True
+                    if target_step_id and target_step_id == target_scope:
+                        applies = True
+                    if applies:
+                        if input_data is None:
                             raise UnauthorizedExecutionError(
-                                f"Proposal '{proposal.id}' execution authority expired at '{exp_str}'."
+                                f"Proposal '{proposal.id}' constraint '{c}' requires argument verification for '{target_scope}', "
+                                f"but no arguments were provided."
                             )
-                    except (ValueError, TypeError):
-                        pass
+                        if computed_digest != digest_val:
+                            raise UnauthorizedExecutionError(
+                                f"Execution arguments digest mismatch for proposal '{proposal.id}' on '{target_scope}'. "
+                                f"Constraint requires '{digest_val}', got '{computed_digest}'."
+                            )
+                else:
+                    if input_data is None:
+                        raise UnauthorizedExecutionError(
+                            f"Proposal '{proposal.id}' constraint '{c}' requires argument verification, "
+                            f"but no arguments were provided."
+                        )
+                    if computed_digest != expected_digest:
+                        raise UnauthorizedExecutionError(
+                            f"Execution arguments digest mismatch for proposal '{proposal.id}'. "
+                            f"Constraint requires '{expected_digest}', got '{computed_digest}'."
+                        )
 
         return proposal
 

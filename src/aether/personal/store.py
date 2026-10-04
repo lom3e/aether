@@ -213,6 +213,20 @@ class PersonalStore:
             cursor.execute("CREATE INDEX IF NOT EXISTS idx_mp_intent ON mission_proposals(intent_id);")
             cursor.execute("CREATE UNIQUE INDEX IF NOT EXISTS idx_mp_intent_version ON mission_proposals(intent_id, version);")
 
+            cursor.execute(
+                """
+                CREATE TABLE IF NOT EXISTS proposal_executed_steps (
+                    proposal_id TEXT NOT NULL,
+                    step_id TEXT NOT NULL,
+                    action_id TEXT NOT NULL DEFAULT '',
+                    args_digest TEXT NOT NULL DEFAULT '',
+                    executed_at TEXT NOT NULL,
+                    PRIMARY KEY (proposal_id, step_id)
+                );
+                """
+            )
+            cursor.execute("CREATE INDEX IF NOT EXISTS idx_pes_prop ON proposal_executed_steps(proposal_id);")
+
     def save_session(self, session: PersonalSession) -> PersonalSession:
         """Saves or updates session metadata."""
         with self._transaction() as cursor:
@@ -728,6 +742,7 @@ class PersonalStore:
             row = conn.execute("SELECT * FROM mission_proposals WHERE id = ?", (proposal_id,)).fetchone()
         if not row:
             return None
+        executed_steps = self.list_executed_steps(row["id"])
         return MissionProposal.from_dict({
             "id": row["id"],
             "intent_id": row["intent_id"],
@@ -750,9 +765,43 @@ class PersonalStore:
             "clarification_requirements": json.loads(row["clarification_requirements"]) if row["clarification_requirements"] else [],
             "provenance": json.loads(row["provenance"]) if row["provenance"] else None,
             "status": row["status"],
+            "executed_steps": executed_steps,
             "created_at": row["created_at"],
             "updated_at": row["updated_at"],
         })
+
+    def is_step_executed(self, proposal_id: str, step_id: str) -> bool:
+        """Checks if a specific step of a proposal has already been executed."""
+        conn = self._get_connection()
+        row = conn.execute(
+            "SELECT 1 FROM proposal_executed_steps WHERE proposal_id = ? AND step_id = ?",
+            (proposal_id, step_id),
+        ).fetchone()
+        return row is not None
+
+    def record_step_executed(
+        self, proposal_id: str, step_id: str, action_id: str = "", args_digest: str = ""
+    ) -> None:
+        """Records the execution of a proposal step for idempotency tracking."""
+        from datetime import datetime, timezone
+        now = datetime.now(timezone.utc).isoformat()
+        with self._transaction() as cursor:
+            cursor.execute(
+                """
+                INSERT OR IGNORE INTO proposal_executed_steps (proposal_id, step_id, action_id, args_digest, executed_at)
+                VALUES (?, ?, ?, ?, ?)
+                """,
+                (proposal_id, step_id, action_id, args_digest, now),
+            )
+
+    def list_executed_steps(self, proposal_id: str) -> list[str]:
+        """Returns the list of step_ids executed for a proposal."""
+        conn = self._get_connection()
+        rows = conn.execute(
+            "SELECT step_id FROM proposal_executed_steps WHERE proposal_id = ?",
+            (proposal_id,),
+        ).fetchall()
+        return [r["step_id"] for r in rows]
 
     def transition_proposal_status(
         self,
@@ -830,6 +879,7 @@ class PersonalStore:
                 "clarification_requirements": json.loads(row["clarification_requirements"]) if row["clarification_requirements"] else [],
                 "provenance": json.loads(row["provenance"]) if row["provenance"] else None,
                 "status": row["status"],
+                "executed_steps": self.list_executed_steps(row["id"]),
                 "created_at": row["created_at"],
                 "updated_at": row["updated_at"],
             })
