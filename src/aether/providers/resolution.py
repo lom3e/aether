@@ -65,22 +65,29 @@ def resolve_provider(
     from aether.providers.manager import ProviderManager
     mgr = provider_manager or ProviderManager()
 
+    s_store = getattr(workspace, "secret_store", None) if workspace else None
+
     if provider_name:
         # User/agent/team explicitly specified provider_name
-        cfg = ProviderConfig(model=model_name, timeout=timeout or 60.0)
+        api_key = None
+        if s_store:
+            api_key = s_store.get_secret(f"provider_api_key:{provider_name.lower()}")
+        cfg = ProviderConfig(model=model_name, api_key=api_key, timeout=timeout or 60.0)
         try:
             return mgr.get(provider_name, config=cfg)
         except Exception as e:
             logger.debug(f"Could not resolve explicit provider '{provider_name}': {e}")
             return None
 
-    # 4. Global / environment key based resolution
-    if os.environ.get("OPENAI_API_KEY"):
-        return mgr.get("openai", ProviderConfig(model=model_name, api_key=os.environ["OPENAI_API_KEY"], timeout=timeout or 60.0))
-    if os.environ.get("ANTHROPIC_API_KEY"):
-        return mgr.get("anthropic", ProviderConfig(model=model_name, api_key=os.environ["ANTHROPIC_API_KEY"], timeout=timeout or 60.0))
-    if os.environ.get("GEMINI_API_KEY"):
-        return mgr.get("gemini", ProviderConfig(model=model_name, api_key=os.environ["GEMINI_API_KEY"], timeout=timeout or 60.0))
+    # 4. Workspace SecretStore / Global environment key based resolution
+    for p_name, env_var in (("openai", "OPENAI_API_KEY"), ("anthropic", "ANTHROPIC_API_KEY"), ("gemini", "GEMINI_API_KEY")):
+        key = None
+        if s_store:
+            key = s_store.get_secret(f"provider_api_key:{p_name}")
+        if not key:
+            key = os.environ.get(env_var)
+        if key:
+            return mgr.get(p_name, ProviderConfig(model=model_name, api_key=key, timeout=timeout or 60.0))
 
     # 5. Safe local auto-discovery: fallback to Ollama if reachable with installed models
     try:

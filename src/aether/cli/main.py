@@ -273,17 +273,24 @@ def _cmd_ui(args) -> None:
     port = getattr(args, "port", None)
     if port is None:
         port = 8000
-    data_dir = getattr(args, "data_dir", None)
     token = getattr(args, "token", None) or os.environ.get("AETHER_SESSION_TOKEN")
+    insecure = getattr(args, "insecure_no_auth", False)
+    if not token and not insecure:
+        import secrets
+        token = secrets.token_urlsafe(32)
+
     no_browser = getattr(args, "no_browser", False)
 
     if data_dir:
         set_aether_data_dir(data_dir)
         os.environ["AETHER_DATA_DIR"] = str(Path(data_dir).expanduser().resolve())
 
-    if token:
+    if token and not insecure:
         app.state.session_token = str(token).strip()
         os.environ["AETHER_SESSION_TOKEN"] = str(token).strip()
+    elif insecure:
+        app.state.session_token = None
+        os.environ.pop("AETHER_SESSION_TOKEN", None)
 
     # Handle port 0 (ephemeral port allocation)
     bound_port = port
@@ -311,8 +318,10 @@ def _cmd_ui(args) -> None:
     base_url = f"http://{host}:{bound_port}"
     print("Starting Aether Workspace UI...")
     print(f"\n  ► Aether runtime ready at: {base_url}")
-    if token:
-        print(f"  ► Session token authentication enabled.")
+    if token and not insecure:
+        print(f"  ► Session token (auth required): {token}")
+    elif insecure:
+        print("  ► WARNING: Running in insecure mode without API authentication (--insecure-no-auth).")
     print()
     sys.stdout.flush()
 
@@ -485,13 +494,22 @@ def main() -> None:
                         help="Override provider")
     chat_p.add_argument("--model", help="Override model")
 
-    # ---- ui ----
+    # ---- ui & serve ----
     ui_p = subparsers.add_parser("ui", help="Start the Aether Web UI / Desktop runtime")
     ui_p.add_argument("--host", default="127.0.0.1", help="Host address to bind (default: 127.0.0.1)")
     ui_p.add_argument("--port", type=int, default=8000, help="Port to listen on (use 0 for ephemeral port, default: 8000)")
     ui_p.add_argument("--data-dir", help="Root data directory for Aether configuration and workspaces")
     ui_p.add_argument("--token", help="Session token for local API and WebSocket authentication")
+    ui_p.add_argument("--insecure-no-auth", action="store_true", help="Disable API session token authentication (INSECURE)")
     ui_p.add_argument("--no-browser", action="store_true", help="Do not automatically launch a web browser window")
+
+    serve_p = subparsers.add_parser("serve", help="Alias for 'ui': Start the Aether Web API & runtime")
+    serve_p.add_argument("--host", default="127.0.0.1", help="Host address to bind (default: 127.0.0.1)")
+    serve_p.add_argument("--port", type=int, default=8000, help="Port to listen on (use 0 for ephemeral port, default: 8000)")
+    serve_p.add_argument("--data-dir", help="Root data directory for Aether configuration and workspaces")
+    serve_p.add_argument("--token", help="Session token for local API and WebSocket authentication")
+    serve_p.add_argument("--insecure-no-auth", action="store_true", help="Disable API session token authentication (INSECURE)")
+    serve_p.add_argument("--no-browser", action="store_true", help="Do not automatically launch a web browser window")
 
     # ---- knowledge ----
     know_p = subparsers.add_parser("knowledge", help="Manage team knowledge base")
@@ -541,7 +559,7 @@ def main() -> None:
     handler = dispatch.get(args.command)
     if callable(handler):
         handler(args)
-    elif args.command == "ui":
+    elif args.command in ("ui", "serve"):
         _cmd_ui(args)
     elif isinstance(handler, dict):
         sub_key = getattr(args, f"{args.command}_command", None)

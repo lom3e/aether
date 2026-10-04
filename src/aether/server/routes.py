@@ -819,17 +819,16 @@ async def get_provider_settings(request: Request):
     if not ws:
         raise HTTPException(status_code=500, detail="Workspace not initialized")
 
-    env_file = ws.root / ".env"
+    s_store = getattr(ws, "secret_store", None)
+    has_openai = bool((s_store and s_store.has_secret("provider_api_key:openai")) or os.environ.get("OPENAI_API_KEY"))
+    has_anthropic = bool((s_store and s_store.has_secret("provider_api_key:anthropic")) or os.environ.get("ANTHROPIC_API_KEY"))
+    has_gemini = bool((s_store and s_store.has_secret("provider_api_key:gemini")) or os.environ.get("GEMINI_API_KEY"))
 
-    # We won't return actual API keys, just configuration status
-    has_openai = False
-    has_anthropic = False
-    has_gemini = False
-
-    if env_file.exists():
-        has_openai = _env_has_value(env_file, "OPENAI_API_KEY")
-        has_anthropic = _env_has_value(env_file, "ANTHROPIC_API_KEY")
-        has_gemini = _env_has_value(env_file, "GEMINI_API_KEY")
+    env_file = ws.root / ".env" if ws and hasattr(ws, "root") and ws.root else None
+    if env_file and env_file.exists():
+        has_openai = has_openai or _env_has_value(env_file, "OPENAI_API_KEY")
+        has_anthropic = has_anthropic or _env_has_value(env_file, "ANTHROPIC_API_KEY")
+        has_gemini = has_gemini or _env_has_value(env_file, "GEMINI_API_KEY")
 
     # Read default provider from team if exists
     team = request.app.state.team
@@ -874,7 +873,12 @@ async def get_provider_status(
     effective_model = model or (team.config.default_model if team else "qwen3.5:9b")
 
     api_key: str | None = None
-    if ws and hasattr(ws, "root") and ws.root:
+    s_store = getattr(ws, "secret_store", None)
+    if s_store:
+        api_key = s_store.get_secret(f"provider_api_key:{effective_provider.lower()}")
+    if not api_key:
+        api_key = os.environ.get(f"{effective_provider.upper()}_API_KEY")
+    if not api_key and ws and hasattr(ws, "root") and ws.root:
         env_file = ws.root / ".env"
         if env_file.exists():
             for line in env_file.read_text(encoding="utf-8").splitlines():
@@ -924,27 +928,16 @@ async def save_provider_settings(request: Request, data: ProviderSettings):
     ws, team = _runtime(request)
     _validate_provider(data)
 
-    # Save API key to .env if provided
+    # Save API key securely in SecretStore if provided
     if data.api_key:
-        env_file = ws.root / ".env"
-        env_vars = {}
-        if env_file.exists():
-            for line in env_file.read_text().splitlines():
-                if "=" in line:
-                    k, v = line.split("=", 1)
-                    env_vars[k.strip()] = v.strip()
-
-        key_name = f"{data.provider.upper()}_API_KEY"
-        env_vars[key_name] = data.api_key
-
-        env_content = "\n".join([f"{k}={v}" for k, v in env_vars.items()])
-        env_file.write_text(env_content)
-
-        # Ensure .env is in .gitignore
-        gitignore = ws.root / ".gitignore"
-        if not gitignore.exists() or ".env" not in gitignore.read_text():
-            with open(gitignore, "a") as f:
-                f.write("\n.env\n")
+        s_store = getattr(ws, "secret_store", None)
+        if s_store:
+            s_store.store_secret(
+                secret_ref=f"provider_api_key:{data.provider.lower()}",
+                value=data.api_key.strip(),
+                entity_type="provider",
+                entity_id=data.provider.lower(),
+            )
 
     # Update Team default provider
     if team:
@@ -975,20 +968,20 @@ async def save_provider_settings(request: Request, data: ProviderSettings):
 @router.post("/settings/provider/test")
 async def test_provider_settings(request: Request, data: ProviderSettings):
     _validate_provider(data)
-    # Try a simple connection using the configured provider
-    previous_value: str | None = None
-    key_name: str | None = None
+    # Try a simple connection using the configured provider without process-global env mutation
     try:
-        if data.api_key:
-            key_name = f"{data.provider.upper()}_API_KEY"
-            previous_value = os.environ.get(key_name)
-            os.environ[key_name] = data.api_key
-
         from aether.providers.manager import ProviderManager
         from aether.providers.types import ProviderConfig
 
+        effective_key = data.api_key
+        if not effective_key:
+            ws = getattr(request.app.state, "workspace", None)
+            s_store = getattr(ws, "secret_store", None) if ws else None
+            if s_store:
+                effective_key = s_store.get_secret(f"provider_api_key:{data.provider.lower()}")
+
         provider = ProviderManager().get(
-            data.provider, config=ProviderConfig(model=data.model, api_key=data.api_key)
+            data.provider, config=ProviderConfig(model=data.model, api_key=effective_key, timeout=10.0)
         )
         # Attempt a basic generation
         from aether.core.execution import Message
@@ -996,12 +989,6 @@ async def test_provider_settings(request: Request, data: ProviderSettings):
         return {"status": "ok", "message": "Connection successful"}
     except Exception as e:
         raise HTTPException(status_code=400, detail=f"Connection failed: {_human_provider_error(e, data.api_key)}")
-    finally:
-        if key_name:
-            if previous_value is None:
-                os.environ.pop(key_name, None)
-            else:
-                os.environ[key_name] = previous_value
 @router.get("/workspace", response_model=WorkspaceInfo)
 async def get_workspace(request: Request):
     ws = getattr(request.app.state, "workspace", None)
@@ -7251,6 +7238,17 @@ async def telegram_webhook_route(request: Request):
     ws = getattr(request.app.state, "workspace", None)
     if not ws:
         raise HTTPException(status_code=503, detail="Workspace not initialized.")
+
+    # Verify Telegram Webhook Secret Token using constant-time comparison
+    import hmac
+    conn = ws.connections.get_connection(ws.name, "telegram") if hasattr(ws, "connections") else None
+    if conn and conn.auth_metadata:
+        configured_secret = conn.auth_metadata.get("webhook_secret")
+        if configured_secret:
+            provided_token = request.headers.get("X-Telegram-Bot-Api-Secret-Token", "")
+            if not hmac.compare_digest(provided_token, configured_secret):
+                raise HTTPException(status_code=403, detail="Invalid Telegram webhook secret token.")
+
     try:
         update_data = await request.json()
     except Exception:

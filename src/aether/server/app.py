@@ -41,13 +41,12 @@ else:
         "http://tauri.localhost",
         "https://tauri.localhost",
         "app://localhost",
-        "null",
     ]
 
 app.add_middleware(
     CORSMiddleware,
     allow_origins=allowed_origins,
-    allow_origin_regex=r"^(http://(localhost|127\.0\.0\.1)(:\d+)?|tauri://localhost|https?://tauri\.localhost|app://localhost|null)$",
+    allow_origin_regex=r"^(http://(localhost|127\.0\.0\.1)(:\d+)?|tauri://localhost|https?://tauri\.localhost|app://localhost)$",
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -63,24 +62,25 @@ async def session_token_middleware(request: Request, call_next):
     session_token = getattr(request.app.state, "session_token", None) or os.environ.get("AETHER_SESSION_TOKEN")
     if session_token:
         path = request.url.path
-        # Health check and static UI files are exempt from token authentication
-        if path != "/api/health" and path.startswith("/api/"):
-            query_token = None
-            if "query_string" in request.scope:
-                try:
-                    query_token = request.query_params.get("token") or request.query_params.get("session_token")
-                except Exception:
-                    query_token = None
-            auth_header = request.headers.get("X-Aether-Session-Token") or request.headers.get("Authorization")
-            expected_bearer = f"Bearer {session_token}"
-            token_valid = False
-            if auth_header:
-                if auth_header == session_token or auth_header == expected_bearer:
-                    token_valid = True
-            elif query_token and query_token == session_token:
-                token_valid = True
+        exempt_paths = {
+            "/api/health",
+            "/api/connections/telegram/webhook",
+        }
+        is_exempt = (
+            path in exempt_paths
+            or path.endswith("/oauth/callback")
+            or path.startswith("/api/connections/oauth/")
+        )
+        if path.startswith("/api/") and not is_exempt:
+            auth_header = request.headers.get("X-Aether-Session-Token") or request.headers.get("Authorization") or ""
+            provided_token = ""
+            if auth_header.startswith("Bearer "):
+                provided_token = auth_header[7:].strip()
+            elif auth_header:
+                provided_token = auth_header.strip()
 
-            if not token_valid:
+            import hmac
+            if not provided_token or not hmac.compare_digest(provided_token, session_token):
                 return JSONResponse(
                     status_code=401,
                     content={"detail": "Unauthorized: invalid or missing session token."},

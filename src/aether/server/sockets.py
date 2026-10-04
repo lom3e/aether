@@ -55,7 +55,8 @@ async def websocket_endpoint(websocket: WebSocket) -> None:
         if token_candidate and token_candidate.startswith("Bearer "):
             token_candidate = token_candidate[7:]
 
-        if not token_candidate or token_candidate != session_token:
+        import hmac
+        if not token_candidate or not hmac.compare_digest(token_candidate, session_token):
             await websocket.accept()
             await websocket.send_json({"type": "error", "message": "Unauthorized: invalid or missing session token."})
             await websocket.close(code=1008)

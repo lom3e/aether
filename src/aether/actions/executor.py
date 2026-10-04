@@ -606,9 +606,14 @@ class ActionExecutor:
         elif action_id == "files.create_document":
             filename = inp.get("filename", "untitled.txt")
             content = inp.get("content", "")
-            base_dir = self.project_path or Path.cwd()
-            target_path = base_dir / filename
+            ws = self._get_workspace(ws_id)
+            sandbox = ws.sandbox if (ws and hasattr(ws, "sandbox")) else None
+            if not sandbox:
+                from aether.core.security import PathSandbox
+                base_dir = self.project_path or (ws.root if ws else None) or Path.cwd()
+                sandbox = PathSandbox(base_dir, auto_create=True)
             try:
+                target_path = sandbox.resolve(filename)
                 target_path.parent.mkdir(parents=True, exist_ok=True)
                 target_path.write_text(content, encoding="utf-8")
                 return {
@@ -618,20 +623,25 @@ class ActionExecutor:
                     "status": "created",
                 }
             except Exception as e:
-                logger.error(f"Failed to write file {target_path}: {e}")
+                logger.error(f"Failed to write file {filename}: {e}")
                 raise IOError(f"Could not create file '{filename}': {e}") from e
 
         elif action_id == "files.read_document":
             filename = inp.get("filename", "")
-            base_dir = self.project_path or Path.cwd()
-            target_path = base_dir / filename
-            if target_path.exists() and target_path.is_file():
-                try:
+            ws = self._get_workspace(ws_id)
+            sandbox = ws.sandbox if (ws and hasattr(ws, "sandbox")) else None
+            if not sandbox:
+                from aether.core.security import PathSandbox
+                base_dir = self.project_path or (ws.root if ws else None) or Path.cwd()
+                sandbox = PathSandbox(base_dir, auto_create=True)
+            try:
+                target_path = sandbox.resolve(filename)
+                if target_path.exists() and target_path.is_file():
                     content = target_path.read_text(encoding="utf-8", errors="replace")
                     return {"filename": filename, "path": str(target_path), "content": content, "exists": True}
-                except Exception as e:
-                    return {"filename": filename, "path": str(target_path), "content": "", "exists": False, "error": str(e)}
-            return {"filename": filename, "content": "", "exists": False, "error": "File not found"}
+                return {"filename": filename, "content": "", "exists": False, "error": "File not found"}
+            except Exception as e:
+                return {"filename": filename, "path": "", "content": "", "exists": False, "error": str(e)}
 
         # 7. Web search action
         elif action_id == "web.search":

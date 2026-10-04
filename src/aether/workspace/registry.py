@@ -271,16 +271,16 @@ class WorkspaceRegistry:
         ws_dir.mkdir(parents=True, exist_ok=True)
         ws = Workspace.init(ws_dir, clean_name)
 
-        # Save API key if provided
+        # Save API key securely in SecretStore if provided
         if api_key and provider:
-            env_file = ws.root / ".env"
-            key_map = {
-                "openai": "OPENAI_API_KEY",
-                "anthropic": "ANTHROPIC_API_KEY",
-                "gemini": "GEMINI_API_KEY",
-            }
-            if provider in key_map:
-                env_file.write_text(f"{key_map[provider]}={api_key.strip()}\n", encoding="utf-8")
+            s_store = getattr(ws, "secret_store", None)
+            if s_store:
+                s_store.store_secret(
+                    secret_ref=f"provider_api_key:{provider.lower()}",
+                    value=api_key.strip(),
+                    entity_type="provider",
+                    entity_id=provider.lower(),
+                )
 
         # Apply preset
         if preset_id and preset_id != "empty":

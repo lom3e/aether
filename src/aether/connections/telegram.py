@@ -75,6 +75,13 @@ class TelegramConnector(BaseConnector):
                 required=False,
                 secret=False,
             ),
+            CredentialRequirement(
+                key="webhook_secret",
+                label="Webhook Secret Token",
+                description="Secret token passed in X-Telegram-Bot-Api-Secret-Token to verify webhook authenticity.",
+                required=False,
+                secret=True,
+            ),
         ]
 
     def _get_token(self, params: dict[str, Any] | None = None) -> str | None:

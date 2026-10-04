@@ -141,6 +141,13 @@ class HttpConnector(BaseConnector):
             if not base_url:
                 return False, "Base URL is required to perform live connectivity check."
 
+            from aether.core.security import validate_public_url, SecurityBoundaryViolation
+            allow_internal = bool(meta.get("allow_internal"))
+            try:
+                validate_public_url(base_url, allow_internal=allow_internal)
+            except SecurityBoundaryViolation as s_err:
+                return False, str(s_err)
+
             try:
                 headers = {"User-Agent": "Aether/1.0"}
                 if auth_type == "bearer" and token:
@@ -253,6 +260,13 @@ class HttpConnector(BaseConnector):
         parsed = urllib.parse.urlparse(full_url)
         if parsed.scheme not in ("http", "https"):
             raise ConnectorError(f"Invalid URL scheme '{parsed.scheme}'. Only http and https are allowed.", provider=self.provider)
+
+        from aether.core.security import validate_public_url, SecurityBoundaryViolation
+        allow_internal = bool(self._auth_metadata.get("allow_internal"))
+        try:
+            validate_public_url(full_url, allow_internal=allow_internal)
+        except SecurityBoundaryViolation as s_err:
+            raise ConnectorError(str(s_err), provider=self.provider) from s_err
 
         # Merge headers and query parameters
         req_headers = {"User-Agent": "Aether-HTTP-Connector/1.0"}

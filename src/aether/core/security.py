@@ -262,3 +262,64 @@ class PathSandbox:
             return True
         except (SecurityBoundaryViolation, SensitivePathAccessDenied):
             return False
+
+
+def validate_public_url(url: str, allow_internal: bool = False) -> None:
+    """
+    SSRF Protection: Validates that an outbound HTTP/HTTPS request target does not resolve
+    to a private, loopback, link-local, multicast, or cloud-metadata network address.
+
+    Raises SecurityBoundaryViolation if the target IP address is prohibited.
+    """
+    if allow_internal or os.environ.get("AETHER_ALLOW_INTERNAL_HTTP") == "1":
+        return
+
+    import ipaddress
+    import socket
+    import urllib.parse
+
+    parsed = urllib.parse.urlparse(url)
+    if parsed.scheme not in ("http", "https"):
+        raise SecurityBoundaryViolation(
+            f"Invalid URL scheme '{parsed.scheme}'. Only http and https are permitted."
+        )
+
+    hostname = parsed.hostname
+    if not hostname:
+        raise SecurityBoundaryViolation(f"URL '{url}' is missing a valid hostname.")
+
+    hostname_clean = hostname.strip().lower()
+
+    # Explicit check for localhost and known link-local patterns
+    if hostname_clean in ("localhost", "0.0.0.0") or hostname_clean.endswith(".localhost"):
+        raise SecurityBoundaryViolation(
+            f"SSRF Protection: Access to local host '{hostname}' is blocked."
+        )
+
+    # Resolve hostname to IP addresses
+    try:
+        addr_info = socket.getaddrinfo(hostname_clean, None)
+    except socket.gaierror as exc:
+        raise SecurityBoundaryViolation(
+            f"SSRF Protection: Failed to resolve hostname '{hostname}': {exc}"
+        ) from exc
+
+    for item in addr_info:
+        sockaddr = item[4]
+        ip_str = sockaddr[0]
+        try:
+            ip = ipaddress.ip_address(ip_str)
+        except ValueError:
+            continue
+
+        if (
+            ip.is_loopback
+            or ip.is_private
+            or ip.is_link_local
+            or ip.is_multicast
+            or ip.is_reserved
+            or ip.is_unspecified
+        ):
+            raise SecurityBoundaryViolation(
+                f"SSRF Protection: Outbound request to private/internal network address '{hostname}' ({ip_str}) is blocked."
+            )

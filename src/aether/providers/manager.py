@@ -93,6 +93,15 @@ class ProviderManager:
                 cls = OllamaProvider
                 self._registry[name] = cls
             elif name == "mock":
+                import os
+                import sys
+                is_testing = os.environ.get("AETHER_ENABLE_TEST_PROVIDERS") == "1" or "pytest" in sys.modules
+                if not is_testing:
+                    raise ProviderNotFoundError(
+                        "Provider 'mock' is disabled in production environments. "
+                        "Set AETHER_ENABLE_TEST_PROVIDERS=1 for test execution.",
+                        provider="mock",
+                    )
                 from aether.providers.mock import MockProvider
                 cls = MockProvider
                 self._registry[name] = cls
