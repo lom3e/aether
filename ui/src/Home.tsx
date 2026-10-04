@@ -38,6 +38,7 @@ interface PersonalMsg {
   steps: StepItem[];
   action_execution_id?: string;
   mission_id?: string;
+  metadata?: Record<string, any>;
   created_at: string;
 }
 
@@ -380,6 +381,58 @@ export function Home({
       }
     } catch (err: any) {
       showToast(err.message || 'Error declining action.', 'error');
+    } finally {
+      setActionLoading(null);
+    }
+  };
+
+  const handleApproveProposal = async (proposalId: string) => {
+    if (actionLoading === proposalId) return;
+    setActionLoading(proposalId);
+    try {
+      const res = await fetch(apiUrl(`/api/personal/proposals/${encodeURIComponent(proposalId)}/accept`), {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+      });
+      if (res.ok) {
+        showToast('Proposal accepted and authorized for execution.', 'success');
+        fetchOverview();
+        setMessages(prev => prev.map(msg => {
+          if (msg.metadata?.proposal_id === proposalId) {
+            return {
+              ...msg,
+              metadata: { ...msg.metadata, status: 'accepted' },
+              steps: msg.steps.map(s => s.details?.proposal_id === proposalId ? { ...s, status: 'completed', title: 'Proposal accepted' } : s),
+            };
+          }
+          return msg;
+        }));
+      } else {
+        const err = await res.json().catch(() => ({}));
+        showToast(err.detail || 'Failed to accept proposal.', 'error');
+      }
+    } catch (err: any) {
+      showToast(err.message || 'Error accepting proposal.', 'error');
+    } finally {
+      setActionLoading(null);
+    }
+  };
+
+  const handleRejectProposal = async (proposalId: string) => {
+    if (actionLoading === proposalId) return;
+    setActionLoading(proposalId);
+    try {
+      setMessages(prev => prev.map(msg => {
+        if (msg.metadata?.proposal_id === proposalId) {
+          return {
+            ...msg,
+            metadata: { ...msg.metadata, status: 'rejected' },
+            steps: msg.steps.map(s => s.details?.proposal_id === proposalId ? { ...s, status: 'failed', title: 'Proposal declined' } : s),
+          };
+        }
+        return msg;
+      }));
+      showToast('Proposal declined.', 'info');
     } finally {
       setActionLoading(null);
     }
@@ -935,6 +988,50 @@ export function Home({
                           <Check size={13} style={{ marginRight: '4px' }} />
                         )}
                         {actionLoading === msg.action_execution_id ? 'Approving...' : 'Approve'}
+                      </button>
+                    </div>
+                  </div>
+                )}
+
+                {/* Pending Proposal Acceptance Card in Message */}
+                {msg.metadata?.proposal_id && (msg.metadata?.status === 'proposal_pending' || msg.steps.some(s => s.status === 'waiting_acceptance')) && (
+                  <div style={{ marginTop: '14px', padding: '12px 16px', borderRadius: '10px', backgroundColor: '#f59e0b10', border: '1px solid #f59e0b40', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                      <Shield size={16} color="#f59e0b" />
+                      <span style={{ fontSize: '13px', fontWeight: 600, color: '#f59e0b' }}>Confirmation Required</span>
+                    </div>
+                    <div style={{ display: 'flex', gap: '8px' }}>
+                      <button
+                        className="btn btn-ghost"
+                        disabled={actionLoading === msg.metadata!.proposal_id}
+                        onClick={() => handleRejectProposal(msg.metadata!.proposal_id)}
+                        style={{
+                          fontSize: '12px',
+                          padding: '4px 10px',
+                          color: 'hsl(var(--destructive))',
+                          opacity: actionLoading === msg.metadata!.proposal_id ? 0.6 : 1,
+                        }}
+                      >
+                        <X size={13} style={{ marginRight: '4px' }} /> Decline
+                      </button>
+                      <button
+                        className="btn btn-primary"
+                        disabled={actionLoading === msg.metadata!.proposal_id}
+                        onClick={() => handleApproveProposal(msg.metadata!.proposal_id)}
+                        style={{
+                          fontSize: '12px',
+                          padding: '4px 14px',
+                          backgroundColor: '#10b981',
+                          borderColor: '#10b981',
+                          opacity: actionLoading === msg.metadata!.proposal_id ? 0.6 : 1,
+                        }}
+                      >
+                        {actionLoading === msg.metadata!.proposal_id ? (
+                          <Loader2 size={13} className="animate-spin" style={{ marginRight: '4px' }} />
+                        ) : (
+                          <Check size={13} style={{ marginRight: '4px' }} />
+                        )}
+                        {actionLoading === msg.metadata!.proposal_id ? 'Approving...' : 'Approve'}
                       </button>
                     </div>
                   </div>

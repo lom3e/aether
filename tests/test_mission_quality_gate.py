@@ -23,11 +23,27 @@ def temp_dir():
 
 
 @pytest.fixture
-def workspace(temp_dir):
+def workspace(temp_dir, accepted_authority_factory):
     ws_dir = temp_dir / "workspace"
     ws_dir.mkdir(parents=True, exist_ok=True)
     ws = Workspace(root=str(ws_dir))
     ws.runtime = None
+
+    orig_create_mission = ws.missions.create_mission
+
+    def create_mission_with_authority(*args, **kwargs):
+        title = kwargs.get("title") or (args[0] if len(args) > 0 else "Test Mission")
+        kwargs.setdefault("workspace_id", ws.name)
+        _, auth = accepted_authority_factory(ws, title=title)
+        meta = dict(kwargs.get("metadata") or {})
+        if "authority" not in meta:
+            meta["authority"] = auth.to_dict()
+            meta["proposal_id"] = auth.proposal_id
+            meta["proposal_version"] = auth.proposal_version
+        kwargs["metadata"] = meta
+        return orig_create_mission(*args, **kwargs)
+
+    ws.missions.create_mission = create_mission_with_authority
     return ws
 
 

@@ -28,7 +28,7 @@ class AgentTool(Tool):
         self.description = (
             f"Delegate a task to the '{agent.name}' agent (role: {agent.role})."
         )
-        self.classification = ToolClassification.LOCAL_MUTATION
+        self.classification = ToolClassification.READ_ONLY
         self._agent = agent
         self._delegation_context = delegation_context
 

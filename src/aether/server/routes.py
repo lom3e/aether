@@ -3243,6 +3243,51 @@ async def create_mission(request: Request, data: CreateMissionPayload):
             milestones=data.milestones,
         )
 
+        if ws:
+            p_store = getattr(ws, "personal_store", None)
+            if not p_store and hasattr(ws, "personal"):
+                p_store = getattr(ws.personal, "store", None)
+            if p_store:
+                try:
+                    from aether.planning.contracts import IntentRequest, MissionProposal, ProposalStatus
+                    import uuid
+                    from datetime import datetime, timezone
+                    meta = dict(mission.metadata or {})
+                    if "proposal_id" not in meta and "authority" not in meta:
+                        intent_id = f"intent-mission-{uuid.uuid4().hex[:8]}"
+                        p_store.save_intent_request(IntentRequest(
+                            id=intent_id,
+                            workspace_id=mission.workspace_id,
+                            raw_input=f"User created mission: {mission.title}",
+                            source_surface="missions_ui",
+                            created_at=datetime.now(timezone.utc).isoformat(),
+                        ))
+                        prop = MissionProposal(
+                            id=f"prop-mission-{uuid.uuid4().hex[:8]}",
+                            intent_id=intent_id,
+                            workspace_id=mission.workspace_id,
+                            title=mission.title,
+                            objective=mission.objective,
+                            why="User initiated mission in UI",
+                            context_summary=f"Mission {mission.title} ({mission.id})",
+                            confidence=1.0,
+                            constraints=[],
+                            status=ProposalStatus.READY_FOR_ACCEPTANCE,
+                        )
+                        p_store.save_proposal(prop)
+                        if hasattr(ws, "personal") and ws.personal:
+                            accepted_prop, authority = ws.personal.accept_proposal(
+                                proposal_id=prop.id,
+                                workspace_id=mission.workspace_id,
+                                actor="user",
+                            )
+                            meta["proposal_id"] = accepted_prop.id
+                            meta["authority"] = authority.to_dict()
+                            ws.missions.update_mission(mission.id, metadata=meta)
+                            mission.metadata = meta
+                except Exception as exc:
+                    logger.warning("Could not auto-bind accepted proposal to created mission: %s", exc)
+
         # Emit MISSION_STARTED event if created in active/running state
         event_bus = getattr(request.app.state, "event_bus", None)
         if event_bus:
@@ -4092,6 +4137,50 @@ async def start_mission_route(request: Request, mission_id: str, payload: Missio
                     elif prop.status in (ProposalStatus.READY_FOR_ACCEPTANCE, ProposalStatus.VALIDATED):
                         if ws and hasattr(ws, "personal"):
                             _, auth_obj = ws.personal.accept_proposal(prop.id, workspace_id=mission.workspace_id)
+
+    if not auth_obj:
+        ws = getattr(request.app.state, "workspace", None)
+        p_store = getattr(ws, "personal_store", None) if ws else None
+        if not p_store and ws and hasattr(ws, "personal"):
+            p_store = getattr(ws.personal, "store", None)
+        if ws and p_store and hasattr(ws, "personal") and ws.personal:
+            try:
+                from aether.planning.contracts import IntentRequest, MissionProposal, ProposalStatus
+                import uuid
+                from datetime import datetime, timezone
+                intent_id = f"intent-start-{uuid.uuid4().hex[:8]}"
+                p_store.save_intent_request(IntentRequest(
+                    id=intent_id,
+                    workspace_id=mission.workspace_id,
+                    raw_input=f"User started mission: {mission.title}",
+                    source_surface="missions_ui",
+                    created_at=datetime.now(timezone.utc).isoformat(),
+                ))
+                prop = MissionProposal(
+                    id=f"prop-start-{uuid.uuid4().hex[:8]}",
+                    intent_id=intent_id,
+                    workspace_id=mission.workspace_id,
+                    title=mission.title,
+                    objective=mission.objective,
+                    why="User started mission in UI",
+                    context_summary=f"Mission {mission.title} ({mission.id})",
+                    confidence=1.0,
+                    constraints=[],
+                    status=ProposalStatus.READY_FOR_ACCEPTANCE,
+                )
+                p_store.save_proposal(prop)
+                accepted_prop, authority = ws.personal.accept_proposal(
+                    proposal_id=prop.id,
+                    workspace_id=mission.workspace_id,
+                    actor="user",
+                )
+                auth_obj = authority
+                meta = dict(mission.metadata or {})
+                meta["proposal_id"] = accepted_prop.id
+                meta["authority"] = authority.to_dict()
+                runtime.store.update_mission(mission.id, metadata=meta)
+            except Exception as exc:
+                logger.warning("Could not auto-bind accepted proposal on start_mission: %s", exc)
 
     try:
         execution = await runtime.start_mission(mission_id, team_name=team_name, authority=auth_obj)

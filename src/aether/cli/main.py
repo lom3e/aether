@@ -280,6 +280,7 @@ def _cmd_ui(args) -> None:
         token = secrets.token_urlsafe(32)
 
     no_browser = getattr(args, "no_browser", False)
+    data_dir = getattr(args, "data_dir", None)
 
     if data_dir:
         set_aether_data_dir(data_dir)
@@ -306,7 +307,7 @@ def _cmd_ui(args) -> None:
     app.state.bound_port = bound_port
 
     ui_dir = Path(__file__).parent.parent.parent.parent / "ui"
-    if (ui_dir / "package.json").exists() and not (ui_dir / "dist" / "index.html").exists():
+    if getattr(args, "dev", False) and (ui_dir / "package.json").exists() and not (ui_dir / "dist" / "index.html").exists():
         def start_vite():
             try:
                 import subprocess
@@ -502,6 +503,7 @@ def main() -> None:
     ui_p.add_argument("--token", help="Session token for local API and WebSocket authentication")
     ui_p.add_argument("--insecure-no-auth", action="store_true", help="Disable API session token authentication (INSECURE)")
     ui_p.add_argument("--no-browser", action="store_true", help="Do not automatically launch a web browser window")
+    ui_p.add_argument("--dev", action="store_true", help="Start frontend development server alongside backend")
 
     serve_p = subparsers.add_parser("serve", help="Alias for 'ui': Start the Aether Web API & runtime")
     serve_p.add_argument("--host", default="127.0.0.1", help="Host address to bind (default: 127.0.0.1)")
@@ -510,6 +512,7 @@ def main() -> None:
     serve_p.add_argument("--token", help="Session token for local API and WebSocket authentication")
     serve_p.add_argument("--insecure-no-auth", action="store_true", help="Disable API session token authentication (INSECURE)")
     serve_p.add_argument("--no-browser", action="store_true", help="Do not automatically launch a web browser window")
+    serve_p.add_argument("--dev", action="store_true", help="Start frontend development server alongside backend")
 
     # ---- knowledge ----
     know_p = subparsers.add_parser("knowledge", help="Manage team knowledge base")
