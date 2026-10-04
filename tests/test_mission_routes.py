@@ -71,11 +71,14 @@ def test_workspace(tmp_path: Path, accepted_authority_factory):
 
     mock_team = MockTeam()
     ws.load_team = MagicMock(return_value=mock_team)
+    ws.runtime = None
 
     orig_create_mission = ws.missions.create_mission
 
     def create_mission_with_authority(*args, **kwargs):
         title = kwargs.get("title") or (args[0] if len(args) > 0 else "Mission")
+        if "workspace_id" not in kwargs:
+            kwargs["workspace_id"] = ws.name
         _, auth = accepted_authority_factory(ws, title=title)
         meta = dict(kwargs.get("metadata") or {})
         if "authority" not in meta:

@@ -104,7 +104,7 @@ class ActionExecutor:
         if self.workspace is not None and hasattr(self.workspace, "personal_store"):
             return self.workspace.personal_store
         from aether.workspace.workspace import Workspace
-        ws = Workspace._active_workspaces.get(workspace_id)
+        ws = Workspace.get(workspace_id)
         if ws is not None and hasattr(ws, "personal_store"):
             return ws.personal_store
         return None

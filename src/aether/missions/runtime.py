@@ -333,6 +333,18 @@ class MissionRuntime:
                     effective_auth = ExecutionAuthority.from_dict(active.metadata["authority"])
                 except Exception:
                     pass
+            if effective_auth is None and mission and mission.metadata and mission.metadata.get("authority"):
+                try:
+                    effective_auth = ExecutionAuthority.from_dict(mission.metadata["authority"])
+                except Exception:
+                    pass
+            elif effective_auth is None and mission and mission.metadata and mission.metadata.get("proposal_id"):
+                prop_id = mission.metadata["proposal_id"]
+                p_store = self._resolve_personal_store(mission.workspace_id)
+                if p_store:
+                    prop = p_store.get_proposal(prop_id, workspace_id=mission.workspace_id)
+                    if prop and getattr(prop, "status", None) == "accepted":
+                        effective_auth = ExecutionBoundary.issue_authority(prop)
 
             p_store = self._resolve_personal_store(mission.workspace_id)
             ExecutionBoundary.validate_authority(

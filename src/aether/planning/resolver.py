@@ -79,6 +79,12 @@ class ContextResolver:
         """
         ws_id = intent.workspace_id.strip()
         expected_ws = getattr(self.workspace, "name", getattr(self.workspace, "id", ws_id))
+        valid_ws_identifiers = {
+            expected_ws,
+            getattr(self.workspace, "id", ""),
+            getattr(self.workspace, "name", ""),
+            getattr(getattr(self.workspace, "root", None), "name", ""),
+        } - {"", None}
 
         resolved_entities: list[ResolvedEntity] = []
         evidence_refs: list[EvidenceReference] = []
@@ -88,7 +94,7 @@ class ContextResolver:
         retrieval_failures: list[str] = []
 
         # 1. Workspace scope check
-        if ws_id != expected_ws and ws_id != "default" and expected_ws != "default":
+        if ws_id not in valid_ws_identifiers and ws_id != "default" and expected_ws != "default":
             retrieval_failures.append(
                 f"Workspace authorization mismatch: requested '{ws_id}' does not match active workspace '{expected_ws}'."
             )

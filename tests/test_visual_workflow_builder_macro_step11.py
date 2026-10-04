@@ -50,7 +50,11 @@ from aether.workspace.workspace import Workspace
 @pytest.fixture
 def temp_ws(tmp_path: Path) -> Workspace:
     ws = Workspace.get_or_init(tmp_path, name="workflow_test_ws")
-    return ws
+    yield ws
+    try:
+        ws.close()
+    except Exception:
+        pass
 
 
 # ---------------------------------------------------------------------------
@@ -216,7 +220,14 @@ def test_action_executor_workflow_actions(temp_ws: Workspace, accepted_authority
     registry = ActionRegistry()
     store = ActionStore(temp_ws.root / ".aether" / "actions.db")
     safety = ActionSafetyPolicy()
-    executor = ActionExecutor(registry=registry, store=store, project_path=temp_ws.root, safety_policy=safety)
+    executor = ActionExecutor(
+        registry=registry,
+        store=store,
+        workspace=temp_ws,
+        personal_store=temp_ws.personal_store,
+        project_path=temp_ws.root,
+        safety_policy=safety,
+    )
     _, auth = accepted_authority_factory(temp_ws, title="Workflow Actions")
 
     # 1. workflow.list when empty

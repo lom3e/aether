@@ -108,7 +108,7 @@ def test_b_milestone_plan_generation_and_sequencing(tmp_path: Path):
 # Test C: Execution through Runtime.execute()
 # ---------------------------------------------------------------------------
 @pytest.mark.asyncio
-async def test_c_execution_through_runtime(tmp_path: Path):
+async def test_c_execution_through_runtime(tmp_path: Path, accepted_authority_factory):
     ws = Workspace(tmp_path)
     store: MissionStore = ws.missions
 
@@ -152,7 +152,8 @@ async def test_c_execution_through_runtime(tmp_path: Path):
     mock_evaluator.evaluate.side_effect = _mock_eval
 
     runtime = MissionRuntime(workspace=ws, evaluator=mock_evaluator)
-    execution = await runtime.start_mission(mission.id)
+    _, auth = accepted_authority_factory(ws, title=mission.title)
+    execution = await runtime.start_mission(mission.id, authority=auth)
 
     # Allow async execution loop to complete
     handle = runtime._active_executions.get(execution.id)
@@ -203,12 +204,78 @@ def test_d_lineage_preservation():
 # ---------------------------------------------------------------------------
 # Test E: Workforce delegation via AgentTool
 # ---------------------------------------------------------------------------
-def test_e_workforce_delegation_agent_tool(tmp_path: Path):
+def test_e_workforce_delegation_agent_tool(tmp_path: Path, accepted_authority_factory):
     from aether.core.runtime import Runtime
     from aether.agents.agent import Agent
+    from aether.providers.base import AIProvider
+    from aether.providers.capabilities import ProviderCapabilities
+    from aether.providers.types import ProviderConfig, ProviderStreamChunk
+    from aether.core.execution import ToolCall
+
+    class ScriptedStreamProvider(AIProvider):
+        def __init__(self, turns):
+            super().__init__(ProviderConfig(model="mock-scripted"))
+            self.turns = list(turns)
+            self.call_count = 0
+
+        @property
+        def capabilities(self):
+            return ProviderCapabilities(supports_tools=True, supports_streaming=True)
+
+        def generate(self, messages, tools=None):
+            turn = self.turns[min(self.call_count, len(self.turns) - 1)]
+            self.call_count += 1
+            content = turn.get("content", "")
+            tool_calls = turn.get("tool_calls")
+            from aether.providers.types import Message, ProviderResponse
+            msg = Message(role="assistant", content=content, tool_calls=tool_calls)
+            return ProviderResponse(
+                content=content,
+                model="mock-scripted",
+                finish_reason=turn.get("finish_reason", "stop"),
+                message=msg,
+            )
+
+        def generate_stream(self, messages, tools=None):
+            turn = self.turns[min(self.call_count, len(self.turns) - 1)]
+            self.call_count += 1
+            chunks = turn.get("chunks", [])
+            if not chunks:
+                content = turn.get("content", "")
+                tool_calls = turn.get("tool_calls")
+                if content:
+                    yield ProviderStreamChunk(text=content)
+                if tool_calls:
+                    yield ProviderStreamChunk(text="", finish_reason="tool_calls", tool_calls=tool_calls)
+                else:
+                    yield ProviderStreamChunk(text="", finish_reason=turn.get("finish_reason", "stop"))
+            else:
+                for c in chunks:
+                    yield c
+
+    scripted_provider = ScriptedStreamProvider([
+        {
+            "tool_calls": [
+                ToolCall(
+                    call_id="call_analyst_1",
+                    tool_name="data_analyst",
+                    arguments={"instruction": "Conduct quantitative research on energy sector"},
+                )
+            ],
+            "finish_reason": "tool_calls",
+        },
+        {
+            "content": "Specialist quantitative analysis: Energy sector metrics show strong growth.",
+            "finish_reason": "stop",
+        },
+        {
+            "content": "Executive synthesis: Quantitative research on energy sector complete with specialist analysis.",
+            "finish_reason": "stop",
+        },
+    ])
 
     ws = Workspace(tmp_path)
-    runtime = Runtime(workspace=ws)
+    runtime = Runtime(workspace=ws, provider=scripted_provider)
 
     # Scaffolding coordinator and specialist
     coordinator = Agent(name="coordinator", role="Project Coordinator")
@@ -217,18 +284,21 @@ def test_e_workforce_delegation_agent_tool(tmp_path: Path):
     runtime.register_agent(coordinator)
     runtime.register_agent(specialist)
 
+    _, auth = accepted_authority_factory(ws, title="Conduct quantitative research on energy sector")
     task = Task(
         instruction="Conduct quantitative research on energy sector",
         workspace_id=ws.name,
         session_id="sess-e",
         mission_id="msn-e",
         mode=ExecutionMode.DELEGATE,
+        authority=auth,
     )
 
     result = runtime.execute(task)
     assert result.success is True
     assert result.status == ExecutionStatus.COMPLETED
     assert "energy sector" in result.output.lower() or "quantitative" in result.output.lower()
+
 
 
 # ---------------------------------------------------------------------------
@@ -347,7 +417,7 @@ def test_h_deliverable_recording_and_referencing(tmp_path: Path):
 # Test I: Truthful failure handling
 # ---------------------------------------------------------------------------
 @pytest.mark.asyncio
-async def test_i_truthful_failure_handling(tmp_path: Path):
+async def test_i_truthful_failure_handling(tmp_path: Path, accepted_authority_factory):
     ws = Workspace(tmp_path)
     store: MissionStore = ws.missions
 
@@ -373,7 +443,8 @@ async def test_i_truthful_failure_handling(tmp_path: Path):
 
     ws.runtime = FailingRuntime()
     runtime = MissionRuntime(workspace=ws)
-    execution = await runtime.start_mission(mission.id)
+    _, auth = accepted_authority_factory(ws, title=mission.title)
+    execution = await runtime.start_mission(mission.id, authority=auth)
 
     handle = runtime._active_executions.get(execution.id)
     if handle and handle.task:
