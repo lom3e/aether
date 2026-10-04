@@ -983,9 +983,9 @@ async def test_provider_settings(request: Request, data: ProviderSettings):
         provider = ProviderManager().get(
             data.provider, config=ProviderConfig(model=data.model, api_key=effective_key, timeout=10.0)
         )
-        # Attempt a basic generation
+        # Attempt a basic generation without blocking event loop
         from aether.core.execution import Message
-        provider.generate([Message(role="user", content="Say hello")])
+        await asyncio.to_thread(provider.generate, [Message(role="user", content="Say hello")])
         return {"status": "ok", "message": "Connection successful"}
     except Exception as e:
         raise HTTPException(status_code=400, detail=f"Connection failed: {_human_provider_error(e, data.api_key)}")
@@ -6141,7 +6141,8 @@ async def personal_chat_route(request: Request, payload: PersonalChatPayload):
     if not ws:
         raise HTTPException(status_code=503, detail="Workspace not initialized.")
     ws_id = (payload.workspace_id or ws.name).strip()
-    msg = ws.personal.process_prompt(
+    msg = await asyncio.to_thread(
+        ws.personal.process_prompt,
         workspace_id=ws_id,
         prompt=payload.prompt,
         session_id=payload.session_id,
@@ -6175,7 +6176,8 @@ async def create_personal_intent_route(request: Request, payload: IntentRequestP
         )
 
     try:
-        intent, context_pack, proposal, validation_result = ws.personal.create_intent_and_proposal(
+        intent, context_pack, proposal, validation_result = await asyncio.to_thread(
+            ws.personal.create_intent_and_proposal,
             raw_input=payload.raw_input,
             workspace_id=ws.name,
             session_id=payload.session_id,

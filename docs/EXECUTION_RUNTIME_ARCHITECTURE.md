@@ -106,3 +106,18 @@ When executing `ExecutionMode.DELEGATE`:
    - Findings are collected and synthesized into an executive report.
 4. **Dossier Generation**: Deliverables are automatically written to `<workspace_root>/reviews/` ensuring artifact persistence.
 5. **Truthful State Rule**: The state is derived strictly from `ExecutionResult.status`, never parsed or guessed from unstructured model text.
+
+---
+
+## 6. Architectural Scale & Operational Constraints (Production Stabilization)
+
+1. **Single Active Workspace per Runtime Process**:
+   Each Aether process binds to a single contextual workspace on local desktop. Multi-workspace cross-talk is prevented at the registry and route boundaries (`ExecutionBoundary`).
+2. **Asynchronous Route Offloading (`asyncio.to_thread`)**:
+   Long-running cognitive dispatches, heavy disk I/O, and LLM synchronous calls (`process_prompt`, `create_intent_and_proposal`, `provider.generate`) are strictly offloaded via `asyncio.to_thread` to maintain event-loop responsiveness for WebSocket heartbeats, SSE telemetry, and HTTP health probes.
+3. **Provider Resilience & Circuit Breaker Isolation**:
+   Upstream model providers are shielded by `ResilientProvider` with exponential backoff on transient errors (429, 5xx, network timeouts). Consecutive failures trip an active `CircuitBreaker` (fail-fast), protecting threads from stalling on dead endpoints.
+4. **SQLite Concurrency & WAL Mode**:
+   All local state stores (`missions`, `personal`, `workspace`, `conversations`) utilize `core.sqlite.get_sqlite_connection` with `PRAGMA journal_mode=WAL`, `busy_timeout=15000`, and `PRAGMA foreign_keys=ON`, eliminating locking contention and preventing partial write corruption.
+5. **Explicit CLI & Zero Dev-Server Spawning in Production**:
+   The production binary (`aether-runtime` / CLI) serves pre-compiled static assets and never invokes or auto-spawns development tools (`npm`, `vite`). Development mode is strictly opt-in via `--dev`.
