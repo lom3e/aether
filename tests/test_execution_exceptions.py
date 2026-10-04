@@ -3,10 +3,12 @@ import pytest
 from aether.engine.core import ExecutionEngine
 from aether.tools.executor import ToolExecutor
 from aether.tools.registry import ToolRegistry
-from aether.tools.base import Tool, ToolExecutionContext
+from aether.tools.base import Tool, ToolExecutionContext, ToolClassification
 from aether.core.execution import ExecutionContext, Task, ToolCall
 
 class FailingTool(Tool):
+    classification: ToolClassification = ToolClassification.READ_ONLY
+
     def __init__(self, name, exception_to_raise):
         self._name = name
         self.exception_to_raise = exception_to_raise

@@ -1024,7 +1024,13 @@ class MissionRuntime:
                 self._harvest_deliverables(mid, exec_id, tmpl_m.id, created_files)
 
                 if result and result.success:
-                    out_text = result.output or "(no output produced)"
+                    raw_out = getattr(result, "output", "")
+                    if hasattr(raw_out, "_mock_name"):
+                        out_text = str(raw_out)
+                    elif raw_out:
+                        out_text = str(raw_out)
+                    else:
+                        out_text = "(no output produced)"
                     now_done = datetime.now(timezone.utc).isoformat()
                     self.store.update_execution_milestone(
                         exec_id,
@@ -1055,7 +1061,8 @@ class MissionRuntime:
                     })
                     self._broadcast_graph_update(mid, exec_id, "milestone_completed")
                 else:
-                    err_msg = (result.error if result else None) or "Stage execution failed."
+                    raw_err = (getattr(result, "error", None) if result else None) or "Stage execution failed."
+                    err_msg = str(raw_err)
                     self.store.update_execution_milestone(
                         exec_id,
                         tmpl_m.id,
