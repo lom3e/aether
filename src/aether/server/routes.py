@@ -2513,6 +2513,7 @@ class CreateAutomationPayload(BaseModel):
     trigger: dict[str, Any] = Field(default_factory=lambda: {"type": "manual"})
     steps: list[dict[str, Any]] = Field(default_factory=list)
     output_destination: dict[str, Any] | None = None
+    metadata: dict[str, Any] = Field(default_factory=dict)
 
 
 class ToggleAutomationPayload(BaseModel):

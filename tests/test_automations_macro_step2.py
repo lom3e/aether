@@ -17,11 +17,23 @@ from datetime import datetime, timedelta, timezone
 import json
 from pathlib import Path
 import pytest
+from unittest.mock import MagicMock
 from starlette.requests import Request
 from starlette.datastructures import Headers
 
 from aether.automation.builder import AutomationBuilder
 from aether.automation.engine import AutomationEngine
+from aether.core.execution import ExecutionResult
+
+
+class MockAutomationTeam:
+    def __init__(self):
+        self.call_count = 0
+
+    def run(self, task_instruction, **kwargs):
+        self.call_count += 1
+        return ExecutionResult(success=True, output=f"Executed: {task_instruction}")
+
 from aether.automation.models import (
     AutomationDefinition,
     AutomationSuggestion,
@@ -162,6 +174,7 @@ def test_companion_automation_intent_and_approval(tmp_path: Path):
 async def test_webhook_automation_lifecycle(tmp_path: Path, accepted_authority_factory):
     """Verify webhook endpoint authentication, payload ingestion, and execution."""
     ws = Workspace.get_or_init(tmp_path / "ws_webhook", "Webhook WS")
+    ws.load_team = MagicMock(return_value=MockAutomationTeam())
 
     # 1. Create an automation with webhook trigger
     auto = AutomationDefinition(
@@ -421,6 +434,7 @@ def test_suggestions_engine_pattern_discovery(tmp_path: Path):
 async def test_truthful_execution_and_notifications(tmp_path: Path, accepted_authority_factory):
     """Verify AutomationEngine executes through canonical Runtime and dispatches notifications without fake simulation."""
     ws = Workspace.get_or_init(tmp_path / "ws_truth", "Truthful WS")
+    ws.load_team = MagicMock(return_value=MockAutomationTeam())
     engine = AutomationEngine(workspace=ws)
 
     auto = AutomationDefinition(

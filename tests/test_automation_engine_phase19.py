@@ -12,9 +12,21 @@ import asyncio
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 import pytest
+from unittest.mock import MagicMock
 from starlette.requests import Request
 
 from aether.automation.engine import AutomationEngine
+from aether.core.execution import ExecutionResult
+
+
+class MockTeam:
+    def __init__(self):
+        self.call_count = 0
+
+    def run(self, task_instruction, **kwargs):
+        self.call_count += 1
+        return ExecutionResult(success=True, output=f"Executed: {task_instruction}")
+
 from aether.automation.models import (
     AutomationDefinition,
     AutomationRunRecord,
@@ -196,9 +208,11 @@ def test_automation_store_crud(tmp_path: Path):
 # ---------------------------------------------------------------------------
 
 @pytest.mark.asyncio
-async def test_automation_engine_execution(tmp_path: Path):
+async def test_automation_engine_execution(tmp_path: Path, accepted_authority_factory):
     """Verify AutomationEngine executes pipeline and writes output file."""
     ws = Workspace.get_or_init(tmp_path / "ws_engine", "Engine WS")
+    _, auth = accepted_authority_factory(ws, title="Build Doc")
+    ws.load_team = MagicMock(return_value=MockTeam())
     engine = AutomationEngine(workspace=ws)
 
     auto = AutomationDefinition(
@@ -209,6 +223,7 @@ async def test_automation_engine_execution(tmp_path: Path):
             PipelineStep(id="step_2", name="Doc", prompt_template="Write documentation based on: {step_1_output}"),
         ],
         output_destination=OutputDestination(type=OutputType.FILE, target_path="docs/output.md"),
+        metadata={"authority": auth.to_dict()},
     )
     ws.automations.save_automation(auto)
 
@@ -229,9 +244,11 @@ async def test_automation_engine_execution(tmp_path: Path):
 # ---------------------------------------------------------------------------
 
 @pytest.mark.asyncio
-async def test_automation_scheduler_tick_and_trigger(tmp_path: Path):
+async def test_automation_scheduler_tick_and_trigger(tmp_path: Path, accepted_authority_factory):
     """Verify AutomationScheduler evaluates due automations and triggers execution."""
     ws = Workspace.get_or_init(tmp_path / "ws_sched", "Scheduler WS")
+    _, auth = accepted_authority_factory(ws, title="Scheduled Task")
+    ws.load_team = MagicMock(return_value=MockTeam())
     scheduler = AutomationScheduler(workspace=ws, tick_interval_seconds=0.1)
 
     auto = AutomationDefinition(
@@ -239,6 +256,7 @@ async def test_automation_scheduler_tick_and_trigger(tmp_path: Path):
         enabled=True,
         trigger=TriggerConfig(type=TriggerType.SCHEDULE, interval_seconds=1),
         steps=[PipelineStep(id="s1", name="Quick Task", prompt_template="Execute quick task")],
+        metadata={"authority": auth.to_dict()},
     )
     ws.automations.save_automation(auto)
 
@@ -267,9 +285,11 @@ async def test_automation_scheduler_tick_and_trigger(tmp_path: Path):
 # ---------------------------------------------------------------------------
 
 @pytest.mark.asyncio
-async def test_automations_rest_api_endpoints(tmp_path: Path):
+async def test_automations_rest_api_endpoints(tmp_path: Path, accepted_authority_factory):
     """Verify REST API endpoints for automations CRUD and triggering."""
     ws = Workspace.get_or_init(tmp_path / "ws_api", "API WS")
+    _, auth = accepted_authority_factory(ws, title="Daily Briefing")
+    ws.load_team = MagicMock(return_value=MockTeam())
     scope = {"type": "http", "app": type("App", (), {"state": type("State", (), {"workspace": ws, "scheduler": None, "event_bus": None})()})()}
     req = Request(scope)
 
@@ -281,6 +301,7 @@ async def test_automations_rest_api_endpoints(tmp_path: Path):
         trigger={"type": "schedule", "cron": "0 8 * * *"},
         steps=[{"id": "step_1", "name": "Collect", "prompt_template": "Collect status"}],
         output_destination={"type": "notification", "notify_title": "Daily Briefing Done"},
+        metadata={"authority": auth.to_dict()},
     )
     created = await create_automation(req, create_payload)
     assert created["name"] == "Daily Briefing"
@@ -301,6 +322,7 @@ async def test_automations_rest_api_endpoints(tmp_path: Path):
         description="Updated description",
         enabled=True,
         trigger={"type": "schedule", "cron": "0 9 * * *"},
+        metadata={"authority": auth.to_dict()},
     )
     updated = await update_automation(req, auto_id, update_payload)
     assert updated["name"] == "Daily Executive Briefing"

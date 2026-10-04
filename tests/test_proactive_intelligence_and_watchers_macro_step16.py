@@ -18,7 +18,7 @@ from aether.proactive.engine import ProactiveIntelligenceEngine
 from aether.workspace.workspace import Workspace
 from aether.personal.service import PersonalAgentService
 from aether.personal.models import IntentTier
-from aether.content.models import Campaign, PlatformType, RepurposedVariant, ContentStatus
+from aether.content.models import Campaign, PlatformType, RepurposedVariant, ContentStatus, ContentItem
 from aether.client.models import ClientProfile
 from aether.benchmarking.models import EvolutionProposal
 from aether.server.routes import (
@@ -129,8 +129,11 @@ def test_proactive_engine_workspace_pattern_scan(temp_workspace: Workspace):
 
     # Seed workspace with content campaigns and variants
     camp = temp_workspace.content.create_campaign(Campaign(name="Q3 Growth Campaign"))
+    item = temp_workspace.content.save_content_item(
+        ContentItem(campaign_id=camp.id, title="Main Article", source_text="Content")
+    )
     var = RepurposedVariant(
-        item_id=camp.id,
+        item_id=item.id,
         platform=PlatformType.LINKEDIN,
         title="Post 1",
         body="Content",
@@ -138,7 +141,7 @@ def test_proactive_engine_workspace_pattern_scan(temp_workspace: Workspace):
     )
     temp_workspace.content.save_variant(var)
     temp_workspace.content.save_variant(
-        RepurposedVariant(item_id=camp.id, platform=PlatformType.TWITTER_THREAD, title="Post 2", body="Tweet")
+        RepurposedVariant(item_id=item.id, platform=PlatformType.TWITTER_THREAD, title="Post 2", body="Tweet")
     )
 
     # Seed client

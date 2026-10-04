@@ -262,10 +262,29 @@ class ProposalGenerator:
         )
 
         # Step 2: Implementation or Investigation
-        is_code = any(k in prompt for k in ["code", "refactor", "bug", "fix", "test", "repo", "git", "branch", "pr", "pull request"])
+        is_automation = (
+            any(k in prompt for k in ["automat", "ogni ", "every ", "schedul", "cron", "workflow", "watcher", "webhook"])
+            or (intent.constraints and any("automations" in str(c) for c in intent.constraints))
+        )
+        is_code = (
+            any(k in prompt for k in ["code", "refactor", "bug", "fix", "test", "git", "branch", "pull request"])
+            or bool(re.search(r"\b(repo|repository|pr)\b", prompt))
+        )
         is_research = any(k in prompt for k in ["research", "report", "analisi", "audit", "investigate", "study"])
 
-        if is_code:
+        if is_automation:
+            steps.append(
+                ProposedStep(
+                    id=f"step-2",
+                    order_idx=1,
+                    title="Automation Workflow Configuration",
+                    description="Configure, test, and register the requested automation trigger and action pipeline.",
+                    assigned_team_or_role="Automation Lead",
+                    dependencies=["step-1"],
+                    required_tools_or_actions=["automations.create_draft", "automations.create", "automations.update", "automations.enable"],
+                )
+            )
+        elif is_code:
             steps.append(
                 ProposedStep(
                     id=f"step-2",
@@ -338,6 +357,15 @@ class ProposalGenerator:
         """Derives upfront human approval requirements for sensitive external/mutating actions."""
         prompt = intent.raw_input.lower()
         approvals: list[RequiredApprovalSpec] = []
+        if any(k in prompt for k in ["automat", "ogni ", "every ", "schedul", "cron", "workflow"]) or (intent.constraints and any("automations" in str(c) for c in intent.constraints)):
+            approvals.append(
+                RequiredApprovalSpec(
+                    id=f"appr-automation",
+                    action_or_boundary="automations.create_draft",
+                    reason="Creating recurring or automated workflows requires explicit authorization.",
+                    sensitive_fields=["automation"],
+                )
+            )
 
         if any(k in prompt for k in ["email", "mail", "invia mail", "send email"]):
             approvals.append(

@@ -47,6 +47,24 @@ class AutomationEngine:
 
     async def _execute_single_step(self, step: PipelineStep, prompt: str, team: Any, authority: Any = None) -> tuple[str, str, str | None]:
         """Executes a single step via team or canonical runtime. Returns (status, output, error)."""
+        from aether.core.execution import ExecutionBoundary, UnauthorizedExecutionError
+        ws_id = getattr(self.workspace, "name", None) or getattr(self.workspace, "id", "default")
+        p_store = None
+        if self.workspace and hasattr(self.workspace, "personal_store"):
+            p_store = self.workspace.personal_store
+        if not p_store and self.workspace and hasattr(self.workspace, "personal"):
+            p_store = getattr(self.workspace.personal, "store", None)
+
+        try:
+            ExecutionBoundary.validate_authority(
+                authority=authority,
+                workspace_id=ws_id,
+                store=p_store,
+                action_or_boundary=f"workforce.delegate:{ws_id}",
+            )
+        except UnauthorizedExecutionError as auth_err:
+            return "failed", "", str(auth_err)
+
         if team and hasattr(team, "run"):
             result = await asyncio.to_thread(team.run, prompt, target_agent=step.agent_name)
             step_output = result.output if hasattr(result, "output") else str(result)

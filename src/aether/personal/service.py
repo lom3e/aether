@@ -149,6 +149,7 @@ class PersonalAgentService:
         workspace_id: str,
         session_id: str | None = None,
         source_surface: str = "api",
+        constraints: list[str] | None = None,
     ) -> tuple[IntentRequest, ContextPack, MissionProposal, ProposalValidationResult]:
         """
         Executes the canonical Intent -> Context -> Proposal -> Validation pipeline (Phase A Macro-pass 1).
@@ -162,6 +163,7 @@ class PersonalAgentService:
             raw_input=raw_input,
             session_id=session_id,
             source_surface=source_surface,
+            constraints=list(constraints or []),
         )
 
         resolver = ContextResolver(
@@ -1485,11 +1487,15 @@ class PersonalAgentService:
         if requires_proposal and not authority:
             # Generate proposal via canonical Phase A pipeline
             try:
+                proposal_constraints = []
+                if intent.action_id:
+                    proposal_constraints.append(f"allow:{intent.action_id}")
                 _, _, proposal, val_res = self.create_intent_and_proposal(
                     raw_input=prompt,
                     workspace_id=workspace_id,
                     session_id=session_id,
                     source_surface="companion" if is_voice else "api",
+                    constraints=proposal_constraints,
                 )
                 response_text = proposal.to_human_markdown()
                 msg_metadata = {
