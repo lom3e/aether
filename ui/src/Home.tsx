@@ -296,11 +296,42 @@ export function Home({
         setMessages(prev => [...prev, data]);
         fetchOverview();
       } else {
-        showToast('Error processing request.', 'error');
+        const errData = await res.json().catch(() => ({}));
+        const errMsg = errData.detail || 'Error processing request.';
+        showToast(errMsg, 'error');
+        setMessages(prev => [...prev, {
+          id: `err-${Date.now()}`,
+          role: 'assistant',
+          content: `⚠️ **Request failed:** ${errMsg}`,
+          tier: 'answer',
+          steps: [{
+            id: `step-err-${Date.now()}`,
+            title: 'Request failed',
+            status: 'failed',
+            category: 'error',
+            details: { error: errMsg },
+          }],
+          created_at: new Date().toISOString(),
+        }]);
       }
-    } catch (err) {
+    } catch (err: any) {
       console.error('Chat error', err);
-      showToast('Network error while contacting Aether.', 'error');
+      const errMsg = err?.message || 'Network error while contacting Aether.';
+      showToast(errMsg, 'error');
+      setMessages(prev => [...prev, {
+        id: `err-${Date.now()}`,
+        role: 'assistant',
+        content: `⚠️ **Network error:** ${errMsg}`,
+        tier: 'answer',
+        steps: [{
+          id: `step-err-${Date.now()}`,
+          title: 'Network connection failed',
+          status: 'failed',
+          category: 'error',
+          details: { error: errMsg },
+        }],
+        created_at: new Date().toISOString(),
+      }]);
     } finally {
       setIsSubmitting(false);
     }

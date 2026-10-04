@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useContext } from 'react';
 import {
   Share2,
   Sparkles,
@@ -20,6 +20,7 @@ import {
   Briefcase
 } from 'lucide-react';
 import { apiUrl } from './api';
+import { ToastContext } from './toast';
 
 function LinkedinIcon({ size = 15, color = "#0A66C2" }: { size?: number; color?: string }) {
   return (
@@ -177,6 +178,7 @@ By standardizing on self-healing execution and strict safety policies, engineeri
 
   // Executive Report Modal
   const [reportModalContent, setReportModalContent] = useState<string | null>(null);
+  const showToast = useContext(ToastContext);
 
   // Fetch initial data
   useEffect(() => {
@@ -193,9 +195,13 @@ By standardizing on self-healing execution and strict safety policies, engineeri
         if (data.length > 0 && !selectedCampaignId) {
           setSelectedCampaignId(data[0].id);
         }
+      } else {
+        const err = await res.json().catch(() => ({}));
+        showToast(err.detail || 'Failed to load campaigns', 'error');
       }
-    } catch (err) {
+    } catch (err: any) {
       console.error('Failed to load campaigns:', err);
+      showToast(err?.message || 'Error loading campaigns', 'error');
     }
   };
 
@@ -205,9 +211,13 @@ By standardizing on self-healing execution and strict safety policies, engineeri
       if (res.ok) {
         const data = await res.json();
         setClients(data);
+      } else {
+        const err = await res.json().catch(() => ({}));
+        showToast(err.detail || 'Failed to load clients', 'error');
       }
-    } catch (err) {
+    } catch (err: any) {
       console.error('Failed to load clients:', err);
+      showToast(err?.message || 'Error loading clients', 'error');
     }
   };
 
@@ -219,9 +229,13 @@ By standardizing on self-healing execution and strict safety policies, engineeri
       if (res.ok) {
         const data = await res.json();
         setBiData(data);
+      } else {
+        const err = await res.json().catch(() => ({}));
+        showToast(err.detail || 'Failed to load BI analytics', 'error');
       }
-    } catch (err) {
+    } catch (err: any) {
       console.error('Failed to load BI data:', err);
+      showToast(err?.message || 'Error loading BI analytics', 'error');
     } finally {
       setBiLoading(false);
     }
@@ -278,9 +292,14 @@ By standardizing on self-healing execution and strict safety policies, engineeri
         const updated = await res.json();
         setVariants((prev) => prev.map((v) => (v.id === updated.id ? updated : v)));
         setScheduleVariantId(null);
+        showToast('Variant scheduled successfully', 'success');
+      } else {
+        const err = await res.json().catch(() => ({}));
+        showToast(err.detail || 'Failed to schedule variant', 'error');
       }
-    } catch (err) {
+    } catch (err: any) {
       console.error('Failed to schedule:', err);
+      showToast(err?.message || 'Error scheduling variant', 'error');
     }
   };
 
@@ -292,13 +311,14 @@ By standardizing on self-healing execution and strict safety policies, engineeri
       if (res.ok) {
         const updated = await res.json();
         setVariants((prev) => prev.map((v) => (v.id === updated.id ? updated : v)));
+        showToast('Variant approved and published', 'success');
       } else {
         const errData = await res.json().catch(() => ({}));
-        alert(`Failed to approve variant: ${errData.detail || 'Server error'}`);
+        showToast(`Failed to approve variant: ${errData.detail || 'Server error'}`, 'error');
       }
-    } catch (err) {
+    } catch (err: any) {
       console.error('Failed to approve variant:', err);
-      alert('Network error approving variant.');
+      showToast(err?.message || 'Network error approving variant.', 'error');
     }
   };
 
@@ -323,9 +343,14 @@ By standardizing on self-healing execution and strict safety policies, engineeri
         setShowCampaignModal(false);
         setNewCampName('');
         setNewCampDesc('');
+        showToast('Campaign created successfully', 'success');
+      } else {
+        const err = await res.json().catch(() => ({}));
+        showToast(err.detail || 'Failed to create campaign', 'error');
       }
-    } catch (err) {
+    } catch (err: any) {
       console.error('Failed to create campaign:', err);
+      showToast(err?.message || 'Error creating campaign', 'error');
     }
   };
 
@@ -351,9 +376,14 @@ By standardizing on self-healing execution and strict safety policies, engineeri
         setNewClientName('');
         setNewClientDomain('');
         setNewClientEmail('');
+        showToast('Client created successfully', 'success');
+      } else {
+        const err = await res.json().catch(() => ({}));
+        showToast(err.detail || 'Failed to create client', 'error');
       }
-    } catch (err) {
+    } catch (err: any) {
       console.error('Failed to create client:', err);
+      showToast(err?.message || 'Error creating client', 'error');
     }
   };
 
@@ -365,9 +395,13 @@ By standardizing on self-healing execution and strict safety policies, engineeri
       if (res.ok) {
         const data = await res.json();
         setReportModalContent(data.report_markdown);
+      } else {
+        const err = await res.json().catch(() => ({}));
+        showToast(err.detail || 'Failed to generate report', 'error');
       }
-    } catch (err) {
+    } catch (err: any) {
       console.error('Failed to generate report:', err);
+      showToast(err?.message || 'Error generating report', 'error');
     }
   };
 
@@ -387,9 +421,14 @@ By standardizing on self-healing execution and strict safety policies, engineeri
         const created = await res.json();
         setReviews((prev) => [created, ...prev]);
         handleCopy(created.token, `token-${created.id}`);
+        showToast('Review link created and copied', 'success');
+      } else {
+        const err = await res.json().catch(() => ({}));
+        showToast(err.detail || 'Failed to create review link', 'error');
       }
-    } catch (err) {
+    } catch (err: any) {
       console.error('Failed to create review link:', err);
+      showToast(err?.message || 'Error creating review link', 'error');
     }
   };
 

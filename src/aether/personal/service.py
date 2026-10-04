@@ -1957,7 +1957,13 @@ class PersonalAgentService:
                     )
                 else:
                     runtime_res = self.runtime.execute(exec_request)
-                    response_text = runtime_res.output or ""
+                    if runtime_res.status == ExecutionStatus.FAILED:
+                        if steps:
+                            steps[-1].status = "failed"
+                            steps[-1].details = {"error": runtime_res.error}
+                        response_text = runtime_res.error or "Error generating response from AI model provider."
+                    else:
+                        response_text = runtime_res.output or ""
 
         # 7. Record assistant message
         assistant_msg = PersonalMessage(

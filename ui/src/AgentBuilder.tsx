@@ -59,14 +59,14 @@ export function AgentBuilder({
 
   useEffect(() => {
     fetch(apiUrl('/api/skills'))
-      .then(res => res.json())
+      .then(res => res.ok ? res.json() : [])
       .then(data => {
         if (Array.isArray(data)) setAvailableSkills(data);
       })
-      .catch(() => {});
+      .catch(err => console.debug('Failed to load skills:', err));
 
     fetch(apiUrl('/api/agents'))
-      .then(res => res.json())
+      .then(res => res.ok ? res.json() : [])
       .then(data => {
         if (Array.isArray(data)) {
           setAvailableAgents(data.map(a => ({
@@ -77,15 +77,15 @@ export function AgentBuilder({
           })));
         }
       })
-      .catch(() => {});
+      .catch(err => console.debug('Failed to load agents:', err));
 
     fetch(apiUrl('/api/settings/provider'))
-      .then(res => res.json())
-      .then(data => {
-        if (data.provider) setTeamProvider(data.provider);
-        if (data.model) setTeamDefaultModel(data.model);
+      .then(res => res.ok ? res.json() : {})
+      .then((data: any) => {
+        if (data?.provider) setTeamProvider(data.provider);
+        if (data?.model) setTeamDefaultModel(data.model);
       })
-      .catch(() => {});
+      .catch(err => console.debug('Failed to load settings provider:', err));
   }, []);
 
   const handleGenerateDraft = async () => {

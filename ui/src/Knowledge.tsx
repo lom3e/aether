@@ -42,21 +42,36 @@ export function Knowledge() {
 
   const fetchStatus = () => {
     fetch(apiUrl('/api/knowledge/files'))
-      .then(res => res.json())
+      .then(async res => {
+        if (!res.ok) {
+          const err = await res.json().catch(() => ({}));
+          throw new Error(err.detail || 'Failed to load knowledge files');
+        }
+        return res.json();
+      })
       .then(data => {
         setDocuments(data.documents || []);
         setLoading(false);
       })
-      .catch(console.error);
+      .catch(err => {
+        console.error('Error fetching knowledge files:', err);
+        showToast(err instanceof Error ? err.message : 'Error loading knowledge files', 'error');
+        setLoading(false);
+      });
 
     fetch(apiUrl('/api/workspace/project'))
-      .then(res => res.json())
+      .then(res => {
+        if (!res.ok) return null;
+        return res.json();
+      })
       .then(data => {
         if (data && data.project) {
           setProjectInfo(data.project);
         }
       })
-      .catch(() => {});
+      .catch(err => {
+        console.debug('Error fetching workspace project info:', err);
+      });
   };
 
   useEffect(() => {

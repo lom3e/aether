@@ -176,9 +176,13 @@ export function Settings({ onWorkspaceSwitched }: SettingsProps) {
       if (res.ok) {
         showToast('Workspace knowledge cleared.', 'info');
         fetchWorkspaceData();
+      } else {
+        const err = await apiError(res, 'Failed to clear knowledge.');
+        showToast(err.message, 'error');
       }
-    } catch (err) {
+    } catch (err: any) {
       console.error(err);
+      showToast(err?.message || 'Error clearing knowledge.', 'error');
     }
   };
 
@@ -191,9 +195,13 @@ export function Settings({ onWorkspaceSwitched }: SettingsProps) {
         showToast('Workspace reset to initial clean state.', 'info');
         fetchWorkspaceData();
         if (onWorkspaceSwitched) onWorkspaceSwitched();
+      } else {
+        const err = await apiError(res, 'Failed to reset workspace.');
+        showToast(err.message, 'error');
       }
-    } catch (err) {
+    } catch (err: any) {
       console.error(err);
+      showToast(err?.message || 'Error resetting workspace.', 'error');
     }
   };
 

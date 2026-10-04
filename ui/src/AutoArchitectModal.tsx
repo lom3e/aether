@@ -86,12 +86,12 @@ export function AutoArchitectModal({ isOpen, onClose, onSuccess }: AutoArchitect
 
   useEffect(() => {
     fetch(apiUrl('/api/settings/provider'))
-      .then(res => res.json())
-      .then(data => {
-        if (data.provider) setWorkspaceProvider(data.provider);
-        if (data.model) setWorkspaceModel(data.model);
+      .then(res => res.ok ? res.json() : {})
+      .then((data: any) => {
+        if (data?.provider) setWorkspaceProvider(data.provider);
+        if (data?.model) setWorkspaceModel(data.model);
       })
-      .catch(() => {});
+      .catch(err => console.debug('Failed to load settings provider:', err));
   }, []);
 
   const loadingMessages = [
@@ -134,7 +134,8 @@ export function AutoArchitectModal({ isOpen, onClose, onSuccess }: AutoArchitect
       });
 
       if (!res.ok) {
-        throw new Error('Failed to generate workforce architecture');
+        const errData = await res.json().catch(() => ({}));
+        throw new Error(errData.detail || 'Failed to generate workforce architecture');
       }
 
       const data: ArchitectBlueprint = await res.json();
@@ -151,9 +152,9 @@ export function AutoArchitectModal({ isOpen, onClose, onSuccess }: AutoArchitect
       setOpenAgentOverrides({});
       setStep('preview');
       showToast(t('workforceGeneratedSuccess') || 'Squadra progettata con successo!', 'success');
-    } catch (err) {
+    } catch (err: any) {
       console.error('Architect generation failed', err);
-      showToast(t('architectError') || 'Errore nella generazione della squadra. Riprova.', 'error');
+      showToast(err?.message || t('architectError') || 'Errore nella generazione della squadra. Riprova.', 'error');
       setStep('input');
     }
   };
