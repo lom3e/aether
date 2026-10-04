@@ -213,6 +213,8 @@ def test_action_executor_learning_actions(temp_ws: Workspace, accepted_authority
         registry=registry,
         store=action_store,
         project_path=temp_ws.root,
+        workspace=temp_ws,
+        personal_store=temp_ws.personal_store,
     )
     ws_id = temp_ws.name
     _, auth = accepted_authority_factory(temp_ws, title="Learning Actions")

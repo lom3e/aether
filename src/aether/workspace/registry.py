@@ -312,6 +312,20 @@ agents:
     instructions: "You coordinate tasks for the workspace."
 """
             default_team_path.write_text(default_yaml, encoding="utf-8")
+
+        if provider:
+            manifest = dict(ws.config)
+            ws_sec = dict(manifest.get("workspace") or {})
+            ws_sec["default_provider"] = provider
+            if model:
+                ws_sec["default_model"] = model
+            manifest["workspace"] = ws_sec
+            import yaml
+            tmp = ws.config_path.with_suffix(".tmp")
+            with open(tmp, "w", encoding="utf-8") as f:
+                yaml.safe_dump(manifest, f, sort_keys=False)
+            tmp.replace(ws.config_path)
+            ws._config_cache = manifest
             # Still seed official system knowledge
             from aether.presets.applier import PresetApplier
             try:

@@ -1136,9 +1136,10 @@ class Agent:
             ws = context.metadata["workspace"]
 
         ws_id = (
-            getattr(ws, "id", None)
-            or (self.metadata.get("workspace_id") if self.metadata else None)
+            (self.metadata.get("workspace_id") if self.metadata else None)
             or (task.metadata.get("workspace_id") if task.metadata else None)
+            or getattr(ws, "id", None)
+            or getattr(ws, "name", None)
             or "default"
         )
 
@@ -1164,6 +1165,14 @@ class Agent:
                 query=task.instruction,
                 limit=5,
             )
+            if not guidance and ws and hasattr(ws, "name") and ws.name and ws.name != ws_id:
+                guidance = learning_svc.get_relevant_guidance(
+                    workspace_id=ws.name,
+                    agent_name=self.name,
+                    team_name=team_name,
+                    query=task.instruction,
+                    limit=5,
+                )
             if not guidance:
                 return None
 

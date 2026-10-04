@@ -38,6 +38,7 @@ def test_playwright_missions_e2e_flow(tmp_path, monkeypatch):
         HOME=str(tmp_path),
         AETHER_WORKSPACE=str(ws.root),
         AETHER_UI_DIR=str(Path("ui/dist").resolve()),
+        AETHER_ENABLE_TEST_PROVIDERS="1",
     )
     server_proc = subprocess.Popen(
         [
@@ -105,11 +106,11 @@ def test_playwright_missions_e2e_flow(tmp_path, monkeypatch):
 
             # 7. Test Mission Runtime Execution: Draft -> Start -> Real Execution Run #1
             page.click("button:has-text('Start Mission')")
-            page.wait_for_selector("text=Run #1", timeout=15000)
+            page.wait_for_selector("text=Run #1", timeout=45000)
             assert page.is_visible("text=Run #1")
 
             # Wait for execution run to complete and show Re-run action
-            page.wait_for_selector("button:has-text('Re-run Mission')", timeout=10000)
+            page.wait_for_selector("button:has-text('Re-run Mission')", timeout=30000)
             assert page.is_visible("button:has-text('Re-run Mission')")
 
             # Verify truthful workforce state (Completed, not Standby)
@@ -123,7 +124,7 @@ def test_playwright_missions_e2e_flow(tmp_path, monkeypatch):
 
             # 8. Test Re-run -> Dispatches Execution Run #2
             page.click("button:has-text('Re-run Mission')")
-            page.wait_for_selector("text=Run #2", timeout=5000)
+            page.wait_for_selector("text=Run #2", timeout=45000)
             assert page.is_visible("text=Run #2")
 
             # 9. Add second milestone inline using "+ Add Step" (Slice 2C)

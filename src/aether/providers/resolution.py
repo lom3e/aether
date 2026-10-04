@@ -61,6 +61,15 @@ def resolve_provider(
             provider_name = ws_cfg.get("workspace", {}).get("default_provider")
             if not model_name:
                 model_name = ws_cfg.get("workspace", {}).get("default_model")
+        if not provider_name and hasattr(workspace, "load_team"):
+            try:
+                loaded_team = workspace.load_team()
+                if loaded_team and getattr(loaded_team, "config", None):
+                    provider_name = getattr(loaded_team.config, "default_provider", None)
+                    if not model_name:
+                        model_name = getattr(loaded_team.config, "default_model", None)
+            except Exception:
+                pass
 
     from aether.providers.manager import ProviderManager
     mgr = provider_manager or ProviderManager()

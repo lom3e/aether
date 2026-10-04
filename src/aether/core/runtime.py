@@ -496,7 +496,13 @@ class Runtime:
 
         live_provider = self.resolve_provider()
 
-        if not live_provider:
+        if coordinator.provider is None:
+            coordinator.provider = live_provider
+        for s in specialists:
+            if s.provider is None:
+                s.provider = live_provider
+
+        if not coordinator.provider:
             return ExecutionResult(
                 success=False,
                 status=ExecutionStatus.FAILED,
@@ -504,10 +510,6 @@ class Runtime:
                 execution_id=request.id,
                 metadata={"code": "NO_PROVIDER"},
             )
-
-        coordinator.provider = live_provider
-        for s in specialists:
-            s.provider = live_provider
 
         # Wire AgentTools for all specialists into coordinator's tool registry
         from aether.tools.agent_tool import AgentTool
@@ -693,8 +695,11 @@ class Runtime:
 
     def resolve_provider(self) -> Any:
         """Resolves available provider via unified deterministic precedence contract."""
+        team = self._get_workforce_team()
+        team_config = getattr(team, "config", None) if team else None
         return resolve_provider(
             explicit_provider=self.provider,
+            team_config=team_config,
             workspace=self.workspace,
             provider_manager=self.provider_manager,
         )
