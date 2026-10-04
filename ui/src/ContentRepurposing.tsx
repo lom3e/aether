@@ -292,9 +292,13 @@ By standardizing on self-healing execution and strict safety policies, engineeri
       if (res.ok) {
         const updated = await res.json();
         setVariants((prev) => prev.map((v) => (v.id === updated.id ? updated : v)));
+      } else {
+        const errData = await res.json().catch(() => ({}));
+        alert(`Failed to approve variant: ${errData.detail || 'Server error'}`);
       }
     } catch (err) {
-      console.error('Failed to publish:', err);
+      console.error('Failed to approve variant:', err);
+      alert('Network error approving variant.');
     }
   };
 
@@ -859,7 +863,7 @@ By standardizing on self-healing execution and strict safety policies, engineeri
                               onClick={() => handlePublish(currentVariant.id)}
                             >
                               <Send size={13} />
-                              Mark Published
+                              Approve for Manual Publish
                             </button>
                           </>
                         )}

@@ -189,34 +189,41 @@ class Runtime:
 
         provider = self.resolve_provider()
 
-        if provider is not None:
-            try:
-                res = provider.generate(prep_ctx.messages)
-                if res and getattr(res, "content", None) and res.content.strip():
-                    return ExecutionResult(
-                        success=True,
-                        status=ExecutionStatus.COMPLETED,
-                        output=res.content.strip(),
-                        execution_id=request.id,
-                        metadata={"provider": getattr(provider, "model", "ai"), "history_turns": len(recent_history)},
-                    )
-            except Exception as e:
-                logger.warning(f"Live provider call exception in Runtime, falling back to contextual synthesis: {e}")
+        if provider is None:
+            return ExecutionResult(
+                success=False,
+                status=ExecutionStatus.FAILED,
+                error="No AI provider configured. Open Settings → Provider.",
+                execution_id=request.id,
+                metadata={"code": "NO_PROVIDER"},
+            )
 
-        # Truthful diagnostic synthesis when live provider is not configured
-        output = self._synthesize_contextual_response(
-            prompt=request.instruction,
-            workspace_id=ws_id,
-            intel_context=prep_ctx.intel_context,
-            recent_history=recent_history,
-        )
-        return ExecutionResult(
-            success=True,
-            status=ExecutionStatus.COMPLETED,
-            output=output,
-            execution_id=request.id,
-            metadata={"source": "contextual_synthesis"},
-        )
+        try:
+            res = provider.generate(prep_ctx.messages)
+            if res and getattr(res, "content", None) and res.content.strip():
+                return ExecutionResult(
+                    success=True,
+                    status=ExecutionStatus.COMPLETED,
+                    output=res.content.strip(),
+                    execution_id=request.id,
+                    metadata={"provider": getattr(provider, "model", "ai"), "history_turns": len(recent_history)},
+                )
+            return ExecutionResult(
+                success=False,
+                status=ExecutionStatus.FAILED,
+                error="AI provider returned an empty response.",
+                execution_id=request.id,
+                metadata={"code": "EMPTY_PROVIDER_RESPONSE"},
+            )
+        except Exception as e:
+            logger.warning(f"Live provider call exception in Runtime: {e}")
+            return ExecutionResult(
+                success=False,
+                status=ExecutionStatus.FAILED,
+                error=f"AI provider error: {e}",
+                execution_id=request.id,
+                metadata={"code": "PROVIDER_ERROR"},
+            )
 
     def _execute_do(self, request: Task) -> ExecutionResult:
         """Executes DO tier: Safe local mutation (e.g. creating/editing local documents)."""
@@ -239,26 +246,47 @@ class Runtime:
                 raw_content = action_args.get("content", "")
                 if not raw_content or raw_content.startswith("# Document created by Aether"):
                     provider = self.resolve_provider()
-                    if provider is not None:
-                        try:
-                            from aether.providers.types import Message
-                            filename = action_args.get("filename", "document")
-                            gen_messages = [
-                                Message(role="system", content=(
-                                    "You are a helpful writing assistant. Generate the content for a document "
-                                    "based on the user's request. Write only the document content, not meta-commentary. "
-                                    "Use markdown formatting where appropriate."
-                                )),
-                                Message(role="user", content=(
-                                    f"Create the content for a file named '{filename}'. "
-                                    f"Original request: {request.instruction}"
-                                )),
-                            ]
-                            gen_res = provider.generate(gen_messages)
-                            if gen_res and getattr(gen_res, "content", None) and gen_res.content.strip():
-                                action_args["content"] = gen_res.content.strip()
-                        except Exception as gen_err:
-                            logger.debug(f"LLM content drafting failed, using template: {gen_err}")
+                    if provider is None:
+                        return ExecutionResult(
+                            success=False,
+                            status=ExecutionStatus.FAILED,
+                            error="No AI provider configured to draft document content. Open Settings → Provider.",
+                            execution_id=request.id,
+                            metadata={"code": "NO_PROVIDER"},
+                        )
+                    try:
+                        from aether.providers.types import Message
+                        filename = action_args.get("filename", "document")
+                        gen_messages = [
+                            Message(role="system", content=(
+                                "You are a helpful writing assistant. Generate the content for a document "
+                                "based on the user's request. Write only the document content, not meta-commentary. "
+                                "Use markdown formatting where appropriate."
+                            )),
+                            Message(role="user", content=(
+                                f"Create the content for a file named '{filename}'. "
+                                f"Original request: {request.instruction}"
+                            )),
+                        ]
+                        gen_res = provider.generate(gen_messages)
+                        if gen_res and getattr(gen_res, "content", None) and gen_res.content.strip():
+                            action_args["content"] = gen_res.content.strip()
+                        else:
+                            return ExecutionResult(
+                                success=False,
+                                status=ExecutionStatus.FAILED,
+                                error=f"Could not draft content for '{filename}': empty response from AI provider.",
+                                execution_id=request.id,
+                                metadata={"code": "DRAFT_FAILED"},
+                            )
+                    except Exception as gen_err:
+                        return ExecutionResult(
+                            success=False,
+                            status=ExecutionStatus.FAILED,
+                            error=f"Could not draft content for '{action_args.get('filename', 'document')}': {gen_err}",
+                            execution_id=request.id,
+                            metadata={"code": "DRAFT_FAILED"},
+                        )
 
             execution = self.action_executor.execute(
                 action_id=action_id,
@@ -468,82 +496,18 @@ class Runtime:
 
         live_provider = self.resolve_provider()
 
-        if live_provider:
-            coordinator.provider = live_provider
-            for s in specialists:
-                s.provider = live_provider
-        else:
-            # Dynamic generic offline provider fallback formatting output based on prompt & specialist
-            from aether.providers.base import AIProvider
-            from aether.providers.capabilities import ProviderCapabilities
-            from aether.providers.types import Message, ProviderConfig, ProviderResponse
-            from aether.core.execution import ToolCall
-            topic_title = self._extract_task_topic(prompt)
+        if not live_provider:
+            return ExecutionResult(
+                success=False,
+                status=ExecutionStatus.FAILED,
+                error="No AI provider configured. Open Settings → Provider.",
+                execution_id=request.id,
+                metadata={"code": "NO_PROVIDER"},
+            )
 
-            primary_spec = specialists[0]
-
-            class GenericOfflineSpecialist(AIProvider):
-                def __init__(self, spec_name: str, spec_role: str):
-                    super().__init__(ProviderConfig(model="aether-specialist"))
-                    self.spec_name = spec_name
-                    self.spec_role = spec_role
-                @property
-                def capabilities(self):
-                    return ProviderCapabilities(tools=True, structured_output=True)
-                def generate(self, messages, tools=None):
-                    return ProviderResponse(
-                        content=(
-                            f"Specialist findings from {self.spec_name} ({self.spec_role}) for '{topic_title}':\n"
-                            f"- Completed structured investigation into objective: {prompt}\n"
-                            f"- Core domain requirements and architectural constraints evaluated.\n"
-                            f"- Actionable deliverables and operational recommendations structured."
-                        ),
-                        model="aether-specialist",
-                        finish_reason="stop",
-                    )
-
-            class GenericOfflineCoordinator(AIProvider):
-                def __init__(self, lead_name: str, spec_name: str):
-                    super().__init__(ProviderConfig(model="aether-lead"))
-                    self.lead_name = lead_name
-                    self.spec_name = spec_name
-                    self.call_count = 0
-                @property
-                def capabilities(self):
-                    return ProviderCapabilities(tools=True, structured_output=True)
-                def generate(self, messages, tools=None):
-                    self.call_count += 1
-                    fn_name = re.sub(r"[^a-zA-Z0-9_-]+", "_", self.spec_name).strip("_")
-                    if self.call_count == 1:
-                        return ProviderResponse(
-                            content=f"Delegating analysis to {self.spec_name}.",
-                            model="aether-lead",
-                            finish_reason="tool_calls",
-                            message=Message(
-                                role="assistant",
-                                content=f"Delegating analysis to {self.spec_name}.",
-                                tool_calls=[
-                                    ToolCall(
-                                        call_id="call_del_1",
-                                        tool_name=fn_name,
-                                        arguments={"instruction": f"Perform structured analysis for: {prompt}"},
-                                    )
-                                ],
-                            ),
-                        )
-                    else:
-                        tool_findings = next((m.content for m in reversed(messages) if m.role == "tool"), "")
-                        synthesis = (
-                            f"Executive Strategic Synthesis for {topic_title}:\n\n"
-                            f"Objective '{prompt}' coordinated by {self.lead_name} and analyzed with specialist {self.spec_name}.\n\n"
-                            f"{tool_findings}\n\n"
-                            f"Strategic roadmap and verified actions documented."
-                        )
-                        return ProviderResponse(content=synthesis, model="aether-lead", finish_reason="stop")
-
-            coordinator.provider = GenericOfflineCoordinator(coordinator.name, primary_spec.name)
-            for s in specialists:
-                s.provider = GenericOfflineSpecialist(s.name, s.role)
+        coordinator.provider = live_provider
+        for s in specialists:
+            s.provider = live_provider
 
         # Wire AgentTools for all specialists into coordinator's tool registry
         from aether.tools.agent_tool import AgentTool
@@ -572,6 +536,15 @@ class Runtime:
             authority=request.authority,
         )
         mgr_result = coordinator.execute(wf_task)
+        if not mgr_result or not mgr_result.success or mgr_result.status == ExecutionStatus.FAILED:
+            err_msg = (mgr_result.error if mgr_result else None) or "Workforce coordination failed."
+            return ExecutionResult(
+                success=False,
+                status=ExecutionStatus.FAILED,
+                error=err_msg,
+                execution_id=request.id,
+                metadata={"coordinator": coordinator.name},
+            )
 
         cb(65, "Workforce analyzing domain metrics and compiling findings")
 

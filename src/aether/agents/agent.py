@@ -313,7 +313,8 @@ class Agent:
                 if decision is None or decision.action == DecisionAction.CONTINUE:
                     # Plan exhausted successfully
                     self.lifecycle.complete()
-                    return ExecutionResult(success=True, output="Plan completed successfully.", metadata=metadata)
+                    out_msg = decision.reasoning if (decision and decision.reasoning) else "(no output produced)"
+                    return ExecutionResult(success=True, output=out_msg, metadata=metadata)
 
                 self.runtime_safety_policy.after_cycle()
 

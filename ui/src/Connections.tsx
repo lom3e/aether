@@ -735,7 +735,13 @@ export function Connections({ navigate: _navigate, initialExecutionId, initialTa
       if (!res.ok) {
         throw new Error(data.detail || data.summary || 'Sync failed');
       }
-      showToast(`Synced ${data.items_synced || 0} items into workspace memory and knowledge!`, 'success');
+      if (data.status === 'unsupported') {
+        showToast(`Sync unsupported for ${providerId}: ${data.summary || 'connector has no ingestion sync'}`, 'warning');
+      } else if (data.status === 'skipped') {
+        showToast(`Sync skipped for ${providerId}: ${data.summary || 'connection not active'}`, 'info');
+      } else {
+        showToast(`Synced ${data.items_synced || 0} items into workspace memory and knowledge!`, 'success');
+      }
       await fetchAll();
     } catch (err: any) {
       showToast(err.message || 'Failed to sync connection', 'error');
@@ -755,7 +761,12 @@ export function Connections({ navigate: _navigate, initialExecutionId, initialTa
       if (!res.ok) {
         throw new Error(data.detail || 'Sync all failed');
       }
-      showToast(`Synced ${data.total_items_synced || 0} external items into workspace intelligence!`, 'success');
+      const total = data.total_items_synced || 0;
+      if (total === 0) {
+        showToast('Sync completed: 0 items ingested (unsupported providers skipped).', 'info');
+      } else {
+        showToast(`Synced ${total} external items into workspace intelligence!`, 'success');
+      }
       await fetchAll();
     } catch (err: any) {
       showToast(err.message || 'Failed to sync connections', 'error');

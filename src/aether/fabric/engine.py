@@ -192,21 +192,13 @@ class ExecutionFabricEngine:
 
         if isinstance(capabilities, HardwareCapabilities):
             caps = capabilities
+            node_status = NodeStatus.ONLINE
         elif isinstance(capabilities, dict):
             caps = HardwareCapabilities.from_dict(capabilities)
+            node_status = NodeStatus.ONLINE
         else:
-            # Default placeholder specs for a remote node
-            caps = HardwareCapabilities(
-                cpu_brand="Remote Compute Unit",
-                cpu_cores=8,
-                ram_total_gb=32.0,
-                ram_free_gb=24.0,
-                gpu_name="Dedicated Accelerator" if resolved_role == NodeRole.GPU_NODE else "Integrated",
-                gpu_vram_gb=16.0 if resolved_role == NodeRole.GPU_NODE else 0.0,
-                accelerator_type="cuda" if resolved_role == NodeRole.GPU_NODE else "cpu",
-                os_name="linux",
-                architecture="x86_64",
-            )
+            caps = None
+            node_status = NodeStatus.UNVERIFIED
 
         now = datetime.now(timezone.utc).isoformat()
         node = MeshNode(
@@ -214,12 +206,12 @@ class ExecutionFabricEngine:
             workspace_id=workspace_id,
             name=name,
             role=resolved_role,
-            status=NodeStatus.ONLINE,
+            status=node_status,
             endpoint=endpoint,
             is_local=False,
             capabilities=caps,
             tags=list(tags or ["remote", resolved_role.value]),
-            ping_ms=12.5,
+            ping_ms=0.0,
             active_workloads=0,
             last_heartbeat=now,
             created_at=now,

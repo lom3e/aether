@@ -87,18 +87,21 @@ class ConnectorSyncEngine:
             return cls._sync_google_calendar(workspace, opts)
         elif prov == "github":
             return cls._sync_github(workspace, opts)
-        elif prov == "slack":
-            return cls._sync_slack(workspace, opts)
-        elif prov == "email":
-            return cls._sync_email(workspace, opts)
-        elif prov == "http":
-            return cls._sync_http(workspace, opts)
+        elif prov in ("slack", "email", "http"):
+            return ConnectorSyncResult(
+                provider=prov,
+                status="unsupported",
+                items_synced=0,
+                summary=f"Connector '{prov}' does not support ingestion synchronization.",
+                synced_at=datetime.now(timezone.utc).isoformat(),
+            )
         else:
             return ConnectorSyncResult(
                 provider=prov,
                 status="skipped",
                 items_synced=0,
                 summary=f"Connector '{prov}' does not require ingestion sync.",
+                synced_at=datetime.now(timezone.utc).isoformat(),
             )
 
     # ---------------------------------------------------------------------------
@@ -488,75 +491,5 @@ class ConnectorSyncEngine:
             items_synced=synced_count,
             summary=f"Synced {synced_count} GitHub items into workspace knowledge and memory.",
             details=details,
-            synced_at=now_iso,
-        )
-
-    # ---------------------------------------------------------------------------
-    # Slack, Email, HTTP Sync Stubs
-    # ---------------------------------------------------------------------------
-
-    @classmethod
-    def _sync_slack(cls, workspace: "Workspace", options: dict[str, Any]) -> ConnectorSyncResult:
-        now_iso = datetime.now(timezone.utc).isoformat()
-        conn = workspace.connections.get_connection(workspace.id, "slack")
-        if conn and conn.status == ConnectionStatus.CONNECTED:
-            conn.last_synced_at = now_iso
-            workspace.connections.save_connection(conn)
-            return ConnectorSyncResult(
-                provider="slack",
-                status="synced",
-                items_synced=1,
-                summary="Slack connection verified and synced.",
-                synced_at=now_iso,
-            )
-        return ConnectorSyncResult(
-            provider="slack",
-            status="skipped",
-            items_synced=0,
-            summary="Slack connection not connected.",
-            synced_at=now_iso,
-        )
-
-    @classmethod
-    def _sync_email(cls, workspace: "Workspace", options: dict[str, Any]) -> ConnectorSyncResult:
-        now_iso = datetime.now(timezone.utc).isoformat()
-        conn = workspace.connections.get_connection(workspace.id, "email")
-        if conn and conn.status == ConnectionStatus.CONNECTED:
-            conn.last_synced_at = now_iso
-            workspace.connections.save_connection(conn)
-            return ConnectorSyncResult(
-                provider="email",
-                status="synced",
-                items_synced=1,
-                summary="Email connection verified and synced.",
-                synced_at=now_iso,
-            )
-        return ConnectorSyncResult(
-            provider="email",
-            status="skipped",
-            items_synced=0,
-            summary="Email connection not connected.",
-            synced_at=now_iso,
-        )
-
-    @classmethod
-    def _sync_http(cls, workspace: "Workspace", options: dict[str, Any]) -> ConnectorSyncResult:
-        now_iso = datetime.now(timezone.utc).isoformat()
-        conn = workspace.connections.get_connection(workspace.id, "http")
-        if conn and conn.status == ConnectionStatus.CONNECTED:
-            conn.last_synced_at = now_iso
-            workspace.connections.save_connection(conn)
-            return ConnectorSyncResult(
-                provider="http",
-                status="synced",
-                items_synced=1,
-                summary="HTTP webhook endpoints verified and synced.",
-                synced_at=now_iso,
-            )
-        return ConnectorSyncResult(
-            provider="http",
-            status="skipped",
-            items_synced=0,
-            summary="HTTP connector not connected.",
             synced_at=now_iso,
         )

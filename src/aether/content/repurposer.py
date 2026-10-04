@@ -315,9 +315,11 @@ class ContentRepurposingEngine:
             character_count=len(newsletter_md),
             compliance_passed=True,
             compliance_notes=[],
-            engagement_score=85.0,
+            engagement_score=self.calculate_engagement_score(
+                has_hook=True, has_cta=True, char_count=len(newsletter_md), max_recommended=2000, bullet_count=len(key_points)
+            ),
             status=ContentStatus.DRAFT,
-            metadata={"subject_line": subject_line, "preview_text": preview_text, "tone": tone.value},
+            metadata={"subject_line": subject_line, "preview_text": preview_text, "tone": tone.value, "score_type": "heuristic_estimate"},
         )
         return variant
 
@@ -370,9 +372,11 @@ class ContentRepurposingEngine:
             character_count=len(script),
             compliance_passed=True,
             compliance_notes=[],
-            engagement_score=88.0,
+            engagement_score=self.calculate_engagement_score(
+                has_hook=True, has_cta=True, char_count=len(script), max_recommended=1000, bullet_count=len(key_points)
+            ),
             status=ContentStatus.DRAFT,
-            metadata={"estimated_duration_seconds": est_sec, "tone": tone.value},
+            metadata={"estimated_duration_seconds": est_sec, "tone": tone.value, "score_type": "heuristic_estimate"},
         )
         return variant
 
@@ -415,9 +419,11 @@ class ContentRepurposingEngine:
             character_count=len(blog_md),
             compliance_passed=True,
             compliance_notes=[],
-            engagement_score=82.0,
+            engagement_score=self.calculate_engagement_score(
+                has_hook=True, has_cta=True, char_count=len(blog_md), max_recommended=3000, bullet_count=len(key_points)
+            ),
             status=ContentStatus.DRAFT,
-            metadata={"tone": tone.value},
+            metadata={"tone": tone.value, "score_type": "heuristic_estimate"},
         )
         return variant
 

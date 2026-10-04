@@ -22,6 +22,7 @@ class ContentStatus(str, Enum):
     """Lifecycle status of content variants."""
     DRAFT = "draft"
     SCHEDULED = "scheduled"
+    APPROVED_FOR_MANUAL_PUBLISH = "approved_for_manual_publish"
     PUBLISHED = "published"
     ARCHIVED = "archived"
 

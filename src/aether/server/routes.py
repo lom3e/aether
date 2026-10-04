@@ -5434,7 +5434,7 @@ async def publish_variant_route(request: Request, variant_id: str):
     from aether.content.models import ContentStatus
     now_str = datetime.now(timezone.utc).isoformat()
     var = ws.content.update_variant_status(
-        variant_id=variant_id, status=ContentStatus.PUBLISHED, published_at=now_str
+        variant_id=variant_id, status=ContentStatus.APPROVED_FOR_MANUAL_PUBLISH, published_at=now_str
     )
     if not var:
         raise HTTPException(status_code=404, detail="Variant not found.")

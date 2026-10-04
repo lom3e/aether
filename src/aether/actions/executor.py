@@ -109,6 +109,22 @@ class ActionExecutor:
             return ws.personal_store
         return None
 
+    def _get_workspace(self, workspace_id: str | None = None) -> Any:
+        """Resolves workspace from injected self.workspace or active registry without silent fake fallback."""
+        if self.workspace is not None:
+            return self.workspace
+        if workspace_id:
+            from aether.workspace.workspace import Workspace
+            ws = Workspace.get(workspace_id) if hasattr(Workspace, "get") else None
+            if ws is not None:
+                return ws
+        if self.project_path:
+            from aether.workspace.workspace import Workspace
+            ws = Workspace.get_or_init(self.project_path)
+            if ws is not None:
+                return ws
+        raise RuntimeError("Workspace unavailable for action execution.")
+
     def execute(
         self,
         action_id: str,
@@ -490,9 +506,11 @@ class ActionExecutor:
             connector = self.connection_service.get_http_connector(ws_id)
             try:
                 res = connector.execute(action_id, inp)
+                if hasattr(res, "success") and not res.success:
+                    raise RuntimeError(res.error or f"HTTP connector operation '{action_id}' failed.")
                 if hasattr(self.connection_service, "record_operation_success"):
                     self.connection_service.record_operation_success(ws_id, "http", action_id)
-                return res.data
+                return res.data if hasattr(res, "data") else (res if isinstance(res, dict) else {})
             except Exception as exc:
                 err_str = str(exc).lower()
                 is_auth = any(t in err_str for t in ("401", "403", "unauthorized", "auth failed"))
@@ -617,53 +635,43 @@ class ActionExecutor:
 
         # 7. Web search action
         elif action_id == "web.search":
-            query = inp.get("query", "")
-            return {
-                "query": query,
-                "results": [
-                    {
-                        "title": f"Workspace query: {query}",
-                        "snippet": f"Real search result query executed for '{query}'.",
-                    }
-                ],
-            }
+            query = (inp.get("query") or "").strip()
+            if not query:
+                raise ValueError("Web search query cannot be empty.")
+            from aether.tools.web_search import DuckDuckGoSearchBackend
+            backend = DuckDuckGoSearchBackend()
+            try:
+                results = backend.search(query=query, max_results=int(inp.get("max_results", 5)))
+                return {
+                    "query": query,
+                    "results": [r.to_dict() for r in results],
+                }
+            except Exception as e:
+                logger.error(f"Web search backend failed for query '{query}': {e}")
+                raise RuntimeError(f"Web search failed: {e}") from e
 
         # 8. Automations actions
         elif action_id == "automations.create_draft":
             from aether.automation.builder import AutomationBuilder
             from aether.automation.models import AutomationDefinition
-            from aether.workspace.workspace import Workspace
             prompt_text = inp.get("prompt", "")
             raw_auto = inp.get("automation")
             auto_def = AutomationDefinition.from_dict(raw_auto) if raw_auto else AutomationBuilder.build_from_natural_language(prompt_text)
-            ws = None
-            try:
-                ws = Workspace.get(ws_id) if hasattr(Workspace, "get") else None
-                if not ws and self.project_path:
-                    ws = Workspace.get_or_init(self.project_path)
-            except Exception:
-                pass
-            if ws and hasattr(ws, "automations"):
-                saved = ws.automations.save_automation(auto_def)
-                return {"automation_id": saved.id, "name": saved.name, "status": "draft", "human_schedule": saved.human_schedule}
-            return {"automation_id": auto_def.id, "name": auto_def.name, "status": "draft", "human_schedule": auto_def.human_schedule}
+            ws = self._get_workspace(ws_id)
+            if not hasattr(ws, "automations") or not ws.automations:
+                raise RuntimeError("Automations subsystem unavailable in workspace.")
+            saved = ws.automations.save_automation(auto_def)
+            return {"automation_id": saved.id, "name": saved.name, "status": "draft", "human_schedule": saved.human_schedule}
 
         elif action_id == "automations.activate":
-            from aether.workspace.workspace import Workspace
             auto_id = inp.get("automation_id", "")
-            ws = None
-            try:
-                ws = Workspace.get(ws_id) if hasattr(Workspace, "get") else None
-                if not ws and self.project_path:
-                    ws = Workspace.get_or_init(self.project_path)
-            except Exception:
-                pass
-            if ws and hasattr(ws, "automations"):
-                activated = ws.automations.toggle_automation(auto_id, True)
-                if activated:
-                    return {"automation_id": activated.id, "name": activated.name, "status": "active", "enabled": True}
-                raise ValueError(f"Automation '{auto_id}' not found")
-            return {"automation_id": auto_id, "status": "active", "enabled": True}
+            ws = self._get_workspace(ws_id)
+            if not hasattr(ws, "automations") or not ws.automations:
+                raise RuntimeError("Automations subsystem unavailable in workspace.")
+            activated = ws.automations.toggle_automation(auto_id, True)
+            if activated:
+                return {"automation_id": activated.id, "name": activated.name, "status": "active", "enabled": True}
+            raise ValueError(f"Automation '{auto_id}' not found")
 
         # 9. Mission dry run action
         elif action_id == "missions.dry_run":

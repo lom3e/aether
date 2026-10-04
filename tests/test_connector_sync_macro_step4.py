@@ -173,7 +173,9 @@ def test_sync_all_connectors(tmp_path: Path):
     providers = [r.provider for r in results]
     assert "calendar" in providers
     assert "slack" in providers
-    assert all(r.status == "synced" for r in results)
+    by_provider = {r.provider: r for r in results}
+    assert by_provider["calendar"].status == "synced"
+    assert by_provider["slack"].status == "unsupported"
 
 
 # ---------------------------------------------------------------------------

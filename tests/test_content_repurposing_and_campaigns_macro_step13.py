@@ -371,7 +371,7 @@ async def test_fastapi_content_routes():
         assert sched_res["status"] == "scheduled"
         assert sched_res["scheduled_at"] == "2026-10-15T10:00:00Z"
 
-        # 8. Publish Variant
+        # 8. Publish Variant (approved for manual publish since no direct social connectors)
         pub_res = await publish_variant_route(req, var_id)
-        assert pub_res["status"] == "published"
+        assert pub_res["status"] == "approved_for_manual_publish"
         assert pub_res["published_at"] is not None

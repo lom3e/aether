@@ -193,12 +193,41 @@ class AutonomousGoalOrchestrator:
         s2 = stages[1]
         s2.status = "running"
         s2.started_at = datetime.now(timezone.utc).isoformat()
-        s2.result = {
-            "plan_nodes": ["context_retrieval", "mesh_compute_allocation", "specialist_execution", "quality_eval", "deliverable_export"],
-            "strategy": "zero_simulation_autonomous_loop",
-        }
-        s2.status = "completed"
-        s2.completed_at = datetime.now(timezone.utc).isoformat()
+        try:
+            from aether.planning.generator import ProposalGenerator
+            from aether.planning.contracts import IntentRequest, ContextPack
+            provider = None
+            if hasattr(self.workspace, "runtime") and self.workspace.runtime:
+                provider = self.workspace.runtime.resolve_provider()
+
+            generator = ProposalGenerator(provider=provider)
+            intent_req = IntentRequest(
+                id=f"intent-auto-{goal_id[-6:]}",
+                workspace_id=workspace_id,
+                raw_input=goal_prompt,
+                source_surface="autonomy",
+            )
+            ctx_pack = ContextPack(workspace_scope=workspace_id, confidence=1.0)
+            proposal = generator.generate(intent_req, ctx_pack)
+            s2.result = {
+                "proposal_id": proposal.id,
+                "strategy": "proposal_driven_autonomous_loop",
+                "plan_nodes": [step.title for step in proposal.proposed_steps] or ["context_retrieval", "mesh_compute_allocation", "specialist_execution", "quality_eval", "deliverable_export"],
+                "confidence": proposal.confidence,
+                "status": proposal.status.value if hasattr(proposal.status, "value") else str(proposal.status),
+            }
+            s2.status = "completed"
+            s2.completed_at = datetime.now(timezone.utc).isoformat()
+        except Exception as e:
+            logger.error(f"Autonomy Stage 2 (Plan) failed: {e}")
+            s2.status = "failed"
+            s2.error = f"Planner failed: {e}"
+            s2.completed_at = datetime.now(timezone.utc).isoformat()
+            goal.status = AutonomousGoalStatus.FAILED
+            goal.error = s2.error
+            if self.store:
+                self.store.save_goal(goal)
+            return goal
 
         # STAGE 3: ALLOCATE_RESOURCES (Fabric Mesh)
         goal.active_stage_index = 2
@@ -235,14 +264,41 @@ class AutonomousGoalOrchestrator:
         s4 = stages[3]
         s4.status = "running"
         s4.started_at = datetime.now(timezone.utc).isoformat()
-        assigned_agents = ["Systems Lead", "Domain Specialist", "Reviewer"]
-        s4.result = {
-            "assigned_agents": assigned_agents,
-            "orchestration_mode": "autonomous_synthesis",
-        }
-        s4.assigned_agent = assigned_agents[0]
-        s4.status = "completed"
-        s4.completed_at = datetime.now(timezone.utc).isoformat()
+        try:
+            team = None
+            if hasattr(self.workspace, "runtime") and self.workspace.runtime:
+                team = self.workspace.runtime._get_workforce_team()
+            elif hasattr(self.workspace, "team"):
+                team = self.workspace.team
+
+            assigned_agents = []
+            if team:
+                agents_list = team.agents() if callable(getattr(team, "agents", None)) else (getattr(team, "agents", None) or [])
+                if isinstance(agents_list, dict):
+                    assigned_agents = list(agents_list.keys())
+                elif isinstance(agents_list, list):
+                    assigned_agents = [getattr(a, "name", str(a)) for a in agents_list]
+
+            if not assigned_agents:
+                assigned_agents = ["Systems Lead", "Domain Specialist", "Reviewer"]
+
+            s4.result = {
+                "assigned_agents": assigned_agents,
+                "orchestration_mode": "autonomous_synthesis",
+            }
+            s4.assigned_agent = assigned_agents[0]
+            s4.status = "completed"
+            s4.completed_at = datetime.now(timezone.utc).isoformat()
+        except Exception as e:
+            logger.error(f"Autonomy Stage 4 (Workforce Dispatch) failed: {e}")
+            s4.status = "failed"
+            s4.error = f"Workforce dispatch failed: {e}"
+            s4.completed_at = datetime.now(timezone.utc).isoformat()
+            goal.status = AutonomousGoalStatus.FAILED
+            goal.error = s4.error
+            if self.store:
+                self.store.save_goal(goal)
+            return goal
 
         # STAGE 5: ACTION_EXECUTION
         goal.active_stage_index = 4
@@ -300,14 +356,105 @@ class AutonomousGoalOrchestrator:
         s6 = stages[5]
         s6.status = "running"
         s6.started_at = datetime.now(timezone.utc).isoformat()
-        s6.result = {
-            "policy_check": "passed",
-            "quality_score": 100,
-            "risk_tier": "low",
-            "audit_trail_recorded": True,
-        }
-        s6.status = "completed"
-        s6.completed_at = datetime.now(timezone.utc).isoformat()
+        try:
+            # Create provisional deliverable to run genuine QualityGate review
+            deliv_obj = self._create_deliverable(
+                workspace_id,
+                goal_id,
+                goal_prompt,
+                allocated_tier,
+                s5.result,
+                verification_status="evaluating",
+                quality_score=None,
+            )
+
+            from aether.missions.models import Deliverable
+            from aether.missions.reviewer import QualityGateEvaluator
+            import asyncio
+
+            eval_deliv = Deliverable(
+                id=deliv_obj["id"],
+                mission_id=goal_id,
+                name=deliv_obj["name"],
+                path=deliv_obj["path"],
+                type="document",
+            )
+            evaluator = QualityGateEvaluator()
+            team = None
+            if hasattr(self.workspace, "runtime") and self.workspace.runtime:
+                team = self.workspace.runtime._get_workforce_team()
+            elif hasattr(self.workspace, "team"):
+                team = self.workspace.team
+
+            eval_coro = evaluator.evaluate(
+                mission_title=f"Autonomous Goal: {goal_prompt[:40]}",
+                mission_objective=goal_prompt,
+                deliverables=[eval_deliv],
+                completed_context=[
+                    "Understood intent and retrieved context.",
+                    "Planned execution nodes.",
+                    f"Allocated compute tier {allocated_tier}.",
+                    f"Dispatched workforce: {', '.join(assigned_agents)}.",
+                    f"Action executed with status: {s5.result.get('status', 'executed')}.",
+                ],
+                team=team,
+                workspace=self.workspace,
+            )
+            try:
+                loop = asyncio.get_running_loop()
+            except RuntimeError:
+                loop = None
+
+            if loop and loop.is_running():
+                import concurrent.futures
+                with concurrent.futures.ThreadPoolExecutor(max_workers=1) as pool:
+                    eval_res = pool.submit(asyncio.run, eval_coro).result()
+            else:
+                eval_res = asyncio.run(eval_coro)
+
+            if not eval_res.passed:
+                s6.status = "failed"
+                s6.error = f"Quality gate verification failed: {eval_res.feedback}"
+                s6.result = eval_res.to_dict()
+                s6.completed_at = datetime.now(timezone.utc).isoformat()
+                goal.status = AutonomousGoalStatus.FAILED
+                goal.error = s6.error
+                if self.store:
+                    self.store.save_goal(goal)
+                return goal
+
+            s6.result = {
+                "policy_check": "passed",
+                "quality_score": eval_res.score,
+                "risk_tier": "low",
+                "audit_trail_recorded": True,
+                "rules": {k: v.to_dict() for k, v in eval_res.rules.items()},
+                "feedback": eval_res.feedback,
+            }
+            s6.status = "completed"
+            s6.completed_at = datetime.now(timezone.utc).isoformat()
+
+            # Finalize deliverable with genuine verified status and real score
+            deliv_obj = self._create_deliverable(
+                workspace_id,
+                goal_id,
+                goal_prompt,
+                allocated_tier,
+                s5.result,
+                verification_status="verified",
+                quality_score=eval_res.score,
+            )
+        except Exception as e:
+            logger.error(f"Autonomy Stage 6 (Safety Verification) failed: {e}")
+            s6.status = "failed"
+            s6.error = str(e)
+            s6.result = {"error": str(e), "status": "failed"}
+            s6.completed_at = datetime.now(timezone.utc).isoformat()
+            goal.status = AutonomousGoalStatus.FAILED
+            goal.error = str(e)
+            if self.store:
+                self.store.save_goal(goal)
+            return goal
 
         # STAGE 7: DELIVERABLE_CREATION
         goal.active_stage_index = 6
@@ -315,7 +462,6 @@ class AutonomousGoalOrchestrator:
         s7.status = "running"
         s7.started_at = datetime.now(timezone.utc).isoformat()
 
-        deliv_obj = self._create_deliverable(workspace_id, goal_id, goal_prompt, allocated_tier, s5.result)
         goal.deliverables.append(deliv_obj)
         s7.result = {"deliverables_created": [deliv_obj]}
         s7.status = "completed"
@@ -352,10 +498,11 @@ class AutonomousGoalOrchestrator:
         s9.status = "running"
         s9.started_at = datetime.now(timezone.utc).isoformat()
 
+        q_score = s6.result.get("quality_score", 95)
         learning_text = (
             f"Autonomous Goal '{goal_prompt}' executed successfully across 9 operational stages. "
             f"Hardware compute tier: '{allocated_tier}' on node '{allocated_node}'. "
-            f"Generated verified deliverable '{deliv_obj['name']}'."
+            f"Generated verified deliverable '{deliv_obj['name']}' with quality score {q_score}/100."
         )
         try:
             if hasattr(self.workspace, "memory") and self.workspace.memory:
@@ -376,17 +523,18 @@ class AutonomousGoalOrchestrator:
                 self.workspace.memory.create_memory(mem)
 
             if hasattr(self.workspace, "learning") and self.workspace.learning:
-                from aether.learning.models import LearningEvent
+                from aether.learning.models import LearningEvent, LearningEventType
                 evt = LearningEvent(
                     id=f"evt-auto-{uuid.uuid4().hex[:8]}",
                     workspace_id=workspace_id,
-                    event_type="autonomous_goal_success",
+                    event_type=LearningEventType.SUCCESS,
                     observed_behavior=f"Autonomous goal resolved: {goal_prompt[:60]}",
-                    expected_behavior="Operational loop executed with quality score 100/100",
+                    expected_behavior=f"Operational loop executed with quality score {q_score}/100",
+                    correction="None required: genuine quality gate verification passed.",
                     evidence={"goal_id": goal_id, "deliverable": deliv_obj["name"]},
                 )
                 self.workspace.learning.record_event(evt)
-            s9.result = {"learning_recorded": True, "memory_category": "lesson"}
+            s9.result = {"learning_recorded": True, "memory_category": "lesson", "quality_score": q_score}
         except Exception as e:
             logger.warning(f"Autonomy learning reflection fallback: {e}")
             s9.result = {"learning_recorded": False, "error": str(e)}
@@ -470,6 +618,8 @@ class AutonomousGoalOrchestrator:
         goal_prompt: str,
         tier: str,
         action_result: dict[str, Any],
+        verification_status: str = "verified",
+        quality_score: int | None = 95,
     ) -> dict[str, Any]:
         """Generates a permanent markdown deliverable artifact stored in workspace deliverables."""
         deliv_dir = Path(getattr(self.workspace, "project_path", None) or getattr(self.workspace, "root", ".")) / "deliverables"
@@ -479,6 +629,7 @@ class AutonomousGoalOrchestrator:
         filename = f"{clean_slug}_{goal_id[-6:]}.md"
         file_path = deliv_dir / filename
 
+        score_text = f"{quality_score}/100" if quality_score is not None else "Pending Verification"
         content = (
             f"# Autonomous Operational Deliverable\n\n"
             f"**Goal:** {goal_prompt}\n"
@@ -491,8 +642,8 @@ class AutonomousGoalOrchestrator:
             f"## Action Results & Verification\n"
             f"```json\n{json.dumps(action_result, indent=2)}\n```\n\n"
             f"## Quality Gate\n"
-            f"- **Verification Status:** Verified Safe & Compliant\n"
-            f"- **Quality Score:** 100/100\n"
+            f"- **Verification Status:** {verification_status.capitalize()}\n"
+            f"- **Quality Score:** {score_text}\n"
         )
         file_path.write_text(content, encoding="utf-8")
         sha = hashlib.sha256(content.encode("utf-8")).hexdigest()
@@ -503,6 +654,7 @@ class AutonomousGoalOrchestrator:
             "path": str(file_path),
             "sha256": sha,
             "type": "document",
-            "status": "verified",
+            "status": verification_status,
+            "quality_score": quality_score,
             "created_at": datetime.now(timezone.utc).isoformat(),
         }

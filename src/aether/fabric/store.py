@@ -132,7 +132,7 @@ class FabricStore:
                     node.status.value if isinstance(node.status, NodeStatus) else str(node.status),
                     node.endpoint,
                     1 if node.is_local else 0,
-                    json.dumps(node.capabilities.to_dict()),
+                    json.dumps(node.capabilities.to_dict()) if node.capabilities else "{}",
                     json.dumps(node.tags),
                     node.ping_ms,
                     node.active_workloads,
@@ -242,7 +242,7 @@ class FabricStore:
 
     def _row_to_node(self, row: sqlite3.Row) -> MeshNode:
         caps_dict = json.loads(row["capabilities"]) if row["capabilities"] else {}
-        caps = HardwareCapabilities.from_dict(caps_dict)
+        caps = HardwareCapabilities.from_dict(caps_dict) if caps_dict else None
         return MeshNode(
             id=row["id"],
             workspace_id=row["workspace_id"],

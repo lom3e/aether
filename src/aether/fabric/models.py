@@ -30,6 +30,7 @@ class NodeStatus(StrEnum):
     BUSY = "busy"
     DRAINING = "draining"
     OFFLINE = "offline"
+    UNVERIFIED = "unverified"
 
     @classmethod
     def from_str(cls, val: str) -> NodeStatus:

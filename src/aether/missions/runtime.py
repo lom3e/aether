@@ -52,17 +52,7 @@ class NotFoundError(Exception):
 
 def _has_usable_runtime(workspace: Any) -> bool:
     """Returns True if workspace has a valid runtime engine for executing tasks."""
-    if not hasattr(workspace, "runtime") or workspace.runtime is None:
-        return False
-    try:
-        from unittest.mock import Mock, MagicMock
-        if isinstance(workspace.runtime, (Mock, MagicMock)):
-            ret = getattr(workspace.runtime.execute, "return_value", None)
-            if not isinstance(ret, ExecutionResult):
-                return False
-    except ImportError:
-        pass
-    return True
+    return hasattr(workspace, "runtime") and workspace.runtime is not None
 
 
 @dataclass
@@ -1034,7 +1024,7 @@ class MissionRuntime:
                 self._harvest_deliverables(mid, exec_id, tmpl_m.id, created_files)
 
                 if result and result.success:
-                    out_text = result.output or f"Stage '{tmpl_m.title}' completed successfully."
+                    out_text = result.output or "(no output produced)"
                     now_done = datetime.now(timezone.utc).isoformat()
                     self.store.update_execution_milestone(
                         exec_id,
