@@ -23,10 +23,12 @@ from aether.actions.models import (
 )
 from aether.actions.registry import ActionRegistry
 from aether.actions.store import ActionStore
+from aether.workspace.workspace import Workspace
 
 
 @pytest.fixture
-def executor_setup(tmp_path: Path):
+def executor_setup(tmp_path: Path, accepted_authority_factory):
+    ws = Workspace.init(tmp_path / "ws", name="ws-test")
     db_path = tmp_path / "actions.db"
     store = ActionStore(str(db_path))
     registry = ActionRegistry()
@@ -50,8 +52,13 @@ def executor_setup(tmp_path: Path):
     )
     registry.register(action_def, handler=dummy_handler)
 
-    executor = ActionExecutor(registry=registry, store=store)
-    return executor, store, execution_counter
+    executor = ActionExecutor(
+        registry=registry,
+        store=store,
+        workspace=ws,
+        personal_store=ws.personal_store,
+    )
+    return executor, store, execution_counter, ws, accepted_authority_factory
 
 
 def test_concurrent_simultaneous_approvals(executor_setup):
@@ -62,14 +69,16 @@ def test_concurrent_simultaneous_approvals(executor_setup):
     - All threads complete without unhandled crash.
     - Final state is SUCCEEDED.
     """
-    executor, store, counter = executor_setup
+    executor, store, counter, ws, make_auth = executor_setup
 
-    # Create pending execution
+    # Create pending execution with valid accepted authority
+    _, auth = make_auth(ws, title="Database Cleanup")
     pending = executor.execute(
         action_id="test.sensitive_op",
         workspace_id="ws-test",
         input_data={"target": "database_cleanup"},
         auto_approve=False,
+        authority=auth,
     )
     assert pending.status == ActionExecutionStatus.WAITING_APPROVAL
 
@@ -111,13 +120,15 @@ def test_concurrent_approve_versus_reject_race(executor_setup):
     - The loser raises a clear ValueError rather than leaving the system in an inconsistent state.
     - The winning state in SQLite is 100% consistent with the returned result.
     """
-    executor, store, counter = executor_setup
+    executor, store, counter, ws, make_auth = executor_setup
 
+    _, auth = make_auth(ws, title="Nuclear Launch")
     pending = executor.execute(
         action_id="test.sensitive_op",
         workspace_id="ws-test",
         input_data={"target": "nuclear_launch"},
         auto_approve=False,
+        authority=auth,
     )
     assert pending.status == ActionExecutionStatus.WAITING_APPROVAL
 
@@ -173,14 +184,16 @@ def test_terminal_state_invariants_and_idempotency(executor_setup):
     - Calling approve on already succeeded action is idempotent.
     - Calling reject on already rejected action is idempotent.
     """
-    executor, store, counter = executor_setup
+    executor, store, counter, ws, make_auth = executor_setup
 
     # Case A: Approve then idempotent re-approve & reject attempt
+    _, auth_a = make_auth(ws, title="Case A")
     exec_a = executor.execute(
         action_id="test.sensitive_op",
         workspace_id="ws-test",
         input_data={"case": "A"},
         auto_approve=False,
+        authority=auth_a,
     )
     approved_a = executor.approve(exec_a.id)
     assert approved_a.status == ActionExecutionStatus.SUCCEEDED
@@ -196,11 +209,13 @@ def test_terminal_state_invariants_and_idempotency(executor_setup):
         executor.reject(exec_a.id, reason="Too late")
 
     # Case B: Reject then idempotent re-reject & approve attempt
+    _, auth_b = make_auth(ws, title="Case B")
     exec_b = executor.execute(
         action_id="test.sensitive_op",
         workspace_id="ws-test",
         input_data={"case": "B"},
         auto_approve=False,
+        authority=auth_b,
     )
     rejected_b = executor.reject(exec_b.id, reason="Declined initially")
     assert rejected_b.status == ActionExecutionStatus.REJECTED

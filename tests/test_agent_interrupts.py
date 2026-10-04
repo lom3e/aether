@@ -5,11 +5,12 @@ from aether.agents.agent import Agent
 from aether.planning.types import Goal
 from aether.core.execution import ExecutionStatus
 from aether.core.interrupts import RequireInput
-from aether.tools.base import Tool
+from aether.tools.base import Tool, ToolClassification
 
 class InterruptingTool(Tool):
     name = "interrupter"
     description = "Interrupts the execution"
+    classification = ToolClassification.READ_ONLY
 
     def execute(self, input_data: str, context: Any | None = None) -> str:
         raise RequireInput("Need secret code", key="code")

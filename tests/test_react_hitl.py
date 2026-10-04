@@ -4,12 +4,13 @@ from aether.agents.agent import Agent
 from aether.core.execution import ExecutionStatus, Task
 from aether.core.interrupts import RequireApproval
 from aether.providers.mock import MockProvider
-from aether.tools.base import Tool
+from aether.tools.base import Tool, ToolClassification
 
 
 class DynamicApprovalTool(Tool):
     name = "approval_tool"
     description = "Requires approval before continuing."
+    classification = ToolClassification.READ_ONLY
 
     def execute(self, input_data: str, context=None) -> str:
         raise RequireApproval("Approve the protected action?")

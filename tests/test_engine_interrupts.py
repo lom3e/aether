@@ -1,13 +1,14 @@
 from aether.core.execution import ExecutionContext, Task, ToolCall
 from aether.core.interrupts import RequireApproval
 from aether.engine.core import ExecutionEngine
-from aether.tools.base import Tool
+from aether.tools.base import Tool, ToolClassification
 from aether.tools.registry import ToolRegistry
 
 
 class ApprovalTool(Tool):
     name = "approval_tool"
     description = "Requires a human approval before continuing."
+    classification = ToolClassification.READ_ONLY
 
     def execute(self, input_data: str, context=None) -> str:
         raise RequireApproval("Approve this action?")
