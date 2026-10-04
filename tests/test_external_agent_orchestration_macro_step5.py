@@ -60,7 +60,8 @@ class MockHttpWorkerHandler(http.server.BaseHTTPRequestHandler):
 
 
 @pytest.fixture
-def http_worker_server():
+def http_worker_server(monkeypatch):
+    monkeypatch.setenv("AETHER_ALLOW_INTERNAL_HTTP", "1")
     server = http.server.HTTPServer(("127.0.0.1", 0), MockHttpWorkerHandler)
     port = server.server_address[1]
     thread = threading.Thread(target=server.serve_forever, daemon=True)
@@ -331,6 +332,8 @@ def test_action_executor_delegate_external(http_worker_server, tmp_path):
         auto_approve=True,
         authority=auth,
     )
+    if exec_res.status.value == "waiting_approval":
+        exec_res = executor.approve(exec_res.id)
 
     assert exec_res.status.value in ("succeeded", "success")
     assert "Processed instruction: Fetch remote logs" in (exec_res.output_data or {}).get("output", "")
