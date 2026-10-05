@@ -6044,6 +6044,7 @@ class PersonalChatPayload(BaseModel):
     prompt: str
     session_id: str | None = None
     workspace_id: str | None = None
+    authority: dict[str, Any] | None = None
 
 
 class IntentRequestPayload(BaseModel):
@@ -6142,11 +6143,21 @@ async def personal_chat_route(request: Request, payload: PersonalChatPayload):
     if not ws:
         raise HTTPException(status_code=503, detail="Workspace not initialized.")
     ws_id = (payload.workspace_id or ws.name).strip()
+
+    auth_obj = None
+    if payload.authority:
+        from aether.core.execution import ExecutionAuthority
+        if isinstance(payload.authority, ExecutionAuthority):
+            auth_obj = payload.authority
+        elif isinstance(payload.authority, dict):
+            auth_obj = ExecutionAuthority.from_dict(payload.authority)
+
     msg = await asyncio.to_thread(
         ws.personal.process_prompt,
         workspace_id=ws_id,
         prompt=payload.prompt,
         session_id=payload.session_id,
+        authority=auth_obj,
     )
     return msg.to_dict()
 

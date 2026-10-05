@@ -329,7 +329,7 @@ class ProposalGenerator:
                     description=f"Execute tasks required to fulfill objective: {intent.raw_input[:80]}.",
                     assigned_team_or_role="Operations Specialist",
                     dependencies=["step-1"],
-                    required_tools_or_actions=[],
+                    required_tools_or_actions=["workforce.delegate"],
                 )
             )
 

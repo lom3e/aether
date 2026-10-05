@@ -119,6 +119,19 @@ class AutomationEngine:
                 else:
                     auth_obj = auth_meta
 
+        if not auth_obj and self.workspace:
+            ws = self.workspace
+            p_store = getattr(ws, "personal_store", None)
+            if not p_store and hasattr(ws, "personal"):
+                p_store = getattr(ws.personal, "store", None)
+            ws_id = getattr(ws, "id", None) or getattr(ws, "name", "default")
+            prop_id = (automation.metadata or {}).get("proposal_id")
+            if p_store and prop_id:
+                prop = p_store.get_proposal(prop_id, workspace_id=ws_id)
+                if prop and getattr(prop, "status", None) == "accepted":
+                    from aether.core.execution import ExecutionBoundary
+                    auth_obj = ExecutionBoundary.issue_authority(prop)
+
         # 1. Deduplication / Idempotency Check
         fingerprint = TriggerEvaluator.compute_fingerprint(
             automation_id=automation.id,

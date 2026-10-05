@@ -78,6 +78,17 @@ async def session_token_middleware(request: Request, call_next):
                 provided_token = auth_header[7:].strip()
             elif auth_header:
                 provided_token = auth_header.strip()
+            elif (
+                path == "/api/personal/events"
+                or "text/event-stream" in request.headers.get("accept", "")
+            ) and "query_string" in request.scope:
+                try:
+                    if "token" in request.query_params:
+                        provided_token = request.query_params.get("token", "").strip()
+                    elif "session_token" in request.query_params:
+                        provided_token = request.query_params.get("session_token", "").strip()
+                except Exception:
+                    pass
 
             import hmac
             if not provided_token or not hmac.compare_digest(provided_token, session_token):

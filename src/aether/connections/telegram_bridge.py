@@ -49,7 +49,8 @@ class TelegramBridge:
                 try:
                     res = workspace.action_executor.approve_execution(exec_id)
                     from aether.actions.models import ActionExecutionStatus
-                    if res.status == ActionExecutionStatus.SUCCEEDED:
+                    status_val = getattr(res.status, "value", str(res.status)) if hasattr(res, "status") else ""
+                    if status_val in ("succeeded", "completed", "approved") or getattr(res, "status", None) in (ActionExecutionStatus.SUCCEEDED, ActionExecutionStatus.APPROVED):
                         connector.answer_callback_query(cb_id, "✅ Azione approvata ed eseguita!")
                         connector.edit_message_text(
                             chat_id=chat_id,

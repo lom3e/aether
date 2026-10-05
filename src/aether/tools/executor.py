@@ -42,6 +42,11 @@ class ToolExecutor:
                         f"Invalid authority type for tool '{tool.name}': expected ExecutionAuthority, got {type(context.authority).__name__}."
                     )
                 target_store = getattr(context, "store", None) or self.store
+                if not target_store and context.workspace_id:
+                    from aether.workspace.workspace import Workspace
+                    ws = Workspace.get(context.workspace_id)
+                    if ws and hasattr(ws, "personal_store"):
+                        target_store = ws.personal_store
                 if target_store and context.workspace_id:
                     ExecutionBoundary.validate_authority(
                         authority=context.authority,

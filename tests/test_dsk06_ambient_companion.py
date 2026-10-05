@@ -298,17 +298,19 @@ async def test_h_notification_visibility(workspace):
 # Test I: Approval Execution Path
 # ---------------------------------------------------------------------------
 @pytest.mark.asyncio
-async def test_i_approval_card_executes_action(workspace):
+async def test_i_approval_card_executes_action(workspace, accepted_authority_factory):
     """Verify pending approval card in Companion approves and executes real action."""
     app.state.workspace = workspace
 
     # 1. Execute an ACT tier action requiring approval
+    _, auth = accepted_authority_factory(workspace, title="Team Sync")
     exec_req = make_request("POST", "/api/actions/execute")
     payload = ExecuteActionPayload(
         action_id="calendar.create_event",
         workspace_id=workspace.name,
         input_data={"title": "Team Sync", "start_time": "2026-10-01T10:00:00Z"},
         auto_approve=False,
+        authority=auth.to_dict(),
     )
     exec_res = await execute_action_route(exec_req, payload)
     assert exec_res["status"] == ActionExecutionStatus.PENDING_APPROVAL.value
@@ -392,7 +394,7 @@ def test_n_reopening_state_sync():
 # Test O: Full 22-Step Lifecycle Acceptance Simulation
 # ---------------------------------------------------------------------------
 @pytest.mark.asyncio
-async def test_o_acceptance_simulation_22_steps(workspace):
+async def test_o_acceptance_simulation_22_steps(workspace, accepted_authority_factory):
     """
     End-to-end simulation of the complete 22-step flow:
     1. Launch Aether -> 2. Main window opens -> 3. Close main window
@@ -472,6 +474,7 @@ async def test_o_acceptance_simulation_22_steps(workspace):
     assert ov1 is not None
 
     # Step 14: Trigger an approval-requiring action
+    _, auth = accepted_authority_factory(workspace, title="Sprint Review")
     exec_req = make_request("POST", "/api/actions/execute")
     exec_res = await execute_action_route(
         exec_req,
@@ -480,6 +483,7 @@ async def test_o_acceptance_simulation_22_steps(workspace):
             workspace_id=workspace.name,
             input_data={"title": "Sprint Review", "start_time": "2026-10-02T14:00:00Z"},
             auto_approve=False,
+            authority=auth.to_dict(),
         ),
     )
     execution_id = exec_res["id"]
@@ -606,6 +610,19 @@ async def test_r_carshine_specialist_delegation(workspace):
     assert "CarShine" in res["content"]
     assert res["tier"] == IntentTier.DELEGATE.value
 
+    # Authorize execution of delegated workforce via accepted proposal authority
+    if "proposal_id" in res.get("metadata", {}):
+        prop_id = res["metadata"]["proposal_id"]
+        _, authority = workspace.personal.accept_proposal(prop_id, workspace_id=workspace.name)
+        await personal_chat_route(
+            req,
+            PersonalChatPayload(
+                prompt="Analisi di mercato per CarShine",
+                workspace_id=workspace.name,
+                authority=authority.to_dict(),
+            ),
+        )
+
     # Wait for the background worker thread to finish
     workspace.personal.task_manager._executor.shutdown(wait=True)
 
@@ -647,6 +664,18 @@ async def test_s_generic_workforce_delegation_arbitrary_topic(workspace):
     assert res["role"] == "assistant"
     assert "AuthModule" in res["content"]
     assert res["tier"] == IntentTier.DELEGATE.value
+
+    if "proposal_id" in res.get("metadata", {}):
+        prop_id = res["metadata"]["proposal_id"]
+        _, authority = workspace.personal.accept_proposal(prop_id, workspace_id=workspace.name)
+        await personal_chat_route(
+            req,
+            PersonalChatPayload(
+                prompt="Audit di sicurezza per AuthModule",
+                workspace_id=workspace.name,
+                authority=authority.to_dict(),
+            ),
+        )
 
     workspace.personal.task_manager._executor.shutdown(wait=True)
 

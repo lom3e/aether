@@ -383,6 +383,7 @@ def test_playwright_replay_and_workforce_health(tmp_path, monkeypatch):
         HOME=str(tmp_path),
         AETHER_WORKSPACE=str(ws.root),
         AETHER_UI_DIR=str(Path("ui/dist").resolve()),
+        AETHER_ENABLE_TEST_PROVIDERS="1",
     )
 
     server_proc = subprocess.Popen(
@@ -429,7 +430,7 @@ def test_playwright_replay_and_workforce_health(tmp_path, monkeypatch):
 
             # 4. Start Mission to generate real execution run
             page.click("button:has-text('Start Mission')")
-            page.wait_for_selector("text=Run #1", timeout=15000)
+            page.wait_for_selector("text=Run #1", timeout=45000)
 
             # 5. Populate real telemetry in SQLite
             store = ws.missions

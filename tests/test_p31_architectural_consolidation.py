@@ -463,12 +463,38 @@ async def test_action_and_mission_approval_routes_delegate_to_canonical():
         scope = {"type": "http", "app": app, "headers": [], "path": "/", "method": "POST"}
         req = Request(scope)
 
+        from aether.planning.contracts import IntentRequest, MissionProposal, ProposalStatus
+        from datetime import datetime, timezone
+        p_store = ws.personal_store
+        p_store.save_intent_request(IntentRequest(
+            id="intent-p31",
+            workspace_id="p31_ws",
+            raw_input="Team Sync",
+            source_surface="test",
+            created_at=datetime.now(timezone.utc).isoformat(),
+        ))
+        prop = MissionProposal(
+            id="prop-p31",
+            intent_id="intent-p31",
+            workspace_id="p31_ws",
+            title="Team Sync",
+            objective="Create calendar event",
+            why="Testing approval",
+            context_summary="Team Sync",
+            confidence=1.0,
+            constraints=["allow:calendar.create_event"],
+            status=ProposalStatus.READY_FOR_ACCEPTANCE,
+        )
+        p_store.save_proposal(prop)
+        _, auth = ws.personal.accept_proposal("prop-p31", "p31_ws")
+
         # 1. Action execution delegation
         execution = ws.actions.execute(
             action_id="calendar.create_event",
             workspace_id="p31_ws",
             input_data={"title": "Team Sync", "start_time": "2026-10-10T12:00:00Z"},
             auto_approve=False,
+            authority=auth,
         )
 
         res_action = await approve_action_execution_route(

@@ -95,7 +95,11 @@ class WriteFileProvider(AIProvider):
             )
 
 
-def test_artifacts_tracking_in_execution_result(tmp_path):
+def test_artifacts_tracking_in_execution_result(tmp_path, accepted_authority_factory):
+    from aether.workspace.workspace import Workspace
+    ws = Workspace.get_or_init(tmp_path, name="artifact_ws")
+    _, auth = accepted_authority_factory(ws, title="Create output file")
+
     sandbox = PathSandbox(root=tmp_path)
     tools = create_filesystem_tools(sandbox)
     registry = ToolRegistry()
@@ -107,7 +111,7 @@ def test_artifacts_tracking_in_execution_result(tmp_path):
         provider=WriteFileProvider(),
         tool_registry=registry,
     )
-    task = Task(agent_name="ArtifactAgent", instruction="Create output.txt")
+    task = Task(agent_name="ArtifactAgent", instruction="Create output.txt", authority=auth, workspace_id=ws.name)
 
     result = agent.execute(task)
 

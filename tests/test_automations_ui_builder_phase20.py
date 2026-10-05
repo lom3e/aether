@@ -8,6 +8,7 @@ Validates:
 import asyncio
 import os
 from pathlib import Path
+from unittest.mock import MagicMock
 import pytest
 from starlette.requests import Request
 
@@ -37,6 +38,15 @@ from playwright.sync_api import sync_playwright
 _state: dict = {}
 
 
+class MockAutomationTeam:
+    def run(self, prompt: str, target_agent: str | None = None):
+        return type("MockResult", (), {
+            "output": f"Mock output for prompt: {prompt[:30]}",
+            "success": True,
+            "error": None,
+        })()
+
+
 @pytest.fixture(scope="module")
 def browser_context(aether_server):
     """Module-scoped browser context with Aether server."""
@@ -56,9 +66,11 @@ def _base_url() -> str:
 
 
 @pytest.mark.asyncio
-async def test_ui_builder_crud_and_execution_lifecycle(tmp_path: Path):
+async def test_ui_builder_crud_and_execution_lifecycle(tmp_path: Path, accepted_authority_factory):
     """Verify the exact sequence of REST API calls performed by the Automations UI builder."""
     ws = Workspace.get_or_init(tmp_path / "ws_ui_auto", "UI Automations WS")
+    ws.load_team = MagicMock(return_value=MockAutomationTeam())
+    _, auth = accepted_authority_factory(ws, title="Sprint Code Review Summary")
     scope = {
         "type": "http",
         "app": type("App", (), {"state": type("State", (), {"workspace": ws, "scheduler": None, "event_bus": None})()})(),
@@ -80,6 +92,7 @@ async def test_ui_builder_crud_and_execution_lifecycle(tmp_path: Path):
             {"id": "step_2", "name": "Draft Report", "agent_name": "Writer", "prompt_template": "Format review: {step_1_output}"},
         ],
         output_destination={"type": "file", "target_path": "reviews/sprint_summary.md"},
+        metadata={"authority": auth.to_dict()},
     )
     created = await create_automation(req, create_data)
     assert created["id"].startswith("auto_")
@@ -133,9 +146,11 @@ async def test_ui_builder_crud_and_execution_lifecycle(tmp_path: Path):
 
 
 @pytest.mark.asyncio
-async def test_knowledge_destination_execution(tmp_path: Path):
+async def test_knowledge_destination_execution(tmp_path: Path, accepted_authority_factory):
     """Verify automation pipeline that outputs directly into Knowledge Base."""
     ws = Workspace.get_or_init(tmp_path / "ws_kb_auto", "KB Auto WS")
+    ws.load_team = MagicMock(return_value=MockAutomationTeam())
+    _, auth = accepted_authority_factory(ws, title="Auto Research Ingest")
     scope = {
         "type": "http",
         "app": type("App", (), {"state": type("State", (), {"workspace": ws, "scheduler": None, "event_bus": None})()})(),
@@ -149,6 +164,7 @@ async def test_knowledge_destination_execution(tmp_path: Path):
         trigger={"type": "manual"},
         steps=[{"id": "s1", "name": "Generate Fact Sheet", "agent_name": "Manager", "prompt_template": "Fact Sheet: AI Multi-Agent Workforces"}],
         output_destination={"type": "knowledge"},
+        metadata={"authority": auth.to_dict()},
     )
     created = await create_automation(req, create_data)
     auto_id = created["id"]

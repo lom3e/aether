@@ -27,12 +27,13 @@ class AgentIdentity:
     def create(cls, name: str, role: str) -> "AgentIdentity":
         """Generate a new AgentIdentity with a fresh ID and current timestamps."""
         safe_name = "".join(c if c.isalnum() else "_" for c in name).lower()
+        now = time.time()
         return cls(
             id=f"agent_{safe_name}_{uuid.uuid4().hex[:8]}",
             name=name,
             role=role,
-            created_at=time.time(),
-            last_active=time.time(),
+            created_at=now,
+            last_active=now,
         )
 
 

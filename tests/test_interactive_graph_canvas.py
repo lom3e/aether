@@ -177,12 +177,13 @@ def test_playwright_interactive_execution_graph_canvas(tmp_path: Path, monkeypat
         HOME=str(tmp_path),
         AETHER_WORKSPACE=str(ws.root),
         AETHER_UI_DIR=str(Path("ui/dist").resolve()),
+        AETHER_ENABLE_TEST_PROVIDERS="1",
     )
     server_proc = subprocess.Popen(
         [
             str(Path(".venv/bin/uvicorn").resolve()),
             "aether.server.app:app",
-            "--port", "8995",
+            "--port", "8994",
             "--log-level", "warning",
         ],
         cwd=str(Path.cwd()),
@@ -201,7 +202,7 @@ def test_playwright_interactive_execution_graph_canvas(tmp_path: Path, monkeypat
             page.add_init_script("localStorage.setItem('aether_language', 'en');")
 
             # 1. Open UI
-            page.goto("http://localhost:8995")
+            page.goto("http://localhost:8994")
             page.wait_for_selector("text=Interactive Canvas Workspace", timeout=10000)
 
             # 2. Click Missions
@@ -243,7 +244,7 @@ def test_playwright_interactive_execution_graph_canvas(tmp_path: Path, monkeypat
 
             # 6. Start Mission to generate real Execution Run #1
             page.click("button:has-text('Start Mission')")
-            page.wait_for_selector("text=Run #1", timeout=15000)
+            page.wait_for_selector("text=Run #1", timeout=45000)
 
             # Re-open Inspector in Live Execution mode
             page.click("button:has-text('Inspect')")

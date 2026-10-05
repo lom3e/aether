@@ -43,7 +43,17 @@ class EventEmitter:
             self._listeners[event_type] = []
         self._listeners[event_type].append(callback)
 
-    def emit(self, event: AgentEvent) -> None:
+    def emit(self, event_or_type: AgentEvent | EventType, data: dict[str, Any] | None = None) -> None:
+        if isinstance(event_or_type, AgentEvent):
+            event = event_or_type
+        else:
+            meta = data or {}
+            event = AgentEvent(
+                event_type=event_or_type,
+                agent_name=meta.get("agent", meta.get("agent_name", "agent")),
+                task_id=meta.get("task_id", meta.get("execution_id", "")),
+                metadata=meta,
+            )
         if event.event_type in self._listeners:
             for listener in tuple(self._listeners[event.event_type]):
                 listener(event)

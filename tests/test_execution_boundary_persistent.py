@@ -118,9 +118,12 @@ async def test_genuine_authority_lifecycle_in_mission_runtime(tmp_path, accepted
 
     # 3. Genuine authority succeeds
     _, valid_auth = accepted_authority_factory(ws, title="Mission Proposal")
-    exec_run = await runtime.start_mission(mission.id, authority=valid_auth)
-    assert exec_run is not None
-    assert exec_run.mission_id == mission.id
+    try:
+        exec_run = await runtime.start_mission(mission.id, authority=valid_auth)
+        assert exec_run is not None
+        assert exec_run.mission_id == mission.id
+    finally:
+        await runtime.shutdown()
 
 
 def test_external_agent_adapter_enforces_persistent_authority(tmp_path, accepted_authority_factory):

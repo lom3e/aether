@@ -33,6 +33,7 @@ def test_playwright_workspace_and_conversation_flow(tmp_path, monkeypatch):
         PATH=subprocess.os.environ.get("PATH", ""),
         HOME=str(tmp_path),
         AETHER_WORKSPACE=str(ws.root),
+        AETHER_ENABLE_TEST_PROVIDERS="1",
     )
     server_proc = subprocess.Popen(
         [
@@ -109,11 +110,10 @@ def test_playwright_workspace_and_conversation_flow(tmp_path, monkeypatch):
             # 8. Switch back to Workspace Alpha
             page.click("text=Workspace Beta")
             page.wait_for_selector("text=Workspace Alpha", timeout=5000)
-            page.click("button:has-text('Workspace Alpha')")
-
             # Wait for switch back
-            page.wait_for_selector("text=Workspace Alpha", timeout=10000)
-            # Verify the original conversation is still present and intact
+            with page.expect_response("**/api/workspaces/switch"):
+                page.click("button:has-text('Workspace Alpha')")
+            time.sleep(1.0)
             page.wait_for_selector("button:has-text('Analyze competitor')", timeout=5000)
             assert page.is_visible("button:has-text('Analyze competitor')")
 

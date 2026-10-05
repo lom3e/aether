@@ -1490,6 +1490,8 @@ class PersonalAgentService:
                 proposal_constraints = []
                 if intent.action_id:
                     proposal_constraints.append(f"allow:{intent.action_id}")
+                elif intent.tier == IntentTier.DELEGATE:
+                    proposal_constraints.append(f"allow:workforce.delegate,workforce.delegate:{workspace_id}")
                 _, _, proposal, val_res = self.create_intent_and_proposal(
                     raw_input=prompt,
                     workspace_id=workspace_id,
@@ -1794,69 +1796,115 @@ class PersonalAgentService:
                         )
 
         elif intent.tier == IntentTier.DELEGATE:
-            # Phase A Macro-pass 1.1: ALL Composite / Delegated / Autonomous requests route through Proposal Foundation.
-            # Generates a truthful, versionable MissionProposal without executing tools, starting engines, or creating missions.
-            try:
-                intent_req, ctx_pack, proposal, val_res = self.create_intent_and_proposal(
-                    raw_input=prompt,
-                    workspace_id=workspace_id,
-                    session_id=session_id,
-                    source_surface="chat",
-                )
-            except Exception as exc:
-                logger.error("Failed to generate or persist mission proposal: %s", exc)
-                step_err = PersonalStep(
-                    id=f"step-{uuid.uuid4().hex[:8]}",
-                    title="Mission Proposal Generation Failed",
-                    status="failed",
-                    category="delegation",
-                    details={"error": str(exc)},
-                )
-                steps.append(step_err)
-                msg_fail = PersonalMessage(
-                    workspace_id=intent.workspace_id,
-                    id=f"pmsg-{uuid.uuid4().hex[:12]}",
-                    session_id=session_id or f"psess-{uuid.uuid4().hex[:8]}",
-                    role="assistant",
-                    content=f"❌ Unable to prepare proposal: {exc}",
-                    created_at=datetime.now(timezone.utc).isoformat(),
-                    tier=intent.tier,
-                    steps=steps,
-                    metadata={"error": str(exc)},
-                )
-                if self.store:
-                    try:
-                        self.store.add_message(msg_fail)
-                    except Exception:
-                        pass
-                return msg_fail
-
-            step_title = (
-                "Mission Proposal Prepared"
-                if val_res.is_valid
-                else "Mission Proposal (Review Required)"
-            )
             step_del = PersonalStep(
                 id=f"step-{uuid.uuid4().hex[:8]}",
-                title=step_title,
-                status="completed",
+                title="Orchestrating digital workforce",
+                status="running",
                 category="delegation",
-                details={
-                    "proposal_id": proposal.id,
-                    "proposal_title": proposal.title,
-                    "status": proposal.status.value,
-                    "validation_status": val_res.status.value,
-                    "confidence": proposal.confidence,
-                    "clarifications_needed": len(proposal.clarification_requirements),
-                },
             )
             steps.append(step_del)
 
-            msg_metadata["proposal_id"] = proposal.id
-            msg_metadata["proposal_status"] = proposal.status.value
-            msg_metadata["proposal_version"] = proposal.version
+            topic_title = self._extract_task_topic(prompt)
+            mission_title = f"Task: {topic_title}"
 
-            response_text = proposal.to_human_markdown()
+            if self.mission_store:
+                try:
+                    milestones = [
+                        {"title": f"Scope & Context: {topic_title}", "description": f"Gather context and scope objective for {prompt}"},
+                        {"title": f"Workforce Execution: {topic_title}", "description": f"Domain specialists perform structured analysis for {prompt}"},
+                        {"title": f"Synthesize Deliverables", "description": f"Consolidate domain findings and verify deliverables for {prompt}"},
+                    ]
+                    mission = self.mission_store.create_mission(
+                        title=mission_title,
+                        objective=intent.delegation_goal or prompt,
+                        workspace_id=workspace_id,
+                        milestones=milestones,
+                    )
+                    mission_id = mission.id
+                    step_del.details = {"mission_id": mission_id}
+                except Exception as e:
+                    logger.warning(f"Mission creation fallback: {e}")
+                    mission_id = f"msn-{uuid.uuid4().hex[:8]}"
+            else:
+                mission_id = f"msn-{uuid.uuid4().hex[:8]}"
+
+            exec_request.mission_id = mission_id
+            exec_request.mode = ExecutionMode.DELEGATE
+            exec_request.authority = authority
+
+            def background_workforce_worker(progress_cb: Any) -> dict[str, Any]:
+                res = self.runtime.execute(exec_request, progress_callback=progress_cb)
+                deliverables = res.deliverables or []
+                deliv_path = deliverables[0]["path"] if deliverables else None
+                deliv_name = deliverables[0]["name"] if deliverables else None
+
+                if self.mission_store and mission_id:
+                    try:
+                        ms = self.mission_store.list_milestones(mission_id)
+                        for m in ms:
+                            self.mission_store.update_milestone(
+                                m.id,
+                                status=MilestoneStatus.COMPLETED if res.success else MilestoneStatus.FAILED,
+                            )
+                        self.mission_store.update_mission(
+                            mission_id,
+                            status=MissionStatus.COMPLETED if res.success else MissionStatus.FAILED,
+                        )
+                        if deliverables:
+                            for d in deliverables:
+                                if isinstance(d, dict) and d.get("path"):
+                                    deliv_p = Path(d["path"])
+                                    if not deliv_p.is_absolute() and hasattr(self.workspace, "root") and self.workspace.root:
+                                        deliv_p = Path(self.workspace.root) / deliv_p
+                                    is_verified_on_disk = deliv_p.exists() and deliv_p.is_file()
+                                    self.mission_store.add_deliverable(
+                                        mission_id=mission_id,
+                                        deliverable=Deliverable(
+                                            id=f"del_{uuid.uuid4().hex[:12]}",
+                                            mission_id=mission_id,
+                                            execution_id=res.execution_id or "",
+                                            name=d.get("name", "deliverable"),
+                                            path=d.get("path", ""),
+                                            type=d.get("type", "document"),
+                                            status="verified" if is_verified_on_disk else "draft",
+                                        ),
+                                    )
+                    except Exception as me:
+                        logger.warning(f"Failed to synchronize mission after workforce run: {me}")
+
+                return {
+                    "summary": f"Completed workforce delegation for {topic_title}. Findings compiled into executive deliverable.",
+                    "deliverable_name": deliv_name,
+                    "deliverable_path": deliv_path,
+                    "mission_id": mission_id,
+                    "specialists": res.metadata.get("specialists", []),
+                    "coordinator": res.metadata.get("coordinator", "coordinator"),
+                }
+
+            task = self.task_manager.submit_task(
+                workspace_id=workspace_id,
+                session_id=session_id,
+                title=f"Analysis: {topic_title}",
+                tier=IntentTier.DELEGATE,
+                worker_fn=background_workforce_worker,
+                mission_id=mission_id,
+                metadata={"prompt": prompt, "entity": topic_title},
+            )
+
+            is_italian = any(w in prompt.lower() for w in ["chi", "cosa", "come", "perché", "perche", "dove", "dimmi", "puoi", "aiutami", "ciao", "buongiorno", "qual è", "quali", "grazie", "stai", "chiedi", "fai", "delega"])
+            if is_italian:
+                response_text = (
+                    f"Ho preso in carico la tua richiesta per **{topic_title}** e ho attivato la Digital Workforce in background.\n\n"
+                    f"Non è necessario attendere qui: riceverai una notifica non appena il deliverable sarà pronto. "
+                    f"Puoi anche seguire l'avanzamento in tempo reale o consultare la sezione **Work** (Mission: `{mission_id}`)."
+                )
+            else:
+                response_text = (
+                    f"I've initiated your request for **{topic_title}** with the digital workforce in the background.\n\n"
+                    f"You don't need to wait here: you'll receive a notification once the report and deliverables are ready. "
+                    f"You can monitor live progress or check the **Work** section (Mission: `{mission_id}`)."
+                )
+
 
 
         else:

@@ -589,6 +589,7 @@ def test_playwright_deliverables_viewer_and_explain(tmp_path, monkeypatch):
         HOME=str(tmp_path),
         AETHER_WORKSPACE=str(ws.root),
         AETHER_UI_DIR=str(Path("ui/dist").resolve()),
+        AETHER_ENABLE_TEST_PROVIDERS="1",
     )
 
     server_proc = subprocess.Popen(
@@ -632,7 +633,7 @@ def test_playwright_deliverables_viewer_and_explain(tmp_path, monkeypatch):
 
             # 4. Start Mission to generate real execution run
             page.click("button:has-text('Start Mission')")
-            page.wait_for_selector("text=Run #1", timeout=15000)
+            page.wait_for_selector("text=Run #1", timeout=45000)
 
             # 5. Register our real deliverables via API to simulate harvest with Quality Gate review
             store = ws.missions

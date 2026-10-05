@@ -284,6 +284,7 @@ def test_7_action_executor_truthful_gate_and_operation_auditing(temp_dirs, accep
         store=action_store,
         activity_service=act_svc,
         connection_service=conn_svc,
+        workspace=ws,
     )
 
     # 1. Unconfigured -> Fails cleanly with RuntimeError

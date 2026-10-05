@@ -293,9 +293,11 @@ def test_compile_multi_run_isolation(temp_workspace: Workspace):
 # ==============================================================================
 
 @pytest.mark.asyncio
-async def test_runtime_execution_compiles_graph_and_broadcasts(temp_workspace: Workspace):
+async def test_runtime_execution_compiles_graph_and_broadcasts(temp_workspace: Workspace, accepted_authority_factory):
     store = temp_workspace.missions
     mock_team = MockTeam()
+    temp_workspace.runtime = None
+    temp_workspace.load_team = MagicMock(return_value=mock_team)
     temp_workspace.teams = MagicMock()
     temp_workspace.teams.get_team.return_value = mock_team
 
@@ -313,15 +315,21 @@ async def test_runtime_execution_compiles_graph_and_broadcasts(temp_workspace: W
         title="Autonomous Mission",
         objective="Compile execution DAG on runtime steps",
         team_name="Engineering",
+        workspace_id=temp_workspace.name,
     )
     store.create_milestone(mission.id, title="Alpha Task", order_idx=0)
 
+    _, auth = accepted_authority_factory(temp_workspace, title="Autonomous Mission")
+
     # Start mission (coroutine)
-    exec_record = await runtime.start_mission(mission.id)
+    exec_record = await runtime.start_mission(mission.id, authority=auth)
     assert exec_record.id is not None
 
     # Wait for execution loop to finish
-    await asyncio.sleep(0.3)
+    handle = runtime._active_executions.get(exec_record.id)
+    if handle and handle.task:
+        await handle.task
+    await asyncio.sleep(0.5)
 
     # Check broadcast messages for mission_graph_updated
     graph_updates = [m for m in broadcasted_messages if m.get("type") == "mission_graph_updated"]

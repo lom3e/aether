@@ -496,13 +496,7 @@ class Runtime:
 
         live_provider = self.resolve_provider()
 
-        if coordinator.provider is None:
-            coordinator.provider = live_provider
-        for s in specialists:
-            if s.provider is None:
-                s.provider = live_provider
-
-        if not coordinator.provider:
+        if not live_provider:
             return ExecutionResult(
                 success=False,
                 status=ExecutionStatus.FAILED,
@@ -510,6 +504,10 @@ class Runtime:
                 execution_id=request.id,
                 metadata={"code": "NO_PROVIDER"},
             )
+
+        coordinator.provider = live_provider
+        for s in specialists:
+            s.provider = live_provider
 
         # Wire AgentTools for all specialists into coordinator's tool registry
         from aether.tools.agent_tool import AgentTool

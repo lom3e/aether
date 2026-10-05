@@ -4,13 +4,14 @@ from aether.core.execution import Task
 from aether.core.runtime import Runtime
 from aether.memory.in_memory import InMemoryMemory
 from aether.providers.mock import MockProvider
-from aether.tools.base import Tool, ToolExecutionContext
+from aether.tools.base import Tool, ToolClassification, ToolExecutionContext
 from aether.tools.registry import ToolRegistry
 
 
 class EchoTool(Tool):
     name = "echo"
     description = "Echo tool used in tests"
+    classification = ToolClassification.READ_ONLY
 
     def execute(self, input_data: str, context: ToolExecutionContext | None = None) -> str:
         return f"echo:{input_data}"

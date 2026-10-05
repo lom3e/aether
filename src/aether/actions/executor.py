@@ -113,13 +113,17 @@ class ActionExecutor:
         """Resolves workspace from injected self.workspace or active registry without silent fake fallback."""
         if self.workspace is not None:
             return self.workspace
+        from aether.workspace.workspace import Workspace
+        if self.project_path:
+            ws_by_path = Workspace.get(self.project_path)
+            if ws_by_path is not None:
+                if not workspace_id or workspace_id in (ws_by_path.name, ws_by_path.id, ws_by_path.root.name):
+                    return ws_by_path
         if workspace_id:
-            from aether.workspace.workspace import Workspace
             ws = Workspace.get(workspace_id) if hasattr(Workspace, "get") else None
             if ws is not None:
                 return ws
         if self.project_path:
-            from aether.workspace.workspace import Workspace
             ws = Workspace.get_or_init(self.project_path)
             if ws is not None:
                 return ws
