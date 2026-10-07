@@ -1,6 +1,7 @@
 import type { ReactNode, CSSProperties, ComponentType } from 'react';
 import { Minimize2 } from 'lucide-react';
 import { isTauri, minimizeToCompanion } from './desktop';
+import { useTranslation } from './i18n';
 
 export interface TopHeaderProps {
   title: ReactNode;
@@ -21,6 +22,7 @@ export function TopHeader({
   style,
   children,
 }: TopHeaderProps) {
+  const { t } = useTranslation();
   return (
     <header
       data-testid="top-header"
@@ -76,7 +78,7 @@ export function TopHeader({
           {isTauri() && (
             <button
               onClick={() => minimizeToCompanion()}
-              title="Minimize to Companion (Option+Space)"
+              title={t('topHeaderMinimizeShortcut')}
               data-testid="minimize-to-companion-btn"
               style={{
                 display: 'inline-flex',
@@ -93,7 +95,7 @@ export function TopHeader({
               }}
             >
               <Minimize2 size={13} />
-              <span>Minimize to Companion</span>
+              <span>{t('topHeaderMinimizeCompanion')}</span>
             </button>
           )}
         </div>

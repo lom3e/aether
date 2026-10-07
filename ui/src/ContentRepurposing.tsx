@@ -21,6 +21,7 @@ import {
 } from 'lucide-react';
 import { apiUrl } from './api';
 import { ToastContext } from './toast';
+import { useTranslation } from './i18n';
 
 function LinkedinIcon({ size = 15, color = "#0A66C2" }: { size?: number; color?: string }) {
   return (
@@ -116,6 +117,7 @@ interface CampaignBI {
 }
 
 export function ContentRepurposing({ navigate }: { navigate: (view: string) => void }) {
+  const { t } = useTranslation();
   // Main Tab Navigation: 'repurpose' | 'bi' | 'clients'
   const [activeMainTab, setActiveMainTab] = useState<'repurpose' | 'bi' | 'clients'>('repurpose');
 
@@ -188,7 +190,7 @@ By standardizing on self-healing execution and strict safety policies, engineeri
 
   const fetchCampaigns = async () => {
     try {
-      const res = await fetch(apiUrl('/content/campaigns'));
+      const res = await fetch(apiUrl('/api/content/campaigns'));
       if (res.ok) {
         const data = await res.json();
         setCampaigns(data);
@@ -207,7 +209,7 @@ By standardizing on self-healing execution and strict safety policies, engineeri
 
   const fetchClients = async () => {
     try {
-      const res = await fetch(apiUrl('/client/profiles'));
+      const res = await fetch(apiUrl('/api/client/profiles'));
       if (res.ok) {
         const data = await res.json();
         setClients(data);
@@ -225,7 +227,7 @@ By standardizing on self-healing execution and strict safety policies, engineeri
     if (!campaignId) return;
     setBiLoading(true);
     try {
-      const res = await fetch(apiUrl(`/analytics/campaigns/${campaignId}`));
+      const res = await fetch(apiUrl(`/api/analytics/campaigns/${campaignId}`));
       if (res.ok) {
         const data = await res.json();
         setBiData(data);
@@ -246,7 +248,7 @@ By standardizing on self-healing execution and strict safety policies, engineeri
     setLoading(true);
     setError(null);
     try {
-      const res = await fetch(apiUrl('/content/repurpose'), {
+      const res = await fetch(apiUrl('/api/content/repurpose'), {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -283,7 +285,7 @@ By standardizing on self-healing execution and strict safety policies, engineeri
   const handleScheduleSubmit = async () => {
     if (!scheduleVariantId) return;
     try {
-      const res = await fetch(apiUrl(`/content/variants/${scheduleVariantId}/schedule`), {
+      const res = await fetch(apiUrl(`/api/content/variants/${scheduleVariantId}/schedule`), {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ scheduled_at: scheduleDateTime || new Date().toISOString() }),
@@ -305,7 +307,7 @@ By standardizing on self-healing execution and strict safety policies, engineeri
 
   const handlePublish = async (variantId: string) => {
     try {
-      const res = await fetch(apiUrl(`/content/variants/${variantId}/publish`), {
+      const res = await fetch(apiUrl(`/api/content/variants/${variantId}/publish`), {
         method: 'POST',
       });
       if (res.ok) {
@@ -325,7 +327,7 @@ By standardizing on self-healing execution and strict safety policies, engineeri
   const handleCreateCampaign = async () => {
     if (!newCampName.trim()) return;
     try {
-      const res = await fetch(apiUrl('/content/campaigns'), {
+      const res = await fetch(apiUrl('/api/content/campaigns'), {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -357,7 +359,7 @@ By standardizing on self-healing execution and strict safety policies, engineeri
   const handleCreateClient = async () => {
     if (!newClientName.trim()) return;
     try {
-      const res = await fetch(apiUrl('/client/profiles'), {
+      const res = await fetch(apiUrl('/api/client/profiles'), {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -389,7 +391,7 @@ By standardizing on self-healing execution and strict safety policies, engineeri
 
   const handleGenerateReport = async (clientId: string) => {
     try {
-      const res = await fetch(apiUrl(`/client/profiles/${clientId}/reports`), {
+      const res = await fetch(apiUrl(`/api/client/profiles/${clientId}/reports`), {
         method: 'POST',
       });
       if (res.ok) {
@@ -407,7 +409,7 @@ By standardizing on self-healing execution and strict safety policies, engineeri
 
   const handleCreateReview = async (clientId: string) => {
     try {
-      const res = await fetch(apiUrl('/client/reviews'), {
+      const res = await fetch(apiUrl('/api/client/reviews'), {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -441,136 +443,137 @@ By standardizing on self-healing execution and strict safety policies, engineeri
   const currentVariant = variants.find((v) => v.platform === activePlatformTab);
 
   return (
-    <div style={{ padding: '24px', maxWidth: '1400px', margin: '0 auto' }}>
-      {/* Top Header */}
-      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '20px' }}>
-        <div>
-          <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '4px' }}>
-            <Share2 size={24} style={{ color: 'hsl(var(--primary))' }} />
-            <h1 style={{ fontSize: '24px', fontWeight: 700, margin: 0 }}>Social Workforce & Business Intelligence</h1>
-            <span
-              style={{
-                fontSize: '11px',
-                fontWeight: 600,
-                padding: '2px 8px',
-                borderRadius: '12px',
-                backgroundColor: 'hsl(var(--primary)/0.15)',
-                color: 'hsl(var(--primary))',
-              }}
-            >
-              Autonomous Engine
-            </span>
+    <div style={{ flex: 1, overflowY: 'auto', width: '100%', height: '100%' }}>
+      <div style={{ padding: '24px', maxWidth: '1400px', margin: '0 auto' }}>
+        {/* Top Header */}
+        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '20px' }}>
+          <div>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '4px' }}>
+              <Share2 size={24} style={{ color: 'hsl(var(--primary))' }} />
+              <h1 style={{ fontSize: '24px', fontWeight: 700, margin: 0 }}>{t('contentHeaderTitle')}</h1>
+              <span
+                style={{
+                  fontSize: '11px',
+                  fontWeight: 600,
+                  padding: '2px 8px',
+                  borderRadius: '12px',
+                  backgroundColor: 'hsl(var(--primary)/0.15)',
+                  color: 'hsl(var(--primary))',
+                }}
+              >
+                Autonomous Engine
+              </span>
+            </div>
+            <p style={{ fontSize: '13px', color: 'hsl(var(--muted-fg))', margin: 0 }}>
+              {t('contentHeaderSubtitle')}
+            </p>
           </div>
-          <p style={{ fontSize: '13px', color: 'hsl(var(--muted-fg))', margin: 0 }}>
-            Multichannel content adaptation, campaign intelligence, client sign-off gates, and executive reporting.
-          </p>
+
+          <div style={{ display: 'flex', gap: '8px' }}>
+            <button
+              className="btn btn-ghost"
+              onClick={() => navigate('missions')}
+              style={{ fontSize: '13px' }}
+            >
+              Missions
+            </button>
+            <button
+              className="btn btn-secondary"
+              onClick={() => setShowCampaignModal(true)}
+              style={{ display: 'flex', alignItems: 'center', gap: '6px', fontSize: '13px' }}
+            >
+              <Plus size={15} />
+              New Campaign
+            </button>
+            <button
+              className="btn btn-primary"
+              onClick={() => setShowClientModal(true)}
+              style={{ display: 'flex', alignItems: 'center', gap: '6px', fontSize: '13px' }}
+            >
+              <Users size={15} />
+              New Client
+            </button>
+          </div>
         </div>
 
-        <div style={{ display: 'flex', gap: '8px' }}>
+        {/* Main Feature Tabs */}
+        <div
+          style={{
+            display: 'flex',
+            gap: '8px',
+            borderBottom: '1px solid hsl(var(--border))',
+            marginBottom: '20px',
+          }}
+        >
           <button
-            className="btn btn-ghost"
-            onClick={() => navigate('missions')}
-            style={{ fontSize: '13px' }}
+            onClick={() => setActiveMainTab('repurpose')}
+            style={{
+              padding: '10px 16px',
+              fontSize: '13px',
+              fontWeight: activeMainTab === 'repurpose' ? 600 : 400,
+              color: activeMainTab === 'repurpose' ? 'hsl(var(--primary))' : 'hsl(var(--muted-fg))',
+              borderBottom: activeMainTab === 'repurpose' ? '2px solid hsl(var(--primary))' : '2px solid transparent',
+              background: 'none',
+              borderTop: 'none',
+              borderLeft: 'none',
+              borderRight: 'none',
+              cursor: 'pointer',
+              display: 'flex',
+              alignItems: 'center',
+              gap: '6px',
+            }}
           >
-            Missions
+            <Share2 size={15} />
+            {t('contentTabVariants')}
           </button>
+
           <button
-            className="btn btn-secondary"
-            onClick={() => setShowCampaignModal(true)}
-            style={{ display: 'flex', alignItems: 'center', gap: '6px', fontSize: '13px' }}
+            onClick={() => {
+              setActiveMainTab('bi');
+              if (selectedCampaignId) fetchBI(selectedCampaignId);
+            }}
+            style={{
+              padding: '10px 16px',
+              fontSize: '13px',
+              fontWeight: activeMainTab === 'bi' ? 600 : 400,
+              color: activeMainTab === 'bi' ? 'hsl(var(--primary))' : 'hsl(var(--muted-fg))',
+              borderBottom: activeMainTab === 'bi' ? '2px solid hsl(var(--primary))' : '2px solid transparent',
+              background: 'none',
+              borderTop: 'none',
+              borderLeft: 'none',
+              borderRight: 'none',
+              cursor: 'pointer',
+              display: 'flex',
+              alignItems: 'center',
+              gap: '6px',
+            }}
           >
-            <Plus size={15} />
-            New Campaign
+            <TrendingUp size={15} />
+            {t('contentTabAnalytics')}
           </button>
+
           <button
-            className="btn btn-primary"
-            onClick={() => setShowClientModal(true)}
-            style={{ display: 'flex', alignItems: 'center', gap: '6px', fontSize: '13px' }}
+            onClick={() => setActiveMainTab('clients')}
+            style={{
+              padding: '10px 16px',
+              fontSize: '13px',
+              fontWeight: activeMainTab === 'clients' ? 600 : 400,
+              color: activeMainTab === 'clients' ? 'hsl(var(--primary))' : 'hsl(var(--muted-fg))',
+              borderBottom: activeMainTab === 'clients' ? '2px solid hsl(var(--primary))' : '2px solid transparent',
+              background: 'none',
+              borderTop: 'none',
+              borderLeft: 'none',
+              borderRight: 'none',
+              cursor: 'pointer',
+              display: 'flex',
+              alignItems: 'center',
+              gap: '6px',
+            }}
           >
-            <Users size={15} />
-            New Client
+            <Briefcase size={15} />
+            {t('contentTabClients')}
           </button>
         </div>
-      </div>
-
-      {/* Main Feature Tabs */}
-      <div
-        style={{
-          display: 'flex',
-          gap: '8px',
-          borderBottom: '1px solid hsl(var(--border))',
-          marginBottom: '20px',
-        }}
-      >
-        <button
-          onClick={() => setActiveMainTab('repurpose')}
-          style={{
-            padding: '10px 16px',
-            fontSize: '13px',
-            fontWeight: activeMainTab === 'repurpose' ? 600 : 400,
-            color: activeMainTab === 'repurpose' ? 'hsl(var(--primary))' : 'hsl(var(--muted-fg))',
-            borderBottom: activeMainTab === 'repurpose' ? '2px solid hsl(var(--primary))' : '2px solid transparent',
-            background: 'none',
-            borderTop: 'none',
-            borderLeft: 'none',
-            borderRight: 'none',
-            cursor: 'pointer',
-            display: 'flex',
-            alignItems: 'center',
-            gap: '6px',
-          }}
-        >
-          <Share2 size={15} />
-          Content Repurposing
-        </button>
-
-        <button
-          onClick={() => {
-            setActiveMainTab('bi');
-            if (selectedCampaignId) fetchBI(selectedCampaignId);
-          }}
-          style={{
-            padding: '10px 16px',
-            fontSize: '13px',
-            fontWeight: activeMainTab === 'bi' ? 600 : 400,
-            color: activeMainTab === 'bi' ? 'hsl(var(--primary))' : 'hsl(var(--muted-fg))',
-            borderBottom: activeMainTab === 'bi' ? '2px solid hsl(var(--primary))' : '2px solid transparent',
-            background: 'none',
-            borderTop: 'none',
-            borderLeft: 'none',
-            borderRight: 'none',
-            cursor: 'pointer',
-            display: 'flex',
-            alignItems: 'center',
-            gap: '6px',
-          }}
-        >
-          <TrendingUp size={15} />
-          Campaign Intelligence & ROI
-        </button>
-
-        <button
-          onClick={() => setActiveMainTab('clients')}
-          style={{
-            padding: '10px 16px',
-            fontSize: '13px',
-            fontWeight: activeMainTab === 'clients' ? 600 : 400,
-            color: activeMainTab === 'clients' ? 'hsl(var(--primary))' : 'hsl(var(--muted-fg))',
-            borderBottom: activeMainTab === 'clients' ? '2px solid hsl(var(--primary))' : '2px solid transparent',
-            background: 'none',
-            borderTop: 'none',
-            borderLeft: 'none',
-            borderRight: 'none',
-            cursor: 'pointer',
-            display: 'flex',
-            alignItems: 'center',
-            gap: '6px',
-          }}
-        >
-          <Briefcase size={15} />
-          Client Work & Review Gates
-        </button>
-      </div>
 
       {/* TAB 1: Content Repurposing Engine */}
       {activeMainTab === 'repurpose' && (
@@ -587,12 +590,12 @@ By standardizing on self-healing execution and strict safety policies, engineeri
             >
               <h2 style={{ fontSize: '15px', fontWeight: 600, marginBottom: '12px', display: 'flex', alignItems: 'center', gap: '6px' }}>
                 <FileText size={16} />
-                Source Material
+                {t('contentSourceMaterial')}
               </h2>
 
               <div style={{ marginBottom: '12px' }}>
                 <label style={{ fontSize: '12px', fontWeight: 500, color: 'hsl(var(--muted-fg))', display: 'block', marginBottom: '4px' }}>
-                  Asset Title
+                  {t('contentAssetTitle')}
                 </label>
                 <input
                   type="text"
@@ -600,17 +603,17 @@ By standardizing on self-healing execution and strict safety policies, engineeri
                   style={{ width: '100%', fontSize: '13px' }}
                   value={title}
                   onChange={(e) => setTitle(e.target.value)}
-                  placeholder="e.g. Scaling Autonomous Agent Workforces"
+                  placeholder={t('contentAssetPlaceholder')}
                 />
               </div>
 
               <div style={{ marginBottom: '12px' }}>
                 <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '4px' }}>
                   <label style={{ fontSize: '12px', fontWeight: 500, color: 'hsl(var(--muted-fg))' }}>
-                    Raw Content / Deliverable Markdown
+                    {t('contentRawContent')}
                   </label>
                   <span style={{ fontSize: '11px', color: 'hsl(var(--muted-fg))' }}>
-                    {sourceText.length} characters
+                    {sourceText.length} {t('contentChars')}
                   </span>
                 </div>
                 <textarea
@@ -626,7 +629,7 @@ By standardizing on self-healing execution and strict safety policies, engineeri
               {/* Campaign Selection */}
               <div style={{ marginBottom: '12px' }}>
                 <label style={{ fontSize: '12px', fontWeight: 500, color: 'hsl(var(--muted-fg))', display: 'block', marginBottom: '4px' }}>
-                  Associate with Campaign (Optional)
+                  {t('contentCampaignOptional')}
                 </label>
                 <select
                   className="input"
@@ -634,7 +637,7 @@ By standardizing on self-healing execution and strict safety policies, engineeri
                   value={selectedCampaignId}
                   onChange={(e) => setSelectedCampaignId(e.target.value)}
                 >
-                  <option value="">No Campaign (Ad-hoc Asset)</option>
+                  <option value="">{t('contentNoCampaign')}</option>
                   {campaigns.map((c) => (
                     <option key={c.id} value={c.id}>
                       {c.name} ({c.status})
@@ -646,7 +649,7 @@ By standardizing on self-healing execution and strict safety policies, engineeri
               {/* Tone Selector */}
               <div style={{ marginBottom: '16px' }}>
                 <label style={{ fontSize: '12px', fontWeight: 500, color: 'hsl(var(--muted-fg))', display: 'block', marginBottom: '4px' }}>
-                  Tone of Voice
+                  {t('contentToneOfVoice')}
                 </label>
                 <select
                   className="input"
@@ -654,25 +657,25 @@ By standardizing on self-healing execution and strict safety policies, engineeri
                   value={tone}
                   onChange={(e) => setTone(e.target.value)}
                 >
-                  <option value="thought_leadership">Thought Leadership (Executive & Authoritative)</option>
-                  <option value="punchy_viral">Punchy & Viral (High-Contrast & Hook-Driven)</option>
-                  <option value="educational">Educational (Actionable Breakdown & Steps)</option>
-                  <option value="storytelling">Storytelling (Behind-The-Scenes Narrative)</option>
-                  <option value="conversational">Conversational (Direct & Community-Oriented)</option>
+                  <option value="thought_leadership">{t('contentToneThoughtLeadership')}</option>
+                  <option value="punchy_viral">{t('contentTonePunchyViral')}</option>
+                  <option value="educational">{t('contentToneEducational')}</option>
+                  <option value="storytelling">{t('contentToneStorytelling')}</option>
+                  <option value="conversational">{t('contentToneConversational')}</option>
                 </select>
               </div>
 
               {/* Target Platforms Checkboxes */}
               <div style={{ marginBottom: '18px' }}>
                 <label style={{ fontSize: '12px', fontWeight: 500, color: 'hsl(var(--muted-fg))', display: 'block', marginBottom: '6px' }}>
-                  Target Platforms
+                  {t('contentTargetPlatforms')}
                 </label>
                 <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, 1fr)', gap: '8px' }}>
                   {[
-                    { id: 'linkedin', label: 'LinkedIn Post', icon: <LinkedinIcon size={14} color="#0A66C2" /> },
-                    { id: 'twitter_thread', label: 'Twitter / X Thread', icon: <TwitterIcon size={14} color="#1DA1F2" /> },
-                    { id: 'newsletter', label: 'Newsletter Digest', icon: <Mail size={14} color="#FF6600" /> },
-                    { id: 'video_script', label: 'Short-Form Script', icon: <Video size={14} color="#E1306C" /> },
+                    { id: 'linkedin', label: t('contentPlatformLinkedIn'), icon: <LinkedinIcon size={14} color="#0A66C2" /> },
+                    { id: 'twitter_thread', label: t('contentPlatformTwitter'), icon: <TwitterIcon size={14} color="#1DA1F2" /> },
+                    { id: 'newsletter', label: t('contentPlatformNewsletter'), icon: <Mail size={14} color="#FF6600" /> },
+                    { id: 'video_script', label: t('contentPlatformScript'), icon: <Video size={14} color="#E1306C" /> },
                   ].map((p) => (
                     <label
                       key={p.id}
@@ -712,7 +715,7 @@ By standardizing on self-healing execution and strict safety policies, engineeri
                 disabled={loading || selectedPlatforms.length === 0}
               >
                 <Sparkles size={16} />
-                {loading ? 'Repurposing Content...' : 'Repurpose with Social Workforce'}
+                {loading ? t('contentBtnRepurposing') : t('contentBtnRepurpose')}
               </button>
 
               {error && (
@@ -754,9 +757,9 @@ By standardizing on self-healing execution and strict safety policies, engineeri
                 }}
               >
                 <Share2 size={36} style={{ color: 'hsl(var(--muted-fg))', marginBottom: '12px', opacity: 0.6 }} />
-                <h3 style={{ fontSize: '16px', fontWeight: 600, margin: '0 0 6px 0' }}>No Repurposed Variants Yet</h3>
+                <h3 style={{ fontSize: '16px', fontWeight: 600, margin: '0 0 6px 0' }}>{t('contentNoVariantsTitle')}</h3>
                 <p style={{ fontSize: '13px', color: 'hsl(var(--muted-fg))', maxWidth: '360px', margin: 0 }}>
-                  Configure your source text on the left and click "Repurpose with Social Workforce" to generate multi-channel adaptations.
+                  {t('contentNoVariantsDesc')}
                 </p>
               </div>
             ) : (
@@ -1572,6 +1575,7 @@ By standardizing on self-healing execution and strict safety policies, engineeri
           </div>
         </div>
       )}
+      </div>
     </div>
   );
 }

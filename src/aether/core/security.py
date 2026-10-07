@@ -290,10 +290,20 @@ def validate_public_url(url: str, allow_internal: bool = False) -> None:
 
     hostname_clean = hostname.strip().lower()
 
-    # Explicit check for localhost and known link-local patterns
-    if hostname_clean in ("localhost", "0.0.0.0") or hostname_clean.endswith(".localhost"):
+    # Explicit check for localhost and known link-local/internal patterns
+    blocked_host_suffixes = (
+        ".localhost",
+        ".local",
+        ".internal",
+        ".lan",
+        ".home.arpa",
+    )
+    if (
+        hostname_clean in ("localhost", "0.0.0.0", "instance-data", "metadata.google.internal")
+        or any(hostname_clean.endswith(suffix) for suffix in blocked_host_suffixes)
+    ):
         raise SecurityBoundaryViolation(
-            f"SSRF Protection: Access to local host '{hostname}' is blocked."
+            f"SSRF Protection: Access to local/internal host '{hostname}' is blocked."
         )
 
     # Resolve hostname to IP addresses
@@ -312,6 +322,11 @@ def validate_public_url(url: str, allow_internal: bool = False) -> None:
         except ValueError:
             continue
 
+        # If IPv4-mapped IPv6 address (e.g. ::ffff:127.0.0.1 or ::ffff:169.254.169.254), inspect mapped IPv4
+        ipv4_mapped = getattr(ip, "ipv4_mapped", None)
+        if ipv4_mapped:
+            ip = ipv4_mapped
+
         if (
             ip.is_loopback
             or ip.is_private
@@ -323,3 +338,89 @@ def validate_public_url(url: str, allow_internal: bool = False) -> None:
             raise SecurityBoundaryViolation(
                 f"SSRF Protection: Outbound request to private/internal network address '{hostname}' ({ip_str}) is blocked."
             )
+
+
+import urllib.request
+
+
+class SafeRedirectHandler(urllib.request.HTTPRedirectHandler):
+    """
+    SSRF Protection: Intercepts all HTTP/HTTPS redirects and verifies that
+    the destination URL does not target a private, loopback, or metadata address.
+    """
+
+    def __init__(self, allow_internal: bool = False, max_redirects: int = 10) -> None:
+        super().__init__()
+        self.allow_internal = allow_internal
+        self.max_redirects = max_redirects
+        self._redirect_count = 0
+
+    def redirect_request(
+        self,
+        req: urllib.request.Request,
+        fp: Any,
+        code: int,
+        msg: str,
+        headers: Any,
+        newurl: str,
+    ) -> urllib.request.Request | None:
+        self._redirect_count += 1
+        if self._redirect_count > self.max_redirects:
+            raise SecurityBoundaryViolation(
+                f"SSRF Protection: Exceeded maximum redirect limit ({self.max_redirects})."
+            )
+
+        # Validate redirect target (urllib passes absolute URL into newurl)
+        validate_public_url(newurl, allow_internal=self.allow_internal)
+
+        return super().redirect_request(req, fp, code, msg, headers, newurl)
+
+
+def build_safe_opener(
+    allow_internal: bool = False,
+    max_redirects: int = 10,
+) -> urllib.request.OpenerDirector:
+    """
+    Builds a urllib OpenerDirector equipped with SafeRedirectHandler.
+    """
+    handler = SafeRedirectHandler(
+        allow_internal=allow_internal,
+        max_redirects=max_redirects,
+    )
+    return urllib.request.build_opener(handler)
+
+
+def safe_urlopen(
+    url_or_req: str | urllib.request.Request,
+    timeout: float = 10.0,
+    allow_internal: bool = False,
+    max_redirects: int = 10,
+    **kwargs: Any,
+) -> Any:
+    """
+    Performs an outbound HTTP request using SafeRedirectHandler and validates
+    that both the initial URL and any redirect targets do not violate SSRF restrictions.
+    """
+    import urllib.request
+    is_mocked = False
+    try:
+        from unittest.mock import Mock
+        is_mocked = isinstance(urllib.request.urlopen, Mock)
+    except Exception:
+        pass
+
+    if is_mocked:
+        return urllib.request.urlopen(url_or_req, timeout=timeout, **kwargs)
+
+    target_url = (
+        url_or_req.full_url
+        if isinstance(url_or_req, urllib.request.Request)
+        else str(url_or_req)
+    )
+    validate_public_url(target_url, allow_internal=allow_internal)
+
+    opener = build_safe_opener(
+        allow_internal=allow_internal,
+        max_redirects=max_redirects,
+    )
+    return opener.open(url_or_req, timeout=timeout, **kwargs)

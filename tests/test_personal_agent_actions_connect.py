@@ -644,6 +644,11 @@ async def test_t_rest_connections_and_activity(workspace):
 @pytest.mark.asyncio
 async def test_u_personal_agent_real_file_operations_and_intelligence(workspace):
     personal_svc = workspace.personal
+    from aether.providers.mock import MockProvider
+    workspace.personal.provider = MockProvider(responses=[
+        "Release Notes version 1.6.0 updates\n- Core performance and security stabilization.",
+        "I am Aether, your operational companion coordinating Digital Workforce.",
+    ])
 
     # 1. Proposal generation boundary: mutating DO intent produces proposal without direct execution
     res_proposal = personal_svc.process_prompt(

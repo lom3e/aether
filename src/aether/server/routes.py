@@ -76,6 +76,24 @@ async def system_shutdown(request: Request):
         "active_tasks_cancelled": cancelled_count,
     }
 
+
+class OpenBrowserPayload(BaseModel):
+    url: str
+
+
+@router.post("/system/open-browser")
+async def system_open_browser(payload: OpenBrowserPayload):
+    """Safely opens a verified HTTP/HTTPS external URL in the user's default browser."""
+    target_url = (payload.url or "").strip()
+    if not (target_url.startswith("https://") or target_url.startswith("http://")):
+        raise HTTPException(status_code=400, detail="Only http and https protocols are supported.")
+    import webbrowser
+    import threading
+
+    threading.Thread(target=webbrowser.open, args=(target_url,), daemon=True).start()
+    return {"status": "opened", "url": target_url}
+
+
 _VALID_PROVIDERS = {"openai", "anthropic", "gemini", "ollama", "mock"}
 _VALID_KNOWLEDGE_EXTENSIONS = {".txt", ".md", ".markdown", ".csv", ".pdf", ".rst", ".py", ".yaml", ".yml", ".json", ".docx"}
 _MAX_UPLOAD_BYTES = 25 * 1024 * 1024
@@ -559,6 +577,12 @@ async def ingest_knowledge_url(request: Request, payload: IngestUrlRequest):
     if not url.startswith("http://") and not url.startswith("https://"):
         raise HTTPException(status_code=400, detail="Invalid URL scheme. Must start with http:// or https://")
 
+    from aether.core.security import validate_public_url, SecurityBoundaryViolation
+    try:
+        validate_public_url(url)
+    except SecurityBoundaryViolation as s_err:
+        raise HTTPException(status_code=400, detail=str(s_err))
+
     parsed = urlparse(url)
     filename = payload.title or (parsed.netloc + parsed.path.rstrip("/")).replace("/", "_") or "webpage"
     if not filename.endswith((".html", ".htm")):
@@ -741,24 +765,11 @@ async def init_workspace(request: Request, data: WorkspaceInitRequest):
         ws = Workspace.get_or_init(cwd, data.name.strip())
         request.app.state.workspace = ws
 
-        # Save API key to .env if provided
+        # Store API key securely in SecretStore if provided
         if data.api_key and data.provider:
-            env_file = ws.root / ".env"
-            env_vars = {}
-            if env_file.exists():
-                for line in env_file.read_text(encoding="utf-8").splitlines():
-                    if "=" in line and not line.strip().startswith("#"):
-                        k, v = line.split("=", 1)
-                        env_vars[k.strip()] = v.strip()
-            key_map = {
-                "openai": "OPENAI_API_KEY",
-                "anthropic": "ANTHROPIC_API_KEY",
-                "gemini": "GEMINI_API_KEY"
-            }
-            if data.provider in key_map:
-                env_vars[key_map[data.provider]] = data.api_key
-                lines = [f"{k}={v}" for k, v in env_vars.items()]
-                env_file.write_text("\n".join(lines) + "\n", encoding="utf-8")
+            s_store = getattr(ws, "secret_store", None)
+            if s_store:
+                s_store.set_secret(f"provider_api_key:{data.provider.lower()}", data.api_key)
 
         # Apply selected preset (or default to starter-workforce)
         preset_to_apply = data.preset_id or "starter-workforce"
@@ -824,12 +835,6 @@ async def get_provider_settings(request: Request):
     has_anthropic = bool((s_store and s_store.has_secret("provider_api_key:anthropic")) or os.environ.get("ANTHROPIC_API_KEY"))
     has_gemini = bool((s_store and s_store.has_secret("provider_api_key:gemini")) or os.environ.get("GEMINI_API_KEY"))
 
-    env_file = ws.root / ".env" if ws and hasattr(ws, "root") and ws.root else None
-    if env_file and env_file.exists():
-        has_openai = has_openai or _env_has_value(env_file, "OPENAI_API_KEY")
-        has_anthropic = has_anthropic or _env_has_value(env_file, "ANTHROPIC_API_KEY")
-        has_gemini = has_gemini or _env_has_value(env_file, "GEMINI_API_KEY")
-
     # Read default provider from team if exists
     team = request.app.state.team
     provider = team.config.default_provider if team else "openai"
@@ -878,14 +883,6 @@ async def get_provider_status(
         api_key = s_store.get_secret(f"provider_api_key:{effective_provider.lower()}")
     if not api_key:
         api_key = os.environ.get(f"{effective_provider.upper()}_API_KEY")
-    if not api_key and ws and hasattr(ws, "root") and ws.root:
-        env_file = ws.root / ".env"
-        if env_file.exists():
-            for line in env_file.read_text(encoding="utf-8").splitlines():
-                if "=" in line and not line.strip().startswith("#"):
-                    k, v = line.split("=", 1)
-                    if k.strip().upper() == f"{effective_provider.upper()}_API_KEY":
-                        api_key = v.strip()
 
     from aether.providers.health import get_default_health_checker
     checker = get_default_health_checker()
@@ -3272,7 +3269,10 @@ async def create_mission(request: Request, data: CreateMissionPayload):
                             why="User initiated mission in UI",
                             context_summary=f"Mission {mission.title} ({mission.id})",
                             confidence=1.0,
-                            constraints=[],
+                            constraints=[
+                                f"bind_mission:{mission.id}",
+                                f"allow:mission.start:{mission.id},mission.execute:{mission.id},mission.rerun:{mission.id},mission.resume:{mission.id},mission.retry:{mission.id},mission.*",
+                            ],
                             status=ProposalStatus.READY_FOR_ACCEPTANCE,
                         )
                         p_store.save_proposal(prop)
@@ -4166,7 +4166,10 @@ async def start_mission_route(request: Request, mission_id: str, payload: Missio
                     why="User started mission in UI",
                     context_summary=f"Mission {mission.title} ({mission.id})",
                     confidence=1.0,
-                    constraints=[],
+                    constraints=[
+                        f"bind_mission:{mission.id}",
+                        f"allow:mission.start:{mission.id},mission.execute:{mission.id},mission.rerun:{mission.id},mission.resume:{mission.id},mission.retry:{mission.id},mission.*",
+                    ],
                     status=ProposalStatus.READY_FOR_ACCEPTANCE,
                 )
                 p_store.save_proposal(prop)
@@ -5391,6 +5394,34 @@ async def repurpose_content_route(request: Request, payload: RepurposePayload):
     if not ws:
         raise HTTPException(status_code=503, detail="Workspace not initialized.")
 
+    team = getattr(request.app.state, "team", None)
+    effective_provider = (team.config.default_provider if team and hasattr(team, "config") and team.config else None)
+    if not effective_provider:
+        effective_provider = getattr(ws, "config", {}).get("workspace", {}).get("default_provider", "ollama") if ws else "ollama"
+    effective_model = (team.config.default_model if team and hasattr(team, "config") and team.config else None) or "qwen3.5:9b"
+
+    api_key: str | None = None
+    s_store = getattr(ws, "secret_store", None)
+    if s_store:
+        api_key = s_store.get_secret(f"provider_api_key:{effective_provider.lower()}")
+    if not api_key:
+        api_key = os.environ.get(f"{effective_provider.upper()}_API_KEY")
+
+    from aether.providers.health import get_default_health_checker
+    checker = get_default_health_checker()
+    status = await checker.acheck_health(
+        provider=effective_provider,
+        model=effective_model,
+        api_key=api_key,
+        force_refresh=False,
+    )
+    if not status.reachable:
+        err_msg = status.error or f"AI provider '{effective_provider}' is not reachable. Ensure the provider is running."
+        raise HTTPException(
+            status_code=503,
+            detail=f"Provider unavailable: {err_msg}",
+        )
+
     from aether.content.models import RepurposeRequest, PlatformType, ContentTone
     target_platforms = []
     for p in payload.target_platforms:
@@ -5664,6 +5695,7 @@ class RunBenchmarkPayload(BaseModel):
     error_rate: float | None = None
     quality_score: float | None = None
     safety_compliance: float | None = None
+    completion_rate: float | None = None
     status: str = "completed"
     metadata: dict[str, Any] = Field(default_factory=dict)
 
@@ -5673,20 +5705,24 @@ async def run_benchmark_route(request: Request, payload: RunBenchmarkPayload):
     ws = getattr(request.app.state, "workspace", None)
     if not ws:
         raise HTTPException(status_code=503, detail="Workspace not initialized.")
-    run, alerts, proposals = ws.benchmarking_engine.evaluate_target(
-        target_type=payload.target_type,
-        target_id=payload.target_id,
-        target_name=payload.target_name,
-        suite_name=payload.suite_name,
-        test_suite=payload.test_suite,
-        latency_ms=payload.latency_ms,
-        tokens_used=payload.tokens_used,
-        error_rate=payload.error_rate,
-        quality_score=payload.quality_score,
-        safety_compliance=payload.safety_compliance,
-        status=payload.status,
-        metadata=payload.metadata,
-    )
+    try:
+        run, alerts, proposals = ws.benchmarking_engine.evaluate_target(
+            target_type=payload.target_type,
+            target_id=payload.target_id,
+            target_name=payload.target_name,
+            suite_name=payload.suite_name,
+            test_suite=payload.test_suite,
+            latency_ms=payload.latency_ms,
+            tokens_used=payload.tokens_used,
+            error_rate=payload.error_rate,
+            quality_score=payload.quality_score,
+            safety_compliance=payload.safety_compliance,
+            completion_rate=payload.completion_rate,
+            status=payload.status,
+            metadata=payload.metadata,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
     return {
         "benchmark_run": run.to_dict(),
         "alerts": [a.to_dict() for a in alerts],
@@ -6103,6 +6139,19 @@ class CreateCalendarEventPayload(BaseModel):
     workspace_id: str | None = None
 
 
+class GenericOAuthStartPayload(BaseModel):
+    workspace_id: str | None = None
+    client_id: str | None = None
+    client_secret: str | None = None
+    redirect_uri: str | None = None
+
+
+class DeveloperOAuthConfigPayload(BaseModel):
+    workspace_id: str | None = None
+    client_id: str
+    client_secret: str
+
+
 class GoogleOAuthStartPayload(BaseModel):
     workspace_id: str | None = None
     client_id: str | None = None
@@ -6243,6 +6292,7 @@ async def accept_proposal_route(
         raise HTTPException(status_code=503, detail="Workspace not initialized.")
     expected_ver = payload.expected_version if payload else None
     actor = payload.actor if payload else "user"
+    from aether.core.execution import UnauthorizedExecutionError
     try:
         accepted_proposal, authority = ws.personal.accept_proposal(
             proposal_id=proposal_id,
@@ -6255,7 +6305,7 @@ async def accept_proposal_route(
             "proposal": accepted_proposal.to_dict(),
             "authority": authority.to_dict(),
         }
-    except ValueError as exc:
+    except (ValueError, UnauthorizedExecutionError) as exc:
         raise HTTPException(status_code=400, detail=str(exc))
     except Exception as exc:
         raise HTTPException(status_code=500, detail=str(exc))
@@ -7115,6 +7165,395 @@ async def create_calendar_event_route(request: Request, payload: CreateCalendarE
 
 
 # ---------------------------------------------------------------------------
+# Multi-Provider OAuth 2.0 Engine Endpoints
+# ---------------------------------------------------------------------------
+
+@router.get("/connections/oauth/providers")
+async def list_oauth_providers_route(request: Request, workspace_id: str | None = None):
+    ws = getattr(request.app.state, "workspace", None)
+    ws_id = ((workspace_id or (ws.name if ws else "default"))).strip()
+    base = str(request.base_url).rstrip("/")
+    from aether.connections.oauth import OAuthManager
+    store = ws.connections.store if ws and hasattr(ws, "connections") else None
+    return OAuthManager.get_all_providers_status(ws_id, base_url=base, store=store)
+
+
+@router.post("/connections/{provider}/oauth/config")
+async def save_developer_oauth_config_route(
+    provider: str,
+    payload: DeveloperOAuthConfigPayload,
+    request: Request,
+):
+    ws = getattr(request.app.state, "workspace", None)
+    if not ws:
+        raise HTTPException(status_code=503, detail="Workspace not initialized.")
+    ws_id = ((payload.workspace_id or ws.name)).strip()
+    from aether.connections.oauth import OAuthManager
+    if provider not in OAuthManager.get_supported_providers():
+        raise HTTPException(status_code=400, detail=f"Provider '{provider}' does not support OAuth configuration.")
+    res = OAuthManager.save_developer_config(
+        provider=provider,
+        workspace_id=ws_id,
+        client_id=payload.client_id,
+        client_secret=payload.client_secret,
+        store=ws.connections.store,
+    )
+    return res
+
+
+@router.post("/connections/{provider}/oauth/start")
+async def start_provider_oauth_route(
+    provider: str,
+    request: Request,
+    payload: GenericOAuthStartPayload | None = None,
+):
+    ws = getattr(request.app.state, "workspace", None)
+    if not ws:
+        raise HTTPException(status_code=503, detail="Workspace not initialized.")
+    ws_id = ((payload.workspace_id if payload else None) or ws.name).strip()
+
+    from aether.connections.oauth import OAuthManager
+    if provider not in OAuthManager.get_supported_providers():
+        raise HTTPException(status_code=400, detail=f"Provider '{provider}' does not support OAuth.")
+
+    base = str(request.base_url).rstrip("/")
+    redirect_uri = payload.redirect_uri if payload and payload.redirect_uri else f"{base}/api/connections/{provider}/oauth/callback"
+
+    client_id = payload.client_id if payload else None
+    client_secret = payload.client_secret if payload else None
+
+    try:
+        auth_url, state, redirect_uri = OAuthManager.create_auth_flow(
+            provider=provider,
+            workspace_id=ws_id,
+            redirect_uri=redirect_uri,
+            client_id=client_id,
+            client_secret=client_secret,
+            store=ws.connections.store,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+
+    return {"auth_url": auth_url, "state": state, "redirect_uri": redirect_uri}
+
+
+@router.get("/connections/{provider}/oauth/callback")
+async def generic_oauth_callback_route(
+    provider: str,
+    request: Request,
+    code: str | None = None,
+    state: str | None = None,
+    error: str | None = None,
+    error_description: str | None = None,
+):
+    ws = getattr(request.app.state, "workspace", None)
+    from aether.connections.oauth import OAuthManager
+    from aether.connections.models import Connection, ConnectionStatus
+    from datetime import datetime, timezone
+    import uuid
+
+    prov = provider.lower().strip()
+    if prov not in OAuthManager.get_supported_providers():
+        raise HTTPException(status_code=400, detail=f"Unsupported OAuth provider: {provider}")
+
+    prov_display = prov.capitalize()
+    if prov == "google_calendar":
+        prov_display = "Google Calendar"
+    elif prov == "github":
+        prov_display = "GitHub"
+    elif prov == "slack":
+        prov_display = "Slack"
+    elif prov == "notion":
+        prov_display = "Notion"
+
+    if error:
+        err_msg = error_description or error
+        logger.warning("%s OAuth authorization failed or was canceled: %s", prov_display, err_msg)
+        html = f"""<!DOCTYPE html>
+<html>
+<head><title>Aether — Authorization Canceled</title></head>
+<body style="font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; background: #090d16; color: #f8fafc; padding: 48px; text-align: center;">
+  <div style="max-width: 440px; margin: 0 auto; background: #131b2e; border: 1px solid #ef444450; border-radius: 12px; padding: 32px;">
+    <h2 style="color: #ef4444; margin-top: 0;">Authorization Canceled</h2>
+    <p style="font-size: 14px; color: #cbd5e1; line-height: 1.5;">{err_msg}</p>
+    <p style="font-size: 12px; color: #64748b; margin-top: 24px;">You can close this window and try again from Aether Connections.</p>
+  </div>
+  <script>
+    if (window.opener) {{
+      window.opener.postMessage({{ type: 'aether_oauth_error', provider: {json.dumps(prov)}, error: {json.dumps(err_msg)} }}, '*');
+    }}
+  </script>
+</body>
+</html>"""
+        return HTMLResponse(content=html, status_code=200)
+
+    if not state or not code:
+        html = """<!DOCTYPE html>
+<html>
+<head><title>Aether — Invalid Request</title></head>
+<body style="font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; background: #090d16; color: #f8fafc; padding: 48px; text-align: center;">
+  <div style="max-width: 440px; margin: 0 auto; background: #131b2e; border: 1px solid #ef444450; border-radius: 12px; padding: 32px;">
+    <h2 style="color: #ef4444; margin-top: 0;">Invalid State</h2>
+    <p style="font-size: 14px; color: #cbd5e1;">Missing OAuth code or state parameter.</p>
+  </div>
+</body>
+</html>"""
+        return HTMLResponse(content=html, status_code=400)
+
+    state_data = OAuthManager.validate_and_consume_state(state)
+    if not state_data and prov == "google_calendar":
+        from aether.connections.google_calendar import GoogleOAuthManager
+        g_state = GoogleOAuthManager.validate_and_consume_state(state)
+        if g_state:
+            from aether.connections.oauth import OAuthStateData
+            state_data = OAuthStateData(
+                workspace_id=g_state.workspace_id,
+                provider="google_calendar",
+                code_verifier=g_state.code_verifier,
+                client_id=g_state.client_id,
+                client_secret=g_state.client_secret,
+                redirect_uri=g_state.redirect_uri,
+                created_at=g_state.created_at,
+            )
+
+    if not state_data:
+        html = """<!DOCTYPE html>
+<html>
+<head><title>Aether — Invalid or Expired State</title></head>
+<body style="font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; background: #090d16; color: #f8fafc; padding: 48px; text-align: center;">
+  <div style="max-width: 440px; margin: 0 auto; background: #131b2e; border: 1px solid #ef444450; border-radius: 12px; padding: 32px;">
+    <h2 style="color: #ef4444; margin-top: 0;">Session Expired</h2>
+    <p style="font-size: 14px; color: #cbd5e1;">OAuth state is invalid or has expired (timeout is 15 minutes). Please restart connection from Aether.</p>
+  </div>
+</body>
+</html>"""
+        return HTMLResponse(content=html, status_code=400)
+
+    ws_id = state_data.workspace_id or (ws.name if ws else "default")
+
+    try:
+        tokens = OAuthManager.exchange_code(prov, code, state_data)
+    except Exception as exc:
+        err_msg = str(exc)
+        logger.error("Token exchange failed during %s callback: %s", prov_display, err_msg)
+        if ws:
+            ws.connections.record_operation_failure(ws_id, prov, "oauth_exchange", err_msg, is_auth_error=True)
+        html = f"""<!DOCTYPE html>
+<html>
+<head><title>Aether — Token Exchange Failed</title></head>
+<body style="font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; background: #090d16; color: #f8fafc; padding: 48px; text-align: center;">
+  <div style="max-width: 440px; margin: 0 auto; background: #131b2e; border: 1px solid #ef444450; border-radius: 12px; padding: 32px;">
+    <h2 style="color: #ef4444; margin-top: 0;">Authorization Failed</h2>
+    <p style="font-size: 14px; color: #cbd5e1;">{err_msg}</p>
+  </div>
+  <script>
+    if (window.opener) {{
+      window.opener.postMessage({{ type: 'aether_oauth_error', provider: {json.dumps(prov)}, error: {json.dumps(err_msg)} }}, '*');
+    }}
+  </script>
+</body>
+</html>"""
+        return HTMLResponse(content=html, status_code=200)
+
+    # Live verification
+    if prov == "google_calendar":
+        from aether.connections.google_calendar import GoogleCalendarConnector
+        connector = GoogleCalendarConnector(auth_metadata=tokens, workspace_id=ws_id, store=ws.connections.store if ws else None)
+        valid, message = connector.verify(tokens, live_check=True)
+        account_name = tokens.get("email") or "Google User"
+    elif prov == "github":
+        from aether.connections.github import GitHubConnector
+        connector = GitHubConnector(auth_metadata=tokens)
+        valid, message = connector.verify(tokens, live_check=True)
+        account_name = tokens.get("account_name") or f"@{tokens.get('login', 'github-user')}"
+    elif prov == "slack":
+        from aether.connections.slack import SlackConnector
+        connector = SlackConnector(auth_metadata=tokens)
+        valid, message = connector.verify(tokens, live_check=True)
+        account_name = tokens.get("account_name") or f"Slack ({tokens.get('team', 'Workspace')})"
+    elif prov == "notion":
+        from aether.connections.notion import NotionConnector
+        connector = NotionConnector(auth_metadata=tokens)
+        valid, message = connector.verify(tokens, live_check=True)
+        account_name = tokens.get("account_name") or f"Notion ({tokens.get('workspace_name', 'Workspace')})"
+    else:
+        valid, message = True, "Verified"
+        account_name = f"{prov_display} Account"
+
+    now_iso = datetime.now(timezone.utc).isoformat()
+
+    if ws:
+        existing = ws.connections.get_connection(ws_id, prov)
+        status = ConnectionStatus.VERIFIED if valid else ConnectionStatus.VERIFICATION_FAILED
+        conn = Connection(
+            id=existing.id if existing else f"conn-{uuid.uuid4().hex[:10]}",
+            workspace_id=ws_id,
+            provider=prov,
+            account_name=account_name,
+            status=status,
+            scopes=existing.scopes if existing else ws.connections.get_default_capabilities(prov),
+            capabilities=ws.connections.get_default_capabilities(prov),
+            auth_metadata=tokens,
+            last_verified_at=now_iso if valid else None,
+            last_verification_error=None if valid else message,
+            verification_method=f"{prov}_oauth",
+            created_at=existing.created_at if existing else now_iso,
+            updated_at=now_iso,
+        )
+        ws.connections.save_connection(conn)
+
+        if ws.activity:
+            from aether.activity.models import ActivityCategory, ActivityStatus
+            act_status = ActivityStatus.COMPLETED if valid else ActivityStatus.FAILED
+            act_title = f"Verified: {prov_display}" if valid else f"Verification Failed: {prov_display}"
+            ws.activity.log(
+                workspace_id=ws_id,
+                title=act_title,
+                description=f"{prov_display} authorization {'verified' if valid else 'failed'}: {message}",
+                category=ActivityCategory.CONNECTION,
+                status=act_status,
+                link_view="connections",
+                link_id=conn.id,
+            )
+
+    if valid:
+        html = f"""<!DOCTYPE html>
+<html>
+<head><title>Aether — {prov_display} Connected</title></head>
+<body style="font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; background: #090d16; color: #f8fafc; padding: 48px; text-align: center;">
+  <div style="max-width: 440px; margin: 0 auto; background: #131b2e; border: 1px solid #10b98150; border-radius: 12px; padding: 32px;">
+    <div style="width: 48px; height: 48px; border-radius: 50%; background: #10b98120; color: #10b981; display: flex; align-items: center; justify-content: center; margin: 0 auto 16px; font-size: 24px; font-weight: bold;">✓</div>
+    <h2 style="color: #10b981; margin: 0 0 8px;">Connected & Verified!</h2>
+    <p style="font-size: 14px; color: #cbd5e1; margin: 0 0 4px;">Authorized as <strong>{account_name}</strong></p>
+    <p style="font-size: 13px; color: #94a3b8; line-height: 1.4;">Live access to {prov_display} API verified.</p>
+    <p style="font-size: 12px; color: #64748b; margin-top: 20px;">Closing window...</p>
+  </div>
+  <script>
+    if (window.opener) {{
+      window.opener.postMessage({{ type: 'aether_oauth_success', provider: {json.dumps(prov)}, account: {json.dumps(account_name)} }}, '*');
+      setTimeout(function() {{ window.close(); }}, 1200);
+    }}
+  </script>
+</body>
+</html>"""
+        return HTMLResponse(content=html, status_code=200)
+    else:
+        html = f"""<!DOCTYPE html>
+<html>
+<head><title>Aether — {prov_display} Verification Failed</title></head>
+<body style="font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; background: #090d16; color: #f8fafc; padding: 48px; text-align: center;">
+  <div style="max-width: 440px; margin: 0 auto; background: #131b2e; border: 1px solid #ef444450; border-radius: 12px; padding: 32px;">
+    <h2 style="color: #ef4444; margin-top: 0;">Live Verification Failed</h2>
+    <p style="font-size: 14px; color: #cbd5e1; line-height: 1.5;">{message}</p>
+    <p style="font-size: 12px; color: #64748b; margin-top: 24px;">Please check developer app permissions or retry.</p>
+  </div>
+  <script>
+    if (window.opener) {{
+      window.opener.postMessage({{ type: 'aether_oauth_error', provider: {json.dumps(prov)}, error: {json.dumps(message)} }}, '*');
+    }}
+  </script>
+</body>
+</html>"""
+        return HTMLResponse(content=html, status_code=200)
+
+
+@router.post("/connections/{provider}/oauth/exchange")
+async def exchange_generic_oauth_route(provider: str, request: Request, payload: GoogleOAuthExchangePayload):
+    """
+    Direct code-exchange endpoint supporting programmatic testing and alternative flows.
+    """
+    ws = getattr(request.app.state, "workspace", None)
+    if not ws:
+        raise HTTPException(status_code=503, detail="Workspace not initialized.")
+    ws_id = (payload.workspace_id or ws.name).strip()
+
+    from aether.connections.oauth import OAuthManager
+    from aether.connections.models import Connection, ConnectionStatus
+    from datetime import datetime, timezone
+    import uuid
+
+    prov = provider.lower().strip()
+    if prov not in OAuthManager.get_supported_providers():
+        raise HTTPException(status_code=400, detail=f"Unsupported OAuth provider: {provider}")
+
+    state_data = OAuthManager.validate_and_consume_state(payload.state)
+    if not state_data and prov == "google_calendar":
+        from aether.connections.google_calendar import GoogleOAuthManager
+        g_state = GoogleOAuthManager.validate_and_consume_state(payload.state)
+        if g_state:
+            from aether.connections.oauth import OAuthStateData
+            state_data = OAuthStateData(
+                workspace_id=g_state.workspace_id,
+                provider="google_calendar",
+                code_verifier=g_state.code_verifier,
+                client_id=g_state.client_id,
+                client_secret=g_state.client_secret,
+                redirect_uri=g_state.redirect_uri,
+                created_at=g_state.created_at,
+            )
+
+    if not state_data:
+        raise HTTPException(status_code=400, detail="Invalid or expired OAuth state.")
+
+    if payload.redirect_uri:
+        state_data.redirect_uri = payload.redirect_uri
+
+    tokens = OAuthManager.exchange_code(prov, payload.code, state_data)
+
+    if prov == "google_calendar":
+        from aether.connections.google_calendar import GoogleCalendarConnector
+        connector = GoogleCalendarConnector(auth_metadata=tokens, workspace_id=ws_id, store=ws.connections.store)
+        valid, message = connector.verify(tokens, live_check=True)
+        account_name = tokens.get("email") or "Google User"
+    elif prov == "github":
+        from aether.connections.github import GitHubConnector
+        connector = GitHubConnector(auth_metadata=tokens)
+        valid, message = connector.verify(tokens, live_check=True)
+        account_name = tokens.get("account_name") or f"@{tokens.get('login', 'github-user')}"
+    elif prov == "slack":
+        from aether.connections.slack import SlackConnector
+        connector = SlackConnector(auth_metadata=tokens)
+        valid, message = connector.verify(tokens, live_check=True)
+        account_name = tokens.get("account_name") or f"Slack ({tokens.get('team', 'Workspace')})"
+    elif prov == "notion":
+        from aether.connections.notion import NotionConnector
+        connector = NotionConnector(auth_metadata=tokens)
+        valid, message = connector.verify(tokens, live_check=True)
+        account_name = tokens.get("account_name") or f"Notion ({tokens.get('workspace_name', 'Workspace')})"
+    else:
+        valid, message = True, "Verified"
+        account_name = f"{prov} Account"
+
+    now_iso = datetime.now(timezone.utc).isoformat()
+
+    existing = ws.connections.get_connection(ws_id, prov)
+    status = ConnectionStatus.VERIFIED if valid else ConnectionStatus.VERIFICATION_FAILED
+    conn = Connection(
+        id=existing.id if existing else f"conn-{uuid.uuid4().hex[:10]}",
+        workspace_id=ws_id,
+        provider=prov,
+        account_name=account_name,
+        status=status,
+        scopes=existing.scopes if existing else ws.connections.get_default_capabilities(prov),
+        capabilities=ws.connections.get_default_capabilities(prov),
+        auth_metadata=tokens,
+        last_verified_at=now_iso if valid else None,
+        last_verification_error=None if valid else message,
+        verification_method=f"{prov}_oauth",
+        created_at=existing.created_at if existing else now_iso,
+        updated_at=now_iso,
+    )
+    saved = ws.connections.save_connection(conn)
+
+    return {
+        "valid": valid,
+        "message": message,
+        "status": saved.status.value,
+        "connection": saved.to_dict(mask_secrets=True),
+    }
+
+
+# ---------------------------------------------------------------------------
 # Google Calendar & OAuth 2.0 PKCE Endpoints (Macro-pass P0.2)
 # ---------------------------------------------------------------------------
 
@@ -7463,12 +7902,21 @@ async def telegram_webhook_route(request: Request):
     # Verify Telegram Webhook Secret Token using constant-time comparison
     import hmac
     conn = ws.connections.get_connection(ws.name, "telegram") if hasattr(ws, "connections") else None
+    configured_secret = None
     if conn and conn.auth_metadata:
         configured_secret = conn.auth_metadata.get("webhook_secret")
-        if configured_secret:
-            provided_token = request.headers.get("X-Telegram-Bot-Api-Secret-Token", "")
-            if not hmac.compare_digest(provided_token, configured_secret):
-                raise HTTPException(status_code=403, detail="Invalid Telegram webhook secret token.")
+        if configured_secret and hasattr(ws, "secret_store") and str(configured_secret).startswith("secret_ref:"):
+            configured_secret = ws.secret_store.get_secret(configured_secret)
+
+    if not configured_secret:
+        raise HTTPException(
+            status_code=403,
+            detail="Telegram webhook secret is not configured; unauthenticated webhook updates are rejected.",
+        )
+
+    provided_token = request.headers.get("X-Telegram-Bot-Api-Secret-Token", "")
+    if not provided_token or not hmac.compare_digest(provided_token, configured_secret):
+        raise HTTPException(status_code=403, detail="Invalid Telegram webhook secret token.")
 
     try:
         update_data = await request.json()

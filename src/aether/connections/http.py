@@ -171,12 +171,15 @@ class HttpConnector(BaseConnector):
                     encoded = base64.b64encode(f"{user}:{password}".encode("utf-8")).decode("ascii")
                     headers["Authorization"] = f"Basic {encoded}"
 
-                req = urllib.request.Request(base_url, headers=headers, method="GET")
+                from aether.core.security import safe_urlopen
+                req = urllib.request.Request(base_url, headers=headers)
                 try:
-                    with urllib.request.urlopen(req, timeout=5.0) as resp:
+                    with safe_urlopen(req, timeout=5.0, allow_internal=allow_internal) as resp:
                         if 200 <= resp.status < 400:
                             return True, f"HTTP endpoint verified reachable (HTTP {resp.status})."
                         return False, f"HTTP endpoint returned unexpected status code {resp.status}."
+                except SecurityBoundaryViolation as s_err:
+                    return False, str(s_err)
                 except urllib.error.HTTPError as exc:
                     if exc.code in (401, 403):
                         return False, f"HTTP authentication failed (HTTP {exc.code}): {exc.reason}"
@@ -315,8 +318,9 @@ class HttpConnector(BaseConnector):
 
         req = urllib.request.Request(full_url, data=req_body, headers=req_headers, method=clean_method)
 
+        from aether.core.security import safe_urlopen
         try:
-            with urllib.request.urlopen(req, timeout=timeout) as response:
+            with safe_urlopen(req, timeout=timeout, allow_internal=allow_internal) as response:
                 status_code = response.status
                 resp_bytes = response.read()
                 resp_headers = dict(response.headers)

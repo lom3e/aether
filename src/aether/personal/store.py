@@ -793,13 +793,21 @@ class PersonalStore:
     def record_step_executed(
         self, proposal_id: str, step_id: str, action_id: str = "", args_digest: str = ""
     ) -> None:
-        """Records the execution of a proposal step for idempotency tracking."""
+        """Records the execution of a proposal step for idempotency tracking. Raises ValueError on replay."""
         from datetime import datetime, timezone
         now = datetime.now(timezone.utc).isoformat()
         with self._transaction() as cursor:
+            existing = cursor.execute(
+                "SELECT 1 FROM proposal_executed_steps WHERE proposal_id = ? AND step_id = ?",
+                (proposal_id, step_id),
+            ).fetchone()
+            if existing:
+                raise ValueError(
+                    f"Step '{step_id}' of proposal '{proposal_id}' has already been executed (replay detected)."
+                )
             cursor.execute(
                 """
-                INSERT OR IGNORE INTO proposal_executed_steps (proposal_id, step_id, action_id, args_digest, executed_at)
+                INSERT INTO proposal_executed_steps (proposal_id, step_id, action_id, args_digest, executed_at)
                 VALUES (?, ?, ?, ?, ?)
                 """,
                 (proposal_id, step_id, action_id, args_digest, now),

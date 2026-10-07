@@ -35,36 +35,60 @@ class AlertSeverity(str, Enum):
 @dataclass
 class BenchmarkMetrics:
     """Quantitative performance and quality metrics."""
-    completion_rate: float = 1.0  # 0.0 to 1.0
-    error_rate: float = 0.0  # 0.0 to 1.0
-    avg_latency_ms: float = 1200.0
-    avg_tokens_per_task: int = 1500
-    quality_score: float = 85.0  # 0 to 100 (or 0.0 to 1.0)
-    safety_compliance_score: float = 100.0  # 0 to 100 (or 0.0 to 1.0)
-    human_intervention_rate: float = 0.05
-    total_evaluations: int = 10
+    completion_rate: float
+    error_rate: float
+    avg_latency_ms: float
+    avg_tokens_per_task: int
+    quality_score: float
+    safety_compliance_score: float
+    human_intervention_rate: float = 0.0
+    total_evaluations: int = 1
 
     def __init__(
         self,
-        completion_rate: float = 1.0,
-        error_rate: float = 0.0,
+        completion_rate: Optional[float] = None,
+        error_rate: Optional[float] = None,
         avg_latency_ms: Optional[float] = None,
         latency_ms: Optional[float] = None,
         avg_tokens_per_task: Optional[int] = None,
         tokens_used: Optional[int] = None,
-        quality_score: float = 85.0,
+        quality_score: Optional[float] = None,
         safety_compliance_score: Optional[float] = None,
         safety_compliance: Optional[float] = None,
-        human_intervention_rate: float = 0.05,
-        total_evaluations: int = 10,
+        human_intervention_rate: float = 0.0,
+        total_evaluations: int = 1,
         **kwargs: Any,
     ):
+        eff_lat = latency_ms if latency_ms is not None else avg_latency_ms
+        eff_tok = tokens_used if tokens_used is not None else avg_tokens_per_task
+        eff_safe = safety_compliance if safety_compliance is not None else safety_compliance_score
+
+        missing = []
+        if completion_rate is None:
+            missing.append("completion_rate")
+        if error_rate is None:
+            missing.append("error_rate")
+        if eff_lat is None:
+            missing.append("latency_ms/avg_latency_ms")
+        if eff_tok is None:
+            missing.append("tokens_used/avg_tokens_per_task")
+        if quality_score is None:
+            missing.append("quality_score")
+        if eff_safe is None:
+            missing.append("safety_compliance/safety_compliance_score")
+
+        if missing:
+            raise ValueError(
+                f"Missing required benchmark metric inputs: {', '.join(missing)}. "
+                "Synthetic fallback metrics are prohibited."
+            )
+
         self.completion_rate = float(completion_rate)
         self.error_rate = float(error_rate)
-        self.avg_latency_ms = float(latency_ms if latency_ms is not None else (avg_latency_ms if avg_latency_ms is not None else 1200.0))
-        self.avg_tokens_per_task = int(tokens_used if tokens_used is not None else (avg_tokens_per_task if avg_tokens_per_task is not None else 1500))
+        self.avg_latency_ms = float(eff_lat)
+        self.avg_tokens_per_task = int(eff_tok)
         self.quality_score = float(quality_score)
-        self.safety_compliance_score = float(safety_compliance if safety_compliance is not None else (safety_compliance_score if safety_compliance_score is not None else 100.0))
+        self.safety_compliance_score = float(eff_safe)
         self.human_intervention_rate = float(human_intervention_rate)
         self.total_evaluations = int(total_evaluations)
 

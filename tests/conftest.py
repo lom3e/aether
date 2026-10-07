@@ -20,6 +20,9 @@ from aether.server.app import app
 from aether.core.paths import set_aether_data_dir
 from aether.core.secrets import MemorySecretStore, set_secret_store
 
+# Enable test providers by default for test execution
+os.environ.setdefault("AETHER_ENABLE_TEST_PROVIDERS", "1")
+
 
 @pytest.fixture(autouse=True)
 def reset_app_state_and_paths():
@@ -224,13 +227,14 @@ def make_test_accepted_authority(
             pass
 
     intent_id = f"intent-{uuid.uuid4().hex[:10]}"
+    effective_constraints = list(constraints) if constraints is not None else ["allow:*"]
     p_store.save_intent_request(IntentRequest(
         id=intent_id,
         workspace_id=ws_id,
         raw_input=f"Authorized intent: {title}",
         source_surface="test_suite",
         created_at=datetime.now(timezone.utc).isoformat(),
-        constraints=list(constraints or []),
+        constraints=effective_constraints,
     ))
     proposal = MissionProposal(
         id=f"prop-{uuid.uuid4().hex[:10]}",
@@ -241,7 +245,7 @@ def make_test_accepted_authority(
         why="Automated test execution under Phase A lifecycle",
         context_summary="Test context pack",
         confidence=1.0,
-        constraints=list(constraints or []),
+        constraints=effective_constraints,
         status=ProposalStatus.READY_FOR_ACCEPTANCE,
     )
     p_store.save_proposal(proposal)

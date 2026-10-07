@@ -222,10 +222,11 @@ class MCPClient:
             headers["Authorization"] = f"Bearer {self.auth_token}"
         headers.update(self.headers)
 
+        from aether.core.security import safe_urlopen
         req = urllib.request.Request(self.endpoint_url, data=data_bytes, headers=headers, method="POST")
 
         try:
-            with urllib.request.urlopen(req, timeout=self.timeout_seconds) as resp:
+            with safe_urlopen(req, timeout=self.timeout_seconds) as resp:
                 resp_bytes = resp.read()
                 charset = resp.headers.get_content_charset() or "utf-8"
                 return json.loads(resp_bytes.decode(charset))

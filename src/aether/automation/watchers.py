@@ -231,9 +231,10 @@ class HttpPollingWatcher(BaseWatcher):
         """
         Returns (status_code, resp_headers, content_hash, error_msg, is_retryable).
         """
+        from aether.core.security import safe_urlopen, SecurityBoundaryViolation
         req = urllib.request.Request(self.url, headers=self.headers, method=self.method)
         try:
-            with urllib.request.urlopen(req, timeout=10) as resp:
+            with safe_urlopen(req, timeout=10) as resp:
                 status = resp.status
                 resp_headers = {k.lower(): v for k, v in resp.headers.items()}
                 body = resp.read()
@@ -250,6 +251,8 @@ class HttpPollingWatcher(BaseWatcher):
             return 0, {}, "", f"Network/URL Error: {ue.reason}", True
         except TimeoutError:
             return 0, {}, "", "Request timed out", True
+        except SecurityBoundaryViolation:
+            raise
         except Exception as exc:
             return 0, {}, "", f"Unexpected error: {exc}", True
 

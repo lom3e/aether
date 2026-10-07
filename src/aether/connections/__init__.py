@@ -5,6 +5,7 @@ from aether.connections.models import CalendarEvent, Connection, ConnectionStatu
 from aether.connections.store import ConnectionStore
 from aether.connections.service import CalendarConnector, ConnectionService
 from aether.connections.sync import ConnectorSyncEngine, ConnectorSyncResult
+from aether.connections.oauth import OAuthManager
 from aether.connections.telegram import TelegramConnector
 from aether.connections.telegram_bridge import TelegramBridge
 
@@ -17,6 +18,7 @@ __all__ = [
     "ConnectionService",
     "ConnectorSyncEngine",
     "ConnectorSyncResult",
+    "OAuthManager",
     "TelegramConnector",
     "TelegramBridge",
 ]

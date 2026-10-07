@@ -133,9 +133,9 @@ class GitHubConnector(BaseConnector):
         meta = auth_metadata or self._auth_metadata
         token = str(meta.get("token") or meta.get("pat") or meta.get("api_key") or "").strip()
         if not token:
-            return False, "GitHub Personal Access Token (PAT) is required."
-        if not (token.startswith("ghp_") or token.startswith("github_pat_") or len(token) >= 20):
-            return False, "Invalid GitHub token format. Must be a Personal Access Token (e.g. starting with 'ghp_' or 'github_pat_')."
+            return False, "GitHub access token is required."
+        if not (token.startswith("ghp_") or token.startswith("github_pat_") or token.startswith("gho_") or token.startswith("ghu_") or len(token) >= 20):
+            return False, "Invalid GitHub token format. Expected a valid GitHub token (e.g. starting with 'gho_' or 'ghp_')."
 
         if live_check or meta.get("live_check"):
             try:

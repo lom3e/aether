@@ -426,6 +426,7 @@ class DocumentIngester:
         and ingests into the KnowledgeStore.
         """
         import urllib.request
+        from aether.core.security import safe_urlopen
         req = urllib.request.Request(
             url,
             headers={
@@ -434,7 +435,7 @@ class DocumentIngester:
             },
             method="GET",
         )
-        with urllib.request.urlopen(req, timeout=timeout) as resp:
+        with safe_urlopen(req, timeout=timeout) as resp:
             content_type = resp.headers.get("Content-Type", "").lower()
             raw_bytes = resp.read()
             encoding = resp.headers.get_content_charset() or "utf-8"

@@ -308,7 +308,8 @@ def test_7_action_executor_truthful_gate_and_operation_auditing(temp_dirs, accep
     mock_resp.read.return_value = b"ok"
 
     with patch("urllib.request.urlopen", return_value=mock_resp):
-        exec2 = executor.execute("slack.send_message", "ws-test", {"channel": "#general", "text": "Hi"}, auto_approve=True, authority=auth)
+        _, auth2 = accepted_authority_factory(ws, title="Slack Send 2")
+        exec2 = executor.execute("slack.send_message", "ws-test", {"channel": "#general", "text": "Hi"}, auto_approve=True, authority=auth2)
         assert exec2.status == ActionExecutionStatus.SUCCESS
 
         # Assert connection is now marked VERIFIED with last_successful_operation

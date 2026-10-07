@@ -60,7 +60,8 @@ class MockDocServerHandler(http.server.BaseHTTPRequestHandler):
 
 
 @pytest.fixture
-def mock_doc_server():
+def mock_doc_server(monkeypatch):
+    monkeypatch.setenv("AETHER_ALLOW_INTERNAL_HTTP", "1")
     server = http.server.HTTPServer(("127.0.0.1", 0), MockDocServerHandler)
     port = server.server_address[1]
     thread = threading.Thread(target=server.serve_forever, daemon=True)

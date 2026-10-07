@@ -367,6 +367,31 @@ class ActionExecutor:
             execution.transition_to(ActionExecutionStatus.RUNNING)
             self.store.save_execution(execution)
 
+        # Atomic reservation in authority ledger BEFORE dispatching mutation
+        if execution.metadata.get("authority"):
+            auth_meta = execution.metadata["authority"]
+            p_id = auth_meta.get("proposal_id")
+            st_id = auth_meta.get("step_id") or execution.action_id
+            p_store = self._resolve_personal_store(execution.workspace_id)
+            if not p_store or not hasattr(p_store, "record_step_executed") or not p_id:
+                execution.transition_to(ActionExecutionStatus.FAILED)
+                execution.error_message = "Authority ledger recording failed: PersonalStore is not available."
+                self.store.save_execution(execution)
+                raise RuntimeError("Authority ledger recording failed: PersonalStore is not available.")
+            try:
+                from aether.core.execution import compute_args_digest
+                p_store.record_step_executed(
+                    proposal_id=p_id,
+                    step_id=st_id,
+                    action_id=execution.action_id,
+                    args_digest=compute_args_digest(execution.input_data),
+                )
+            except Exception as ledger_err:
+                execution.transition_to(ActionExecutionStatus.FAILED)
+                execution.error_message = f"Authority ledger reservation failed: {ledger_err}"
+                self.store.save_execution(execution)
+                raise RuntimeError(f"Authority ledger reservation failed: {ledger_err}") from ledger_err
+
         try:
             handler = self.registry.get_handler(definition.id)
             if handler is not None:
@@ -383,24 +408,6 @@ class ActionExecutor:
             execution.output_data = result or {}
             execution.completed_at = datetime.now(timezone.utc).isoformat()
             self.store.save_execution(execution)
-
-            # Record executed step for proposal idempotency if authority is present
-            if execution.metadata.get("authority"):
-                try:
-                    auth_meta = execution.metadata["authority"]
-                    p_id = auth_meta.get("proposal_id")
-                    st_id = auth_meta.get("step_id") or execution.action_id
-                    p_store = self._resolve_personal_store(execution.workspace_id)
-                    if p_store and hasattr(p_store, "record_step_executed") and p_id:
-                        from aether.core.execution import compute_args_digest
-                        p_store.record_step_executed(
-                            proposal_id=p_id,
-                            step_id=st_id,
-                            action_id=execution.action_id,
-                            args_digest=compute_args_digest(execution.input_data),
-                        )
-                except Exception:
-                    pass
 
             if self.activity_service:
                 act_title = (
@@ -1572,6 +1579,7 @@ class ActionExecutor:
                 error_rate=inp.get("error_rate"),
                 quality_score=inp.get("quality_score"),
                 safety_compliance=inp.get("safety_compliance"),
+                completion_rate=inp.get("completion_rate"),
             )
 
             return {

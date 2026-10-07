@@ -55,6 +55,7 @@ def test_action_executor_boundary_positive(temp_workspace: Workspace):
         why="User requested event",
         context_summary="Calendar context",
         confidence=1.0,
+        constraints=["allow:calendar.create_event"],
         status=ProposalStatus.READY_FOR_ACCEPTANCE,
     )
     ws.personal_store.save_proposal(proposal)
@@ -114,6 +115,7 @@ def test_action_executor_boundary_tampering(temp_workspace: Workspace):
         why="User requested event",
         context_summary="Calendar context",
         confidence=1.0,
+        constraints=["allow:calendar.create_event"],
         status=ProposalStatus.READY_FOR_ACCEPTANCE,
     )
     ws.personal_store.save_proposal(proposal)

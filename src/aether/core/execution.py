@@ -349,6 +349,17 @@ class ExecutionBoundary:
             )
         from datetime import datetime, timezone
 
+        # Ensure proposal is not completely unconstrained / blanket authority
+        proposed_steps = getattr(proposal, "proposed_steps", None) or []
+        required_approvals = getattr(proposal, "required_approvals", None) or []
+        raw_constraints = getattr(proposal, "constraints", None) or []
+        has_scope_constraint = any(bool(str(c).strip()) for c in raw_constraints)
+        if not proposed_steps and not required_approvals and not has_scope_constraint:
+            raise UnauthorizedExecutionError(
+                f"Blanket/unbounded execution authority is prohibited for proposal '{getattr(proposal, 'id', 'unknown')}'. "
+                f"Proposal must specify proposed steps, required approvals, or explicit scoping constraints."
+            )
+
         # Extract expiry from constraints if not explicitly passed
         authority_expiry = expires_at
         if not authority_expiry:
@@ -508,7 +519,7 @@ class ExecutionBoundary:
                     )
 
         # 3. Step idempotency and single-use checks
-        target_step_id = step_id or authority.step_id
+        target_step_id = step_id or (authority.step_id if authority else None) or action_or_boundary
         if target_step_id:
             already_run = False
             if hasattr(proposal, "executed_steps") and target_step_id in proposal.executed_steps:
@@ -576,6 +587,14 @@ class ExecutionBoundary:
                     act = getattr(req_appr, "action_or_boundary", None)
                     if act and str(act).strip():
                         derived_actions.add(str(act).strip())
+                for c in constraints:
+                    c_clean = str(c).strip()
+                    for prefix in ("mission_id:", "bind_mission:"):
+                        if c_clean.lower().startswith(prefix):
+                            b_id = c_clean[len(prefix):].strip()
+                            if b_id:
+                                derived_actions.add(f"mission.*:{b_id}")
+                                derived_actions.add("mission.*")
                 allowed_actions = derived_actions
 
             if allowed_actions:
@@ -607,6 +626,11 @@ class ExecutionBoundary:
                         f"Execution of '{act_clean}' is outside the authorized scope of proposal '{proposal.id}'. "
                         f"Authorized scope: {sorted(allowed_actions)}."
                     )
+            else:
+                # Fail-closed: unconstrained proposals without steps or scoping constraints cannot authorize execution
+                raise UnauthorizedExecutionError(
+                    f"Execution of '{act_clean}' rejected: proposal '{proposal.id}' has no defined action scope or steps."
+                )
 
             # C. Mission binding check
             if act_clean.startswith("mission.") and ":" in act_clean:

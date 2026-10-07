@@ -486,12 +486,15 @@ class NotificationDispatcher:
         if secret:
             headers["X-Aether-Signature"] = str(secret)
 
+        from aether.core.security import safe_urlopen, SecurityBoundaryViolation
         req = urllib.request.Request(webhook_url, data=payload, headers=headers, method="POST")
         try:
-            with urllib.request.urlopen(req, timeout=10) as resp:
+            with safe_urlopen(req, timeout=10) as resp:
                 if 200 <= resp.status < 300:
                     return DeliveryStatus.SENT, f"Webhook delivered (HTTP {resp.status})"
                 return DeliveryStatus.FAILED, f"Webhook returned HTTP {resp.status}"
+        except SecurityBoundaryViolation as s_err:
+            return DeliveryStatus.FAILED, f"SSRF blocked: {s_err}"
         except urllib.error.HTTPError as he:
             return DeliveryStatus.FAILED, f"Webhook HTTP error {he.code}: {he.reason}"
         except Exception as e:

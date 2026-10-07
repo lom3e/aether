@@ -75,15 +75,14 @@ def test_runtime_execute_answer_mode_with_provider():
     assert "Mock response" in result.output
 
 
-def test_runtime_execute_answer_mode_diagnostic_fallback():
-    runtime = Runtime()  # No provider configured
+def test_runtime_execute_answer_mode_provider_failure():
+    runtime = Runtime()  # No provider configured/available
     task = Task(instruction="Chi sei?", mode=ExecutionMode.ANSWER, workspace_id="test_ws")
     result = runtime.execute(task)
 
-    assert result.success is True
-    assert result.status == ExecutionStatus.COMPLETED
-    assert "Aether" in result.output
-    assert "test_ws" in result.output
+    assert result.success is False
+    assert result.status == ExecutionStatus.FAILED
+    assert "AI provider" in result.error
 
 
 def test_runtime_execute_do_mode(tmp_path, accepted_authority_factory):

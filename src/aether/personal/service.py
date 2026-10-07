@@ -2171,21 +2171,6 @@ class PersonalAgentService:
         res = self.runtime.execute(task)
         return res.output or ""
 
-    def _synthesize_contextual_response(
-        self,
-        prompt: str,
-        workspace_id: str,
-        intel_context: Any = None,
-        recent_history: list[PersonalMessage] | None = None,
-    ) -> str:
-        """Generates dynamic contextual synthesis from memory and workspace state when no live provider is configured."""
-        return self.runtime._synthesize_contextual_response(
-            prompt=prompt,
-            workspace_id=workspace_id,
-            intel_context=intel_context,
-            recent_history=recent_history,
-        )
-
     def get_overview(self, workspace_id: str) -> dict[str, Any]:
         """Provides aggregated overview for the Home Companion hub."""
         # 1. Pending approvals

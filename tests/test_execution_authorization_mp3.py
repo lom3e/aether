@@ -432,3 +432,373 @@ async def test_accept_proactive_suggestion_route_never_marks_applied_on_failure(
     assert loaded is not None
     assert loaded.status != SuggestionStatus.APPLIED
     assert res["status"] in ("failed", "waiting_approval")
+
+
+def test_issue_authority_rejects_blanket_unconstrained_proposal(tmp_path):
+    """Verifies that issue_authority refuses to issue tokens for unconstrained proposals with no steps."""
+    ws = Workspace.get_or_init(tmp_path / "ws_blanket")
+    p_store = ws.personal_store
+
+    prop_blanket = _create_test_proposal(
+        p_store=p_store,
+        workspace_id=ws.name,
+        prop_id="prop-blanket-1",
+        title="Blanket Proposal",
+        constraints=[],
+        proposed_steps=[],
+        status=ProposalStatus.ACCEPTED,
+    )
+
+    with pytest.raises(UnauthorizedExecutionError) as exc_info:
+        ExecutionBoundary.issue_authority(prop_blanket)
+    assert "blanket/unbounded" in str(exc_info.value).lower()
+
+
+def test_validate_authority_rejects_proposal_without_action_scope(tmp_path):
+    """Verifies that validate_authority refuses execution when proposal has no action scope."""
+    ws = Workspace.get_or_init(tmp_path / "ws_scope")
+    p_store = ws.personal_store
+
+    # Proposal with non-scoping constraint (e.g. only expires_at)
+    from datetime import datetime, timezone, timedelta
+    future_iso = (datetime.now(timezone.utc) + timedelta(hours=1)).isoformat()
+    prop_no_scope = _create_test_proposal(
+        p_store=p_store,
+        workspace_id=ws.name,
+        prop_id="prop-no-scope-1",
+        title="No Scope Proposal",
+        constraints=[f"expires_at:{future_iso}"],
+        proposed_steps=[],
+        status=ProposalStatus.ACCEPTED,
+    )
+
+    # If an authority was somehow constructed
+    auth = ExecutionAuthority(
+        proposal_id=prop_no_scope.id,
+        proposal_version=prop_no_scope.version,
+        workspace_id=ws.name,
+        granted_at=datetime.now(timezone.utc).isoformat(),
+    )
+
+    with pytest.raises(UnauthorizedExecutionError) as exc_info:
+        ExecutionBoundary.validate_authority(
+            authority=auth,
+            workspace_id=ws.name,
+            store=p_store,
+            action_or_boundary="files.read_document",
+        )
+    assert "no defined action scope" in str(exc_info.value).lower()
+
+
+def test_record_step_executed_prevents_replay_fail_closed(tmp_path):
+    """Verifies that record_step_executed fails closed on replay and ActionExecutor catches it."""
+    ws = Workspace.get_or_init(tmp_path / "ws_replay")
+    p_store = ws.personal_store
+
+    p_id = "prop-replay-test"
+    step_id = "step-01"
+    action_id = "test.action"
+    args_digest = "testdigest123"
+
+    # First record succeeds
+    p_store.record_step_executed(
+        proposal_id=p_id,
+        step_id=step_id,
+        action_id=action_id,
+        args_digest=args_digest,
+    )
+
+    # Second record with exact same step fails closed with ValueError
+    with pytest.raises(ValueError) as exc_info:
+        p_store.record_step_executed(
+            proposal_id=p_id,
+            step_id=step_id,
+            action_id=action_id,
+            args_digest=args_digest,
+        )
+    assert "replay detected" in str(exc_info.value).lower()
+
+
+def test_replay_with_step_id_blocked_before_handler(tmp_path):
+    """Verifies that replaying an authority with step_id is blocked BEFORE handler execution."""
+    from aether.actions.models import ActionDefinition, ActionTier
+    ws = Workspace.get_or_init(tmp_path / "ws_step_replay")
+    p_store = ws.personal_store
+
+    handler_calls = 0
+    def mutating_handler(inp, ws_id):
+        nonlocal handler_calls
+        handler_calls += 1
+        return {"mutated": True}
+
+    reg = ActionRegistry()
+    reg.register(
+        ActionDefinition(
+            id="test.mutate",
+            name="Mutate Test",
+            description="Testing",
+            provider="test",
+            tier=ActionTier.DO,
+            permission_level=ActionPermissionLevel.LOCAL_MUTATION,
+            requires_confirmation=False,
+        ),
+        handler=mutating_handler,
+    )
+    executor = ActionExecutor(
+        registry=reg,
+        store=ws.action_store,
+        project_path=ws.root,
+        workspace=ws,
+        personal_store=p_store,
+    )
+
+    prop = _create_test_proposal(
+        p_store=p_store,
+        workspace_id=ws.name,
+        prop_id="prop-step-replay-1",
+        title="Step Replay Test",
+        constraints=["allow:test.mutate"],
+    )
+    auth = ExecutionAuthority(
+        proposal_id=prop.id,
+        proposal_version=prop.version,
+        workspace_id=ws.name,
+        granted_at=datetime.now(timezone.utc).isoformat(),
+        step_id="step-fixed-01",
+    )
+
+    # 1. First execution succeeds
+    res1 = executor.execute(
+        action_id="test.mutate",
+        workspace_id=ws.name,
+        input_data={"data": "val1"},
+        authority=auth,
+    )
+    assert res1.status == ActionExecutionStatus.SUCCEEDED
+    assert handler_calls == 1
+
+    # 2. Replay execution with same authority + step_id: MUST FAIL and handler MUST NOT run
+    with pytest.raises((UnauthorizedExecutionError, RuntimeError)):
+        executor.execute(
+            action_id="test.mutate",
+            workspace_id=ws.name,
+            input_data={"data": "val2"},
+            authority=auth,
+        )
+    assert handler_calls == 1  # Handler was NOT invoked a second time!
+
+
+def test_replay_without_step_id_blocked_before_handler(tmp_path):
+    """Verifies that replaying an authority without step_id is blocked BEFORE handler execution."""
+    from aether.actions.models import ActionDefinition, ActionTier
+    ws = Workspace.get_or_init(tmp_path / "ws_nostep_replay")
+    p_store = ws.personal_store
+
+    handler_calls = 0
+    def mutating_handler(inp, ws_id):
+        nonlocal handler_calls
+        handler_calls += 1
+        return {"mutated": True}
+
+    reg = ActionRegistry()
+    reg.register(
+        ActionDefinition(
+            id="test.mutate_no_step",
+            name="Mutate No Step Test",
+            description="Testing",
+            provider="test",
+            tier=ActionTier.DO,
+            permission_level=ActionPermissionLevel.LOCAL_MUTATION,
+            requires_confirmation=False,
+        ),
+        handler=mutating_handler,
+    )
+    executor = ActionExecutor(
+        registry=reg,
+        store=ws.action_store,
+        project_path=ws.root,
+        workspace=ws,
+        personal_store=p_store,
+    )
+
+    prop = _create_test_proposal(
+        p_store=p_store,
+        workspace_id=ws.name,
+        prop_id="prop-nostep-replay-1",
+        title="No Step Replay Test",
+        constraints=["allow:test.mutate_no_step"],
+    )
+    auth = ExecutionAuthority(
+        proposal_id=prop.id,
+        proposal_version=prop.version,
+        workspace_id=ws.name,
+        granted_at=datetime.now(timezone.utc).isoformat(),
+        step_id=None,  # No step_id on authority
+    )
+
+    # 1. First execution succeeds
+    res1 = executor.execute(
+        action_id="test.mutate_no_step",
+        workspace_id=ws.name,
+        input_data={"param": 1},
+        authority=auth,
+    )
+    assert res1.status == ActionExecutionStatus.SUCCEEDED
+    assert handler_calls == 1
+
+    # 2. Second execution with same authority without step_id: MUST FAIL before handler
+    with pytest.raises((UnauthorizedExecutionError, RuntimeError)):
+        executor.execute(
+            action_id="test.mutate_no_step",
+            workspace_id=ws.name,
+            input_data={"param": 2},
+            authority=auth,
+        )
+    assert handler_calls == 1  # Handler was NOT invoked a second time!
+
+
+def test_concurrent_replay_exact_single_execution(tmp_path):
+    """Verifies that concurrent replay attempts result in exactly ONE execution of the handler."""
+    import threading
+    from aether.actions.models import ActionDefinition, ActionTier
+    ws = Workspace.get_or_init(tmp_path / "ws_concurrent_replay")
+    p_store = ws.personal_store
+
+    handler_calls = 0
+    handler_lock = threading.Lock()
+    def mutating_handler(inp, ws_id):
+        nonlocal handler_calls
+        with handler_lock:
+            handler_calls += 1
+        return {"mutated": True}
+
+    reg = ActionRegistry()
+    reg.register(
+        ActionDefinition(
+            id="test.concurrent_action",
+            name="Concurrent Action",
+            description="Testing concurrency",
+            provider="test",
+            tier=ActionTier.DO,
+            permission_level=ActionPermissionLevel.LOCAL_MUTATION,
+            requires_confirmation=False,
+        ),
+        handler=mutating_handler,
+    )
+    executor = ActionExecutor(
+        registry=reg,
+        store=ws.action_store,
+        project_path=ws.root,
+        workspace=ws,
+        personal_store=p_store,
+    )
+
+    prop = _create_test_proposal(
+        p_store=p_store,
+        workspace_id=ws.name,
+        prop_id="prop-concurrent-1",
+        title="Concurrent Test",
+        constraints=["allow:test.concurrent_action"],
+    )
+    auth = ExecutionAuthority(
+        proposal_id=prop.id,
+        proposal_version=prop.version,
+        workspace_id=ws.name,
+        granted_at=datetime.now(timezone.utc).isoformat(),
+    )
+
+    results = []
+    errors = []
+    barrier = threading.Barrier(2)
+
+    def worker():
+        try:
+            barrier.wait()
+            res = executor.execute(
+                action_id="test.concurrent_action",
+                workspace_id=ws.name,
+                input_data={"data": "concurrent"},
+                authority=auth,
+            )
+            results.append(res)
+        except Exception as exc:
+            errors.append(exc)
+
+    t1 = threading.Thread(target=worker)
+    t2 = threading.Thread(target=worker)
+    t1.start()
+    t2.start()
+    t1.join()
+    t2.join()
+
+    # Exactly ONE thread must succeed in executing the mutation handler
+    assert handler_calls == 1
+    # Exactly one thread succeeds and the other thread gets an error
+    assert len(results) == 1
+    assert len(errors) == 1
+    assert results[0].status == ActionExecutionStatus.SUCCEEDED
+
+
+def test_ledger_failure_blocks_mutation_fail_closed(tmp_path, monkeypatch):
+    """Verifies that if ledger reservation fails, action fails closed and handler is NEVER dispatched."""
+    from aether.actions.models import ActionDefinition, ActionTier
+    import sqlite3
+    ws = Workspace.get_or_init(tmp_path / "ws_ledger_fail")
+    p_store = ws.personal_store
+
+    handler_calls = 0
+    def mutating_handler(inp, ws_id):
+        nonlocal handler_calls
+        handler_calls += 1
+        return {"mutated": True}
+
+    reg = ActionRegistry()
+    reg.register(
+        ActionDefinition(
+            id="test.ledger_fail_action",
+            name="Ledger Fail Action",
+            description="Testing ledger failure",
+            provider="test",
+            tier=ActionTier.DO,
+            permission_level=ActionPermissionLevel.LOCAL_MUTATION,
+            requires_confirmation=False,
+        ),
+        handler=mutating_handler,
+    )
+    executor = ActionExecutor(
+        registry=reg,
+        store=ws.action_store,
+        project_path=ws.root,
+        workspace=ws,
+        personal_store=p_store,
+    )
+
+    prop = _create_test_proposal(
+        p_store=p_store,
+        workspace_id=ws.name,
+        prop_id="prop-ledger-fail-1",
+        title="Ledger Fail Test",
+        constraints=["allow:test.ledger_fail_action"],
+    )
+    auth = ExecutionAuthority(
+        proposal_id=prop.id,
+        proposal_version=prop.version,
+        workspace_id=ws.name,
+        granted_at=datetime.now(timezone.utc).isoformat(),
+    )
+
+    # Force record_step_executed to raise an error (simulating database I/O error)
+    def broken_record(*args, **kwargs):
+        raise sqlite3.OperationalError("disk I/O error during ledger write")
+    monkeypatch.setattr(p_store, "record_step_executed", broken_record)
+
+    with pytest.raises(RuntimeError) as exc_info:
+        executor.execute(
+            action_id="test.ledger_fail_action",
+            workspace_id=ws.name,
+            input_data={"data": "test"},
+            authority=auth,
+        )
+    assert "Authority ledger reservation failed" in str(exc_info.value)
+    # The mutating handler MUST NEVER have been dispatched!
+    assert handler_calls == 0

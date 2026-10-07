@@ -376,7 +376,9 @@ async def test_canonical_approval_unknown_target_404(temp_workspace):
 # ---------------------------------------------------------------------------
 
 def test_personal_agent_truthful_act_and_do_flows(temp_workspace, accepted_authority_factory):
+    from aether.providers.mock import MockProvider
     personal_svc = temp_workspace.personal
+    personal_svc.provider = MockProvider(responses=["# Project Overview\n\nNotes content."])
     _, auth_act = accepted_authority_factory(temp_workspace, title="Schedule investor meeting")
     _, auth_do = accepted_authority_factory(temp_workspace, title="Create notes file")
 

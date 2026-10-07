@@ -60,13 +60,37 @@ class WorkforceEvolutionEngine:
         if metrics_override:
             metrics = BenchmarkMetrics.from_dict(metrics_override)
         else:
+            eff_latency = latency_ms if latency_ms is not None else avg_latency_ms
+            eff_tokens = tokens_used if tokens_used is not None else avg_tokens_per_task
+            eff_safety = safety_compliance if safety_compliance is not None else safety_compliance_score
+
+            missing = []
+            if completion_rate is None:
+                missing.append("completion_rate")
+            if error_rate is None:
+                missing.append("error_rate")
+            if eff_latency is None:
+                missing.append("latency_ms/avg_latency_ms")
+            if eff_tokens is None:
+                missing.append("tokens_used/avg_tokens_per_task")
+            if quality_score is None:
+                missing.append("quality_score")
+            if eff_safety is None:
+                missing.append("safety_compliance/safety_compliance_score")
+
+            if missing:
+                raise ValueError(
+                    f"Cannot evaluate benchmark for target '{t_id}': missing required metric inputs: {', '.join(missing)}. "
+                    "Synthetic fallback metrics are prohibited. Real measurement data must be provided."
+                )
+
             metrics = BenchmarkMetrics(
-                completion_rate=completion_rate if completion_rate is not None else 0.95,
-                error_rate=error_rate if error_rate is not None else 0.05,
-                latency_ms=latency_ms if latency_ms is not None else (avg_latency_ms if avg_latency_ms is not None else 950.0),
-                tokens_used=tokens_used if tokens_used is not None else (avg_tokens_per_task if avg_tokens_per_task is not None else 1450),
-                quality_score=quality_score if quality_score is not None else 89.0,
-                safety_compliance=safety_compliance if safety_compliance is not None else (safety_compliance_score if safety_compliance_score is not None else 100.0),
+                completion_rate=completion_rate,
+                error_rate=error_rate,
+                latency_ms=eff_latency,
+                tokens_used=eff_tokens,
+                quality_score=quality_score,
+                safety_compliance=eff_safety,
             )
 
         overall = metrics.calculate_composite_score()

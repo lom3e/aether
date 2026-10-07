@@ -3,12 +3,26 @@ import {
   Calendar, Mail, GitBranch, MessageSquare, FileText, CheckCircle2,
   AlertCircle, ShieldCheck, Settings, Plus, RefreshCw, Clock, Zap, Globe, Send,
   Check, X, Loader2, Search, ChevronDown, ChevronUp, AlertTriangle, Shield,
-  Lock, Trash2
+  Lock, Trash2, ExternalLink, Copy
 } from 'lucide-react';
 import { apiUrl } from './api';
 import { ToastContext } from './toast';
 import { submitApprovalDecision } from './canonicalNotification';
 import { useTranslation } from './i18n';
+import { openExternalUrl } from './desktop';
+
+interface OAuthProviderInfo {
+  provider: string;
+  name: string;
+  supports_oauth: boolean;
+  ready_for_user_connect: boolean;
+  requires_developer_setup: boolean;
+  redirect_uri: string;
+  setup_url: string;
+  has_client_id: boolean;
+  has_client_secret: boolean;
+  client_id_preview?: string;
+}
 
 interface ConnectionItem {
   id: string;
@@ -103,8 +117,26 @@ export function Connections({ navigate: _navigate, initialExecutionId, initialTa
   const [googleAuthPending, setGoogleAuthPending] = useState(false);
   const [googleManualCode, setGoogleManualCode] = useState('');
   const [googleState, setGoogleState] = useState('');
+  const [lastGoogleAuthUrl, setLastGoogleAuthUrl] = useState('');
   const [isCalendarPickerOpen, setIsCalendarPickerOpen] = useState(false);
   const [googleCalendars, setGoogleCalendars] = useState<{ id: string; summary: string; primary: boolean; description?: string }[]>([]);
+
+  // OAuth Management States
+  const [oauthProviders, setOauthProviders] = useState<Record<string, OAuthProviderInfo>>({});
+  const [oauthPendingProvider, setOauthPendingProvider] = useState<string | null>(null);
+
+  // Dedicated Developer App Setup Modal (GitHub, Slack, Notion)
+  const [devSetupModalProvider, setDevSetupModalProvider] = useState<ProviderDefinition | null>(null);
+  const [devSetupTab, setDevSetupTab] = useState<'oauth' | 'manual'>('oauth');
+  const [devClientId, setDevClientId] = useState('');
+  const [devClientSecret, setDevClientSecret] = useState('');
+  const [savingDevConfig, setSavingDevConfig] = useState(false);
+  const [copiedField, setCopiedField] = useState<string | null>(null);
+
+  // Dedicated Guided Telegram Modal
+  const [isTelegramModalOpen, setIsTelegramModalOpen] = useState(false);
+  const [telegramAdvOpen, setTelegramAdvOpen] = useState(false);
+  const [verifyingTelegram, setVerifyingTelegram] = useState(false);
 
   // New Event Form State
   const [isEventModalOpen, setIsEventModalOpen] = useState(false);
@@ -196,7 +228,7 @@ export function Connections({ navigate: _navigate, initialExecutionId, initialTa
       ],
       color: '#000000',
       builtIn: false,
-      isOAuth: false,
+      isOAuth: true,
     },
     {
       id: 'github',
@@ -213,7 +245,7 @@ export function Connections({ navigate: _navigate, initialExecutionId, initialTa
       ],
       color: '#2dba4e',
       builtIn: false,
-      isOAuth: false,
+      isOAuth: true,
     },
     {
       id: 'openapi',
@@ -264,7 +296,7 @@ export function Connections({ navigate: _navigate, initialExecutionId, initialTa
       ],
       color: '#4A154B',
       builtIn: false,
-      isOAuth: false,
+      isOAuth: true,
     },
     {
       id: 'email',
@@ -309,12 +341,14 @@ export function Connections({ navigate: _navigate, initialExecutionId, initialTa
       fetch(apiUrl('/api/connections/calendar/events')).then(r => r.json()),
       fetch(apiUrl('/api/connections/google_calendar/events')).then(r => r.ok ? r.json() : []).catch(() => []),
       fetch(apiUrl('/api/actions/executions')).then(r => r.json()),
+      fetch(apiUrl('/api/connections/oauth/providers')).then(r => r.ok ? r.json() : {}).catch(() => ({})),
     ])
-      .then(([conns, evts, gEvts, execs]) => {
+      .then(([conns, evts, gEvts, execs, oauths]) => {
         if (Array.isArray(conns)) setConnections(conns);
         if (Array.isArray(evts)) setCalendarEvents(evts);
         if (Array.isArray(gEvts)) setGoogleCalendarEvents(gEvts);
         if (Array.isArray(execs)) setExecutions(execs);
+        if (oauths && typeof oauths === 'object') setOauthProviders(oauths as Record<string, OAuthProviderInfo>);
       })
       .catch(err => {
         console.error('Error loading connections data', err);
@@ -792,26 +826,22 @@ export function Connections({ navigate: _navigate, initialExecutionId, initialTa
         throw new Error(data.detail || 'Could not start Google authorization.');
       }
       setGoogleState(data.state || '');
+      setLastGoogleAuthUrl(data.auth_url || '');
 
-      const width = 600;
-      const height = 720;
-      const left = window.screenX + (window.outerWidth - width) / 2;
-      const top = window.screenY + (window.outerHeight - height) / 2;
-      const popup = window.open(
-        data.auth_url,
-        'aether_google_oauth',
-        `width=${width},height=${height},left=${left},top=${top},status=0,toolbar=0,menubar=0`
-      );
+      // Launch authorization flow in host/system browser directly
+      await openExternalUrl(data.auth_url);
 
       const messageHandler = (event: MessageEvent) => {
         if (event.data?.type === 'aether_oauth_success' && event.data?.provider === 'google_calendar') {
           window.removeEventListener('message', messageHandler);
-          showToast(`Google Calendar connected & verified (${event.data.email || 'account'})!`, 'success');
+          clearInterval(pollTimer);
+          showToast(t('connGoogleConnected'), 'success');
           setIsGoogleModalOpen(false);
           setGoogleAuthPending(false);
           fetchAll();
         } else if (event.data?.type === 'aether_oauth_error' && event.data?.provider === 'google_calendar') {
           window.removeEventListener('message', messageHandler);
+          clearInterval(pollTimer);
           showToast(`Google Calendar authorization failed: ${event.data.error || 'error'}`, 'error');
           setGoogleAuthPending(false);
           fetchAll();
@@ -819,17 +849,213 @@ export function Connections({ navigate: _navigate, initialExecutionId, initialTa
       };
       window.addEventListener('message', messageHandler);
 
-      const pollTimer = setInterval(() => {
-        if (!popup || popup.closed) {
+      let attempts = 0;
+      const pollTimer = setInterval(async () => {
+        attempts++;
+        if (attempts > 80) { // 2 minute timeout
           clearInterval(pollTimer);
           window.removeEventListener('message', messageHandler);
           setGoogleAuthPending(false);
-          fetchAll();
+          return;
         }
-      }, 1000);
+        try {
+          const checkRes = await fetch(apiUrl('/api/connections'));
+          if (checkRes.ok) {
+            const conns = await checkRes.json();
+            if (Array.isArray(conns)) {
+              const gc = conns.find((c: any) => c.provider === 'google_calendar');
+              if (gc && (gc.status === 'verified' || gc.status === 'connected')) {
+                clearInterval(pollTimer);
+                window.removeEventListener('message', messageHandler);
+                showToast(t('connGoogleConnected'), 'success');
+                setIsGoogleModalOpen(false);
+                setGoogleAuthPending(false);
+                fetchAll();
+              }
+            }
+          }
+        } catch {
+          // ignore transient poll failure
+        }
+      }, 1500);
     } catch (err: any) {
       showToast(err.message || 'Failed to start Google OAuth', 'error');
       setGoogleAuthPending(false);
+    }
+  };
+
+  const copyToClipboard = (text: string, fieldKey: string) => {
+    navigator.clipboard.writeText(text);
+    setCopiedField(fieldKey);
+    setTimeout(() => setCopiedField(null), 2000);
+    showToast('Copiato negli appunti!', 'info');
+  };
+
+  const handleStartOAuth = async (provider: string) => {
+    setOauthPendingProvider(provider);
+    try {
+      const res = await fetch(apiUrl(`/api/connections/${provider}/oauth/start`), {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({}),
+      });
+      const data = await res.json();
+      if (!res.ok) {
+        throw new Error(data.detail || `Could not start ${provider} authorization.`);
+      }
+      if (data.auth_url) {
+        await openExternalUrl(data.auth_url);
+        const nameMap: Record<string, string> = {
+          google_calendar: 'Google Calendar',
+          github: 'GitHub',
+          slack: 'Slack',
+          notion: 'Notion',
+        };
+        const pName = nameMap[provider] || provider;
+        showToast(`Apertura autorizzazione ${pName} nel browser...`, 'info');
+
+        let attempts = 0;
+        const pollTimer = setInterval(async () => {
+          attempts++;
+          if (attempts > 80) { // 2 minute timeout
+            clearInterval(pollTimer);
+            setOauthPendingProvider(null);
+            return;
+          }
+          try {
+            const checkRes = await fetch(apiUrl('/api/connections'));
+            if (checkRes.ok) {
+              const conns = await checkRes.json();
+              if (Array.isArray(conns)) {
+                const conn = conns.find((c: any) => c.provider === provider);
+                if (conn && (conn.status === 'verified' || conn.status === 'connected')) {
+                  clearInterval(pollTimer);
+                  setOauthPendingProvider(null);
+                  showToast(`${pName} collegato e verificato!`, 'success');
+                  fetchAll();
+                }
+              }
+            }
+          } catch {}
+        }, 1500);
+      }
+    } catch (err: any) {
+      showToast(err.message || 'Errore durante l\'avvio dell\'autorizzazione.', 'error');
+      setOauthPendingProvider(null);
+    }
+  };
+
+  const openDevSetupModal = (p: ProviderDefinition) => {
+    setDevSetupModalProvider(p);
+    setDevSetupTab('oauth');
+    const existing = connections.find(c => c.provider === p.id);
+    if (existing?.auth_metadata?.client_id) {
+      setDevClientId(existing.auth_metadata.client_id);
+    } else {
+      setDevClientId('');
+    }
+    setDevClientSecret('');
+    setTestResult(null);
+  };
+
+  const handleSaveDevOAuthConfig = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!devSetupModalProvider) return;
+    if (!devClientId.trim() || !devClientSecret.trim()) {
+      showToast('Client ID e Client Secret sono obbligatori.', 'error');
+      return;
+    }
+    setSavingDevConfig(true);
+    try {
+      const res = await fetch(apiUrl(`/api/connections/${devSetupModalProvider.id}/oauth/config`), {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          client_id: devClientId.trim(),
+          client_secret: devClientSecret.trim(),
+        }),
+      });
+      if (!res.ok) {
+        const err = await res.json();
+        throw new Error(err.detail || 'Impossibile salvare la configurazione sviluppatore.');
+      }
+      showToast(t('connOAuthConfigSaved'), 'success');
+      await fetchAll();
+      const targetProv = devSetupModalProvider.id;
+      setDevSetupModalProvider(null);
+      // Immediately launch 1-click authorization!
+      await handleStartOAuth(targetProv);
+    } catch (err: any) {
+      showToast(err.message || 'Errore salvataggio configurazione.', 'error');
+    } finally {
+      setSavingDevConfig(false);
+    }
+  };
+
+  const openTelegramModal = (conn?: ConnectionItem) => {
+    if (conn && conn.auth_metadata) {
+      setTelegramBotToken(conn.auth_metadata.bot_token || '');
+      setTelegramDefaultChatId(conn.auth_metadata.default_chat_id || '');
+      setTelegramAllowedChats(conn.auth_metadata.allowed_chat_ids || '');
+    } else {
+      setTelegramBotToken('');
+      setTelegramDefaultChatId('');
+      setTelegramAllowedChats('');
+    }
+    setTestResult(null);
+    setIsTelegramModalOpen(true);
+  };
+
+  const handleConnectTelegramGuided = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!telegramBotToken.trim()) {
+      showToast('Il Bot Token è obbligatorio.', 'error');
+      return;
+    }
+    setVerifyingTelegram(true);
+    setTestResult(null);
+    try {
+      const authMeta: Record<string, any> = {
+        bot_token: telegramBotToken.trim(),
+        live_check: true,
+      };
+      if (telegramDefaultChatId.trim()) authMeta.default_chat_id = telegramDefaultChatId.trim();
+      if (telegramAllowedChats.trim()) authMeta.allowed_chat_ids = telegramAllowedChats.trim();
+
+      const verifyRes = await fetch(apiUrl('/api/connections/telegram/verify'), {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ auth_metadata: authMeta, live_check: true }),
+      });
+      const verifyData = await verifyRes.json();
+      if (!verifyData.valid) {
+        setTestResult({ valid: false, message: verifyData.message || 'Verifica token fallita.' });
+        return;
+      }
+
+      // Save connection
+      const saveRes = await fetch(apiUrl('/api/connections'), {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          provider: 'telegram',
+          account_name: 'Telegram Bot',
+          auth_metadata: authMeta,
+          live_check: true,
+        }),
+      });
+      if (saveRes.ok) {
+        showToast(verifyData.message || 'Telegram Bot collegato e verificato!', 'success');
+        setIsTelegramModalOpen(false);
+        fetchAll();
+      } else {
+        const err = await saveRes.json();
+        setTestResult({ valid: false, message: err.detail || 'Impossibile salvare la connessione Telegram.' });
+      }
+    } catch (err: any) {
+      setTestResult({ valid: false, message: err.message || 'Errore di connessione al server.' });
+    } finally {
+      setVerifyingTelegram(false);
     }
   };
 
@@ -1014,7 +1240,8 @@ export function Connections({ navigate: _navigate, initialExecutionId, initialTa
     : [];
 
   return (
-    <div style={{ padding: '28px', maxWidth: '1120px', margin: '0 auto' }}>
+    <div style={{ flex: 1, overflowY: 'auto', width: '100%', height: '100%' }}>
+      <div style={{ padding: '28px', maxWidth: '1120px', margin: '0 auto' }}>
       {/* Header */}
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: '24px', flexWrap: 'wrap', gap: '16px' }}>
         <div>
@@ -1529,16 +1756,69 @@ export function Connections({ navigate: _navigate, initialExecutionId, initialTa
                               if (conn?.auth_metadata?.client_id) setGoogleClientId(conn.auth_metadata.client_id);
                               setIsGoogleModalOpen(true);
                             }}
-                            disabled={isVerifying}
-                            style={{ fontSize: '12px', padding: '6px 14px' }}
+                            disabled={oauthPendingProvider === 'google_calendar'}
+                            style={{ fontSize: '12px', padding: '6px 14px', backgroundColor: '#4285F4', borderColor: '#4285F4', color: '#fff' }}
                           >
-                            {isVerifying ? (
+                            {oauthPendingProvider === 'google_calendar' ? (
                               <span style={{ display: 'flex', alignItems: 'center', gap: '4px' }}>
-                                <RefreshCw size={12} className="animate-spin" /> {t('connStatusVerifying')}
+                                <RefreshCw size={12} className="animate-spin" /> {t('connGoogleVerifyingBtn')}
+                              </span>
+                            ) : (
+                              t('connGoogleAuthorizeBtn')
+                            )}
+                          </button>
+                        ) : p.id === 'github' && oauthProviders.github?.ready_for_user_connect ? (
+                          <button
+                            className="btn btn-primary"
+                            onClick={() => handleStartOAuth('github')}
+                            disabled={oauthPendingProvider === 'github'}
+                            style={{ fontSize: '12px', padding: '6px 14px', backgroundColor: '#2dba4e', borderColor: '#2dba4e', color: '#fff' }}
+                          >
+                            {oauthPendingProvider === 'github' ? (
+                              <span style={{ display: 'flex', alignItems: 'center', gap: '4px' }}>
+                                <RefreshCw size={12} className="animate-spin" /> {t('connGoogleVerifyingBtn')}
                               </span>
                             ) : (
                               t('connReconnect')
                             )}
+                          </button>
+                        ) : p.id === 'slack' && oauthProviders.slack?.ready_for_user_connect ? (
+                          <button
+                            className="btn btn-primary"
+                            onClick={() => handleStartOAuth('slack')}
+                            disabled={oauthPendingProvider === 'slack'}
+                            style={{ fontSize: '12px', padding: '6px 14px', backgroundColor: '#4A154B', borderColor: '#4A154B', color: '#fff' }}
+                          >
+                            {oauthPendingProvider === 'slack' ? (
+                              <span style={{ display: 'flex', alignItems: 'center', gap: '4px' }}>
+                                <RefreshCw size={12} className="animate-spin" /> {t('connGoogleVerifyingBtn')}
+                              </span>
+                            ) : (
+                              t('connReconnect')
+                            )}
+                          </button>
+                        ) : p.id === 'notion' && oauthProviders.notion?.ready_for_user_connect ? (
+                          <button
+                            className="btn btn-primary"
+                            onClick={() => handleStartOAuth('notion')}
+                            disabled={oauthPendingProvider === 'notion'}
+                            style={{ fontSize: '12px', padding: '6px 14px', backgroundColor: '#000000', borderColor: '#000000', color: '#fff' }}
+                          >
+                            {oauthPendingProvider === 'notion' ? (
+                              <span style={{ display: 'flex', alignItems: 'center', gap: '4px' }}>
+                                <RefreshCw size={12} className="animate-spin" /> {t('connGoogleVerifyingBtn')}
+                              </span>
+                            ) : (
+                              t('connReconnect')
+                            )}
+                          </button>
+                        ) : p.id === 'telegram' ? (
+                          <button
+                            className="btn btn-primary"
+                            onClick={() => openTelegramModal(conn)}
+                            style={{ fontSize: '12px', padding: '6px 14px', backgroundColor: '#229ED9', borderColor: '#229ED9', color: '#fff' }}
+                          >
+                            {t('connReconnect')}
                           </button>
                         ) : (
                           <button
@@ -1664,7 +1944,7 @@ export function Connections({ navigate: _navigate, initialExecutionId, initialTa
                             onClick={handleConnectCalendar}
                             style={{ fontSize: '12px', padding: '6px 14px' }}
                           >
-                            Initialize Calendar
+                            {t('connLocalInitCalendar')}
                           </button>
                         ) : p.id === 'google_calendar' ? (
                           <button
@@ -1673,9 +1953,123 @@ export function Connections({ navigate: _navigate, initialExecutionId, initialTa
                               if (conn?.auth_metadata?.client_id) setGoogleClientId(conn.auth_metadata.client_id);
                               setIsGoogleModalOpen(true);
                             }}
+                            disabled={oauthPendingProvider === 'google_calendar'}
                             style={{ fontSize: '12px', padding: '6px 14px', backgroundColor: '#4285F4', borderColor: '#4285F4', color: '#fff' }}
                           >
-                            Connect Google Calendar
+                            {oauthPendingProvider === 'google_calendar' ? (
+                              <span style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+                                <RefreshCw size={12} className="animate-spin" /> {t('connGoogleVerifyingBtn')}
+                              </span>
+                            ) : (
+                              t('connGoogleAuthorizeBtn')
+                            )}
+                          </button>
+                        ) : p.id === 'github' ? (
+                          oauthProviders.github?.ready_for_user_connect ? (
+                            <button
+                              className="btn btn-primary"
+                              onClick={() => handleStartOAuth('github')}
+                              disabled={oauthPendingProvider === 'github'}
+                              style={{ fontSize: '12px', padding: '6px 14px', backgroundColor: '#2dba4e', borderColor: '#2dba4e', color: '#fff' }}
+                            >
+                              {oauthPendingProvider === 'github' ? (
+                                <span style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+                                  <RefreshCw size={12} className="animate-spin" /> {t('connGoogleVerifyingBtn')}
+                                </span>
+                              ) : (
+                                t('connConnectGithub')
+                              )}
+                            </button>
+                          ) : (
+                            <button
+                              className="btn btn-primary"
+                              onClick={() => openDevSetupModal(p)}
+                              style={{ fontSize: '12px', padding: '6px 14px' }}
+                            >
+                              {t('connSetupGithub')}
+                            </button>
+                          )
+                        ) : p.id === 'slack' ? (
+                          oauthProviders.slack?.ready_for_user_connect ? (
+                            <button
+                              className="btn btn-primary"
+                              onClick={() => handleStartOAuth('slack')}
+                              disabled={oauthPendingProvider === 'slack'}
+                              style={{ fontSize: '12px', padding: '6px 14px', backgroundColor: '#4A154B', borderColor: '#4A154B', color: '#fff' }}
+                            >
+                              {oauthPendingProvider === 'slack' ? (
+                                <span style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+                                  <RefreshCw size={12} className="animate-spin" /> {t('connGoogleVerifyingBtn')}
+                                </span>
+                              ) : (
+                                t('connConnectSlack')
+                              )}
+                            </button>
+                          ) : (
+                            <button
+                              className="btn btn-primary"
+                              onClick={() => openDevSetupModal(p)}
+                              style={{ fontSize: '12px', padding: '6px 14px' }}
+                            >
+                              {t('connSetupSlack')}
+                            </button>
+                          )
+                        ) : p.id === 'notion' ? (
+                          oauthProviders.notion?.ready_for_user_connect ? (
+                            <button
+                              className="btn btn-primary"
+                              onClick={() => handleStartOAuth('notion')}
+                              disabled={oauthPendingProvider === 'notion'}
+                              style={{ fontSize: '12px', padding: '6px 14px', backgroundColor: '#000000', borderColor: '#000000', color: '#fff' }}
+                            >
+                              {oauthPendingProvider === 'notion' ? (
+                                <span style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+                                  <RefreshCw size={12} className="animate-spin" /> {t('connGoogleVerifyingBtn')}
+                                </span>
+                              ) : (
+                                t('connConnectNotion')
+                              )}
+                            </button>
+                          ) : (
+                            <button
+                              className="btn btn-primary"
+                              onClick={() => openDevSetupModal(p)}
+                              style={{ fontSize: '12px', padding: '6px 14px' }}
+                            >
+                              {t('connSetupNotion')}
+                            </button>
+                          )
+                        ) : p.id === 'telegram' ? (
+                          <button
+                            className="btn btn-primary"
+                            onClick={() => openTelegramModal(conn)}
+                            style={{ fontSize: '12px', padding: '6px 14px', backgroundColor: '#229ED9', borderColor: '#229ED9', color: '#fff' }}
+                          >
+                            {t('connSetupTelegram')}
+                          </button>
+                        ) : p.id === 'email' ? (
+                          <button
+                            className="btn btn-primary"
+                            onClick={() => openConfigModal(p, conn)}
+                            style={{ fontSize: '12px', padding: '6px 14px' }}
+                          >
+                            {t('connConfigureEmail')}
+                          </button>
+                        ) : p.id === 'http' ? (
+                          <button
+                            className="btn btn-primary"
+                            onClick={() => openConfigModal(p, conn)}
+                            style={{ fontSize: '12px', padding: '6px 14px' }}
+                          >
+                            {t('connConfigureHttp')}
+                          </button>
+                        ) : p.id === 'openapi' ? (
+                          <button
+                            className="btn btn-primary"
+                            onClick={() => openConfigModal(p, conn)}
+                            style={{ fontSize: '12px', padding: '6px 14px' }}
+                          >
+                            {t('connConfigureOpenapi')}
                           </button>
                         ) : (
                           <button
@@ -2473,7 +2867,18 @@ export function Connections({ navigate: _navigate, initialExecutionId, initialTa
               {/* Provider-specific inputs */}
               {configModalProvider.id === 'github' && (
                 <div>
-                  <label style={{ fontSize: '12px', fontWeight: 600, display: 'block', marginBottom: '4px' }}>Personal Access Token (PAT)</label>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '4px' }}>
+                    <label style={{ fontSize: '12px', fontWeight: 600, margin: 0 }}>Personal Access Token (PAT)</label>
+                    <button
+                      type="button"
+                      className="btn btn-ghost"
+                      style={{ fontSize: '11px', padding: '2px 8px', color: 'hsl(var(--primary))' }}
+                      onClick={() => openExternalUrl('https://github.com/settings/tokens/new?description=Aether%20Agentic%20Desktop&scopes=repo,read:user')}
+                    >
+                      <ExternalLink size={12} style={{ marginRight: '4px' }} />
+                      {t('connGithubOpenTokenLink')}
+                    </button>
+                  </div>
                   <input
                     type="password"
                     className="input"
@@ -2484,7 +2889,7 @@ export function Connections({ navigate: _navigate, initialExecutionId, initialTa
                     style={{ width: '100%' }}
                   />
                   <div style={{ fontSize: '11px', color: 'hsl(var(--muted-fg))', marginTop: '4px' }}>
-                    Requires repo and workflow read/write permissions.
+                    {t('connGithubTokenHelp')}
                   </div>
                 </div>
               )}
@@ -2492,7 +2897,18 @@ export function Connections({ navigate: _navigate, initialExecutionId, initialTa
               {configModalProvider.id === 'slack' && (
                 <>
                   <div>
-                    <label style={{ fontSize: '12px', fontWeight: 600, display: 'block', marginBottom: '4px' }}>Bot User OAuth Token</label>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '4px' }}>
+                      <label style={{ fontSize: '12px', fontWeight: 600, margin: 0 }}>Bot User OAuth Token</label>
+                      <button
+                        type="button"
+                        className="btn btn-ghost"
+                        style={{ fontSize: '11px', padding: '2px 8px', color: 'hsl(var(--primary))' }}
+                        onClick={() => openExternalUrl('https://api.slack.com/apps')}
+                      >
+                        <ExternalLink size={12} style={{ marginRight: '4px' }} />
+                        {t('connSlackOpenApps')}
+                      </button>
+                    </div>
                     <input
                       type="password"
                       className="input"
@@ -2501,6 +2917,9 @@ export function Connections({ navigate: _navigate, initialExecutionId, initialTa
                       onChange={e => { setSlackToken(e.target.value); setTestResult(null); }}
                       style={{ width: '100%' }}
                     />
+                    <div style={{ fontSize: '11px', color: 'hsl(var(--muted-fg))', marginTop: '4px' }}>
+                      {t('connSlackBotHelp')}
+                    </div>
                   </div>
                   <div style={{ textAlign: 'center', fontSize: '11px', color: 'hsl(var(--muted-fg))' }}>— OR —</div>
                   <div>
@@ -2624,7 +3043,18 @@ export function Connections({ navigate: _navigate, initialExecutionId, initialTa
               {configModalProvider.id === 'telegram' && (
                 <>
                   <div>
-                    <label style={{ fontSize: '12px', fontWeight: 600, display: 'block', marginBottom: '4px' }}>Telegram Bot Token</label>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '4px' }}>
+                      <label style={{ fontSize: '12px', fontWeight: 600, margin: 0 }}>Telegram Bot Token</label>
+                      <button
+                        type="button"
+                        className="btn btn-ghost"
+                        style={{ fontSize: '11px', padding: '2px 8px', color: 'hsl(var(--primary))' }}
+                        onClick={() => openExternalUrl('https://t.me/BotFather')}
+                      >
+                        <ExternalLink size={12} style={{ marginRight: '4px' }} />
+                        {t('connTelegramOpenBotFather')}
+                      </button>
+                    </div>
                     <input
                       type="password"
                       className="input"
@@ -2635,7 +3065,7 @@ export function Connections({ navigate: _navigate, initialExecutionId, initialTa
                       style={{ width: '100%' }}
                     />
                     <div style={{ fontSize: '11px', color: 'hsl(var(--muted-fg))', marginTop: '4px' }}>
-                      Obtained from @BotFather on Telegram.
+                      {t('connTelegramBotHelp')}
                     </div>
                   </div>
                   <div>
@@ -2718,7 +3148,18 @@ export function Connections({ navigate: _navigate, initialExecutionId, initialTa
               {configModalProvider.id === 'notion' && (
                 <>
                   <div>
-                    <label style={{ fontSize: '12px', fontWeight: 600, display: 'block', marginBottom: '4px' }}>Integration Token</label>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '4px' }}>
+                      <label style={{ fontSize: '12px', fontWeight: 600, margin: 0 }}>Integration Token</label>
+                      <button
+                        type="button"
+                        className="btn btn-ghost"
+                        style={{ fontSize: '11px', padding: '2px 8px', color: 'hsl(var(--primary))' }}
+                        onClick={() => openExternalUrl('https://www.notion.so/my-integrations')}
+                      >
+                        <ExternalLink size={12} style={{ marginRight: '4px' }} />
+                        {t('connNotionOpenIntegrations')}
+                      </button>
+                    </div>
                     <input
                       type="password"
                       className="input"
@@ -2729,7 +3170,7 @@ export function Connections({ navigate: _navigate, initialExecutionId, initialTa
                       style={{ width: '100%' }}
                     />
                     <div style={{ fontSize: '11px', color: 'hsl(var(--muted-fg))', marginTop: '4px' }}>
-                      Internal integration secret token (starts with secret_ or ntn_).
+                      {t('connNotionHelp')}
                     </div>
                   </div>
                   <div>
@@ -2858,6 +3299,551 @@ export function Connections({ navigate: _navigate, initialExecutionId, initialTa
         </div>
       )}
 
+      {/* DEVELOPER OAUTH APP SETUP MODAL (FOR GITHUB, SLACK, NOTION) */}
+      {devSetupModalProvider && (
+        <div style={{
+          position: 'fixed',
+          inset: 0,
+          backgroundColor: 'rgba(0, 0, 0, 0.65)',
+          backdropFilter: 'blur(4px)',
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'center',
+          zIndex: 1000,
+        }}>
+          <div className="card" style={{ width: '560px', maxHeight: '90vh', overflowY: 'auto', padding: '26px', borderRadius: '14px' }}>
+            {/* Header */}
+            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '16px' }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
+                <div style={{
+                  width: '42px',
+                  height: '42px',
+                  borderRadius: '10px',
+                  backgroundColor: `${devSetupModalProvider.color}15`,
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  color: devSetupModalProvider.color,
+                }}>
+                  <devSetupModalProvider.icon size={22} />
+                </div>
+                <div>
+                  <h3 style={{ margin: 0, fontSize: '18px', fontWeight: 600 }}>
+                    {devSetupModalProvider.id === 'github' ? t('connGithubModalTitle') :
+                     devSetupModalProvider.id === 'slack' ? t('connSlackModalTitle') :
+                     t('connNotionModalTitle')}
+                  </h3>
+                  <div style={{ fontSize: '12px', color: 'hsl(var(--muted-fg))' }}>
+                    {devSetupModalProvider.id === 'github' ? t('connGithubModalSubtitle') :
+                     devSetupModalProvider.id === 'slack' ? t('connSlackModalSubtitle') :
+                     t('connNotionModalSubtitle')}
+                  </div>
+                </div>
+              </div>
+              <button
+                type="button"
+                className="btn btn-ghost"
+                onClick={() => setDevSetupModalProvider(null)}
+                style={{ padding: '6px' }}
+              >
+                <X size={18} />
+              </button>
+            </div>
+
+            {/* Tabs: OAuth App vs Manual */}
+            <div style={{ display: 'flex', gap: '8px', borderBottom: '1px solid hsl(var(--border))', paddingBottom: '10px', marginBottom: '18px' }}>
+              <button
+                type="button"
+                onClick={() => setDevSetupTab('oauth')}
+                style={{
+                  padding: '6px 14px',
+                  borderRadius: '6px',
+                  fontSize: '13px',
+                  fontWeight: devSetupTab === 'oauth' ? 600 : 400,
+                  backgroundColor: devSetupTab === 'oauth' ? 'hsl(var(--primary)/0.12)' : 'transparent',
+                  color: devSetupTab === 'oauth' ? 'hsl(var(--primary))' : 'hsl(var(--muted-fg))',
+                  border: 'none',
+                  cursor: 'pointer',
+                }}
+              >
+                {devSetupModalProvider.id === 'github' ? t('connGithubTabOAuth') :
+                 devSetupModalProvider.id === 'slack' ? t('connSlackTabOAuth') :
+                 t('connNotionTabOAuth')}
+              </button>
+              <button
+                type="button"
+                onClick={() => setDevSetupTab('manual')}
+                style={{
+                  padding: '6px 14px',
+                  borderRadius: '6px',
+                  fontSize: '13px',
+                  fontWeight: devSetupTab === 'manual' ? 600 : 400,
+                  backgroundColor: devSetupTab === 'manual' ? 'hsl(var(--muted)/0.5)' : 'transparent',
+                  color: devSetupTab === 'manual' ? 'hsl(var(--fg))' : 'hsl(var(--muted-fg))',
+                  border: 'none',
+                  cursor: 'pointer',
+                }}
+              >
+                {devSetupModalProvider.id === 'github' ? t('connGithubTabManual') :
+                 devSetupModalProvider.id === 'slack' ? t('connSlackTabManual') :
+                 t('connNotionTabManual')}
+              </button>
+            </div>
+
+            {/* TAB 1: OAUTH APP SETUP */}
+            {devSetupTab === 'oauth' && (
+              <form onSubmit={handleSaveDevOAuthConfig} style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
+                {devSetupModalProvider.id === 'github' && (
+                  <>
+                    <div style={{
+                      backgroundColor: 'hsl(var(--muted)/0.25)',
+                      border: '1px solid hsl(var(--border))',
+                      borderRadius: '8px',
+                      padding: '12px 14px',
+                      display: 'flex',
+                      flexDirection: 'column',
+                      gap: '8px',
+                    }}>
+                      <div style={{ fontSize: '13px', fontWeight: 600, color: 'hsl(var(--fg))' }}>
+                        {t('connGithubStep1')}
+                      </div>
+                      <div>
+                        <button
+                          type="button"
+                          className="btn btn-secondary"
+                          onClick={() => openExternalUrl('https://github.com/settings/applications/new')}
+                          style={{ fontSize: '12px', display: 'flex', alignItems: 'center', gap: '6px' }}
+                        >
+                          <ExternalLink size={13} /> {t('connGithubOpenAppRegistration')}
+                        </button>
+                      </div>
+                    </div>
+
+                    <div style={{
+                      backgroundColor: 'hsl(var(--muted)/0.25)',
+                      border: '1px solid hsl(var(--border))',
+                      borderRadius: '8px',
+                      padding: '12px 14px',
+                      fontSize: '12px',
+                      display: 'flex',
+                      flexDirection: 'column',
+                      gap: '8px',
+                    }}>
+                      <div style={{ fontWeight: 600, color: 'hsl(var(--fg))' }}>
+                        {t('connGithubStep2')}
+                      </div>
+                      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                        <span style={{ color: 'hsl(var(--muted-fg))' }}>{t('connGithubAppName')}</span>
+                        <code style={{ fontSize: '12px', color: 'hsl(var(--fg))' }}>Aether Desktop</code>
+                      </div>
+                      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                        <span style={{ color: 'hsl(var(--muted-fg))' }}>{t('connGithubHomepage')}</span>
+                        <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+                          <code style={{ fontSize: '11px' }}>http://127.0.0.1:8000</code>
+                          <button
+                            type="button"
+                            className="btn btn-ghost"
+                            onClick={() => copyToClipboard('http://127.0.0.1:8000', 'gh_hp')}
+                            style={{ padding: '2px 6px', fontSize: '11px' }}
+                          >
+                            <Copy size={11} /> {copiedField === 'gh_hp' ? '✓' : ''}
+                          </button>
+                        </div>
+                      </div>
+                      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                        <span style={{ color: 'hsl(var(--muted-fg))' }}>{t('connGithubCallbackUrl')}</span>
+                        <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+                          <code style={{ fontSize: '10px' }}>{oauthProviders.github?.redirect_uri || 'http://127.0.0.1:8000/api/connections/github/oauth/callback'}</code>
+                          <button
+                            type="button"
+                            className="btn btn-ghost"
+                            onClick={() => copyToClipboard(oauthProviders.github?.redirect_uri || 'http://127.0.0.1:8000/api/connections/github/oauth/callback', 'gh_cb')}
+                            style={{ padding: '2px 6px', fontSize: '11px' }}
+                          >
+                            <Copy size={11} /> {copiedField === 'gh_cb' ? '✓' : ''}
+                          </button>
+                        </div>
+                      </div>
+                    </div>
+                  </>
+                )}
+
+                {devSetupModalProvider.id === 'slack' && (
+                  <>
+                    <div style={{
+                      backgroundColor: 'hsl(var(--muted)/0.25)',
+                      border: '1px solid hsl(var(--border))',
+                      borderRadius: '8px',
+                      padding: '12px 14px',
+                      display: 'flex',
+                      flexDirection: 'column',
+                      gap: '8px',
+                    }}>
+                      <div style={{ fontSize: '13px', fontWeight: 600, color: 'hsl(var(--fg))' }}>
+                        {t('connSlackStep1')}
+                      </div>
+                      <div>
+                        <button
+                          type="button"
+                          className="btn btn-secondary"
+                          onClick={() => openExternalUrl('https://api.slack.com/apps/new')}
+                          style={{ fontSize: '12px', display: 'flex', alignItems: 'center', gap: '6px' }}
+                        >
+                          <ExternalLink size={13} /> {t('connSlackCreateApp')}
+                        </button>
+                      </div>
+                    </div>
+
+                    <div style={{
+                      backgroundColor: 'hsl(var(--muted)/0.25)',
+                      border: '1px solid hsl(var(--border))',
+                      borderRadius: '8px',
+                      padding: '12px 14px',
+                      fontSize: '12px',
+                      display: 'flex',
+                      flexDirection: 'column',
+                      gap: '8px',
+                    }}>
+                      <div style={{ fontWeight: 600, color: 'hsl(var(--fg))' }}>
+                        {t('connSlackStep2')}
+                      </div>
+                      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                        <code style={{ fontSize: '10px' }}>{oauthProviders.slack?.redirect_uri || 'http://127.0.0.1:8000/api/connections/slack/oauth/callback'}</code>
+                        <button
+                          type="button"
+                          className="btn btn-ghost"
+                          onClick={() => copyToClipboard(oauthProviders.slack?.redirect_uri || 'http://127.0.0.1:8000/api/connections/slack/oauth/callback', 'slack_cb')}
+                          style={{ padding: '2px 6px', fontSize: '11px' }}
+                        >
+                          <Copy size={11} /> {copiedField === 'slack_cb' ? '✓' : ''}
+                        </button>
+                      </div>
+                      <div style={{ color: 'hsl(var(--muted-fg))', marginTop: '4px' }}>
+                        {t('connSlackStep3')}
+                      </div>
+                    </div>
+                  </>
+                )}
+
+                {devSetupModalProvider.id === 'notion' && (
+                  <>
+                    <div style={{
+                      backgroundColor: 'hsl(var(--muted)/0.25)',
+                      border: '1px solid hsl(var(--border))',
+                      borderRadius: '8px',
+                      padding: '12px 14px',
+                      display: 'flex',
+                      flexDirection: 'column',
+                      gap: '8px',
+                    }}>
+                      <div style={{ fontSize: '13px', fontWeight: 600, color: 'hsl(var(--fg))' }}>
+                        {t('connNotionStep1')}
+                      </div>
+                      <div>
+                        <button
+                          type="button"
+                          className="btn btn-secondary"
+                          onClick={() => openExternalUrl('https://www.notion.so/my-integrations')}
+                          style={{ fontSize: '12px', display: 'flex', alignItems: 'center', gap: '6px' }}
+                        >
+                          <ExternalLink size={13} /> {t('connNotionOpenPortal')}
+                        </button>
+                      </div>
+                    </div>
+
+                    <div style={{
+                      backgroundColor: 'hsl(var(--muted)/0.25)',
+                      border: '1px solid hsl(var(--border))',
+                      borderRadius: '8px',
+                      padding: '12px 14px',
+                      fontSize: '12px',
+                      display: 'flex',
+                      flexDirection: 'column',
+                      gap: '8px',
+                    }}>
+                      <div style={{ fontWeight: 600, color: 'hsl(var(--fg))' }}>
+                        {t('connNotionStep2')}
+                      </div>
+                      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                        <code style={{ fontSize: '10px' }}>{oauthProviders.notion?.redirect_uri || 'http://127.0.0.1:8000/api/connections/notion/oauth/callback'}</code>
+                        <button
+                          type="button"
+                          className="btn btn-ghost"
+                          onClick={() => copyToClipboard(oauthProviders.notion?.redirect_uri || 'http://127.0.0.1:8000/api/connections/notion/oauth/callback', 'notion_cb')}
+                          style={{ padding: '2px 6px', fontSize: '11px' }}
+                        >
+                          <Copy size={11} /> {copiedField === 'notion_cb' ? '✓' : ''}
+                        </button>
+                      </div>
+                    </div>
+                  </>
+                )}
+
+                {/* Input Fields for Client ID and Secret */}
+                <div>
+                  <label style={{ fontSize: '12px', fontWeight: 600, display: 'block', marginBottom: '4px' }}>
+                    Client ID *
+                  </label>
+                  <input
+                    type="text"
+                    className="input"
+                    required
+                    placeholder="e.g. 1234567890abcdef..."
+                    value={devClientId}
+                    onChange={e => setDevClientId(e.target.value)}
+                    style={{ width: '100%', fontSize: '13px' }}
+                  />
+                </div>
+
+                <div>
+                  <label style={{ fontSize: '12px', fontWeight: 600, display: 'block', marginBottom: '4px' }}>
+                    Client Secret *
+                  </label>
+                  <input
+                    type="password"
+                    className="input"
+                    required
+                    placeholder="••••••••••••••••••••••••••••••"
+                    value={devClientSecret}
+                    onChange={e => setDevClientSecret(e.target.value)}
+                    style={{ width: '100%', fontSize: '13px' }}
+                  />
+                </div>
+
+                {/* Footer Buttons */}
+                <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '8px', marginTop: '10px', paddingTop: '14px', borderTop: '1px solid hsl(var(--border))' }}>
+                  <button
+                    type="button"
+                    className="btn btn-ghost"
+                    onClick={() => setDevSetupModalProvider(null)}
+                    disabled={savingDevConfig}
+                  >
+                    {t('connGoogleCancel')}
+                  </button>
+                  <button
+                    type="submit"
+                    className="btn btn-primary"
+                    disabled={savingDevConfig || !devClientId.trim() || !devClientSecret.trim()}
+                    style={{ display: 'flex', alignItems: 'center', gap: '6px' }}
+                  >
+                    {savingDevConfig ? <RefreshCw size={13} className="animate-spin" /> : null}
+                    {savingDevConfig ? 'Salvataggio...' : t('connSaveOAuthConfig')}
+                  </button>
+                </div>
+              </form>
+            )}
+
+            {/* TAB 2: MANUAL OPTION */}
+            {devSetupTab === 'manual' && (
+              <div style={{ display: 'flex', flexDirection: 'column', gap: '14px' }}>
+                <p style={{ fontSize: '13px', color: 'hsl(var(--muted-fg))', margin: 0, lineHeight: 1.5 }}>
+                  Puoi collegare questo servizio utilizzando credenziali manuali dirette anziché la configurazione OAuth.
+                </p>
+                <div style={{ display: 'flex', justifyContent: 'flex-end', marginTop: '10px' }}>
+                  <button
+                    type="button"
+                    className="btn btn-primary"
+                    onClick={() => {
+                      const p = devSetupModalProvider;
+                      const conn = connections.find(c => c.provider === p.id);
+                      setDevSetupModalProvider(null);
+                      openConfigModal(p, conn);
+                    }}
+                  >
+                    Apri configurazione manuale
+                  </button>
+                </div>
+              </div>
+            )}
+          </div>
+        </div>
+      )}
+
+      {/* TELEGRAM GUIDED ONBOARDING MODAL */}
+      {isTelegramModalOpen && (
+        <div style={{
+          position: 'fixed',
+          inset: 0,
+          backgroundColor: 'rgba(0, 0, 0, 0.65)',
+          backdropFilter: 'blur(4px)',
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'center',
+          zIndex: 1000,
+        }}>
+          <div className="card" style={{ width: '520px', maxHeight: '90vh', overflowY: 'auto', padding: '26px', borderRadius: '14px' }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '12px', marginBottom: '16px' }}>
+              <div style={{
+                width: '42px',
+                height: '42px',
+                borderRadius: '10px',
+                backgroundColor: '#229ED915',
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                color: '#229ED9',
+              }}>
+                <Send size={22} />
+              </div>
+              <div>
+                <h3 style={{ margin: 0, fontSize: '18px', fontWeight: 600 }}>{t('connTelegramModalTitle')}</h3>
+                <div style={{ fontSize: '12px', color: 'hsl(var(--muted-fg))' }}>
+                  {t('connTelegramModalSubtitle')}
+                </div>
+              </div>
+            </div>
+
+            {testResult && (
+              <div style={{
+                padding: '10px 14px',
+                borderRadius: '8px',
+                marginBottom: '16px',
+                fontSize: '13px',
+                display: 'flex',
+                alignItems: 'center',
+                gap: '8px',
+                backgroundColor: testResult.valid ? '#10b98115' : '#ef444415',
+                color: testResult.valid ? '#10b981' : '#ef4444',
+                border: `1px solid ${testResult.valid ? '#10b98130' : '#ef444430'}`
+              }}>
+                {testResult.valid ? <CheckCircle2 size={16} /> : <AlertCircle size={16} />}
+                <span>{testResult.message}</span>
+              </div>
+            )}
+
+            <form onSubmit={handleConnectTelegramGuided} style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
+              {/* Step 1 */}
+              <div style={{
+                backgroundColor: 'hsl(var(--muted)/0.25)',
+                border: '1px solid hsl(var(--border))',
+                borderRadius: '8px',
+                padding: '12px 14px',
+                display: 'flex',
+                flexDirection: 'column',
+                gap: '8px',
+              }}>
+                <div style={{ fontSize: '13px', fontWeight: 600, color: 'hsl(var(--fg))' }}>
+                  {t('connTelegramStep1Title')}
+                </div>
+                <div style={{ fontSize: '12px', color: 'hsl(var(--muted-fg))' }}>
+                  {t('connTelegramStep1Desc')}
+                </div>
+                <div>
+                  <button
+                    type="button"
+                    className="btn btn-secondary"
+                    onClick={() => openExternalUrl('https://t.me/BotFather')}
+                    style={{ fontSize: '12px', display: 'flex', alignItems: 'center', gap: '6px' }}
+                  >
+                    <ExternalLink size={13} /> {t('connTelegramOpenBotFatherBtn')}
+                  </button>
+                </div>
+              </div>
+
+              {/* Step 2 */}
+              <div style={{
+                backgroundColor: 'hsl(var(--muted)/0.25)',
+                border: '1px solid hsl(var(--border))',
+                borderRadius: '8px',
+                padding: '12px 14px',
+                fontSize: '12px',
+                display: 'flex',
+                flexDirection: 'column',
+                gap: '4px',
+              }}>
+                <div style={{ fontWeight: 600, color: 'hsl(var(--fg))' }}>
+                  {t('connTelegramStep2Title')}
+                </div>
+                <div style={{ color: 'hsl(var(--muted-fg))', lineHeight: 1.4 }}>
+                  {t('connTelegramStep2Desc')}
+                </div>
+              </div>
+
+              {/* Step 3 */}
+              <div>
+                <label style={{ fontSize: '12px', fontWeight: 600, display: 'block', marginBottom: '4px' }}>
+                  {t('connTelegramStep3Title')} *
+                </label>
+                <div style={{ fontSize: '11px', color: 'hsl(var(--muted-fg))', marginBottom: '6px' }}>
+                  {t('connTelegramStep3Desc')}
+                </div>
+                <input
+                  type="password"
+                  className="input"
+                  required
+                  placeholder={t('connTelegramTokenPlaceholder')}
+                  value={telegramBotToken}
+                  onChange={e => { setTelegramBotToken(e.target.value); setTestResult(null); }}
+                  style={{ width: '100%', fontSize: '13px' }}
+                />
+              </div>
+
+              {/* Advanced Chat IDs toggle */}
+              <details
+                open={telegramAdvOpen}
+                onToggle={e => setTelegramAdvOpen((e.target as HTMLDetailsElement).open)}
+                style={{ fontSize: '12px' }}
+              >
+                <summary style={{ cursor: 'pointer', color: 'hsl(var(--muted-fg))', padding: '4px 0' }}>
+                  {t('connTelegramAdvToggle')}
+                </summary>
+                <div style={{ display: 'flex', flexDirection: 'column', gap: '10px', marginTop: '10px' }}>
+                  <div>
+                    <label style={{ fontSize: '11px', fontWeight: 600, display: 'block', marginBottom: '2px' }}>
+                      Default Chat ID (facoltativo)
+                    </label>
+                    <input
+                      type="text"
+                      className="input"
+                      placeholder="e.g. 123456789"
+                      value={telegramDefaultChatId}
+                      onChange={e => setTelegramDefaultChatId(e.target.value)}
+                      style={{ width: '100%', fontSize: '12px' }}
+                    />
+                  </div>
+                  <div>
+                    <label style={{ fontSize: '11px', fontWeight: 600, display: 'block', marginBottom: '2px' }}>
+                      Authorized Chat IDs (separati da virgola)
+                    </label>
+                    <input
+                      type="text"
+                      className="input"
+                      placeholder="e.g. 123456789, 987654321"
+                      value={telegramAllowedChats}
+                      onChange={e => setTelegramAllowedChats(e.target.value)}
+                      style={{ width: '100%', fontSize: '12px' }}
+                    />
+                  </div>
+                  <div style={{ fontSize: '11px', color: 'hsl(var(--muted-fg))' }}>
+                    {t('connTelegramChatIdHelp')}
+                  </div>
+                </div>
+              </details>
+
+              <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '8px', marginTop: '10px', paddingTop: '14px', borderTop: '1px solid hsl(var(--border))' }}>
+                <button
+                  type="button"
+                  className="btn btn-ghost"
+                  onClick={() => setIsTelegramModalOpen(false)}
+                  disabled={verifyingTelegram}
+                >
+                  {t('connGoogleCancel')}
+                </button>
+                <button
+                  type="submit"
+                  className="btn btn-primary"
+                  disabled={verifyingTelegram || !telegramBotToken.trim()}
+                  style={{ display: 'flex', alignItems: 'center', gap: '6px', backgroundColor: '#229ED9', borderColor: '#229ED9', color: '#fff' }}
+                >
+                  {verifyingTelegram ? <RefreshCw size={13} className="animate-spin" /> : null}
+                  {verifyingTelegram ? t('connTelegramVerifying') : t('connTelegramVerifyAndConnect')}
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
       {/* GOOGLE CALENDAR OAUTH MODAL */}
       {isGoogleModalOpen && (
         <div style={{
@@ -2885,117 +3871,179 @@ export function Connections({ navigate: _navigate, initialExecutionId, initialTa
                 <Calendar size={22} />
               </div>
               <div>
-                <h3 style={{ margin: 0, fontSize: '18px', fontWeight: 600 }}>Connect Google Calendar</h3>
+                <h3 style={{ margin: 0, fontSize: '18px', fontWeight: 600 }}>{t('connGoogleModalTitle')}</h3>
                 <div style={{ fontSize: '12px', color: 'hsl(var(--muted-fg))' }}>
-                  Official OAuth 2.0 PKCE flow with direct Google API authorization
+                  {t('connGoogleModalSubtitle')}
                 </div>
               </div>
             </div>
 
-            <p style={{ fontSize: '13px', color: 'hsl(var(--muted-fg))', lineHeight: 1.5, margin: '0 0 16px' }}>
-              Aether connects directly to official Google APIs without third-party proxying.
-              Clicking <strong>Authorize with Google</strong> will open Google's consent screen.
+            <p style={{ fontSize: '13px', color: 'hsl(var(--muted-fg))', lineHeight: 1.5, margin: '0 0 18px' }}>
+              {t('connGoogleDirectNote')}
             </p>
 
-            <form onSubmit={handleStartGoogleOAuth} style={{ display: 'flex', flexDirection: 'column', gap: '14px' }}>
-              <div>
-                <label style={{ fontSize: '12px', fontWeight: 600, display: 'block', marginBottom: '4px' }}>
-                  Google Client ID (Optional)
-                </label>
-                <input
-                  type="text"
-                  className="input"
-                  placeholder="Leave blank to use default desktop client or env setting"
-                  value={googleClientId}
-                  onChange={e => setGoogleClientId(e.target.value)}
-                  style={{ width: '100%', fontSize: '13px' }}
-                />
-                <div style={{ fontSize: '11px', color: 'hsl(var(--muted-fg))', marginTop: '4px' }}>
-                  If using your own Google Cloud project credentials.
+            {/* Primary 1-Click Guided Authorization Action */}
+            <button
+              type="button"
+              className="btn btn-primary"
+              onClick={() => handleStartGoogleOAuth()}
+              disabled={googleAuthPending}
+              style={{
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                gap: '8px',
+                padding: '12px 20px',
+                fontSize: '14px',
+                fontWeight: 600,
+                backgroundColor: '#4285F4',
+                borderColor: '#4285F4',
+                color: '#fff',
+                width: '100%',
+                borderRadius: '8px',
+                boxShadow: '0 2px 8px rgba(66, 133, 244, 0.25)'
+              }}
+            >
+              {googleAuthPending ? (
+                <>
+                  <RefreshCw size={16} className="animate-spin" />
+                  <span>{t('connGoogleVerifyingBtn')}</span>
+                </>
+              ) : (
+                <>
+                  <Globe size={16} />
+                  <span>{t('connGoogleAuthorizeBtn')}</span>
+                </>
+              )}
+            </button>
+
+            {/* Pending Feedback Banner */}
+            {googleAuthPending && (
+              <div style={{
+                padding: '12px 14px',
+                borderRadius: '8px',
+                backgroundColor: '#4285F415',
+                border: '1px solid #4285F430',
+                fontSize: '12px',
+                color: 'hsl(var(--fg))',
+                marginTop: '14px',
+                display: 'flex',
+                flexDirection: 'column',
+                gap: '6px'
+              }}>
+                <div style={{ fontWeight: 500, lineHeight: 1.4 }}>
+                  {t('connGooglePendingMsg')}
+                </div>
+                {lastGoogleAuthUrl && (
+                  <button
+                    type="button"
+                    className="btn btn-ghost"
+                    style={{
+                      padding: 0,
+                      fontSize: '11px',
+                      color: '#4285F4',
+                      textDecoration: 'underline',
+                      justifyContent: 'flex-start',
+                      height: 'auto'
+                    }}
+                    onClick={() => openExternalUrl(lastGoogleAuthUrl)}
+                  >
+                    {t('connGoogleOpenBrowserFallback')}
+                  </button>
+                )}
+              </div>
+            )}
+
+            {/* Collapsible Advanced Developer Settings */}
+            <details style={{ marginTop: '18px', fontSize: '12px' }}>
+              <summary style={{ cursor: 'pointer', color: 'hsl(var(--muted-fg))', fontWeight: 600, padding: '4px 0' }}>
+                {t('connGoogleAdvToggle')}
+              </summary>
+              <div style={{ display: 'flex', flexDirection: 'column', gap: '12px', marginTop: '10px' }}>
+                <div>
+                  <label style={{ fontSize: '12px', fontWeight: 600, display: 'block', marginBottom: '4px' }}>
+                    {t('connGoogleClientId')}
+                  </label>
+                  <input
+                    type="text"
+                    className="input"
+                    placeholder="Leave blank to use default desktop client"
+                    value={googleClientId}
+                    onChange={e => setGoogleClientId(e.target.value)}
+                    style={{ width: '100%', fontSize: '13px' }}
+                  />
+                </div>
+
+                <div>
+                  <label style={{ fontSize: '12px', fontWeight: 600, display: 'block', marginBottom: '4px' }}>
+                    {t('connGoogleClientSecret')}
+                  </label>
+                  <input
+                    type="password"
+                    className="input"
+                    placeholder="Optional for desktop PKCE flows"
+                    value={googleClientSecret}
+                    onChange={e => setGoogleClientSecret(e.target.value)}
+                    style={{ width: '100%', fontSize: '13px' }}
+                  />
+                </div>
+
+                <div style={{
+                  backgroundColor: 'hsl(var(--muted)/0.2)',
+                  border: '1px solid hsl(var(--border))',
+                  borderRadius: '8px',
+                  padding: '10px 14px',
+                  fontSize: '11px',
+                  color: 'hsl(var(--muted-fg))',
+                  lineHeight: 1.4,
+                }}>
+                  <strong>{t('connGoogleRedirectUri')}:</strong><br />
+                  <code style={{ fontSize: '10px', color: 'hsl(var(--fg))' }}>
+                    http://127.0.0.1:8000/api/connections/google_calendar/oauth/callback
+                  </code>
                 </div>
               </div>
+            </details>
 
-              <div>
-                <label style={{ fontSize: '12px', fontWeight: 600, display: 'block', marginBottom: '4px' }}>
-                  Google Client Secret (Optional)
-                </label>
-                <input
-                  type="password"
-                  className="input"
-                  placeholder="Optional for desktop PKCE flows"
-                  value={googleClientSecret}
-                  onChange={e => setGoogleClientSecret(e.target.value)}
-                  style={{ width: '100%', fontSize: '13px' }}
-                />
+            {/* Collapsible Manual Authorization Code Fallback */}
+            <details style={{ marginTop: '10px', fontSize: '12px' }}>
+              <summary style={{ cursor: 'pointer', color: 'hsl(var(--muted-fg))', padding: '4px 0' }}>
+                {t('connGoogleManualFallback')}
+              </summary>
+              <div style={{ marginTop: '10px' }}>
+                <p style={{ fontSize: '11px', color: 'hsl(var(--muted-fg))', margin: '0 0 10px' }}>
+                  {t('connGoogleManualDesc')}
+                </p>
+                <form onSubmit={handleManualExchangeCode} style={{ display: 'flex', gap: '8px' }}>
+                  <input
+                    type="text"
+                    className="input"
+                    placeholder="4/0A..."
+                    value={googleManualCode}
+                    onChange={e => setGoogleManualCode(e.target.value)}
+                    style={{ flex: 1, fontSize: '12px' }}
+                  />
+                  <button
+                    type="submit"
+                    className="btn btn-secondary"
+                    disabled={googleAuthPending || !googleManualCode.trim()}
+                    style={{ fontSize: '12px' }}
+                  >
+                    {t('connGoogleSubmitCode')}
+                  </button>
+                </form>
               </div>
+            </details>
 
-              <div style={{
-                backgroundColor: 'hsl(var(--muted)/0.2)',
-                border: '1px solid hsl(var(--border))',
-                borderRadius: '8px',
-                padding: '10px 14px',
-                fontSize: '11px',
-                color: 'hsl(var(--muted-fg))',
-                lineHeight: 1.4,
-              }}>
-                <strong>Authorized Redirect URI:</strong><br />
-                <code style={{ fontSize: '10px', color: 'hsl(var(--fg))' }}>
-                  http://127.0.0.1:8000/api/connections/google_calendar/oauth/callback
-                </code>
-              </div>
-
-              <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '8px', marginTop: '6px' }}>
-                <button
-                  type="button"
-                  className="btn btn-ghost"
-                  onClick={() => setIsGoogleModalOpen(false)}
-                  disabled={googleAuthPending}
-                >
-                  Cancel
-                </button>
-                <button
-                  type="submit"
-                  className="btn btn-primary"
-                  disabled={googleAuthPending}
-                  style={{ backgroundColor: '#4285F4', borderColor: '#4285F4', color: '#fff' }}
-                >
-                  {googleAuthPending ? (
-                    <span style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
-                      <RefreshCw size={12} className="animate-spin" /> Verifica in corso...
-                    </span>
-                  ) : (
-                    'Authorize with Google'
-                  )}
-                </button>
-              </div>
-            </form>
-
-            {/* Manual fallback exchange for headless or popup blocked */}
-            <div style={{ marginTop: '20px', paddingTop: '16px', borderTop: '1px solid hsl(var(--border))' }}>
-              <div style={{ fontSize: '12px', fontWeight: 600, marginBottom: '6px' }}>
-                Manual Authorization Code Entry (Fallback)
-              </div>
-              <p style={{ fontSize: '11px', color: 'hsl(var(--muted-fg))', margin: '0 0 10px' }}>
-                If your browser did not redirect automatically, paste the authorization code returned by Google below:
-              </p>
-              <form onSubmit={handleManualExchangeCode} style={{ display: 'flex', gap: '8px' }}>
-                <input
-                  type="text"
-                  className="input"
-                  placeholder="4/0A..."
-                  value={googleManualCode}
-                  onChange={e => setGoogleManualCode(e.target.value)}
-                  style={{ flex: 1, fontSize: '12px' }}
-                />
-                <button
-                  type="submit"
-                  className="btn btn-secondary"
-                  disabled={googleAuthPending || !googleManualCode.trim()}
-                  style={{ fontSize: '12px' }}
-                >
-                  Submit & Verify
-                </button>
-              </form>
+            <div style={{ display: 'flex', justifyContent: 'flex-end', marginTop: '20px', paddingTop: '14px', borderTop: '1px solid hsl(var(--border))' }}>
+              <button
+                type="button"
+                className="btn btn-ghost"
+                onClick={() => setIsGoogleModalOpen(false)}
+                disabled={googleAuthPending}
+              >
+                {t('connGoogleCancel')}
+              </button>
             </div>
           </div>
         </div>
@@ -3065,6 +4113,7 @@ export function Connections({ navigate: _navigate, initialExecutionId, initialTa
           </div>
         </div>
       )}
+      </div>
     </div>
   );
 }

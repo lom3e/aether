@@ -37,7 +37,12 @@ export function getSessionToken(): string | null {
 export const API_BASE = getApiBase();
 
 export function apiUrl(path: string): string {
-  return `${getApiBase()}${path}`;
+  const clean = path.startsWith('/') ? path : `/${path}`;
+  const normalized =
+    clean.startsWith('/api/') || clean === '/api' || clean.startsWith('/ws/') || clean === '/ws'
+      ? clean
+      : `/api${clean}`;
+  return `${getApiBase()}${normalized}`;
 }
 
 // Transparently inject X-Aether-Session-Token into fetch calls if session token is configured

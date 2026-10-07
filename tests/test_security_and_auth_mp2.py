@@ -16,6 +16,7 @@ import sys
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 import pytest
+from fastapi import HTTPException
 from starlette.requests import Request
 
 from aether.actions.executor import ActionExecutor
@@ -187,6 +188,65 @@ def test_ssrf_validator_blocks_internal_and_loopback_addresses():
         validate_public_url("http://169.254.169.254/latest/meta-data")
     assert "SSRF Protection" in str(exc3.value)
 
+    # RFC1918 private IPv4 addresses (10.x, 172.16.x, 192.168.x)
+    for private_url in [
+        "http://10.0.0.1/admin",
+        "http://172.16.0.10:8080/metrics",
+        "http://192.168.1.1/router",
+    ]:
+        with pytest.raises(SecurityBoundaryViolation) as exc_priv:
+            validate_public_url(private_url)
+        assert "SSRF Protection" in str(exc_priv.value)
+
+    # IPv6 loopback, link-local, and unique local
+    for ipv6_url in [
+        "http://[::1]:8000/api",
+        "http://[fe80::1]/config",
+        "http://[fd00::1]:9090/keys",
+    ]:
+        with pytest.raises(SecurityBoundaryViolation) as exc_v6:
+            validate_public_url(ipv6_url)
+        assert "SSRF Protection" in str(exc_v6.value)
+
+
+def test_ssrf_redirect_protection():
+    """SafeRedirectHandler must block redirects leading to private or loopback IPs."""
+    from aether.core.security import SafeRedirectHandler, safe_urlopen
+    import urllib.request
+
+    handler = SafeRedirectHandler()
+    req = urllib.request.Request("http://example.com/initial")
+
+    # 1. Public URL -> Redirect to loopback (127.0.0.1)
+    with pytest.raises(SecurityBoundaryViolation) as exc_loop:
+        handler.redirect_request(req, None, 302, "Found", {}, "http://127.0.0.1:8000/secret")
+    assert "SSRF Protection" in str(exc_loop.value)
+
+    # 2. Public URL -> Redirect to RFC1918 (10.0.0.1)
+    with pytest.raises(SecurityBoundaryViolation) as exc_rfc:
+        handler.redirect_request(req, None, 302, "Found", {}, "http://10.0.0.1/admin")
+    assert "SSRF Protection" in str(exc_rfc.value)
+
+    # 3. Public URL -> Redirect to metadata (169.254.169.254)
+    with pytest.raises(SecurityBoundaryViolation) as exc_meta:
+        handler.redirect_request(req, None, 302, "Found", {}, "http://169.254.169.254/latest/meta-data")
+    assert "SSRF Protection" in str(exc_meta.value)
+
+    # 4. Public URL -> Redirect to IPv6 private
+    with pytest.raises(SecurityBoundaryViolation) as exc_v6:
+        handler.redirect_request(req, None, 302, "Found", {}, "http://[::1]/root")
+    assert "SSRF Protection" in str(exc_v6.value)
+
+    # 5. Redirect chain ending in private IP
+    chain_handler = SafeRedirectHandler()
+    # Hop 1: public to public -> permitted
+    req2 = chain_handler.redirect_request(req, None, 302, "Found", {}, "https://httpbin.org/redirect-to")
+    assert req2 is not None
+    # Hop 2: public to private -> blocked fail-closed
+    with pytest.raises(SecurityBoundaryViolation) as exc_chain:
+        chain_handler.redirect_request(req2, None, 302, "Found", {}, "http://192.168.0.50/dashboard")
+    assert "SSRF Protection" in str(exc_chain.value)
+
 
 def test_http_connector_blocks_ssrf():
     """HttpConnector must raise ConnectorError on SSRF targets."""
@@ -344,12 +404,160 @@ async def test_telegram_webhook_verification(tmp_path: Path):
         assert res["status"] == "handled"
 
 
+@pytest.mark.asyncio
+async def test_telegram_webhook_fails_closed_when_unconfigured(tmp_path: Path):
+    """Telegram webhook must reject updates with HTTP 403 when webhook secret is not configured."""
+    ws = Workspace.get_or_init(tmp_path / "tg_unconf_ws", "Telegram Unconfigured WS")
+    app.state.workspace = ws
+
+    # 1. No telegram connection configured -> 403
+    req = Request(
+        scope={
+            "type": "http",
+            "app": app,
+            "headers": [],
+        }
+    )
+    with pytest.raises(HTTPException) as exc:
+        await telegram_webhook_route(req)
+    assert exc.value.status_code == 403
+    assert "not configured" in exc.value.detail.lower()
+
+    # 2. Connection configured but WITHOUT webhook_secret -> 403
+    from aether.connections.models import Connection, ConnectionStatus
+    ws.connections.save_connection(
+        Connection(
+            id="conn-tg-no-sec",
+            workspace_id=ws.name,
+            provider="telegram",
+            account_name="Bot",
+            status=ConnectionStatus.CONNECTED,
+            auth_metadata={
+                "bot_token": "123:ABC",
+            },
+        )
+    )
+    with pytest.raises(HTTPException) as exc2:
+        await telegram_webhook_route(req)
+    assert exc2.value.status_code == 403
+    assert "not configured" in exc2.value.detail.lower()
+
+
+
 def test_mock_provider_blocked_in_production(monkeypatch):
-    """In production mode (no pytest module and no env var), ProviderManager must block 'mock'."""
+    """In production mode (no env var or explicit 0), ProviderManager must block 'mock' fail-closed."""
     mgr = ProviderManager()
-    monkeypatch.setenv("AETHER_ENABLE_TEST_PROVIDERS", "0")
-    monkeypatch.setattr("sys.modules", {k: v for k, v in sys.modules.items() if k != "pytest"})
+    monkeypatch.delenv("AETHER_ENABLE_TEST_PROVIDERS", raising=False)
 
     with pytest.raises(ProviderNotFoundError) as exc:
         mgr.get("mock")
     assert "disabled in production" in str(exc.value)
+
+    monkeypatch.setenv("AETHER_ENABLE_TEST_PROVIDERS", "0")
+    with pytest.raises(ProviderNotFoundError) as exc2:
+        mgr.get("mock")
+    assert "disabled in production" in str(exc2.value)
+
+
+@pytest.mark.asyncio
+async def test_ssrf_all_outbound_sinks_fail_closed(tmp_path: Path):
+    """Verify that knowledge ingestion, watchers, notifications, external agents, and MCP block SSRF targets fail-closed."""
+    from aether.knowledge.ingestion import DocumentIngester
+    from aether.automation.watchers import HttpPollingWatcher
+    from aether.notifications.dispatcher import NotificationDispatcher
+    from aether.notifications.models import Notification, NotificationChannel, ChannelType, NotificationType
+    from aether.notifications.store import NotificationStore
+    from aether.agents.external import ExternalAgentAdapter, ExternalAgentConfig
+    from aether.tools.mcp import MCPClient
+    from aether.core.security import SecurityBoundaryViolation
+    from unittest.mock import MagicMock
+
+    # 1. Knowledge Ingester
+    mock_store = MagicMock()
+    ingester = DocumentIngester(mock_store)
+    with pytest.raises(SecurityBoundaryViolation):
+        ingester.ingest_url("http://127.0.0.1:8080/internal.html")
+
+    # 2. HTTP Polling Watcher
+    watcher = HttpPollingWatcher(automation_id="auto_1", url="http://169.254.169.254/latest/meta-data")
+    with pytest.raises(SecurityBoundaryViolation):
+        watcher._fetch_sync()
+
+    # 3. Notification Dispatcher webhook delivery
+    notif_store = NotificationStore(tmp_path / "notif.db")
+    dispatcher = NotificationDispatcher(store=notif_store)
+    ch = NotificationChannel(
+        id="ch_webhook",
+        workspace_id="default",
+        channel_type=ChannelType.WEBHOOK,
+        name="Webhook",
+        config={"webhook_url": "http://10.0.0.1:5000/webhook"},
+        enabled=True,
+    )
+    notif = Notification(id="n_1", workspace_id="default", type=NotificationType.INSIGHT, title="Alert", message="Test")
+    status, msg = dispatcher._deliver_webhook(ch, notif)
+    assert status.value == "failed"
+    assert "SSRF blocked" in msg
+
+    # 4. External Agent HTTP dispatch
+    cfg = ExternalAgentConfig(name="rogue_worker", endpoint_url="http://[::1]:9999/execute")
+    agent = ExternalAgentAdapter(config=cfg)
+    mock_task = MagicMock(id="task_1", instruction="do it", context_data={}, action_args={}, metadata={}, expected_output=None)
+    with pytest.raises(SecurityBoundaryViolation):
+        agent._execute_http(mock_task)
+
+    # 5. MCP HTTP client
+    client = MCPClient(endpoint_url="http://192.168.1.1/mcp")
+    with pytest.raises(RuntimeError) as exc_mcp:
+        client._send_http({"method": "ping"})
+    assert "SSRF Protection" in str(exc_mcp.value)
+
+
+@pytest.mark.asyncio
+async def test_workspace_init_does_not_write_plaintext_env(tmp_path: Path):
+    """Verify that POST /workspace/init does NOT write plaintext API keys to .env, but securely uses SecretStore."""
+    from aether.server.routes import init_workspace, WorkspaceInitRequest
+    from starlette.requests import Request
+
+    class DummyState:
+        def __init__(self, root: Path):
+            self.workspace_root = root
+            self.workspace = None
+            self.team = None
+            self.active_team_name = None
+
+    class DummyServerApp:
+        def __init__(self, root: Path):
+            self.state = DummyState(root)
+
+    ws_root = tmp_path / "test_init_ws"
+    app = DummyServerApp(ws_root)
+    req = Request(scope={"type": "http", "app": app})
+
+    payload = WorkspaceInitRequest(
+        name="SecureWS",
+        provider="openai",
+        api_key="sk-plaintext-secret-123456",
+        model="gpt-4o",
+    )
+
+    info = await init_workspace(req, payload)
+    assert info.name == "SecureWS"
+
+    ws = app.state.workspace
+    assert ws is not None
+
+    # 1. Assert .env file does not contain the plaintext API key
+    env_file = ws.root / ".env"
+    if env_file.exists():
+        env_content = env_file.read_text(encoding="utf-8")
+        assert "sk-plaintext-secret-123456" not in env_content
+        assert "OPENAI_API_KEY" not in env_content
+
+    # 2. Assert secret is safely preserved in SecretStore
+    assert ws.secret_store.has_secret("provider_api_key:openai")
+    stored_secret = ws.secret_store.get_secret("provider_api_key:openai")
+    assert stored_secret == "sk-plaintext-secret-123456"
+
+    # 3. Assert secret was not leaked to process environment
+    assert os.environ.get("OPENAI_API_KEY") != "sk-plaintext-secret-123456"

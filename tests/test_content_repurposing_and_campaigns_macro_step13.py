@@ -343,7 +343,7 @@ async def test_fastapi_content_routes():
         camps_res = await list_campaigns_route(req)
         assert len(camps_res) >= 1
 
-        # 4. Repurpose Content
+        # 4. Repurpose Content: Case B — Provider Unavailable (Ollama offline)
         rep_payload = RepurposePayload(
             source_text=SAMPLE_ARTICLE,
             title="Scaling Agent Workforces",
@@ -351,10 +351,38 @@ async def test_fastapi_content_routes():
             tone="thought_leadership",
             campaign_id=camp_id,
         )
-        rep_res = await repurpose_content_route(req, rep_payload)
-        assert "item" in rep_res
-        assert len(rep_res["variants"]) == 3
-        var_id = rep_res["variants"][0]["id"]
+
+        from fastapi import HTTPException
+        from unittest.mock import patch, AsyncMock
+        from aether.providers.health import ProviderHealthStatus
+
+        # 4a. With provider offline, MUST raise 503 Service Unavailable (NEVER 405 or fake success)
+        with patch("aether.providers.health.ProviderHealthChecker.acheck_health", new_callable=AsyncMock) as mock_health:
+            mock_health.return_value = ProviderHealthStatus(
+                provider="ollama",
+                model="qwen3.5:9b",
+                status="error",
+                reachable=False,
+                error="Ollama server not reachable at http://localhost:11434 (Connection refused)",
+            )
+            with pytest.raises(HTTPException) as exc_info:
+                await repurpose_content_route(req, rep_payload)
+            assert exc_info.value.status_code == 503
+            assert "Provider unavailable" in exc_info.value.detail
+            assert "not reachable" in exc_info.value.detail
+
+        # 4b. With provider online/available, produces repurposed variants
+        with patch("aether.providers.health.ProviderHealthChecker.acheck_health", new_callable=AsyncMock) as mock_health:
+            mock_health.return_value = ProviderHealthStatus(
+                provider="ollama",
+                model="qwen3.5:9b",
+                status="connected",
+                reachable=True,
+            )
+            rep_res = await repurpose_content_route(req, rep_payload)
+            assert "item" in rep_res
+            assert len(rep_res["variants"]) == 3
+            var_id = rep_res["variants"][0]["id"]
 
         # 5. List Content Items
         items_res = await list_content_items_route(req, campaign_id=camp_id)
@@ -375,3 +403,46 @@ async def test_fastapi_content_routes():
         pub_res = await publish_variant_route(req, var_id)
         assert pub_res["status"] == "approved_for_manual_publish"
         assert pub_res["published_at"] is not None
+
+
+def test_repurpose_content_never_returns_405_and_returns_503_when_offline():
+    """Verify that POST /content/repurpose and POST /api/content/repurpose are registered as POST routes and never fall through to StaticFiles 405."""
+    from aether.server.app import app
+    from aether.server.routes import repurpose_content_route
+    from fastapi.routing import APIRoute
+
+    all_routes = []
+    for r in app.routes:
+        if isinstance(r, APIRoute):
+            all_routes.append((r.path, r.methods, r.endpoint))
+        elif hasattr(r, "effective_candidates"):
+            for c in r.effective_candidates():
+                all_routes.append((c.path, c.methods, c.endpoint))
+
+    repurpose_routes = [r for r in all_routes if "repurpose" in r[0]]
+    paths = {r[0] for r in repurpose_routes}
+    assert "/api/content/repurpose" in paths, "Missing /api/content/repurpose POST route"
+    assert "/content/repurpose" in paths, "Missing top-level /content/repurpose alias route for 405 prevention"
+
+    for path, methods, endpoint in repurpose_routes:
+        assert "POST" in methods, f"Route {path} must accept POST method"
+        assert endpoint == repurpose_content_route
+
+
+@pytest.mark.asyncio
+async def test_system_open_browser_route():
+    """Verify POST /api/system/open-browser accepts valid http/https URLs and rejects unsafe schemes."""
+    from aether.server.routes import system_open_browser, OpenBrowserPayload
+    from unittest.mock import patch
+    from fastapi import HTTPException
+
+    with patch("webbrowser.open") as mock_open:
+        # 1. Valid HTTPS URL
+        res = await system_open_browser(OpenBrowserPayload(url="https://accounts.google.com/o/oauth2/v2/auth?client_id=123"))
+        assert res["status"] == "opened"
+        assert res["url"].startswith("https://accounts.google.com")
+
+    # 2. Disallowed scheme (e.g. javascript: or file://)
+    with pytest.raises(HTTPException) as exc:
+        await system_open_browser(OpenBrowserPayload(url="javascript:alert(1)"))
+    assert exc.value.status_code == 400

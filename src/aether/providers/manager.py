@@ -94,8 +94,7 @@ class ProviderManager:
                 self._registry[name] = cls
             elif name == "mock":
                 import os
-                import sys
-                is_testing = os.environ.get("AETHER_ENABLE_TEST_PROVIDERS") == "1" or "pytest" in sys.modules
+                is_testing = os.environ.get("AETHER_ENABLE_TEST_PROVIDERS") == "1"
                 if not is_testing:
                     raise ProviderNotFoundError(
                         "Provider 'mock' is disabled in production environments. "

@@ -3,6 +3,7 @@
  * Coordinates multi-surface communication between Full Workspace and Ambient Companion.
  */
 import { invoke } from '@tauri-apps/api/core';
+import { apiUrl } from './api';
 import {
   acknowledgeNotificationReceipt,
   resolveCanonicalTarget,
@@ -80,6 +81,29 @@ export async function quitAether(): Promise<void> {
       await invoke('quit_aether');
     } catch (e) {
       console.warn('Could not quit Aether via Tauri IPC:', e);
+    }
+  }
+}
+
+export async function openExternalUrl(url: string): Promise<void> {
+  // 1. Try opening via local backend system route (launches default system browser on host)
+  try {
+    const res = await fetch(apiUrl('/api/system/open-browser'), {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ url }),
+    });
+    if (res.ok) return;
+  } catch (e) {
+    console.debug('System open-browser backend request failed, attempting browser fallback:', e);
+  }
+
+  // 2. Direct browser fallback
+  if (typeof window !== 'undefined') {
+    try {
+      window.open(url, '_blank', 'noopener,noreferrer');
+    } catch (e) {
+      console.warn('Could not open external url via window.open:', e);
     }
   }
 }

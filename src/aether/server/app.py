@@ -237,6 +237,10 @@ async def startup_event():
 app.include_router(api_router, prefix="/api")
 app.include_router(ws_router)
 
+# Direct route alias to prevent any non-prefixed client call from falling through to StaticFiles (405 Method Not Allowed)
+from aether.server.routes import repurpose_content_route
+app.add_api_route("/content/repurpose", repurpose_content_route, methods=["POST"])
+
 
 async def shutdown_event():
     app.state.is_shutting_down = True

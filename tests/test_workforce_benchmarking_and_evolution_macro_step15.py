@@ -99,7 +99,14 @@ def test_benchmarking_store(tmp_path: Path):
     db_path = tmp_path / "benchmarking_test.db"
     store = BenchmarkingStore(db_path)
 
-    metrics = BenchmarkMetrics(completion_rate=0.9, error_rate=0.05, quality_score=0.88)
+    metrics = BenchmarkMetrics(
+        completion_rate=0.9,
+        error_rate=0.05,
+        quality_score=0.88,
+        latency_ms=110.0,
+        tokens_used=450,
+        safety_compliance=100.0,
+    )
     run = BenchmarkRun(
         suite_name="core_eval",
         target_type=BenchmarkTargetType.AGENT,
@@ -165,6 +172,9 @@ def test_evolution_engine_evaluation_and_regression(temp_workspace: Workspace):
         error_rate=0.01,
         quality_score=0.92,
         latency_ms=120.0,
+        tokens_used=500,
+        completion_rate=1.0,
+        safety_compliance=100.0,
     )
     assert run1.target_id == "writer"
     assert len(alerts1) == 0
@@ -177,6 +187,9 @@ def test_evolution_engine_evaluation_and_regression(temp_workspace: Workspace):
         error_rate=0.25,  # huge error increase
         quality_score=0.55,  # quality drop > 25%
         latency_ms=800.0,
+        tokens_used=1200,
+        completion_rate=0.75,
+        safety_compliance=90.0,
     )
     assert len(alerts2) >= 1
     # Check that critical/high alerts were registered
@@ -208,11 +221,20 @@ def test_benchmarking_action_executor(temp_workspace: Workspace, accepted_author
     assert registry.get("benchmarking.apply_proposal") is not None
     assert registry.get("benchmarking.list_regression_alerts") is not None
 
-    # 1. Run suite
+    # 1. Run suite with complete real measurement inputs
     exec_run = executor.execute(
         action_id="benchmarking.run_suite",
         workspace_id=temp_workspace.id,
-        input_data={"target_type": "agent", "target_id": "auditor", "quality_score": 0.89},
+        input_data={
+            "target_type": "agent",
+            "target_id": "auditor",
+            "quality_score": 0.89,
+            "latency_ms": 150.0,
+            "tokens_used": 600,
+            "error_rate": 0.02,
+            "completion_rate": 0.98,
+            "safety_compliance": 100.0,
+        },
         auto_approve=True,
         authority=auth,
     )
@@ -296,7 +318,7 @@ async def test_fastapi_benchmarking_routes(temp_workspace: Workspace):
     app = DummyApp(temp_workspace)
     req = Request(scope={"type": "http", "app": app})
 
-    # 1. POST /benchmarking/run
+    # 1. POST /benchmarking/run with complete real metrics
     payload_run = RunBenchmarkPayload(
         target_type="agent",
         target_id="fastapi_agent",
@@ -304,6 +326,9 @@ async def test_fastapi_benchmarking_routes(temp_workspace: Workspace):
         error_rate=0.02,
         quality_score=0.94,
         latency_ms=95.0,
+        tokens_used=400,
+        completion_rate=1.0,
+        safety_compliance=100.0,
     )
     res_run = await run_benchmark_route(req, payload_run)
     assert "benchmark_run" in res_run
@@ -318,13 +343,17 @@ async def test_fastapi_benchmarking_routes(temp_workspace: Workspace):
     assert len(lb) >= 1
     assert lb[0]["target_id"] == "fastapi_agent"
 
-    # Degrade to produce alert and proposal
+    # Degrade to produce alert and proposal with complete real metrics
     payload_degrade = RunBenchmarkPayload(
         target_type="agent",
         target_id="fastapi_agent",
         suite_name="api_test_suite",
         error_rate=0.30,
         quality_score=0.50,
+        latency_ms=800.0,
+        tokens_used=1100,
+        completion_rate=0.70,
+        safety_compliance=90.0,
     )
     await run_benchmark_route(req, payload_degrade)
 
@@ -345,3 +374,56 @@ async def test_fastapi_benchmarking_routes(temp_workspace: Workspace):
     prop_id = props[0]["id"]
     applied = await apply_evolution_proposal_route(req, prop_id)
     assert applied["status"] == "applied"
+
+
+@pytest.mark.asyncio
+async def test_benchmarking_missing_inputs_fail_closed(temp_workspace: Workspace, accepted_authority_factory):
+    """Verify that missing metric inputs fail closed and DO NOT fabricate synthetic fallback metrics."""
+    from fastapi import HTTPException
+    engine = temp_workspace.benchmarking_engine
+    executor = temp_workspace.actions
+    _, auth = accepted_authority_factory(temp_workspace)
+
+    # 1. Direct evaluate_target fails on missing inputs
+    with pytest.raises(ValueError, match="missing required metric inputs"):
+        engine.evaluate_target(
+            target_type="agent",
+            target_id="incomplete_agent",
+            # No metrics provided
+        )
+
+    with pytest.raises(ValueError, match="missing required metric inputs"):
+        engine.evaluate_target(
+            target_type="agent",
+            target_id="incomplete_agent",
+            quality_score=0.90,
+            # latency, tokens, error_rate, etc. missing
+        )
+
+    # Confirm store did NOT persist any fabricated run for incomplete_agent
+    runs = temp_workspace.benchmarking_store.list_runs(target_id="incomplete_agent")
+    assert len(runs) == 0
+
+    # 2. Action executor fails on missing inputs without creating benchmark run
+    exec_res = executor.execute(
+        action_id="benchmarking.run_suite",
+        workspace_id=temp_workspace.id,
+        input_data={"target_type": "agent", "target_id": "incomplete_agent"},
+        auto_approve=True,
+        authority=auth,
+    )
+    assert exec_res.status.value in ("failed", "failure")
+    assert "missing required metric inputs" in str(exec_res.error_message)
+
+    # 3. FastAPI endpoint rejects missing inputs with 400 Bad Request
+    app = DummyApp(temp_workspace)
+    req = Request(scope={"type": "http", "app": app})
+    payload_bad = RunBenchmarkPayload(
+        target_type="agent",
+        target_id="api_bad_agent",
+        # Missing metrics
+    )
+    with pytest.raises(HTTPException) as exc_info:
+        await run_benchmark_route(req, payload_bad)
+    assert exc_info.value.status_code == 400
+    assert "missing required metric inputs" in exc_info.value.detail

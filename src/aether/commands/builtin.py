@@ -161,14 +161,10 @@ def register_builtin_commands(registry: CommandRegistry) -> None:
         try:
             from aether.providers.health import get_default_health_checker
             api_key = None
-            if ctx.workspace and hasattr(ctx.workspace, "root") and ctx.workspace.root:
-                env_file = ctx.workspace.root / ".env"
-                if env_file.exists():
-                    for line in env_file.read_text(encoding="utf-8").splitlines():
-                        if "=" in line and not line.strip().startswith("#"):
-                            k, v = line.split("=", 1)
-                            if k.strip().upper() == f"{provider.upper()}_API_KEY":
-                                api_key = v.strip()
+            if ctx.workspace and hasattr(ctx.workspace, "secret_store") and ctx.workspace.secret_store:
+                api_key = ctx.workspace.secret_store.get_secret(f"provider_api_key:{provider.lower()}")
+            if not api_key:
+                api_key = os.environ.get(f"{provider.upper()}_API_KEY")
             prov_health = await get_default_health_checker().acheck_health(
                 provider=provider,
                 model=model,
