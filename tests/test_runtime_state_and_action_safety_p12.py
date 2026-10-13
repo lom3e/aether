@@ -161,7 +161,7 @@ def test_terminal_states_immutable(temp_workspace):
 # ---------------------------------------------------------------------------
 
 def test_action_executor_auto_approval_audit_trail(temp_workspace, accepted_authority_factory):
-    """Safe actions auto-approved must record auto_approved=True and approved_by='safety_policy'."""
+    """Safe actions auto-approved under an accepted execution authority record auto_approved=True and are attributed to that authority."""
     executor = temp_workspace.actions
     _, auth = accepted_authority_factory(temp_workspace, title="Create Note")
 
@@ -174,7 +174,8 @@ def test_action_executor_auto_approval_audit_trail(temp_workspace, accepted_auth
     )
     assert execution.status == ActionExecutionStatus.SUCCEEDED
     assert execution.metadata.get("auto_approved") is True
-    assert execution.approved_by == "safety_policy"
+    # With an accepted authority the approval is the user's (via the authority); "safety_policy" is only used without one.
+    assert execution.approved_by == "authority"
 
 
 def test_action_executor_external_action_cannot_be_silently_auto_approved(temp_workspace, accepted_authority_factory):

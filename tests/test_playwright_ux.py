@@ -6,9 +6,11 @@ workspace creation/switching, and complete workspace data isolation.
 import subprocess
 import time
 import tempfile
+import sys
+import os
 from pathlib import Path
 import pytest
-from playwright.sync_api import sync_playwright
+from playwright.sync_api import expect, sync_playwright
 
 from aether.workspace.workspace import Workspace
 from aether.workspace.registry import WorkspaceRegistry
@@ -30,14 +32,15 @@ def test_playwright_workspace_and_conversation_flow(tmp_path, monkeypatch):
     )
 
     env = dict(
-        PATH=subprocess.os.environ.get("PATH", ""),
+        os.environ,  # Windows needs SYSTEMROOT/TEMP etc. for sockets and temp files
         HOME=str(tmp_path),
+        USERPROFILE=str(tmp_path),  # Path.home() on Windows
         AETHER_WORKSPACE=str(ws.root),
         AETHER_ENABLE_TEST_PROVIDERS="1",
     )
     server_proc = subprocess.Popen(
         [
-            str(Path(".venv/bin/uvicorn").resolve()),
+            sys.executable, "-m", "uvicorn",
             "aether.server.app:app",
             "--port", "8992",
             "--log-level", "warning"
@@ -50,10 +53,10 @@ def test_playwright_workspace_and_conversation_flow(tmp_path, monkeypatch):
     try:
         with sync_playwright() as p:
             browser = p.chromium.launch(headless=True)
-            page = browser.new_page()
+            page = browser.new_page(locale="en-US")
 
             # 1. Open UI
-            page.goto("http://localhost:8992")
+            page.goto("http://localhost:8992/?ui=v1")
             page.wait_for_selector("text=Workspace Alpha", timeout=10000)
             assert page.is_visible("text=Workspace Alpha")
 
@@ -105,7 +108,9 @@ def test_playwright_workspace_and_conversation_flow(tmp_path, monkeypatch):
             assert page.is_visible("text=Workspace Beta")
 
             # In Workspace Beta, conversations list should be completely empty (isolated)
-            page.wait_for_selector("text=Start a Task", timeout=5000)
+            page.wait_for_selector("text=Workspace Beta", timeout=5000)
+            # The list reloads asynchronously after the switch: retry until it no longer shows Alpha's conversation.
+            expect(page.locator("button:has-text('Analyze competitor')")).to_have_count(0, timeout=8000)
 
             # 8. Switch back to Workspace Alpha
             page.click("text=Workspace Beta")

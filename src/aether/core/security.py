@@ -15,7 +15,7 @@ import fnmatch
 import os
 from enum import Enum
 from pathlib import Path
-from typing import Sequence
+from typing import Any, Sequence
 
 from aether.errors import (
     SecurityBoundaryViolation,

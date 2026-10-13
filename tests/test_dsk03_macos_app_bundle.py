@@ -21,7 +21,11 @@ import subprocess
 import time
 import urllib.request
 from pathlib import Path
+import sys
 import pytest
+
+pytestmark = pytest.mark.skipif(sys.platform != "darwin", reason="macOS-only: tests the Aether.app bundle (needs macOS and a Tauri .app build)")
+
 
 
 def _get_repo_root() -> Path:

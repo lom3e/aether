@@ -358,8 +358,8 @@ class CodingAgentOrchestrator:
         if not p_dir.exists() or not p_dir.is_dir():
             raise ValueError(f"Project directory does not exist or is not a directory: {task.project_path}")
 
-        forbidden_roots = {"/", "/System", "/usr", "/bin", "/sbin", "/etc", "/var", "/Library", "/private", "/private/var", "/tmp", "/private/tmp"}
-        if str(p_dir) in forbidden_roots:
+        from aether.core.system_paths import is_protected_system_path
+        if is_protected_system_path(p_dir):
             raise ValueError(f"Cannot delegate coding task to protected system directory: {p_dir}")
 
         provider, _ = self.resolve_provider(preferred_provider_id or task.provider_id, workspace=workspace)

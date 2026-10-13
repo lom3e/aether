@@ -388,6 +388,12 @@ class SkillLoader:
                 with tarfile.open(archive_path, "r:*") as tf:
                     for member in tf.getmembers():
                         self._check_traversal(member.name, dest_dir)
+                        # Without the "data" filter, links and device nodes could write outside dest_dir.
+                        if member.issym() or member.islnk() or member.isdev():
+                            raise InvalidSkillPackageError(
+                                f"Archive contains a link or special file entry: {member.name!r}. "
+                                "Extraction aborted."
+                            )
                     tf.extractall(dest_dir)
             except tarfile.TarError as exc:
                 raise InvalidSkillPackageError(

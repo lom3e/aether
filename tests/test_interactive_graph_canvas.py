@@ -12,6 +12,8 @@ Validates:
    - Visual screenshots generation for artifact documentation
 """
 from __future__ import annotations
+import sys
+import tempfile
 
 import asyncio
 import json
@@ -175,13 +177,14 @@ def test_playwright_interactive_execution_graph_canvas(tmp_path: Path, monkeypat
     env = dict(
         os.environ,
         HOME=str(tmp_path),
+        USERPROFILE=str(tmp_path),  # Path.home() on Windows
         AETHER_WORKSPACE=str(ws.root),
         AETHER_UI_DIR=str(Path("ui/dist").resolve()),
         AETHER_ENABLE_TEST_PROVIDERS="1",
     )
     server_proc = subprocess.Popen(
         [
-            str(Path(".venv/bin/uvicorn").resolve()),
+            sys.executable, "-m", "uvicorn",
             "aether.server.app:app",
             "--port", "8994",
             "--log-level", "warning",
@@ -191,18 +194,19 @@ def test_playwright_interactive_execution_graph_canvas(tmp_path: Path, monkeypat
     )
     time.sleep(2.0)
 
-    screenshots_dir = Path("/Users/matteo/.gemini/antigravity/brain/2bf29abb-e8eb-4561-8306-04e6fe0773d0/screenshots")
+    screenshots_dir = Path(os.environ.get("AETHER_TEST_SCREENSHOTS_DIR") or tempfile.gettempdir()) / "aether-test-screenshots"
     screenshots_dir.mkdir(parents=True, exist_ok=True)
 
     try:
         with sync_playwright() as p:
             browser = p.chromium.launch(headless=True)
             context = browser.new_context(viewport={"width": 1440, "height": 900}, locale="en-US")
+            context.add_init_script("localStorage.setItem('aether_experience_mode', 'v1');")  # tests target the classic UI
             page = context.new_page()
             page.add_init_script("localStorage.setItem('aether_language', 'en');")
 
             # 1. Open UI
-            page.goto("http://localhost:8994")
+            page.goto("http://localhost:8994/?ui=v1")
             page.wait_for_selector("text=Interactive Canvas Workspace", timeout=10000)
 
             # 2. Click Missions

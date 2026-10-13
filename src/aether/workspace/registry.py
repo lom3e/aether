@@ -8,6 +8,7 @@ import json
 import os
 import re
 import shutil
+import sys
 import uuid
 from datetime import datetime, timezone
 from pathlib import Path
@@ -55,11 +56,45 @@ _CRITICAL_PROTECTED_PATHS = {
 }
 
 
+def _remove_tree(path: Path, attempts: int = 5, delay: float = 0.2) -> None:
+    """
+    Removes a directory tree, retrying briefly for transient locks (antivirus/indexer on Windows) and making
+    read-only files writable. Raises WorkspaceError if anything is left: a delete must never report success while the
+    data is still on disk.
+    """
+    import stat
+    import time
+
+    def _writable_and_retry(func, target, _exc):
+        try:
+            os.chmod(target, stat.S_IWRITE)
+            func(target)
+        except OSError:
+            pass
+
+    last_error: Exception | None = None
+    for attempt in range(attempts):
+        try:
+            if sys.version_info >= (3, 12):
+                shutil.rmtree(path, onexc=_writable_and_retry)
+            else:
+                shutil.rmtree(path, onerror=_writable_and_retry)
+        except OSError as exc:
+            last_error = exc
+        if not path.exists():
+            return
+        time.sleep(delay * (attempt + 1))
+    raise WorkspaceError(f"Could not remove '{path}' (files are still in use?): {last_error or 'directory still present'}")
+
+
 def _is_protected_path(path: Path) -> bool:
     try:
         resolved = path.resolve()
         # Direct match with critical system paths
         if resolved in _CRITICAL_PROTECTED_PATHS:
+            return True
+        from aether.core.system_paths import is_protected_system_path
+        if is_protected_system_path(resolved):  # also covers Windows system directories and drive roots
             return True
         # Direct root "/" or top-level partition
         if resolved.parent == resolved:
@@ -390,16 +425,24 @@ agents:
         if _is_protected_path(ws_path):
             raise WorkspaceError(f"Cannot delete protected system directory: {ws_path}")
 
+        # Release the file handles of a live Workspace first: an open SQLite file cannot be deleted on Windows
+        for live in list({id(w): w for w in Workspace._active_workspaces.values()}.values()):
+            try:
+                if Path(live.root).resolve() == ws_path:
+                    live.close()
+            except Exception:
+                pass
+
         # Delete workspace folder safely
         if ws_path.exists():
             if (ws_path / ".git").exists():
                 # Project repository: only remove workspace metadata and sqlite files
                 aether_sub = ws_path / ".aether"
                 if aether_sub.exists():
-                    shutil.rmtree(aether_sub, ignore_errors=True)
+                    _remove_tree(aether_sub)
                 (ws_path / "aether.yaml").unlink(missing_ok=True)
             else:
-                shutil.rmtree(ws_path, ignore_errors=True)
+                _remove_tree(ws_path)
 
         # Remove from registry
         data = cls.load_registry()

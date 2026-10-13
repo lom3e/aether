@@ -9,6 +9,7 @@ import hashlib
 from types import SimpleNamespace
 
 import pytest
+from fake_agent_script import write_agent_script
 
 from aether.coding.models import CodingExecutionStatus as S, CodingResult, CodingTask, CodingTaskExecution
 from aether.missions.coding_outcomes import CodingMissionFinalizer
@@ -125,9 +126,7 @@ def _orch(tmp_path, body, monkeypatch):
     reg = CodingRunRegistry()
     monkeypatch.setattr("aether.coding.runs._registry", reg)
     monkeypatch.setattr("aether.coding.orchestrator.get_run_registry", lambda: reg)
-    script = tmp_path / "agent.sh"
-    script.write_text("#!/bin/sh\n" + body + "\n", encoding="utf-8")
-    script.chmod(script.stat().st_mode | stat.S_IEXEC)
+    script = write_agent_script(tmp_path, "agent", body)
     prov = ClaudeCodeCodingProvider()
     status = CodingProviderStatus(id=prov.id, name=prov.name, description="", installed=True, authenticated=True, available=True, diagnostic="ok")
     ps = [patch.object(prov, "is_available", return_value=(True, "ok")), patch.object(prov, "resolve_binary", return_value=str(script)),

@@ -1228,14 +1228,8 @@ async def connect_workspace_project(request: Request, data: ProjectConfigRequest
     if not clean_path:
         raise HTTPException(status_code=422, detail="Project path cannot be empty.")
     resolved = Path(clean_path).expanduser().resolve()
-    forbidden_roots = {Path("/"), Path.home()}
-    for forbidden in ["/System", "/etc", "/usr", "/bin", "/sbin", "/var", "/Windows", "/Program Files"]:
-        try:
-            forbidden_roots.add(Path(forbidden).resolve())
-        except Exception:
-            pass
-
-    if resolved in forbidden_roots or resolved == resolved.parent:
+    from aether.core.system_paths import is_protected_system_path
+    if resolved == Path.home().resolve() or is_protected_system_path(resolved):
         raise HTTPException(
             status_code=400,
             detail=f"Cannot connect sensitive system or root directory '{resolved}'. Please choose a dedicated project folder.",
@@ -8437,6 +8431,7 @@ async def telegram_status_route(request: Request, workspace_id: str | None = Non
     if not ws:
         raise HTTPException(status_code=503, detail="Workspace not initialized.")
     ws_id = _ws_key(ws, workspace_id)
+    conn = ws.connections.get_connection(ws_id, "telegram")
     if not conn or not conn.is_configured:
         return {"configured": False, "status": "disconnected"}
 

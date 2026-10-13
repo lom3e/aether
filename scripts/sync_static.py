@@ -19,6 +19,8 @@ REPO_ROOT = Path(__file__).resolve().parent.parent
 DEFAULT_UI_DIST = REPO_ROOT / "ui" / "dist"
 DEFAULT_SERVER_STATIC = REPO_ROOT / "src" / "aether" / "server" / "static"
 MANIFEST_FILENAME = ".build_manifest.json"
+# OS metadata that is never part of the product and is not tracked: listing it would make the manifest unverifiable.
+IGNORED_FILENAMES = {".DS_Store", "Thumbs.db", "desktop.ini"}
 
 
 def compute_file_sha256(path: Path) -> str:
@@ -62,7 +64,7 @@ def sync_static_assets(
     # Copy files and compute hashes
     for root, _, files in os.walk(src):
         for f in files:
-            if f == MANIFEST_FILENAME:
+            if f == MANIFEST_FILENAME or f in IGNORED_FILENAMES:
                 continue
             src_file = Path(root) / f
             rel_path = src_file.relative_to(src)
@@ -72,7 +74,7 @@ def sync_static_assets(
             shutil.copy2(src_file, tgt_file)
 
             file_hash = compute_file_sha256(tgt_file)
-            file_hashes[str(rel_path)] = file_hash
+            file_hashes[rel_path.as_posix()] = file_hash
             total_bytes += tgt_file.stat().st_size
 
     # Verify target index.html
@@ -91,7 +93,7 @@ def sync_static_assets(
     }
 
     manifest_path = tgt / MANIFEST_FILENAME
-    with open(manifest_path, "w", encoding="utf-8") as f:
+    with open(manifest_path, "w", encoding="utf-8", newline="\n") as f:  # LF on every OS: the file is tracked byte-for-byte
         json.dump(manifest, f, indent=2)
 
     return manifest
@@ -118,11 +120,14 @@ def verify_static_manifest(target_dir: Path | None = None) -> tuple[bool, str]:
     if not expected_files:
         return False, "Manifest contains no files list."
 
-    for rel_path_str, expected_hash in expected_files.items():
-        actual_file = tgt / rel_path_str
-        if not actual_file.exists():
+    # Deterministic diagnostics: a missing file is reported before any checksum mismatch, in sorted order,
+    # whatever order the filesystem enumerated the directory in when the manifest was written.
+    for rel_path_str in sorted(expected_files):
+        if not (tgt / rel_path_str).exists():
             return False, f"Missing file declared in manifest: {rel_path_str}"
-        actual_hash = compute_file_sha256(actual_file)
+    for rel_path_str in sorted(expected_files):
+        expected_hash = expected_files[rel_path_str]
+        actual_hash = compute_file_sha256(tgt / rel_path_str)
         if actual_hash != expected_hash:
             return False, f"Checksum mismatch for {rel_path_str}: expected {expected_hash}, got {actual_hash}"
 

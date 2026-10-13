@@ -13,13 +13,15 @@ Verifies that:
 import os
 import urllib.request
 import json
+import tempfile
 from pathlib import Path
 import pytest
 from playwright.sync_api import expect, sync_playwright
+from ui_nav import nav
 
 _state: dict = {}
 
-SCREENSHOTS_DIR = Path("/Users/matteo/.gemini/antigravity/brain/2bf29abb-e8eb-4561-8306-04e6fe0773d0/screenshots")
+SCREENSHOTS_DIR = Path(os.environ.get("AETHER_TEST_SCREENSHOTS_DIR") or tempfile.gettempdir()) / "aether-test-screenshots"
 
 
 @pytest.fixture(scope="module")
@@ -31,7 +33,8 @@ def browser_context(aether_server):
 
     with sync_playwright() as p:
         browser = p.chromium.launch(headless=True)
-        context = browser.new_context(viewport={"width": 1440, "height": 900})
+        context = browser.new_context(viewport={"width": 1440, "height": 900}, locale="en-US")
+        context.add_init_script("localStorage.setItem('aether_experience_mode', 'v1');")  # tests target the classic UI
         if _state["token"]:
             context.add_init_script(f"window.__AETHER_SESSION_TOKEN__ = '{_state['token']}';")
         yield context
@@ -143,11 +146,7 @@ def test_learning_view_navigation_and_metrics(browser_context):
     page.wait_for_selector(".sidebar", timeout=10000)
 
     # Navigate to Learning view via Sidebar button
-    learning_nav = page.locator("[data-testid='nav-learning']").first
-    if not learning_nav.is_visible():
-        learning_nav = page.locator(".sidebar button:has-text('Learning'), .sidebar button:has-text('Apprendimento')").first
-    expect(learning_nav).to_be_visible(timeout=5000)
-    learning_nav.click()
+    nav(page, "learning")
     page.wait_for_timeout(600)
 
     # Verify Summary Banner metrics

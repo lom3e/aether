@@ -18,6 +18,7 @@ import uuid
 from typing import Any, Callable
 
 from aether.coding.evidence import TreeSnapshot, compare, take_snapshot
+from aether.core.process_control import new_process_group_kwargs
 from aether.coding.models import (
     CodingExecutionStatus,
     CodingProviderStatus,
@@ -491,14 +492,8 @@ class BaseCodingAgentProvider(ABC):
     @staticmethod
     def _terminate_process_tree(proc: Any, force: bool = False) -> None:
         """Stops the child AND everything it spawned (it runs in its own process group)."""
-        sig = signal.SIGKILL if force else signal.SIGTERM
-        try:
-            os.killpg(os.getpgid(proc.pid), sig)
-        except (ProcessLookupError, PermissionError, AttributeError, OSError):
-            try:
-                proc.kill() if force else proc.terminate()
-            except Exception:
-                pass
+        from aether.core.process_control import terminate_process_tree
+        terminate_process_tree(proc, force=force)
 
     def _run_cli_once(
         self,
@@ -540,7 +535,8 @@ class BaseCodingAgentProvider(ABC):
         stdout = ""
         try:
             proc = subprocess.Popen(
-                cmd, cwd=str(cwd), stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, start_new_session=True,
+                cmd, cwd=str(cwd), stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True,
+                **new_process_group_kwargs(),
             )
             execution._process = proc  # type: ignore[attr-defined]
             try:

@@ -11,6 +11,8 @@ Validates:
 """
 import subprocess
 import time
+import sys
+import os
 from pathlib import Path
 import pytest
 from playwright.sync_api import sync_playwright
@@ -36,13 +38,14 @@ def test_playwright_missions_e2e_flow(tmp_path, monkeypatch):
     env = dict(
         subprocess.os.environ,
         HOME=str(tmp_path),
+        USERPROFILE=str(tmp_path),  # Path.home() on Windows
         AETHER_WORKSPACE=str(ws.root),
         AETHER_UI_DIR=str(Path("ui/dist").resolve()),
         AETHER_ENABLE_TEST_PROVIDERS="1",
     )
     server_proc = subprocess.Popen(
         [
-            str(Path(".venv/bin/uvicorn").resolve()),
+            sys.executable, "-m", "uvicorn",
             "aether.server.app:app",
             "--port", "8993",
             "--log-level", "warning",
@@ -56,11 +59,12 @@ def test_playwright_missions_e2e_flow(tmp_path, monkeypatch):
         with sync_playwright() as p:
             browser = p.chromium.launch(headless=True)
             context = browser.new_context(locale="en-US")
+            context.add_init_script("localStorage.setItem('aether_experience_mode', 'v1');")  # tests target the classic UI
             page = context.new_page()
             page.add_init_script("localStorage.setItem('aether_language', 'en');")
 
             # 1. Open UI
-            page.goto("http://localhost:8993")
+            page.goto("http://localhost:8993/?ui=v1")
             page.wait_for_selector("text=Missions Workspace", timeout=10000)
             assert page.is_visible("text=Missions Workspace")
 
@@ -164,8 +168,7 @@ def test_playwright_missions_e2e_flow(tmp_path, monkeypatch):
 
             # 11. Backward compatibility test: Navigate to Chat and verify normal conversation flow
             page.click("button:has-text('Home')")
-            page.wait_for_selector("text=Your AI Workforce is ready", timeout=5000)
-            page.click("button:has-text('Start a Task')")
+            page.click("button:has-text('New Task')")
             page.wait_for_selector("textarea", timeout=5000)
             page.fill("textarea", "Quick inquiry without any mission")
             page.click("button:has-text('Run Task')")

@@ -299,7 +299,7 @@ async def test_fastapi_autonomy_routes(temp_workspace: Workspace):
     assert exc.value.status_code == 403
 
     # Now create and accept a proposal to obtain genuine ExecutionAuthority
-    from aether.planning.contracts import IntentRequest, MissionProposal, ProposalStatus
+    from aether.planning.contracts import IntentRequest, MissionProposal, ProposalStatus, ProposedStep
     from datetime import datetime, timezone
     ws.personal_store.save_intent_request(IntentRequest(
         id="intent-auto-1",
@@ -318,6 +318,12 @@ async def test_fastapi_autonomy_routes(temp_workspace: Workspace):
         context_summary="Context",
         confidence=1.0,
         status=ProposalStatus.READY_FOR_ACCEPTANCE,
+        # Blanket authority is prohibited: the proposal must define its steps (and what it must not touch).
+        proposed_steps=[
+            ProposedStep(id="step-auto-1", order_idx=0, title="Audit mesh compute", description="Audit mesh compute"),
+            ProposedStep(id="step-auto-2", order_idx=1, title="Synthesize document", description="Synthesize the document"),
+        ],
+        constraints=["allow: autonomy.execute, autonomy.plan_and_execute", "Only audit mesh compute and synthesize a document; touch nothing else."],
     )
     ws.personal_store.save_proposal(proposal)
     accepted_prop, auth = ws.personal.accept_proposal(proposal.id, ws_id)

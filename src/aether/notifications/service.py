@@ -20,6 +20,7 @@ from aether.notifications.models import (
     NotificationPriority,
     NotificationRule,
     NotificationStatus,
+    NotificationTargetType,
     NotificationType,
 )
 from aether.notifications.store import NotificationStore

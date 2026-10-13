@@ -10,7 +10,7 @@ Provides safe, sandboxed file operations for agents:
 """
 from __future__ import annotations
 
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 from aether.core.interrupts import RequireApproval
 from aether.core.security import OperationType, PathSandbox

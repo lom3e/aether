@@ -7,6 +7,7 @@ and notification fabric integration.
 from __future__ import annotations
 
 from datetime import datetime, timezone, timedelta
+import json
 import logging
 from pathlib import Path
 import re
@@ -29,7 +30,7 @@ from aether.core.execution import (
 )
 from aether.missions.models import Deliverable, MilestoneStatus, MissionStatus
 from aether.personal.events import PersonalEventHub, get_personal_event_hub
-from aether.personal.intent_rules import assess_coding_prompt
+from aether.personal.intent_rules import assess_coding_prompt, extract_project_path_mention
 from aether.personal.models import (
     IntentTier,
     PendingApproval,
@@ -2043,11 +2044,9 @@ class PersonalAgentService:
                 args["provider_id"] = preferred_prov
 
             # Extract project directory or target files from prompt if specified
-            path_match = re.search(r'(?:in|su|nel progetto|nel repository|nel percorso|directory|folder|path|workspace|repo)\s+(?:(?:locale|local|corrente|attuale|esistente)\s+)?[`"\'\(]?(/[^\s`"\'\)]+)[`"\'\)]?', effective_prompt, re.IGNORECASE)
-            if not path_match:
-                path_match = re.search(r'[`"\'\(]?(/[\w\.\-]+(?:/[\w\.\-]+)+)[`"\'\)]?', effective_prompt)
-            if path_match:
-                candidate_path = Path(path_match.group(1).rstrip(",;.")).resolve()
+            raw_path_mention = extract_project_path_mention(effective_prompt)
+            if raw_path_mention:
+                candidate_path = Path(raw_path_mention.rstrip(",;.")).resolve()
                 if candidate_path.is_file():
                     args["project_path"] = str(candidate_path.parent)
                     args["context_files"] = [str(candidate_path)]
@@ -2300,8 +2299,8 @@ class PersonalAgentService:
             if is_coding_delegation and not wants_preliminary_review:
                 proj_p = intent.action_args.get("project_path") if intent.action_args else None
                 dest_exists = bool(proj_p and Path(proj_p).exists() and Path(proj_p).is_dir())
-                forbidden_roots = {"/", "/System", "/usr", "/bin", "/sbin", "/etc", "/var", "/Library", "/private", "/private/var", "/tmp", "/private/tmp"}
-                if dest_exists and str(Path(proj_p).resolve()) not in forbidden_roots:
+                from aether.core.system_paths import is_protected_system_path
+                if dest_exists and not is_protected_system_path(proj_p):
                     # Security boundary (A2): Textual keyword matching in prompts ('subito', 'direttamente',
                     # 'autonomamente', etc.) CANNOT grant execution consent or bypass confirmation gates.
                     # Autonomous execution is ONLY permitted if the active workspace safety policy

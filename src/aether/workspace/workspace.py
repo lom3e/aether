@@ -167,24 +167,38 @@ class Workspace:
         """Return the display name of the workspace."""
         return self.config.get("workspace", {}).get("name") or self.root.name
 
+    def _uses_data_dir(self) -> bool:
+        """
+        Whether this workspace stores its databases under ``data/`` (current layout) or ``.aether/`` (legacy layout).
+
+        The decision must not flip while the workspace is in use. Previously it was "does data/ exist?", and on Windows
+        the encrypted secrets vault creates ``data/vault`` in the middle of loading a legacy workspace, so the same
+        database changed location between calls (and between runs, orphaning the legacy files).
+        """
+        if self.config_path.exists():
+            return True
+        if self.legacy_aether_dir.exists():
+            return False
+        return self.data_dir.exists()
+
     @property
     def identity_db_path(self) -> str:
         """Path to the agent identity database."""
-        if self.data_dir.exists() or self.config_path.exists():
+        if self._uses_data_dir():
             return str(self.data_dir / "identity.db")
         return str(self.legacy_aether_dir / "identity.db")
 
     @property
     def conversations_db_path(self) -> str:
         """Path to the persistent conversation database."""
-        if self.data_dir.exists() or self.config_path.exists():
+        if self._uses_data_dir():
             return str(self.data_dir / "conversations.db")
         return str(self.legacy_aether_dir / "conversations.db")
 
     @property
     def knowledge_db_path(self) -> str:
         """Path to the local vector/document knowledge database."""
-        if self.data_dir.exists() or self.config_path.exists():
+        if self._uses_data_dir():
             return str(self.data_dir / "knowledge.db")
         return str(self.legacy_aether_dir / "knowledge.db")
 
@@ -225,7 +239,7 @@ class Workspace:
     @property
     def automations_db_path(self) -> str:
         """Path to the persistent automations database."""
-        if self.data_dir.exists() or self.config_path.exists():
+        if self._uses_data_dir():
             return str(self.data_dir / "automations.db")
         return str(self.legacy_aether_dir / "automations.db")
 
@@ -261,7 +275,7 @@ class Workspace:
     @property
     def memory_db_path(self) -> str:
         """Path to the persistent workforce memory database."""
-        if self.data_dir.exists() or self.config_path.exists():
+        if self._uses_data_dir():
             return str(self.data_dir / "memory.db")
         return str(self.legacy_aether_dir / "memory.db")
 
@@ -277,7 +291,7 @@ class Workspace:
     @property
     def knowledge_graph_db_path(self) -> str:
         """Path to the persistent knowledge graph database."""
-        if self.data_dir.exists() or self.config_path.exists():
+        if self._uses_data_dir():
             return str(self.data_dir / "knowledge_graph.db")
         return str(self.legacy_aether_dir / "knowledge_graph.db")
 
@@ -293,7 +307,7 @@ class Workspace:
     @property
     def learning_db_path(self) -> str:
         """Path to the persistent learning & correction database."""
-        if self.data_dir.exists() or self.config_path.exists():
+        if self._uses_data_dir():
             return str(self.data_dir / "learning.db")
         return str(self.legacy_aether_dir / "learning.db")
 
@@ -321,7 +335,7 @@ class Workspace:
     @property
     def activity_db_path(self) -> str:
         """Path to the persistent activity database."""
-        if self.data_dir.exists() or self.config_path.exists():
+        if self._uses_data_dir():
             return str(self.data_dir / "activity.db")
         return str(self.legacy_aether_dir / "activity.db")
 
@@ -345,7 +359,7 @@ class Workspace:
     @property
     def actions_db_path(self) -> str:
         """Path to the persistent actions database."""
-        if self.data_dir.exists() or self.config_path.exists():
+        if self._uses_data_dir():
             return str(self.data_dir / "actions.db")
         return str(self.legacy_aether_dir / "actions.db")
 
@@ -361,7 +375,7 @@ class Workspace:
     @property
     def connections_db_path(self) -> str:
         """Path to the persistent connections database."""
-        if self.data_dir.exists() or self.config_path.exists():
+        if self._uses_data_dir():
             return str(self.data_dir / "connections.db")
         return str(self.legacy_aether_dir / "connections.db")
 
@@ -420,7 +434,7 @@ class Workspace:
     @property
     def policy_db_path(self) -> str:
         """Path to the persistent workspace policy database."""
-        if self.data_dir.exists() or self.config_path.exists():
+        if self._uses_data_dir():
             return str(self.data_dir / "policies.db")
         return str(self.legacy_aether_dir / "policies.db")
 
@@ -452,7 +466,7 @@ class Workspace:
     @property
     def workflows_db_path(self) -> str:
         """Path to the persistent visual workflows database."""
-        if self.data_dir.exists() or self.config_path.exists():
+        if self._uses_data_dir():
             return str(self.data_dir / "workflows.db")
         return str(self.legacy_aether_dir / "workflows.db")
 
@@ -468,7 +482,7 @@ class Workspace:
     @property
     def ecosystem_db_path(self) -> str:
         """Path to the persistent ecosystem & marketplace database."""
-        if self.data_dir.exists() or self.config_path.exists():
+        if self._uses_data_dir():
             return str(self.data_dir / "marketplace.db")
         return str(self.legacy_aether_dir / "marketplace.db")
 
@@ -484,7 +498,7 @@ class Workspace:
     @property
     def content_db_path(self) -> str:
         """Path to the persistent content & campaigns database."""
-        if self.data_dir.exists() or self.config_path.exists():
+        if self._uses_data_dir():
             return str(self.data_dir / "content.db")
         return str(self.legacy_aether_dir / "content.db")
 
@@ -508,7 +522,7 @@ class Workspace:
     @property
     def client_db_path(self) -> str:
         """Path to the persistent client automation database."""
-        if self.data_dir.exists() or self.config_path.exists():
+        if self._uses_data_dir():
             return str(self.data_dir / "client.db")
         return str(self.legacy_aether_dir / "client.db")
 
@@ -532,7 +546,7 @@ class Workspace:
     @property
     def benchmarking_db_path(self) -> str:
         """Path to the persistent workforce benchmarking database."""
-        if self.data_dir.exists() or self.config_path.exists():
+        if self._uses_data_dir():
             return str(self.data_dir / "benchmarking.db")
         return str(self.legacy_aether_dir / "benchmarking.db")
 
@@ -556,7 +570,7 @@ class Workspace:
     @property
     def proactive_db_path(self) -> str:
         """Path to the persistent proactive intelligence & watchers database."""
-        if self.data_dir.exists() or self.config_path.exists():
+        if self._uses_data_dir():
             return str(self.data_dir / "proactive.db")
         return str(self.legacy_aether_dir / "proactive.db")
 
@@ -580,7 +594,7 @@ class Workspace:
     @property
     def fabric_db_path(self) -> str:
         """Path to the persistent execution fabric database."""
-        if self.data_dir.exists() or self.config_path.exists():
+        if self._uses_data_dir():
             return str(self.data_dir / "fabric.db")
         return str(self.legacy_aether_dir / "fabric.db")
 
@@ -604,7 +618,7 @@ class Workspace:
     @property
     def autonomy_db_path(self) -> str:
         """Path to the persistent operational autonomy database."""
-        if self.data_dir.exists() or self.config_path.exists():
+        if self._uses_data_dir():
             return str(self.data_dir / "autonomy.db")
         return str(self.legacy_aether_dir / "autonomy.db")
 
@@ -640,7 +654,7 @@ class Workspace:
     @property
     def coding_runs_db_path(self) -> str:
         """Path to the durable coding-runs database."""
-        if self.data_dir.exists() or self.config_path.exists():
+        if self._uses_data_dir():
             return str(self.data_dir / "coding_runs.db")
         return str(self.legacy_aether_dir / "coding_runs.db")
 
@@ -662,7 +676,7 @@ class Workspace:
     @property
     def personal_db_path(self) -> str:
         """Path to the persistent personal agent database."""
-        if self.data_dir.exists() or self.config_path.exists():
+        if self._uses_data_dir():
             return str(self.data_dir / "personal.db")
         return str(self.legacy_aether_dir / "personal.db")
 
@@ -678,7 +692,7 @@ class Workspace:
     @property
     def notifications_db_path(self) -> str:
         """Path to the persistent notifications database."""
-        if self.data_dir.exists() or self.config_path.exists():
+        if self._uses_data_dir():
             return str(self.data_dir / "notifications.db")
         return str(self.legacy_aether_dir / "notifications.db")
 
@@ -978,9 +992,9 @@ class Workspace:
 
         # Wire knowledge eagerly so a newly created workspace has the full
         # local-first persistence layout even before the first upload.
-        from aether.knowledge.store import KnowledgeStore
-        Path(self.knowledge_db_path).parent.mkdir(parents=True, exist_ok=True)
-        knowledge_store = KnowledgeStore(self.knowledge_db_path)
+        # Use the workspace-owned instance: a private store opened here would never be closed by Workspace.close()
+        # and its open handle blocks deleting the workspace on Windows.
+        knowledge_store = self.knowledge
 
         # Determine project_id if a project is connected
         project_id = None

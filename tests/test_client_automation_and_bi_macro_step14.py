@@ -227,6 +227,7 @@ def test_action_executor_client_and_bi_actions(accepted_authority_factory):
                 "deliverable_type": "content_batch",
             },
             authority=auth,
+            auto_approve=True,  # ACT-tier actions keep their own approval gate, separate from the proposal authority
         )
         assert res_rev.status in ("success", "succeeded")
         rev_data = res_rev.output_data["review"]

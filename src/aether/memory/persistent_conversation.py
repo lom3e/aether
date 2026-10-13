@@ -1,11 +1,12 @@
 import json
 import sqlite3
-from typing import Any
+from contextlib import contextmanager
+from typing import Any, Iterator
 from pathlib import Path
 
 from aether.core.execution import Message, ToolCall
 from aether.memory.conversation import ConversationMemory
-from aether.core.sqlite import get_sqlite_connection
+from aether.core.sqlite import get_sqlite_connection, sqlite_connection
 
 
 class PersistentConversationMemory(ConversationMemory):
@@ -22,10 +23,23 @@ class PersistentConversationMemory(ConversationMemory):
             self.db_path = f"file:memdb_conv_{uuid.uuid4().hex}?mode=memory&cache=shared"
 
         self.agent_id = agent_id
+        # A shared in-memory database vanishes when its last connection closes, so one is kept for the lifetime of
+        # this object; file databases get a connection per use that is always closed (open handles block deletion
+        # of the workspace on Windows).
+        self._keepalive_conn: sqlite3.Connection | None = (
+            get_sqlite_connection(self.db_path) if "mode=memory" in self.db_path else None
+        )
         self._init_db()
 
-    def _get_connection(self) -> sqlite3.Connection:
-        return get_sqlite_connection(self.db_path)
+    @contextmanager
+    def _get_connection(self) -> Iterator[sqlite3.Connection]:
+        with sqlite_connection(self.db_path) as conn:
+            yield conn
+
+    def close(self) -> None:
+        conn, self._keepalive_conn = self._keepalive_conn, None
+        if conn is not None:
+            conn.close()
 
     def _init_db(self) -> None:
         with self._get_connection() as conn:

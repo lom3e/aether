@@ -10,13 +10,15 @@ Verifies that:
 7. Zero console / runtime errors.
 """
 import os
+import tempfile
 from pathlib import Path
 import pytest
 from playwright.sync_api import expect, sync_playwright
+from ui_nav import nav
 
 _state: dict = {}
 
-SCREENSHOTS_DIR = Path("/Users/matteo/.gemini/antigravity/brain/2bf29abb-e8eb-4561-8306-04e6fe0773d0/screenshots")
+SCREENSHOTS_DIR = Path(os.environ.get("AETHER_TEST_SCREENSHOTS_DIR") or tempfile.gettempdir()) / "aether-test-screenshots"
 
 
 @pytest.fixture(scope="module")
@@ -28,7 +30,8 @@ def browser_context(aether_server):
 
     with sync_playwright() as p:
         browser = p.chromium.launch(headless=True)
-        context = browser.new_context(viewport={"width": 1440, "height": 900})
+        context = browser.new_context(viewport={"width": 1440, "height": 900}, locale="en-US")
+        context.add_init_script("localStorage.setItem('aether_experience_mode', 'v1');")  # tests target the classic UI
         if token:
             context.add_init_script(f"window.__AETHER_SESSION_TOKEN__ = '{token}';")
         yield context
@@ -83,10 +86,7 @@ def test_knowledge_graph_tab_and_filters(browser_context):
     _ensure_workspace(page)
 
     # Navigate to Knowledge view via testid or text
-    nav_btn = page.locator("[data-testid='nav-knowledge']").first
-    if not nav_btn.is_visible():
-        nav_btn = page.locator(".sidebar button:has-text('Knowledge'), .sidebar button:has-text('Conoscenza')").first
-    nav_btn.click()
+    nav(page, "knowledge")
     page.wait_for_selector("[data-testid='knowledge-graph-tab']", timeout=10000)
 
     # Switch to Knowledge Graph tab
@@ -151,10 +151,7 @@ def test_knowledge_graph_node_selection_and_inspector(browser_context):
     page.wait_for_timeout(500)
 
     # Open Knowledge view & KG tab
-    nav_btn = page.locator("[data-testid='nav-knowledge']").first
-    if not nav_btn.is_visible():
-        nav_btn = page.locator(".sidebar button:has-text('Knowledge'), .sidebar button:has-text('Conoscenza')").first
-    nav_btn.click()
+    nav(page, "knowledge")
     page.wait_for_selector("[data-testid='knowledge-graph-tab']", timeout=10000)
     page.locator("[data-testid='knowledge-graph-tab']").click()
     page.wait_for_timeout(800)

@@ -121,7 +121,10 @@ def test_happy_path_registers_runs_and_reports_project_evidence(env):
     assert result.verification_passed is True
     # 8. no implicit execution of agent-produced code: only agentapi was ever invoked
     assert set(fake.commands()) <= {"new-conversation", "send-message"}
-    assert not any("pytest" in " ".join(c) for c in fake.calls)
+    # No test runner was started. (Only the command head is inspected: the prompt sent to the agent legitimately contains the
+    # temporary project path, which includes the string "pytest-of-<user>".)
+    assert not any(Path(tok).name.lower() in ("pytest", "pytest.exe", "py.test") or tok == "pytest" for c in fake.calls for tok in c[:3])
+    assert not any(c[:3] == [c[0], "-m", "pytest"] for c in fake.calls)
     assert result.test_passed is None and "not executed" in result.test_output
 
 

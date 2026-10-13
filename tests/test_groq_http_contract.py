@@ -177,7 +177,7 @@ def test_http_errors_map_to_typed_errors_and_never_leak_the_key(srv, status, exc
 
 
 def test_unreachable_endpoint_is_a_connection_error_without_the_key():
-    p = GroqProvider(ProviderConfig(api_key=KEY, base_url="http://127.0.0.1:9/openai/v1", model="m", timeout=2))
+    p = GroqProvider(ProviderConfig(api_key=KEY, base_url="http://127.0.0.1:9/openai/v1", model="m", timeout=10))  # Windows needs ~2s to give up on a closed port, so 2s would race the connect error
     with pytest.raises(ProviderConnectionError) as e:
         p.generate([Message(role="user", content="q")])
     assert KEY not in str(e.value)

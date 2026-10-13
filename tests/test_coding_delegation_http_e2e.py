@@ -8,6 +8,7 @@ Also verifies negative safety controls, fail-closed boundaries, and status inqui
 """
 from __future__ import annotations
 
+import sys
 import tempfile
 from pathlib import Path
 from unittest.mock import MagicMock, patch
@@ -216,7 +217,9 @@ async def test_coding_delegation_system_root_protection(temp_workspace):
     Validates that delegating coding tasks to system root directories fails closed.
     """
     ws = temp_workspace
-    prompt = "Refactor files in /Library"
+    # A protected system directory that exists on the platform running the test.
+    protected = "C:/Windows" if sys.platform == "win32" else "/Library"
+    prompt = f"Refactor files in {protected}"
 
     req1 = make_request("POST", "/api/personal/chat")
     res1 = await personal_chat_route(req1, PersonalChatPayload(prompt=prompt, workspace_id=ws.name))

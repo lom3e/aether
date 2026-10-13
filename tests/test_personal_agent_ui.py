@@ -8,6 +8,7 @@ Verifies that:
 5. Captures screenshots: phase_c_personal_agent.png, phase_c_action_flow.png, phase_c_connections.png.
 """
 from __future__ import annotations
+import tempfile
 
 import os
 from pathlib import Path
@@ -16,7 +17,7 @@ from playwright.sync_api import expect, sync_playwright
 
 _state: dict = {}
 
-SCREENSHOTS_DIR = Path("/Users/matteo/.gemini/antigravity/brain/2bf29abb-e8eb-4561-8306-04e6fe0773d0/screenshots")
+SCREENSHOTS_DIR = Path(os.environ.get("AETHER_TEST_SCREENSHOTS_DIR") or tempfile.gettempdir()) / "aether-test-screenshots"
 
 
 @pytest.fixture(scope="module")
@@ -28,7 +29,8 @@ def browser_context(aether_server):
 
     with sync_playwright() as p:
         browser = p.chromium.launch(headless=True)
-        context = browser.new_context(viewport={"width": 1440, "height": 900})
+        context = browser.new_context(viewport={"width": 1440, "height": 900}, locale="en-US")
+        context.add_init_script("localStorage.setItem('aether_experience_mode', 'v1');")  # tests target the classic UI
         if _state["token"]:
             context.add_init_script(f"window.__AETHER_SESSION_TOKEN__ = '{_state['token']}';")
         yield context

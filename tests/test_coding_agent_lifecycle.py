@@ -6,6 +6,7 @@ explicit user consent gates, token sanitization, and HTTP lifecycle endpoints.
 from __future__ import annotations
 
 import os
+import sys
 from pathlib import Path
 import tempfile
 import threading
@@ -85,6 +86,7 @@ def test_sanitize_log_redacts_credentials():
     assert "[REDACTED]" in sanitized
 
 
+@pytest.mark.skipif(sys.platform == "win32", reason="POSIX execute permission bits do not exist on Windows")
 def test_find_executable_and_permissions(tmp_path: Path):
     """Validates executable discovery and strict permission denial checking."""
     # 1. Non-executable file
@@ -302,7 +304,7 @@ def test_run_cancellable_process_terminates_child():
     cancel_event = threading.Event()
 
     # Launch a process that would sleep 10 seconds
-    cmd = ["python3", "-c", "import time; time.sleep(10)"]
+    cmd = [sys.executable, "-c", "import time; time.sleep(10)"]
 
     def _trigger_cancel():
         time.sleep(0.15)

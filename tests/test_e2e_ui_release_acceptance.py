@@ -11,6 +11,7 @@ import os
 import time
 import pytest
 from playwright.sync_api import Page, expect, sync_playwright
+from ui_nav import nav
 
 # Module-level mutable state: set by browser_context fixture before tests run.
 _state: dict = {}
@@ -24,7 +25,8 @@ def browser_context(aether_server):
     token = aether_server.get("token")
     with sync_playwright() as p:
         browser = p.chromium.launch(headless=True)
-        context = browser.new_context(viewport={"width": 1440, "height": 900})
+        context = browser.new_context(viewport={"width": 1440, "height": 900}, locale="en-US")
+        context.add_init_script("localStorage.setItem('aether_experience_mode', 'v1');")  # tests target the classic UI
         if token:
             context.add_init_script(f"window.__AETHER_SESSION_TOKEN__ = '{token}';")
         yield context
@@ -84,10 +86,10 @@ def test_01_home_and_branding(browser_context):
     # Navigation buttons
     expect(page.locator(".sidebar button:has-text('Home')").first).to_be_visible()
     expect(page.locator(".sidebar button:has-text('New Task'), .sidebar button:has-text('Nuovo Task')").first).to_be_visible()
-    expect(page.locator(".sidebar button:has-text('Agents')").first).to_be_visible()
-    expect(page.locator(".sidebar button:has-text('Teams')").first).to_be_visible()
-    expect(page.locator(".sidebar button:has-text('Knowledge')").first).to_be_visible()
-    expect(page.locator(".sidebar button:has-text('Marketplace')").first).to_be_visible()
+    expect(page.locator("[data-testid='nav-agents']").first).to_be_attached()  # alias block is hidden by design
+    expect(page.locator("[data-testid='nav-teams']").first).to_be_attached()  # alias block is hidden by design
+    expect(page.locator("[data-testid='nav-knowledge']").first).to_be_attached()  # alias block is hidden by design
+    expect(page.locator("[data-testid='nav-marketplace']").first).to_be_attached()  # alias block is hidden by design
     expect(page.locator(".sidebar button:has-text('Settings')").first).to_be_visible()
 
     page.close()
@@ -144,7 +146,7 @@ def test_04_agents_section(browser_context):
         cancel_btn.click()
         page.wait_for_timeout(300)
 
-    page.locator(".sidebar button:has-text('Agents')").first.click()
+    nav(page, "agents")
     page.wait_for_selector(".main-content", timeout=5000)
 
     expect(page.locator(".main-content")).to_be_visible()
@@ -167,7 +169,7 @@ def test_05_teams_and_presets(browser_context):
         cancel_btn.click()
         page.wait_for_timeout(300)
 
-    page.locator(".sidebar button:has-text('Teams')").first.click()
+    nav(page, "teams")
     page.wait_for_selector(".main-content", timeout=5000)
     expect(page.locator(".main-content")).to_be_visible()
 
@@ -181,7 +183,7 @@ def test_06_knowledge_management(browser_context):
     page.goto(base_url)
     page.wait_for_selector(".sidebar", timeout=10000)
 
-    page.locator(".sidebar button:has-text('Knowledge')").first.click()
+    nav(page, "knowledge")
     page.wait_for_selector(".main-content", timeout=5000)
     expect(page.locator(".main-content")).to_be_visible()
 
@@ -195,7 +197,7 @@ def test_07_marketplace_layout(browser_context):
     page.goto(base_url)
     page.wait_for_selector(".sidebar", timeout=10000)
 
-    page.locator(".sidebar button:has-text('Marketplace')").first.click()
+    nav(page, "marketplace")
     page.wait_for_selector(".main-content", timeout=5000)
     expect(page.locator(".main-content")).to_be_visible()
 
@@ -275,22 +277,22 @@ def test_11_topheader_consistency(browser_context):
     expect(page.locator("[data-testid='top-header']").first).to_be_visible()
 
     # 2. Agents
-    page.locator(".sidebar button:has-text('Agents')").first.click()
+    nav(page, "agents")
     page.wait_for_timeout(300)
     expect(page.locator("[data-testid='top-header']").first).to_be_visible()
 
     # 3. Teams
-    page.locator(".sidebar button:has-text('Teams')").first.click()
+    nav(page, "teams")
     page.wait_for_timeout(300)
     expect(page.locator("[data-testid='top-header']").first).to_be_visible()
 
     # 4. Knowledge
-    page.locator(".sidebar button:has-text('Knowledge')").first.click()
+    nav(page, "knowledge")
     page.wait_for_timeout(300)
     expect(page.locator("[data-testid='top-header']").first).to_be_visible()
 
     # 5. Marketplace
-    page.locator(".sidebar button:has-text('Marketplace')").first.click()
+    nav(page, "marketplace")
     page.wait_for_timeout(300)
     expect(page.locator("[data-testid='top-header']").first).to_be_visible()
 

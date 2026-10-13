@@ -125,7 +125,7 @@ class FilesystemWatcher(BaseWatcher):
                         continue
                     try:
                         stat = p.stat()
-                        rel_path = str(p.relative_to(self.workspace_root)) if self.workspace_root in p.parents else p.name
+                        rel_path = p.relative_to(self.workspace_root).as_posix() if self.workspace_root in p.parents else p.name
                         files[rel_path] = (stat.st_mtime, stat.st_size)
                     except (OSError, ValueError, PermissionError) as pe:
                         logger.debug("FilesystemWatcher stat error on %s: %s", p, pe)
@@ -504,6 +504,7 @@ class WatcherManager:
             elif auto.trigger.type == TriggerType.GITHUB_WATCHER or (auto.metadata and auto.metadata.get("watcher", {}).get("type") == "github_repo"):
                 w_meta = auto.metadata.get("watcher", {}) if auto.metadata else {}
                 owner = auto.trigger.github_owner or w_meta.get("owner", "")
+                repo = auto.trigger.github_repo or w_meta.get("repo", "")
                 token = auto.trigger.github_token or w_meta.get("token")
                 if token and (token.startswith("secret_ref:") or token.startswith("sec_")):
                     from aether.core.secrets import get_secret_store

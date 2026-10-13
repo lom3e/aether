@@ -23,6 +23,7 @@ from aether.memory.conversation import ConversationMemory
 from aether.memory.semantic import SemanticMemory
 
 if TYPE_CHECKING:
+    from aether.memory.models import WorkforceMemory
     from aether.memory.store import WorkforceMemoryStore
     from aether.knowledge.graph.store import KnowledgeGraphStore
     from aether.intelligence.service import UnifiedIntelligenceService

@@ -17,6 +17,7 @@ from datetime import datetime, timezone
 import json
 import os
 from pathlib import Path
+from contextlib import closing
 import sqlite3
 import stat
 import tempfile
@@ -181,7 +182,7 @@ def test_connection_store_zero_plaintext_in_db():
         conn_store.save_connection(conn)
 
         # Directly query SQLite table to inspect stored bytes
-        with sqlite3.connect(db_path) as db:
+        with closing(sqlite3.connect(db_path)) as db, db:
             cursor = db.cursor()
             cursor.execute("SELECT auth_metadata FROM connections WHERE id = ?", ("conn_gh_test",))
             raw_metadata_json = cursor.fetchone()[0]

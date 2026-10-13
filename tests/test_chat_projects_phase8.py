@@ -15,6 +15,7 @@ Validates:
 11. Full REST API endpoints (Projects and Conversations pin/project).
 12. Persistence after workspace restart / reload.
 """
+from contextlib import closing
 import sqlite3
 import pytest
 from pathlib import Path
@@ -196,7 +197,7 @@ def test_backward_compatibility_legacy_database_migration(tmp_path):
     legacy_db = tmp_path / "legacy_convs.db"
 
     # Create old-style schema without pinned, project_id, unread
-    with sqlite3.connect(legacy_db) as conn:
+    with closing(sqlite3.connect(legacy_db)) as conn, conn:
         conn.execute(
             """
             CREATE TABLE conversations (
