@@ -16,6 +16,8 @@ import threading
 import time
 from typing import Any, Callable
 
+from aether.core.process_control import new_process_group_kwargs, terminate_process_tree
+
 logger = logging.getLogger(__name__)
 
 STANDARD_MACOS_PATHS = [
@@ -306,7 +308,7 @@ def run_cancellable_process(
         stdout=subprocess.PIPE,
         stderr=subprocess.PIPE,
         text=True,
-        start_new_session=True,
+        **new_process_group_kwargs(),
     )
 
     stdout_lines: list[str] = []
@@ -328,23 +330,19 @@ def run_cancellable_process(
     start_time = time.time()
     was_cancelled = False
 
-    def _kill_group(sig: int) -> None:
-        try:
-            pgid = os.getpgid(proc.pid)
-            os.killpg(pgid, sig)
-        except (ProcessLookupError, PermissionError):
-            pass
+    def _kill_group(force: bool) -> None:
+        terminate_process_tree(proc, force=force)
 
     while proc.poll() is None:
         if cancel_event and cancel_event.is_set():
             was_cancelled = True
             logger.info("Cancellation detected for PID %s (PGID), sending SIGTERM...", proc.pid)
-            _kill_group(signal.SIGTERM)
+            _kill_group(False)
             try:
                 proc.wait(timeout=1.5)
             except subprocess.TimeoutExpired:
                 logger.warning("Process PID %s did not terminate with SIGTERM, escalating to SIGKILL...", proc.pid)
-                _kill_group(signal.SIGKILL)
+                _kill_group(True)
                 try:
                     proc.wait(timeout=1.0)
                 except Exception:
@@ -353,7 +351,7 @@ def run_cancellable_process(
 
         if timeout and (time.time() - start_time) > timeout:
             logger.warning("Process PID %s exceeded timeout of %.1fs, terminating...", proc.pid, timeout)
-            _kill_group(signal.SIGKILL)
+            _kill_group(True)
             try:
                 proc.wait(timeout=1.0)
             except Exception:

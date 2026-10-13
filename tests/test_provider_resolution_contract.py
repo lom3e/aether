@@ -23,17 +23,11 @@ KEY_ENV = ("OPENAI_API_KEY", "ANTHROPIC_API_KEY", "GEMINI_API_KEY", "GROQ_API_KE
 
 
 @pytest.fixture(autouse=True)
-def hermetic(monkeypatch):
+def hermetic(monkeypatch, network_attempts, network_policy):
     for k in KEY_ENV:
         monkeypatch.delenv(k, raising=False)
-    attempts = []
-
-    def no_network(self, *a, **k):
-        attempts.append(a)
-        raise AssertionError(f"unexpected network connection: {a}")
-
-    monkeypatch.setattr(socket.socket, "connect", no_network)
-    monkeypatch.setattr(socket.socket, "connect_ex", no_network)
+    network_policy.strict = True  # these tests prove "nothing is contacted": not even a loopback connection is allowed
+    attempts = network_attempts  # recorded by the autouse isolation fixture in conftest.py
     return attempts
 
 

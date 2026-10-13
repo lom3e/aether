@@ -709,7 +709,21 @@ def build_parser() -> argparse.ArgumentParser:
     return parser
 
 
+def _ensure_utf8_stdio() -> None:
+    """
+    The CLI prints non-ASCII symbols (e.g. the runtime banner). On Windows a redirected stdout uses the legacy ANSI code
+    page (cp1252), where that print raised UnicodeEncodeError and the frozen runtime died at startup; its supervisor
+    reads this output as UTF-8 anyway. Never fail on an unencodable character.
+    """
+    for stream in (sys.stdout, sys.stderr):
+        try:
+            stream.reconfigure(encoding="utf-8", errors="replace")  # type: ignore[union-attr]
+        except (AttributeError, ValueError, OSError):
+            pass  # not a text stream that can be reconfigured (e.g. already replaced by a test harness)
+
+
 def main() -> None:
+    _ensure_utf8_stdio()
     parser = build_parser()
     args = parser.parse_args()
 

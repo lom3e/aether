@@ -20,14 +20,22 @@ class PersonalEventHub:
         self._lock = threading.Lock()
         # workspace_id -> set of asyncio.Queue
         self._subscribers: dict[str, set[asyncio.Queue]] = {}
+        # queue -> the event loop that owns it (None when subscribed outside a running loop). asyncio.Queue is not
+        # thread-safe: a publish from another thread must be handed to the owning loop, never put directly.
+        self._loops: dict[asyncio.Queue, asyncio.AbstractEventLoop | None] = {}
 
     def subscribe(self, workspace_id: str) -> asyncio.Queue:
         """Registers a new listener queue for a workspace."""
         queue: asyncio.Queue = asyncio.Queue(maxsize=100)
+        try:
+            owner_loop: asyncio.AbstractEventLoop | None = asyncio.get_running_loop()
+        except RuntimeError:
+            owner_loop = None
         with self._lock:
             if workspace_id not in self._subscribers:
                 self._subscribers[workspace_id] = set()
             self._subscribers[workspace_id].add(queue)
+            self._loops[queue] = owner_loop
         logger.debug(f"Client subscribed to SSE stream for workspace: {workspace_id}")
         return queue
 
@@ -38,6 +46,7 @@ class PersonalEventHub:
                 self._subscribers[workspace_id].discard(queue)
                 if not self._subscribers[workspace_id]:
                     del self._subscribers[workspace_id]
+            self._loops.pop(queue, None)
 
     def subscriber_count(self, workspace_id: str) -> int:
         """Returns the number of active subscriber queues for a workspace."""
@@ -66,24 +75,44 @@ class PersonalEventHub:
         }
         count = 0
         with self._lock:
-            queues = list(self._subscribers.get(workspace_id, []))
+            queues = [(q, self._loops.get(q)) for q in self._subscribers.get(workspace_id, [])]
 
-        for q in queues:
+        try:
+            current_loop: asyncio.AbstractEventLoop | None = asyncio.get_running_loop()
+        except RuntimeError:
+            current_loop = None
+
+        for q, owner_loop in queues:
             try:
-                # Put nowait; if queue full, drop oldest or ignore
-                q.put_nowait(payload)
+                if owner_loop is None or owner_loop is current_loop:
+                    self._deliver(q, payload)  # same thread as the queue's loop (or no loop involved)
+                else:
+                    # Another thread (e.g. an approval running in asyncio.to_thread, a background task): hand the
+                    # event to the owning loop. FIFO order per publishing thread is preserved by the loop.
+                    owner_loop.call_soon_threadsafe(self._deliver, q, payload)
                 count += 1
-            except asyncio.QueueFull:
-                try:
-                    q.get_nowait()
-                    q.put_nowait(payload)
-                    count += 1
-                except Exception:
-                    pass
+            except RuntimeError as e:  # the owning loop is closed: the subscriber is gone
+                logger.debug(f"Dropping SSE subscriber with a closed loop: {e}")
+                self._drop_queue(workspace_id, q)
             except Exception as e:
                 logger.debug(f"Error delivering SSE event to subscriber: {e}")
 
         return count
+
+    @staticmethod
+    def _deliver(q: asyncio.Queue, payload: dict[str, Any]) -> None:
+        """Puts an event on a queue (must run on the queue's own loop thread); a full queue drops its oldest event."""
+        try:
+            q.put_nowait(payload)
+        except asyncio.QueueFull:
+            try:
+                q.get_nowait()
+                q.put_nowait(payload)
+            except Exception:
+                pass
+
+    def _drop_queue(self, workspace_id: str, queue: asyncio.Queue) -> None:
+        self.unsubscribe(workspace_id, queue)
 
     async def event_generator(self, workspace_id: str, timeout_seconds: float = 30.0) -> AsyncGenerator[str, None]:
         """Async generator formatting events according to SSE standard text/event-stream."""

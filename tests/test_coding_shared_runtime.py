@@ -14,6 +14,7 @@ from pathlib import Path
 from unittest.mock import patch
 
 import pytest
+from fake_agent_script import write_agent_script
 
 from aether.coding.evidence import compare, snapshot_from_blob, snapshot_to_blob, take_snapshot
 from aether.coding.models import CodingExecutionStatus as S, CodingTask
@@ -22,10 +23,7 @@ from aether.coding.providers.codex import CodexCodingProvider
 
 
 def make_agent(tmp_path: Path, body: str) -> str:
-    script = tmp_path / "fake_agent.sh"
-    script.write_text("#!/bin/sh\n" + body + "\n", encoding="utf-8")
-    script.chmod(script.stat().st_mode | stat.S_IEXEC)
-    return str(script)
+    return write_agent_script(tmp_path, "fake_agent", body)
 
 
 @pytest.fixture
@@ -91,7 +89,7 @@ def test_cli_agent_failure_is_failed_with_stderr(tmp_path, project):
 
 
 def test_cli_agent_timeout_kills_the_process_and_says_so(tmp_path, project):
-    agent = make_agent(tmp_path, "echo partial > partial.txt\nsleep 30")
+    agent = make_agent(tmp_path, "echo partial > partial.txt\nexec sleep 30")
     t0 = time.time()
     _, ex, _ = run(CodexCodingProvider, agent, project, timeout=1)
     assert time.time() - t0 < 10
@@ -101,7 +99,7 @@ def test_cli_agent_timeout_kills_the_process_and_says_so(tmp_path, project):
 
 
 def test_cli_agent_cancel_terminates_the_real_process(tmp_path, project):
-    agent = make_agent(tmp_path, "sleep 30")
+    agent = make_agent(tmp_path, "exec sleep 30")
     prov, a, b = provider_with(ClaudeCodeCodingProvider, agent)
     holder = {}
 

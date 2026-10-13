@@ -341,8 +341,9 @@ def test_http_format_validation():
     assert valid
 
 
-def test_http_live_check_status_codes():
+def test_http_live_check_status_codes(fake_dns):
     import urllib.error
+    fake_dns["example.com"] = "93.184.216.34"  # SSRF validation resolves the host; urlopen itself is mocked below
     conn = HTTPConnector()
     creds = {"base_url": "https://example.com"}
 

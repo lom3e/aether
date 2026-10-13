@@ -15,6 +15,7 @@ Tests:
 - Restart and persistence
 - Clean registry state
 """
+import sys
 import os
 import json
 import pytest
@@ -35,14 +36,22 @@ async def test_full_workspace_security_and_isolation(tmp_path, monkeypatch):
     monkeypatch.setattr("aether.workspace.registry._get_registry_path", lambda: reg_file)
 
     # 2. Test prevention of creating/registering in critical system paths
-    protected_test_paths = [
-        Path("/"),
-        Path("/etc"),
-        Path("/System"),
-        Path("/usr"),
-        Path("/bin"),
-        Path.home(),
-    ]
+    if sys.platform == "win32":
+        protected_test_paths = [
+            Path(tmp_path.anchor),
+            Path(os.environ.get("SystemRoot", r"C:\Windows")),
+            Path(os.environ.get("ProgramFiles", r"C:\Program Files")),
+            Path.home(),
+        ]
+    else:
+        protected_test_paths = [
+            Path("/"),
+            Path("/etc"),
+            Path("/System"),
+            Path("/usr"),
+            Path("/bin"),
+            Path.home(),
+        ]
     for prot in protected_test_paths:
         assert _is_protected_path(prot) is True
         with pytest.raises(WorkspaceError):

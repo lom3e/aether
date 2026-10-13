@@ -92,8 +92,8 @@ def test_runtime_execute_do_mode(tmp_path, accepted_authority_factory):
     from aether.activity.service import ActivityService
     from aether.activity.store import ActivityStore
 
-    act_store = ActionStore(f"sqlite:///{tmp_path}/actions.db")
-    activity_svc = ActivityService(ActivityStore(f"sqlite:///{tmp_path}/activity.db"))
+    act_store = ActionStore(str(tmp_path / "actions.db"))
+    activity_svc = ActivityService(ActivityStore(str(tmp_path / "activity.db")))
     executor = ActionExecutor(
         registry=ActionRegistry(),
         store=act_store,

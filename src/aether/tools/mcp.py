@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import collections
 import json
 import logging
 import os
@@ -11,6 +12,7 @@ import urllib.error
 import urllib.parse
 import urllib.request
 
+from aether.core.process_control import new_process_group_kwargs, terminate_process_tree
 from aether.tools.base import Tool, ToolClassification, ToolExecutionContext
 from aether.tools.registry import ToolRegistry
 
@@ -50,6 +52,8 @@ class MCPClient:
         self.timeout_seconds = timeout_seconds
 
         self._process: subprocess.Popen | None = None
+        self._stderr_tail: collections.deque[str] = collections.deque(maxlen=200)
+        self._stderr_thread: threading.Thread | None = None
         self._next_id = 1
         self._lock = threading.Lock()
         self._connected = False
@@ -82,7 +86,13 @@ class MCPClient:
                 cwd=self.cwd,
                 env=proc_env,
                 bufsize=1,
+                **new_process_group_kwargs(),
             )
+            # Keep draining stderr: a server that logs a lot would otherwise block on a full pipe and hang the client.
+            self._stderr_thread = threading.Thread(
+                target=self._drain_stderr, args=(self._process,), name="mcp-stderr-drain", daemon=True
+            )
+            self._stderr_thread.start()
 
         # Handshake: initialize
         init_params = {
@@ -105,6 +115,13 @@ class MCPClient:
 
         self._connected = True
         return self._server_info
+
+    def _drain_stderr(self, proc: subprocess.Popen) -> None:
+        try:
+            for line in proc.stderr:  # type: ignore[union-attr]
+                self._stderr_tail.append(line)
+        except (ValueError, OSError):
+            pass  # the pipe was closed by close()
 
     def list_tools(self) -> list[MCPToolDefinition]:
         """Queries the MCP server for available tools via tools/list."""
@@ -148,18 +165,30 @@ class MCPClient:
         """Closes the connection and terminates any running subprocess."""
         with self._lock:
             self._connected = False
-            if self._process is not None:
+            proc = self._process
+            if proc is not None:
                 try:
-                    if self._process.stdin:
-                        self._process.stdin.close()
-                    self._process.terminate()
-                    self._process.wait(timeout=2.0)
+                    if proc.stdin:
+                        proc.stdin.close()
+                    terminate_process_tree(proc, force=False)
+                    proc.wait(timeout=2.0)
                 except Exception:
+                    terminate_process_tree(proc, force=True)
                     try:
-                        self._process.kill()
+                        proc.wait(timeout=2.0)
                     except Exception:
                         pass
                 finally:
+                    # Release the pipe handles: leaving them to the GC leaks file descriptors (and warns).
+                    for stream in (proc.stdout, proc.stderr):
+                        try:
+                            if stream:
+                                stream.close()
+                        except Exception:
+                            pass
+                    thread, self._stderr_thread = self._stderr_thread, None
+                    if thread is not None:
+                        thread.join(timeout=1.0)
                     self._process = None
 
     def __enter__(self) -> MCPClient:
@@ -252,9 +281,10 @@ class MCPClient:
         while True:
             resp_line = self._process.stdout.readline()
             if not resp_line:
-                stderr_text = ""
-                if self._process.stderr:
-                    stderr_text = self._process.stderr.read()
+                thread = self._stderr_thread
+                if thread is not None:
+                    thread.join(timeout=1.0)  # the process is gone: let the drain thread finish reading
+                stderr_text = "".join(self._stderr_tail)
                 raise RuntimeError(f"MCP subprocess terminated prematurely: {stderr_text.strip()}")
 
             resp_line = resp_line.strip()

@@ -278,6 +278,7 @@ def test_action_executor_content_actions(accepted_authority_factory):
             ws.id,
             {"variant_id": var_id, "scheduled_at": "2026-11-15T09:00:00Z"},
             authority=auth,
+            auto_approve=True,  # ACT-tier actions keep their own approval gate, separate from the proposal authority
         )
         assert res_sched.status.value in ("succeeded", "success")
         assert res_sched.output_data["variant"]["status"] == "scheduled"

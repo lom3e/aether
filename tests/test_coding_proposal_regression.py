@@ -6,7 +6,7 @@ from aether.personal.store import PersonalStore
 from aether.planning.contracts import ProposalStatus
 
 
-def test_coding_delegation_intent_and_proposal_regression():
+def test_coding_delegation_intent_and_proposal_regression(tmp_path):
     """
     Regression test verifying that a coding delegation request with an absolute project path
     and explicit files:
@@ -20,8 +20,13 @@ def test_coding_delegation_intent_and_proposal_regression():
     store = PersonalStore(db_path=tmp_db)
     svc = PersonalAgentService(store=store)
 
+    # The project must really exist (the original relied on a directory left behind on the developer's Mac).
+    project_dir = tmp_path / "aether-manual-gate-8b5cFo"
+    project_dir.mkdir()
+    (project_dir / "calculator.py").write_text("def add(a, b):\n    return a + b\n", encoding="utf-8")
+    (project_dir / "test_calculator.py").write_text("def test_add():\n    assert True\n", encoding="utf-8")
     prompt = (
-        "Nel progetto locale /tmp/aether-manual-gate-8b5cFo, aggiungi una funzione subtract(a, b) "
+        f"Nel progetto locale `{project_dir}`, aggiungi una funzione subtract(a, b) "
         "in calculator.py che restituisca a - b, e aggiungi un test corrispondente in test_calculator.py. "
         "Delega il lavoro a Google Antigravity. Prepara prima la proposta e mostra chiaramente il provider "
         "designato e il progetto di destinazione. Non modificare i file e non avviare l'esecuzione finché "

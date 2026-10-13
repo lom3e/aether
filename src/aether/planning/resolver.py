@@ -215,7 +215,12 @@ class ContextResolver:
             re.IGNORECASE,
         )
         # Also look for explicit directory paths like /tmp/... or /Users/...
-        abs_path_mention = re.search(r"[`'\"\s\(](/[a-zA-Z0-9_\-\./]+)", prompt)
+        abs_path_mention = (
+            re.search(r"[`'\"\s\(](/[a-zA-Z0-9_\-\./]+)", prompt)
+            # Windows drive paths: quoted (may contain spaces) or bare, with either kind of separator
+            or re.search(r"[`'\"]([A-Za-z]:[\\/][^`'\"]+)[`'\"]", prompt)
+            or re.search(r"(?:^|[`'\"\s\(])([A-Za-z]:[\\/][^\s`'\"\(\)<>|?*]*)", prompt)
+        )
         branch_mention = re.search(
             r"\b(?:branch|ramo)\s+[`'\"]?([a-zA-Z0-9_\-\./]+)[`'\"]?",
             prompt,
@@ -287,7 +292,7 @@ class ContextResolver:
             rel_locator = proj_name
             if project_path and ws_root:
                 try:
-                    rel_locator = str(Path(project_path).relative_to(Path(ws_root)))
+                    rel_locator = Path(project_path).relative_to(Path(ws_root)).as_posix()
                 except ValueError:
                     rel_locator = Path(project_path).name
             elif project_path:
@@ -366,7 +371,7 @@ class ContextResolver:
                             source_type="git",
                             source_identifier=target_branch,
                             workspace=intent.workspace_id,
-                            locator=f"{p_str}:refs/heads/{target_branch}",
+                            locator=f"{rel_locator}:refs/heads/{target_branch}",
                             verification_status="verified",
                             excerpt=f"Verified local branch '{target_branch}'",
                         )
@@ -625,14 +630,14 @@ class ContextResolver:
                 rel_file_locator = f_name
                 if getattr(self, "_target_repo_path", None):
                     try:
-                        rel_file_locator = str(found_path.relative_to(Path(self._target_repo_path)))
+                        rel_file_locator = found_path.relative_to(Path(self._target_repo_path)).as_posix()
                     except ValueError:
                         rel_file_locator = found_path.name
                 else:
                     ws_root_path = getattr(self.workspace, "root", None)
                     if ws_root_path:
                         try:
-                            rel_file_locator = str(found_path.relative_to(Path(ws_root_path)))
+                            rel_file_locator = found_path.relative_to(Path(ws_root_path)).as_posix()
                         except ValueError:
                             rel_file_locator = found_path.name
                     else:

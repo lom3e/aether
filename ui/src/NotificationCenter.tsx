@@ -2,7 +2,7 @@ import { useState, useEffect, useRef } from 'react';
 import { Bell, Check, Trash2, Shield, CheckCircle2, AlertTriangle, Sparkles, Sliders, Loader2 } from 'lucide-react';
 import { apiUrl } from './api';
 import { NotificationFabricModal } from './NotificationFabricModal';
-import { resolveCanonicalTarget, submitApprovalDecision } from './canonicalNotification';
+import { resolveCanonicalTarget, submitApprovalDecision, approvalToastKind } from './canonicalNotification';
 import { useToast } from './toast';
 
 export interface NotificationItem {
@@ -170,7 +170,7 @@ export function NotificationCenter({ workspaceName, onNavigate }: NotificationCe
       });
 
       if (res.success) {
-        showToast(res.message, res.status === 'already_completed' ? 'info' : 'success');
+        showToast(res.message, approvalToastKind(res, 'approve'));
         setNotifications(prev =>
           prev.map(n => (n.id === notif.id ? { ...n, status: 'read', action_required: false } : n))
         );

@@ -29,7 +29,7 @@ import {
 } from "lucide-react";
 import { apiUrl, getSessionToken } from "./api";
 import { hideCompanion, showMainWindow } from "./desktop";
-import { resolveCanonicalTarget, submitApprovalDecision } from "./canonicalNotification";
+import { resolveCanonicalTarget, submitApprovalDecision, approvalToastKind } from "./canonicalNotification";
 import { ToastContext } from "./toast";
 
 interface AmbientCompanionProps {
@@ -575,7 +575,7 @@ export function AmbientCompanion({
       });
 
       if (res.success) {
-        showToast(res.message, res.status === "already_completed" ? "info" : "success");
+        showToast(res.message, approvalToastKind(res, "approve"));
         setPendingApprovals(prev => prev.filter(a => (a.execution_id || a.id) !== executionId));
         fetchOverview();
       } else {

@@ -1,6 +1,7 @@
 from aether.agents.agent import Agent
 from aether.core.execution import Task, Message, ToolCall
 from aether.providers.base import AIProvider
+from aether.providers.capabilities import ProviderCapabilities
 from aether.providers.types import ProviderResponse
 from aether.tools.base import Tool, ToolClassification
 from aether.tools.registry import ToolRegistry

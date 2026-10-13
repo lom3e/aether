@@ -10,20 +10,98 @@ import shutil
 import socket
 import subprocess
 import sys
+import tempfile
+import threading
 import time
 import urllib.request
 import urllib.error
 from pathlib import Path
+from typing import Any
 
 import pytest
 from aether.server.app import app
 from aether.core.paths import set_aether_data_dir
 from aether.core.secrets import MemorySecretStore, set_secret_store
 
+from network_guard import PROVIDER_KEY_VARS, NetworkPolicy, install_network_guard
+
+def _release_handles_under(path: str) -> None:
+    """
+    Close every open Workspace (and, via gc, orphaned stores) rooted under ``path``.
+
+    SQLite files that are still open cannot be deleted on Windows (WinError 32), so a ``TemporaryDirectory``
+    holding a live workspace fails on cleanup there, while POSIX silently allows it.
+    """
+    import gc
+    from aether.workspace.workspace import Workspace
+
+    root = os.path.normcase(os.path.abspath(path))
+    for ws in list(Workspace._active_workspaces.values()):
+        ws_root = getattr(ws, "root", None)
+        if ws_root is not None and os.path.normcase(os.path.abspath(str(ws_root))).startswith(root):
+            try:
+                ws.close()
+            except Exception:
+                pass
+    # Stores created directly by a test (not owned by a Workspace) keep per-thread connections open until closed.
+    for obj in gc.get_objects():
+        try:
+            if not type(obj).__module__.startswith("aether."):
+                continue
+            db_path = getattr(obj, "db_path", None) or getattr(obj, "_db_path", None)
+            close = getattr(obj, "close", None)
+            if (
+                isinstance(db_path, (str, os.PathLike))
+                and callable(close)
+                and os.path.normcase(os.path.abspath(str(db_path))).startswith(root)
+            ):
+                close()
+        except Exception:
+            continue
+    gc.collect()
+
+
+_original_tempdir_cleanup = tempfile.TemporaryDirectory.cleanup
+
+
+def _cleanup_releasing_workspaces(self) -> None:
+    _release_handles_under(self.name)
+    _original_tempdir_cleanup(self)
+
+
+tempfile.TemporaryDirectory.cleanup = _cleanup_releasing_workspaces
+
+# Child processes started by the suite (the aether_server fixture, uvicorn subprocesses of the browser tests) get the same
+# network guard through tests/child_guard/sitecustomize.py. Set after pytest started, so it does not affect pytest itself.
+os.environ["PYTHONPATH"] = os.pathsep.join(filter(None, [str(Path(__file__).resolve().parent / "child_guard"), os.environ.get("PYTHONPATH", "")]))
+os.environ["AETHER_TEST_CHILD_NETWORK_GUARD"] = "1"
+os.environ["AETHER_TEST_GUARD_FILE"] = str(Path(__file__).resolve().parent / "network_guard.py")
+
 # Enable test providers by default for test execution
 os.environ.setdefault("AETHER_ENABLE_TEST_PROVIDERS", "1")
+# Never pop real desktop notifications while the suite runs (the Windows toast fallback is exercised with a mock).
+os.environ.setdefault("AETHER_DISABLE_DEV_WINDOWS_TOAST", "1")
 # Sensitive routes fail closed without a session token; tests opt in to loopback-only dev mode explicitly.
 os.environ.setdefault("AETHER_INSECURE_LOCAL_DEV", "1")
+
+
+@pytest.fixture(scope="session", autouse=True)
+def _protect_tracked_static_assets():
+    """
+    The packaging tests run the real build scripts, which synchronise ``ui/dist`` into the tracked
+    ``src/aether/server/static`` directory (rewriting files, line endings and the manifest). Put it back exactly as
+    it was so that running the suite never leaves tracked source files modified.
+    """
+    static_dir = Path(__file__).resolve().parent.parent / "src" / "aether" / "server" / "static"
+    backup = None
+    if static_dir.is_dir():
+        backup = Path(tempfile.mkdtemp(prefix="aether_static_backup_")) / "static"
+        shutil.copytree(static_dir, backup)
+    yield
+    if backup is not None:
+        shutil.rmtree(static_dir, ignore_errors=True)
+        shutil.copytree(backup, static_dir)
+        shutil.rmtree(backup.parent, ignore_errors=True)
 
 
 @pytest.fixture(autouse=True)
@@ -73,9 +151,10 @@ def _find_aether_bin() -> Path:
     """Locate the `aether` CLI binary using the current Python interpreter's directory."""
     # Prefer sibling of the running Python interpreter (i.e. inside the active venv)
     python_bin_dir = Path(sys.executable).parent
-    candidate = python_bin_dir / "aether"
-    if candidate.exists():
-        return candidate
+    for name in ("aether.exe", "aether"):  # Windows console scripts carry the .exe suffix
+        candidate = python_bin_dir / name
+        if candidate.exists():
+            return candidate
     # Fallback: PATH resolution
     found = shutil.which("aether")
     if found:
@@ -131,6 +210,10 @@ def aether_server(tmp_path_factory):
         stdout=subprocess.PIPE,
         stderr=subprocess.STDOUT,
         text=True,
+        encoding="utf-8",  # the banner contains non-ASCII characters; do not depend on the console code page
+        errors="replace",
+        # The server child is outside the in-process network guard: at least never hand it provider credentials.
+        env={**{k: v for k, v in os.environ.items() if k not in PROVIDER_KEY_VARS}, "PYTHONUTF8": "1", "PYTHONIOENCODING": "utf-8"},
         bufsize=1,
     )
 
@@ -158,6 +241,18 @@ def aether_server(tmp_path_factory):
         )
 
     base_url = f"http://127.0.0.1:{bound_port}"
+
+    # Keep draining the server output: once the OS pipe buffer fills up (access logs), the server would block
+    # forever inside logging and every request would hang.
+    def _drain_output() -> None:
+        try:
+            for _ in proc.stdout:
+                pass
+        except (ValueError, OSError):
+            pass
+
+    drain_thread = threading.Thread(target=_drain_output, name="aether-server-output-drain", daemon=True)
+    drain_thread.start()
 
     # Wait for health endpoint to respond
     if not _wait_for_health(base_url, token):
@@ -194,6 +289,10 @@ def aether_server(tmp_path_factory):
     except subprocess.TimeoutExpired:
         proc.kill()
         proc.wait()
+    finally:
+        drain_thread.join(timeout=5)
+        if proc.stdout is not None:
+            proc.stdout.close()
 
     os.environ.pop("AETHER_E2E_BASE_URL", None)
     os.environ.pop("AETHER_E2E_TOKEN", None)
@@ -274,3 +373,72 @@ def make_test_accepted_authority(
 @pytest.fixture
 def accepted_authority_factory():
     return make_test_accepted_authority
+
+
+# ---------------------------------------------------------------------------
+# Credential and network isolation (policy and limits: tests/network_guard.py).
+#   live_provider                    -> real keys, no network guard (explicit; live tests also need their own opt-in env)
+#   external_network("host", ...)    -> loopback + exactly those hosts, no keys
+#   ollama                           -> loopback incl. the local Ollama port, no keys
+#   integration / ordinary           -> no keys, loopback only (the servers the fixtures start)
+# A refused attempt fails the test at teardown even when the code under test swallowed the exception, unless the
+# test is marked ``network_block_expected`` (tests of the guard itself).
+# ---------------------------------------------------------------------------
+@pytest.fixture
+def network_attempts():
+    """Refused connection/DNS attempts of the current test (filled by the autouse isolation fixture)."""
+    return []
+
+
+@pytest.fixture
+def network_policy():
+    """The mutable policy of the guard for this test (e.g. ``network_policy.strict = True`` refuses loopback too)."""
+    return NetworkPolicy()
+
+
+@pytest.fixture(autouse=True)
+def _isolate_credentials_and_network(request, monkeypatch, network_attempts, network_policy):
+    live = request.node.get_closest_marker("live_provider") is not None
+    if not live:
+        for var in PROVIDER_KEY_VARS:
+            monkeypatch.delenv(var, raising=False)
+    if live:
+        yield
+        return
+    external = request.node.get_closest_marker("external_network")
+    if external is not None and not external.args:
+        pytest.fail("@pytest.mark.external_network needs the exact hosts it may reach, e.g. external_network('api.example.com')")
+    network_policy.allow_ollama = request.node.get_closest_marker("ollama") is not None
+    network_policy.extra_hosts = frozenset(str(h).lower() for h in (external.args if external else ()))
+    install_network_guard(monkeypatch, policy=network_policy, attempts=network_attempts)
+    yield
+    if network_attempts and request.node.get_closest_marker("network_block_expected") is None:
+        pytest.fail(
+            "The test attempted network access that the guard refused (the code under test may have swallowed the "
+            f"error): {network_attempts}. Mock it, or opt in with the ollama / external_network('host') markers.",
+            pytrace=False,
+        )
+
+
+@pytest.fixture
+def fake_dns(monkeypatch):
+    """
+    Deterministic name resolution for tests that exercise URL validation (SSRF checks...): returns a dict to fill, e.g.
+    ``fake_dns["example.com"] = "93.184.216.34"``. Listed names resolve to the given address WITHOUT any DNS query; every
+    other name still goes through the network guard (and is refused). This is a mock, not a permission.
+    """
+    import socket
+
+    table: dict[str, str] = {}
+    guarded = socket.getaddrinfo
+
+    def resolve(host, port=None, *args, **kwargs):
+        ip = table.get(str(host).strip("[]").lower())
+        if ip is None:
+            return guarded(host, port, *args, **kwargs)
+        family = socket.AF_INET6 if ":" in ip else socket.AF_INET
+        sockaddr = (ip, port or 0, 0, 0) if family == socket.AF_INET6 else (ip, port or 0)
+        return [(family, socket.SOCK_STREAM, 6, "", sockaddr)]
+
+    monkeypatch.setattr(socket, "getaddrinfo", resolve)
+    return table

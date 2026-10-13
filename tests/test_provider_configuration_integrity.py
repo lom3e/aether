@@ -22,18 +22,12 @@ from aether.workspace.workspace import Workspace
 
 
 @pytest.fixture(autouse=True)
-def hermetic(monkeypatch, tmp_path):
+def hermetic(monkeypatch, tmp_path, network_attempts, network_policy):
     for k in ("OPENAI_API_KEY", "ANTHROPIC_API_KEY", "GEMINI_API_KEY", "GROQ_API_KEY"):
         monkeypatch.delenv(k, raising=False)
     set_aether_data_dir(tmp_path / "aether_home")           # the global registry/pointer never touches ~/.aether
-    attempts = []
-
-    def no_network(self, *a, **k):
-        attempts.append(a)
-        raise AssertionError(f"unexpected network connection: {a}")
-
-    monkeypatch.setattr(socket.socket, "connect", no_network)
-    monkeypatch.setattr(socket.socket, "connect_ex", no_network)
+    network_policy.strict = True  # these tests prove "nothing is contacted": not even a loopback connection is allowed
+    attempts = network_attempts  # recorded by the autouse isolation fixture in conftest.py
     yield attempts
     set_aether_data_dir(None)
 

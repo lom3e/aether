@@ -38,7 +38,8 @@ def _get_repo_root() -> Path:
 
 def _get_frozen_binary_path() -> Path:
     repo_root = _get_repo_root()
-    return repo_root / "build" / "aether-runtime" / "aether-runtime"
+    name = "aether-runtime.exe" if sys.platform == "win32" else "aether-runtime"
+    return repo_root / "build" / "aether-runtime" / name
 
 
 def test_dsk_02_a_and_b_binary_exists_and_executable():
@@ -71,6 +72,10 @@ def test_dsk_02_c_to_l_isolated_clean_env_lifecycle(tmp_path):
         "TMPDIR": str(tmp_path),
         "HOME": str(tmp_path),
     }
+    if sys.platform == "win32":
+        # Windows cannot initialise sockets or locate DLLs without these; no Python variable is passed through.
+        clean_env.update({k: os.environ[k] for k in ("SYSTEMROOT", "SYSTEMDRIVE", "WINDIR") if k in os.environ})
+        clean_env.update({"USERPROFILE": str(tmp_path), "TEMP": str(tmp_path), "TMP": str(tmp_path)})
 
     # 1. Spawn frozen runtime (DSK-02-C, DSK-02-H)
     proc = subprocess.Popen(
@@ -278,3 +283,9 @@ def test_dsk_02_c_to_l_isolated_clean_env_lifecycle(tmp_path):
             proc.kill()
         if 'proc2' in locals() and proc2.poll() is None:
             proc2.kill()
+        for p_ in (proc, locals().get('proc2')):
+            if p_ is not None:
+                p_.wait(timeout=10)
+                for stream in (p_.stdout, p_.stderr):
+                    if stream:
+                        stream.close()

@@ -192,7 +192,7 @@ class TriggerEvaluator:
                     if is_created or is_modified:
                         detected_files.append({
                             "path": str(p),
-                            "relative_path": str(p.relative_to(workspace_root)) if workspace_root in p.parents else p.name,
+                            "relative_path": p.relative_to(workspace_root).as_posix() if workspace_root in p.parents else p.name,
                             "size_bytes": stat.st_size,
                             "modified_at": mtime.isoformat(),
                             "event": "created" if is_created else "modified",

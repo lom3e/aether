@@ -533,8 +533,8 @@ class ActionExecutor:
         def _inside(child: Path, parent: Path) -> bool:
             return child == parent or parent in child.parents
 
-        forbidden_roots = {"/", "/System", "/usr", "/bin", "/sbin", "/etc", "/var", "/Library", "/private", "/private/var", "/tmp", "/private/tmp"}
-        if str(p_dir) in forbidden_roots:
+        from aether.core.system_paths import is_protected_system_path
+        if is_protected_system_path(p_dir):
             raise ValueError(f"Cannot delegate coding task to system root directory: {p_dir}")
         home = Path.home().resolve()
         if p_dir == home or p_dir in home.parents:

@@ -5,7 +5,8 @@ from typing import Any
 from uuid import uuid4
 
 from aether.agents.lifecycle import AgentLifecycle, AgentLifecycleState
-from aether.core.execution import ExecutionContext, ExecutionResult, ExecutionSession, ExecutionStatus, Task
+from aether.core.execution import AgentContext, ExecutionContext, ExecutionResult, ExecutionSession, ExecutionStatus, Task
+from aether.coordination.events import EventEmitter
 from aether.core.interrupts import AgentInterrupt
 from aether.engine.core import ExecutionEngine
 from aether.memory.base import Memory

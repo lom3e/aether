@@ -28,7 +28,8 @@ def browser_context(aether_server):
     token = aether_server.get("token")
     with sync_playwright() as p:
         browser = p.chromium.launch(headless=True)
-        context = browser.new_context(viewport={"width": 1440, "height": 900})
+        context = browser.new_context(viewport={"width": 1440, "height": 900}, locale="en-US")
+        context.add_init_script("localStorage.setItem('aether_experience_mode', 'v1');")  # tests target the classic UI
         if token:
             context.add_init_script(f"window.__AETHER_SESSION_TOKEN__ = '{token}';")
         yield context
@@ -204,36 +205,30 @@ def test_06_workspace_modal_model_suggestions(browser_context):
     provider_select = page.locator("select:has(option[value='ollama'])").first
     expect(provider_select).to_be_visible()
 
-    # 1. Ollama default (live discovered or curated default)
+    # Product policy: no model is ever preselected. Each provider offers its suggested models and the user picks one.
+    def _model_select_with(option_value):
+        return page.locator(f"select:has(option[value='{option_value}'])").first
+
+    # 1. Ollama (suggestions come from the live local installation, so only the policy is asserted)
     provider_select.select_option("ollama")
     page.wait_for_timeout(300)
     model_select = page.locator("select").nth(1)
     expect(model_select).to_be_visible()
-    selected_val = model_select.input_value()
-    assert len(selected_val) > 0
-    # Option should be selected in the list
-    expect(model_select.locator(f"option[value='{selected_val}']")).to_be_attached()
+    assert model_select.input_value() == "", "no model may be preselected"
 
-    # 2. Switch to OpenAI
-    provider_select.select_option("openai")
-    page.wait_for_timeout(300)
-    openai_model = page.locator("select:has(option[value='gpt-4o'])").first
-    expect(openai_model).to_be_visible()
-    assert openai_model.input_value() == "gpt-4o"
-
-    # 3. Switch to Anthropic
-    provider_select.select_option("anthropic")
-    page.wait_for_timeout(300)
-    anthropic_model = page.locator("select:has(option[value='claude-3-5-sonnet-20241022'])").first
-    expect(anthropic_model).to_be_visible()
-    assert anthropic_model.input_value() == "claude-3-5-sonnet-20241022"
-
-    # 4. Switch to Gemini
-    provider_select.select_option("gemini")
-    page.wait_for_timeout(300)
-    gemini_model = page.locator("select:has(option[value='gemini-2.0-flash'])").first
-    expect(gemini_model).to_be_visible()
-    assert gemini_model.input_value() == "gemini-2.0-flash"
+    # 2-4. Hosted providers: suggestions are listed, none is selected until explicitly chosen
+    for provider, model in (
+        ("openai", "gpt-4o"),
+        ("anthropic", "claude-3-5-sonnet-20241022"),
+        ("gemini", "gemini-2.0-flash"),
+    ):
+        provider_select.select_option(provider)
+        page.wait_for_timeout(300)
+        picker = _model_select_with(model)
+        expect(picker).to_be_visible()
+        assert picker.input_value() == "", f"{provider}: no model may be preselected"
+        picker.select_option(model)
+        assert picker.input_value() == model
 
     # 5. Toggle Custom model
     custom_btn = page.locator("button:has-text('Custom model...')").first

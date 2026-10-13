@@ -333,7 +333,12 @@ async def test_deliverable_open_and_reveal(test_workspace, monkeypatch):
         mock_proc = MagicMock()
         return mock_proc
 
+    import platform
     import subprocess
+
+    # Pin the platform branch: on Windows platform.system() itself spawns `cmd /c ver` through Popen, which would
+    # otherwise be recorded as the "open" call (and the Windows branch would launch the real file).
+    monkeypatch.setattr(platform, "system", lambda: "Linux")
     monkeypatch.setattr(subprocess, "Popen", mock_popen)
 
     # 1. Open action (reveal=False)
@@ -390,3 +395,34 @@ async def test_deliverable_security_boundary_enforcement(test_workspace, tmp_pat
         await open_mission_deliverable(req, mid, "del_malicious_01", reveal=False)
     assert exc_open.value.status_code == 403
 
+
+
+@pytest.mark.asyncio
+async def test_deliverable_open_and_reveal_windows_branch(test_workspace, monkeypatch):
+    """The Windows branch opens with os.startfile and reveals with explorer /select (nothing is really launched)."""
+    import os
+    import platform
+    import subprocess
+
+    ws, runtime, mock_team = test_workspace
+    req = make_request()
+    mission = ws.missions.create_mission(title="Win Open", objective="Windows open and reveal")
+    ws.files_dir.mkdir(parents=True, exist_ok=True)
+    report_file = ws.files_dir / "win.txt"
+    report_file.write_text("x")
+    from aether.missions.models import Deliverable
+    ws.missions.add_deliverable(
+        mission.id,
+        Deliverable(id="del_win", mission_id=mission.id, name="win.txt", path="win.txt", type="document", size_bytes=0, status="verified"),
+    )
+
+    started, popen_calls = [], []
+    monkeypatch.setattr(platform, "system", lambda: "Windows")
+    monkeypatch.setattr(os, "startfile", lambda p: started.append(p), raising=False)
+    monkeypatch.setattr(subprocess, "Popen", lambda cmd, *a, **k: popen_calls.append(cmd) or MagicMock())
+
+    res_open = await open_mission_deliverable(req, mission.id, "del_win", reveal=False)
+    assert res_open["action"] == "open" and started == [str(report_file.resolve())] and popen_calls == []
+    res_reveal = await open_mission_deliverable(req, mission.id, "del_win", reveal=True)
+    assert res_reveal["action"] == "reveal"
+    assert popen_calls == [["explorer", f"/select,{report_file.resolve()}"]]

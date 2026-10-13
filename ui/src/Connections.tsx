@@ -7,8 +7,10 @@ import {
 } from 'lucide-react';
 import { apiUrl } from './api';
 import { ToastContext } from './toast';
-import { submitApprovalDecision } from './canonicalNotification';
+import { submitApprovalDecision, approvalToastKind } from './canonicalNotification';
 import { openExternalUrl } from './desktop';
+import { useTranslation } from './i18n';
+import type { TranslationKey } from './i18n';
 
 // Design System Core Imports
 import {
@@ -36,6 +38,18 @@ import {
   AetherSelect,
   AetherFormActions,
 } from './design-system';
+
+type Translate = (key: TranslationKey) => string;
+
+// Renders the light inline markup used by long translated sentences: **bold**, *italic*, `code`.
+function renderRich(text: string): React.ReactNode {
+  return text.split(/(\*\*[^*]+\*\*|\*[^*]+\*|`[^`]+`)/).map((part, i) => {
+    if (part.startsWith('**')) return <strong key={i}>{part.slice(2, -2)}</strong>;
+    if (part.startsWith('`')) return <code key={i}>{part.slice(1, -1)}</code>;
+    if (part.startsWith('*') && part.length > 2) return <em key={i}>{part.slice(1, -1)}</em>;
+    return <React.Fragment key={i}>{part}</React.Fragment>;
+  });
+}
 
 interface OAuthProviderInfo {
   provider: string;
@@ -80,6 +94,8 @@ interface CalendarEventItem {
   html_link?: string;
 }
 
+const NO_DATE_KEY = '__no_date__';
+
 function getEventDateKey(evt: CalendarEventItem): string {
   if (evt.start_date) {
     return evt.start_date;
@@ -96,10 +112,13 @@ function getEventDateKey(evt: CalendarEventItem): string {
       return `${year}-${month}-${day}`;
     }
   }
-  return 'Senza data';
+  return NO_DATE_KEY;
 }
 
-function formatDayLabel(dateKey: string): { label: string; isToday: boolean } {
+function formatDayLabel(dateKey: string, t: Translate, locale: string): { label: string; isToday: boolean } {
+  if (dateKey === NO_DATE_KEY) {
+    return { label: t('connUiNoDate'), isToday: false };
+  }
   if (!/^\d{4}-\d{2}-\d{2}$/.test(dateKey)) {
     return { label: dateKey, isToday: false };
   }
@@ -113,7 +132,7 @@ function formatDayLabel(dateKey: string): { label: string; isToday: boolean } {
 
   const diffDays = Math.round((targetDateOnly.getTime() - today.getTime()) / (1000 * 60 * 60 * 24));
 
-  const formattedDate = eventDate.toLocaleDateString('it-IT', {
+  const formattedDate = eventDate.toLocaleDateString(locale, {
     weekday: 'long',
     day: 'numeric',
     month: 'long',
@@ -121,30 +140,30 @@ function formatDayLabel(dateKey: string): { label: string; isToday: boolean } {
   const capDate = formattedDate.charAt(0).toUpperCase() + formattedDate.slice(1);
 
   if (diffDays === 0) {
-    return { label: `Oggi — ${capDate}`, isToday: true };
+    return { label: `${t('connUiToday')} — ${capDate}`, isToday: true };
   }
   if (diffDays === 1) {
-    return { label: `Domani — ${capDate}`, isToday: false };
+    return { label: `${t('connUiTomorrow')} — ${capDate}`, isToday: false };
   }
   if (diffDays === -1) {
-    return { label: `Ieri — ${capDate}`, isToday: false };
+    return { label: `${t('connUiYesterday')} — ${capDate}`, isToday: false };
   }
   return { label: capDate, isToday: false };
 }
 
-function formatEventTime(evt: CalendarEventItem): string {
+function formatEventTime(evt: CalendarEventItem, t: Translate, locale: string): string {
   const isAllDay = evt.is_all_day || /^\d{4}-\d{2}-\d{2}$/.test(evt.start_time?.trim() || '');
   if (isAllDay) {
-    return 'Tutto il giorno';
+    return t('connUiAllDay');
   }
   try {
     const start = new Date(evt.start_time);
     if (isNaN(start.getTime())) return '';
-    const startStr = start.toLocaleTimeString('it-IT', { hour: '2-digit', minute: '2-digit' });
+    const startStr = start.toLocaleTimeString(locale, { hour: '2-digit', minute: '2-digit' });
     if (evt.end_time) {
       const end = new Date(evt.end_time);
       if (!isNaN(end.getTime())) {
-        const endStr = end.toLocaleTimeString('it-IT', { hour: '2-digit', minute: '2-digit' });
+        const endStr = end.toLocaleTimeString(locale, { hour: '2-digit', minute: '2-digit' });
         return `${startStr} – ${endStr}`;
       }
     }
@@ -186,19 +205,19 @@ interface ProviderDefinition {
   isOAuth: boolean;
 }
 
-const AVAILABLE_PROVIDERS: ProviderDefinition[] = [
+const buildProviders = (t: Translate): ProviderDefinition[] => [
   {
     id: 'calendar',
-    name: 'Aether Calendario (Locale)',
+    name: t('connUiAetherCalendarLocal'),
     icon: Calendar,
     category: 'productivity',
-    description: 'Agenda e archivio impegni integrato nel tuo spazio di lavoro, attivo anche senza connessione internet.',
-    capabilitiesText: 'Consulta appuntamenti e memorizza incontri nello spazio di lavoro locale',
+    description: t('connUiScheduleAndAppointmentArchiveBuiltInto'),
+    capabilitiesText: t('connUiViewAppointmentsAndStoreMeetingsIn'),
     capabilitiesList: [
-      'Consulta impegni e riunioni',
-      'Archiviazione sicura su database locale',
-      'Funziona senza dipendenze cloud',
-      'Indicizzazione automatica per la workforce',
+      t('connUiViewCommitmentsAndMeetings'),
+      t('connUiSecureStorageInALocalDatabase'),
+      t('connUiWorksWithoutCloudDependencies'),
+      t('connUiAutomaticIndexingForTheWorkforce'),
     ],
     color: '#06b6d4',
     builtIn: true,
@@ -209,13 +228,13 @@ const AVAILABLE_PROVIDERS: ProviderDefinition[] = [
     name: 'Google Calendar',
     icon: Calendar,
     category: 'productivity',
-    description: 'Integrazione ufficiale con Google per coordinare impegni personali e professionali con autorizzazione diretta.',
-    capabilitiesText: 'Leggi calendari Google e pianifica riunioni con autorizzazione controllata',
+    description: t('connUiOfficialGoogleIntegrationToCoordinatePersonal'),
+    capabilitiesText: t('connUiReadGoogleCalendarsAndScheduleMeetings'),
     capabilitiesList: [
-      'Lettura calendari personali e di team',
-      'Pianificazione automatica di riunioni',
-      'Aggiornamento impegni con supervisione',
-      'Sincronizzazione continua nello spazio di lavoro',
+      t('connUiReadPersonalAndTeamCalendars'),
+      t('connUiAutomaticMeetingScheduling'),
+      t('connUiSupervisedUpdatingOfCommitments'),
+      t('connUiContinuousSynchronizationWithTheWorkspace'),
     ],
     color: '#4285F4',
     builtIn: false,
@@ -226,13 +245,13 @@ const AVAILABLE_PROVIDERS: ProviderDefinition[] = [
     name: 'Notion',
     icon: FileText,
     category: 'productivity',
-    description: 'Sincronizza pagine di progetto, documentazione aziendale e tabelle di deliverable.',
-    capabilitiesText: 'Accedi a database e pagine Notion per recuperare e pubblicare contenuti',
+    description: t('connUiSyncProjectPagesCompanyDocumentationAnd'),
+    capabilitiesText: t('connUiAccessNotionDatabasesAndPagesTo'),
     capabilitiesList: [
-      'Ricerca e indicizzazione note di progetto',
-      'Lettura tabelle e proprietà di database',
-      'Pubblicazione deliverable verificati',
-      'Sincronizzazione bidirezionale con la memoria',
+      t('connUiSearchAndIndexingOfProjectNotes'),
+      t('connUiReadingDatabaseTablesAndProperties'),
+      t('connUiPublishingVerifiedDeliverables'),
+      t('connUiTwoWaySynchronizationWithMemory'),
     ],
     color: '#000000',
     builtIn: false,
@@ -243,13 +262,13 @@ const AVAILABLE_PROVIDERS: ProviderDefinition[] = [
     name: 'GitHub',
     icon: GitBranch,
     category: 'dev',
-    description: 'Accedi a repository, rami di sviluppo, issue e review automatiche di pull request.',
-    capabilitiesText: 'Ispeziona codice sorgente, apri issue e suggerisci pull request supervisionate',
+    description: t('connUiAccessRepositoriesDevelopmentBranchesIssuesAnd'),
+    capabilitiesText: t('connUiInspectSourceCodeOpenIssuesAnd'),
     capabilitiesList: [
-      'Ispezione albero di codice e file',
-      'Monitoraggio rami e commit recenti',
-      'Creazione issue e note tecniche',
-      'Preparazione pull request verificate',
+      t('connUiCodeTreeAndFileInspection'),
+      t('connUiMonitoringOfBranchesAndRecentCommits'),
+      t('connUiCreationOfIssuesAndTechnicalNotes'),
+      t('connUiPreparationOfVerifiedPullRequests'),
     ],
     color: '#2dba4e',
     builtIn: false,
@@ -257,16 +276,16 @@ const AVAILABLE_PROVIDERS: ProviderDefinition[] = [
   },
   {
     id: 'openapi',
-    name: 'Specifica OpenAPI 3.x',
+    name: t('connUiOpenAPI3XSpecification'),
     icon: Zap,
     category: 'dev',
-    description: 'Collega qualsiasi API REST aziendale tramite il relativo file di specifica OpenAPI.',
-    capabilitiesText: 'Scopri dinamicamente gli endpoint e valida le chiamate tramite schema formale',
+    description: t('connUiConnectAnyCompanyRESTAPIThrough'),
+    capabilitiesText: t('connUiDynamicallyDiscoverEndpointsAndValidateCalls'),
     capabilitiesList: [
-      'Scansione automatica degli endpoint disponibili',
-      'Validazione rigorosa degli input',
-      'Supporto per token e chiavi API',
-      'Esecuzione controllata delle chiamate REST',
+      t('connUiAutomaticScanOfTheAvailableEndpoints'),
+      t('connUiStrictInputValidation'),
+      t('connUiSupportForTokensAndAPIKeys'),
+      t('connUiControlledExecutionOfRESTCalls'),
     ],
     color: '#8B5CF6',
     builtIn: false,
@@ -274,16 +293,16 @@ const AVAILABLE_PROVIDERS: ProviderDefinition[] = [
   },
   {
     id: 'http',
-    name: 'Webhook / API HTTP Generica',
+    name: t('connUiWebhookGenericHTTPAPI'),
     icon: Globe,
     category: 'dev',
-    description: 'Interagisci con servizi web generici e webhook personalizzati con policy di sicurezza.',
-    capabilitiesText: 'Esegui chiamate HTTP (GET, POST, PUT, DELETE) con autenticazione via intestazione',
+    description: t('connUiInteractWithGenericWebServicesAnd'),
+    capabilitiesText: t('connUiRunHTTPCallsGETPOSTPUT'),
     capabilitiesList: [
-      'Chiamate HTTP con intestazioni custom',
-      'Supporto Bearer Token, API Key e Basic Auth',
-      'Protezione SSRF e controllo degli accessi',
-      'Supervisione delle azioni di modifica',
+      t('connUiHTTPCallsWithCustomHeaders'),
+      t('connUiBearerTokenAPIKeyAndBasic'),
+      t('connUiSSRFProtectionAndAccessControl'),
+      t('connUiSupervisionOfModifyingActions'),
     ],
     color: '#6366f1',
     builtIn: false,
@@ -294,13 +313,13 @@ const AVAILABLE_PROVIDERS: ProviderDefinition[] = [
     name: 'Slack',
     icon: MessageSquare,
     category: 'communication',
-    description: 'Invia brief operativi, notifica i canali di team e ricevi feedback dalle conversazioni.',
-    capabilitiesText: 'Pubblica aggiornamenti di stato e avvisi sui canali con approvazione',
+    description: t('connUiSendOperationalBriefsNotifyTeamChannels'),
+    capabilitiesText: t('connUiPostStatusUpdatesAndAlertsTo'),
     capabilitiesList: [
-      'Invio report di avanzamento ai canali',
-      'Notifiche operative in tempo reale',
-      'Supporto Bot Token o Incoming Webhook',
-      'Canale di destinazione predefinito configurabile',
+      t('connUiSendingProgressReportsToChannels'),
+      t('connUiRealTimeOperationalNotifications'),
+      t('connUiBotTokenOrIncomingWebhookSupport'),
+      t('connUiConfigurableDefaultDestinationChannel'),
     ],
     color: '#4A154B',
     builtIn: false,
@@ -308,16 +327,16 @@ const AVAILABLE_PROVIDERS: ProviderDefinition[] = [
   },
   {
     id: 'email',
-    name: 'Email Aziendale / SMTP',
+    name: t('connUiCompanyEmailSMTP'),
     icon: Mail,
     category: 'communication',
-    description: 'Prepara bozze di riepilogo, redigi comunicazioni e invia email verificate via SMTP sicuro.',
-    capabilitiesText: 'Prepara e invia email via SMTP previa esplicita approvazione dell\'utente',
+    description: t('connUiPrepareSummaryDraftsWriteCommunicationsAnd'),
+    capabilitiesText: t('connUiPrepareAndSendEmailsOverSMTP'),
     capabilitiesList: [
-      'Composizione guidata di email strutturate',
-      'Cifratura STARTTLS e SSL/TLS nativa',
-      'Indirizzo mittente e alias personalizzabili',
-      'Invio controllato con gating di approvazione',
+      t('connUiGuidedCompositionOfStructuredEmails'),
+      t('connUiNativeSTARTTLSAndSSLTLSEncryption'),
+      t('connUiCustomizableSenderAddressAndAliases'),
+      t('connUiControlledSendingWithApprovalGating'),
     ],
     color: '#EA4335',
     builtIn: false,
@@ -328,13 +347,13 @@ const AVAILABLE_PROVIDERS: ProviderDefinition[] = [
     name: 'Telegram Companion Bot',
     icon: Send,
     category: 'communication',
-    description: 'Comunica con Aether da smartphone, ricevi notifiche istantanee e approva azioni in mobilità.',
-    capabilitiesText: 'Ricevi comandi da smartphone e gestisci approvazioni con bottoni interattivi',
+    description: t('connUiTalkToAetherFromYourSmartphone'),
+    capabilitiesText: t('connUiReceiveCommandsFromYourSmartphoneAnd'),
     capabilitiesList: [
-      'Notifiche push istantanee su Telegram',
-      'Approvazione rapida di task con pulsanti inline',
-      'Protezione tramite lista di utenti autorizzati',
-      'Esecuzione remota di compiti per il Companion',
+      t('connUiInstantPushNotificationsOnTelegram'),
+      t('connUiQuickTaskApprovalWithInlineButtons'),
+      t('connUiProtectionThroughAListOfAuthorized'),
+      t('connUiRemoteExecutionOfTasksForThe'),
     ],
     color: '#229ED9',
     builtIn: false,
@@ -344,6 +363,9 @@ const AVAILABLE_PROVIDERS: ProviderDefinition[] = [
 
 export function Connections({ initialExecutionId, initialTab }: ConnectionsProps) {
   const showToast = useContext(ToastContext);
+  const { t, language } = useTranslation();
+  const locale = language === 'it' ? 'it-IT' : 'en-US';
+  const AVAILABLE_PROVIDERS = useMemo(() => buildProviders(t), [language]);
 
   const [activeTab, setActiveTab] = useState<'apps' | 'calendar' | 'actions'>(
     initialTab || (initialExecutionId ? 'actions' : 'apps')
@@ -483,13 +505,13 @@ export function Connections({ initialExecutionId, initialTab }: ConnectionsProps
         approver: 'user',
       });
       if (res.success) {
-        showToast(res.message || 'Operazione approvata con successo.', 'success');
+        showToast(res.message || t('connUiApprovalRecorded'), approvalToastKind(res, 'approve'));
         fetchAll();
       } else {
-        showToast(res.message || 'Impossibile approvare l\'operazione.', 'error');
+        showToast(res.message || t('connUiUnableToApproveTheOperation'), 'error');
       }
     } catch (err: any) {
-      showToast(err.message || 'Errore durante l\'approvazione.', 'error');
+      showToast(err.message || t('connUiErrorDuringApproval'), 'error');
     } finally {
       setActionLoadingId(null);
     }
@@ -506,13 +528,13 @@ export function Connections({ initialExecutionId, initialTab }: ConnectionsProps
         reason: 'Rifiutato dall\'utente',
       });
       if (res.success) {
-        showToast(res.message || 'Operazione rifiutata.', 'info');
+        showToast(res.message || t('connUiOperationDeclined'), 'info');
         fetchAll();
       } else {
-        showToast(res.message || 'Impossibile rifiutare l\'operazione.', 'error');
+        showToast(res.message || t('connUiUnableToDeclineTheOperation'), 'error');
       }
     } catch (err: any) {
-      showToast(err.message || 'Errore durante il rifiuto.', 'error');
+      showToast(err.message || t('connUiErrorWhileDeclining'), 'error');
     } finally {
       setActionLoadingId(null);
     }
@@ -520,7 +542,7 @@ export function Connections({ initialExecutionId, initialTab }: ConnectionsProps
 
   const openConfigModal = (provider: ProviderDefinition, existingConn?: ConnectionItem) => {
     setConfigModalProvider(provider);
-    setCredAccountName(existingConn?.account_name || `Account ${provider.name}`);
+    setCredAccountName(existingConn?.account_name || t('connUiAccountName').replace('{name}', provider.name));
     setTestResult(null);
     setGithubToken('');
     setSlackToken('');
@@ -598,13 +620,13 @@ export function Connections({ initialExecutionId, initialTab }: ConnectionsProps
       });
       const data = await res.json();
       if (data.valid) {
-        showToast('Verifica completata: il servizio è attivo e funzionante.', 'success');
+        showToast(t('connUiVerificationCompletedTheServiceIsActive'), 'success');
       } else {
-        showToast(data.message || 'La verifica ha rilevato un problema di autenticazione.', 'error');
+        showToast(data.message || t('connUiVerificationFoundAnAuthenticationProblem'), 'error');
       }
       await fetchAll();
     } catch (err: any) {
-      showToast(err.message || 'Richiesta di verifica non riuscita.', 'error');
+      showToast(err.message || t('connUiVerificationRequestFailed'), 'error');
     } finally {
       setVerifyingProvider(null);
     }
@@ -671,12 +693,12 @@ export function Connections({ initialExecutionId, initialTab }: ConnectionsProps
       const data = await res.json();
       setTestResult({
         valid: Boolean(data.valid),
-        message: data.message || (data.valid ? 'Credenziali verificate con successo.' : 'Verifica non riuscita.'),
+        message: data.message || (data.valid ? t('connUiCredentialsVerifiedSuccessfully') : t('connUiVerificationFailed')),
       });
     } catch {
       setTestResult({
         valid: false,
-        message: 'Impossibile contattare il server locale per la verifica.',
+        message: t('connUiUnableToReachTheLocalServer'),
       });
     } finally {
       setTestingCreds(false);
@@ -695,21 +717,21 @@ export function Connections({ initialExecutionId, initialTab }: ConnectionsProps
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           provider: configModalProvider.id,
-          account_name: credAccountName.trim() || `Account ${configModalProvider.name}`,
+          account_name: credAccountName.trim() || t('connUiAccountName').replace('{name}', configModalProvider.name),
           auth_metadata: authMeta,
           live_check: false,
         }),
       });
       if (res.ok) {
-        showToast(`Servizio ${configModalProvider.name} collegato con successo.`, 'success');
+        showToast(t('connUiServiceConnected').replace('{name}', configModalProvider.name), 'success');
         setConfigModalProvider(null);
         fetchAll();
       } else {
         const err = await res.json().catch(() => ({}));
-        showToast(err.detail || 'Impossibile salvare la connessione.', 'error');
+        showToast(err.detail || t('connUiUnableToSaveTheConnection'), 'error');
       }
     } catch {
-      showToast('Errore durante il salvataggio del servizio.', 'error');
+      showToast(t('connUiErrorWhileSavingTheService'), 'error');
     } finally {
       setSavingCreds(false);
     }
@@ -722,16 +744,16 @@ export function Connections({ initialExecutionId, initialTab }: ConnectionsProps
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           provider: 'calendar',
-          account_name: 'Aether Calendario (Locale)',
+          account_name: t('connUiAetherCalendarLocal'),
           auth_metadata: { type: 'sqlite_built_in' },
         }),
       });
       if (res.ok) {
-        showToast('Calendario locale pronto e attivo.', 'success');
+        showToast(t('connUiLocalCalendarReadyAndActive'), 'success');
         fetchAll();
       }
     } catch {
-      showToast('Impossibile inizializzare il calendario locale.', 'error');
+      showToast(t('connUiUnableToInitializeTheLocalCalendar'), 'error');
     }
   };
 
@@ -743,15 +765,15 @@ export function Connections({ initialExecutionId, initialTab }: ConnectionsProps
         method: 'POST',
       });
       if (res.ok) {
-        showToast(`Servizio ${disconnectTarget.name} scollegato.`, 'info');
+        showToast(t('connUiServiceDisconnected').replace('{name}', disconnectTarget.name), 'info');
         setDisconnectTarget(null);
         setManageProvider(null);
         fetchAll();
       } else {
-        showToast('Impossibile scollegare il servizio.', 'error');
+        showToast(t('connUiUnableToDisconnectTheService'), 'error');
       }
     } catch {
-      showToast('Errore di comunicazione durante la disconnessione.', 'error');
+      showToast(t('connUiCommunicationErrorWhileDisconnecting'), 'error');
     } finally {
       setDisconnecting(false);
     }
@@ -764,13 +786,13 @@ export function Connections({ initialExecutionId, initialTab }: ConnectionsProps
       const data = await res.json();
       const total = data.total_items_ingested || 0;
       if (total === 0) {
-        showToast('Sincronizzazione completata: nessun nuovo elemento rilevato.', 'info');
+        showToast(t('connUiSyncCompletedNoNewItemsFound'), 'info');
       } else {
-        showToast(`Sincronizzati ${total} elementi nella memoria dello spazio di lavoro!`, 'success');
+        showToast(t('connUiSyncedItems').replace('{count}', String(total)), 'success');
       }
       await fetchAll();
     } catch (err: any) {
-      showToast(err.message || 'Impossibile sincronizzare i servizi.', 'error');
+      showToast(err.message || t('connUiUnableToSyncTheServices'), 'error');
     } finally {
       setSyncingAll(false);
     }
@@ -783,7 +805,7 @@ export function Connections({ initialExecutionId, initialTab }: ConnectionsProps
     const trimmedSecret = googleClientSecret.trim();
 
     if (!gInfo?.has_client_id && !trimmedId) {
-      showToast('Configura il tuo Google Client ID prima di avviare l\'autorizzazione.', 'error');
+      showToast(t('connUiSetUpYourGoogleClientID'), 'error');
       return;
     }
 
@@ -811,7 +833,7 @@ export function Connections({ initialExecutionId, initialTab }: ConnectionsProps
       });
       const data = await res.json();
       if (!res.ok) {
-        throw new Error(data.detail || 'Impossibile avviare l\'autorizzazione Google.');
+        throw new Error(data.detail || t('connUiUnableToStartGoogleAuthorization'));
       }
       setGoogleState(data.state || '');
 
@@ -822,14 +844,14 @@ export function Connections({ initialExecutionId, initialTab }: ConnectionsProps
         if (event.data?.type === 'aether_oauth_success' && event.data?.provider === 'google_calendar') {
           window.removeEventListener('message', messageHandler);
           clearInterval(pollTimer);
-          showToast('Google Calendar collegato con successo!', 'success');
+          showToast(t('connUiGoogleCalendarConnectedSuccessfully'), 'success');
           setIsGoogleModalOpen(false);
           setGoogleAuthPending(false);
           fetchAll();
         } else if (event.data?.type === 'aether_oauth_error' && event.data?.provider === 'google_calendar') {
           window.removeEventListener('message', messageHandler);
           clearInterval(pollTimer);
-          showToast(`Autorizzazione Google fallita: ${event.data.error || 'errore'}`, 'error');
+          showToast(t('connUiGoogleAuthFailed').replace('{error}', event.data.error || t('connUiErrorWord')), 'error');
           setGoogleAuthPending(false);
           fetchAll();
         }
@@ -854,7 +876,7 @@ export function Connections({ initialExecutionId, initialTab }: ConnectionsProps
               if (gc && (gc.status === 'verified' || gc.status === 'connected')) {
                 clearInterval(pollTimer);
                 window.removeEventListener('message', messageHandler);
-                showToast('Google Calendar collegato e verificato!', 'success');
+                showToast(t('connUiGoogleCalendarConnectedAndVerified'), 'success');
                 setIsGoogleModalOpen(false);
                 setGoogleAuthPending(false);
                 fetchAll();
@@ -864,7 +886,7 @@ export function Connections({ initialExecutionId, initialTab }: ConnectionsProps
         } catch {}
       }, 1500);
     } catch (err: any) {
-      showToast(err.message || 'Errore durante l\'avvio di Google OAuth', 'error');
+      showToast(err.message || t('connUiErrorWhileStartingGoogleOAuth'), 'error');
       setGoogleAuthPending(false);
     }
   };
@@ -873,7 +895,7 @@ export function Connections({ initialExecutionId, initialTab }: ConnectionsProps
     navigator.clipboard.writeText(text);
     setCopiedField(fieldKey);
     setTimeout(() => setCopiedField(null), 2000);
-    showToast('Copiato negli appunti!', 'info');
+    showToast(t('connUiCopiedToClipboard'), 'info');
   };
 
   const handleStartOAuth = async (provider: string) => {
@@ -886,7 +908,7 @@ export function Connections({ initialExecutionId, initialTab }: ConnectionsProps
       });
       const data = await res.json();
       if (!res.ok) {
-        throw new Error(data.detail || `Impossibile avviare l'autorizzazione per ${provider}.`);
+        throw new Error(data.detail || t('connUiAuthStartFailed').replace('{provider}', provider));
       }
       if (data.auth_url) {
         await openExternalUrl(data.auth_url);
@@ -897,7 +919,7 @@ export function Connections({ initialExecutionId, initialTab }: ConnectionsProps
           notion: 'Notion',
         };
         const pName = nameMap[provider] || provider;
-        showToast(`Apertura pagina di autorizzazione per ${pName}...`, 'info');
+        showToast(t('connUiOpeningAuth').replace('{name}', pName), 'info');
 
         let attempts = 0;
         const pollTimer = setInterval(async () => {
@@ -916,7 +938,7 @@ export function Connections({ initialExecutionId, initialTab }: ConnectionsProps
                 if (conn && (conn.status === 'verified' || conn.status === 'connected')) {
                   clearInterval(pollTimer);
                   setOauthPendingProvider(null);
-                  showToast(`${pName} collegato e attivo!`, 'success');
+                  showToast(t('connUiConnectedActive').replace('{name}', pName), 'success');
                   fetchAll();
                 }
               }
@@ -925,7 +947,7 @@ export function Connections({ initialExecutionId, initialTab }: ConnectionsProps
         }, 1500);
       }
     } catch (err: any) {
-      showToast(err.message || 'Errore durante l\'avvio dell\'autorizzazione.', 'error');
+      showToast(err.message || t('connUiErrorWhileStartingTheAuthorization'), 'error');
       setOauthPendingProvider(null);
     }
   };
@@ -946,7 +968,7 @@ export function Connections({ initialExecutionId, initialTab }: ConnectionsProps
     e.preventDefault();
     if (!devSetupModalProvider) return;
     if (!devClientId.trim() || !devClientSecret.trim()) {
-      showToast('Client ID e Client Secret sono obbligatori.', 'error');
+      showToast(t('connUiClientIDAndClientSecretAre'), 'error');
       return;
     }
     setSavingDevConfig(true);
@@ -961,15 +983,15 @@ export function Connections({ initialExecutionId, initialTab }: ConnectionsProps
       });
       if (!res.ok) {
         const err = await res.json();
-        throw new Error(err.detail || 'Impossibile salvare la configurazione per sviluppatori.');
+        throw new Error(err.detail || t('connUiUnableToSaveTheDeveloperConfiguration'));
       }
-      showToast('Credenziali applicazione salvate con successo!', 'success');
+      showToast(t('connUiApplicationCredentialsSavedSuccessfully'), 'success');
       await fetchAll();
       const targetProv = devSetupModalProvider.id;
       setDevSetupModalProvider(null);
       await handleStartOAuth(targetProv);
     } catch (err: any) {
-      showToast(err.message || 'Errore salvataggio credenziali.', 'error');
+      showToast(err.message || t('connUiErrorSavingCredentials'), 'error');
     } finally {
       setSavingDevConfig(false);
     }
@@ -992,7 +1014,7 @@ export function Connections({ initialExecutionId, initialTab }: ConnectionsProps
   const handleConnectTelegramGuided = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!telegramBotToken.trim()) {
-      showToast('Il Bot Token è obbligatorio per Telegram.', 'error');
+      showToast(t('connUiTheBotTokenIsRequiredFor'), 'error');
       return;
     }
     setVerifyingTelegram(true);
@@ -1012,7 +1034,7 @@ export function Connections({ initialExecutionId, initialTab }: ConnectionsProps
       });
       const verifyData = await verifyRes.json();
       if (!verifyData.valid) {
-        setTestResult({ valid: false, message: verifyData.message || 'Verifica del token non riuscita.' });
+        setTestResult({ valid: false, message: verifyData.message || t('connUiTokenVerificationFailed') });
         return;
       }
 
@@ -1027,15 +1049,15 @@ export function Connections({ initialExecutionId, initialTab }: ConnectionsProps
         }),
       });
       if (saveRes.ok) {
-        showToast('Telegram Companion collegato e attivo!', 'success');
+        showToast(t('connUiTelegramCompanionConnectedAndActive'), 'success');
         setIsTelegramModalOpen(false);
         fetchAll();
       } else {
         const err = await saveRes.json();
-        setTestResult({ valid: false, message: err.detail || 'Impossibile salvare la connessione Telegram.' });
+        setTestResult({ valid: false, message: err.detail || t('connUiUnableToSaveTheTelegramConnection') });
       }
     } catch (err: any) {
-      setTestResult({ valid: false, message: err.message || 'Errore di connessione al server.' });
+      setTestResult({ valid: false, message: err.message || t('connUiServerConnectionError') });
     } finally {
       setVerifyingTelegram(false);
     }
@@ -1044,7 +1066,7 @@ export function Connections({ initialExecutionId, initialTab }: ConnectionsProps
   const handleManualExchangeCode = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!googleManualCode.trim() || !googleState.trim()) {
-      showToast('Codice di autorizzazione e parametro di stato sono entrambi richiesti.', 'error');
+      showToast(t('connUiBothTheAuthorizationCodeAndThe'), 'error');
       return;
     }
     setGoogleAuthPending(true);
@@ -1059,18 +1081,18 @@ export function Connections({ initialExecutionId, initialTab }: ConnectionsProps
       });
       const data = await res.json();
       if (!res.ok) {
-        throw new Error(data.detail || 'Scambio del codice di autorizzazione fallito.');
+        throw new Error(data.detail || t('connUiAuthorizationCodeExchangeFailed'));
       }
       if (data.valid) {
-        showToast('Google Calendar autorizzato e verificato con successo!', 'success');
+        showToast(t('connUiGoogleCalendarAuthorizedAndVerifiedSuccessfully'), 'success');
         setIsGoogleModalOpen(false);
         setGoogleManualCode('');
         fetchAll();
       } else {
-        showToast(`Verifica fallita: ${data.message}`, 'error');
+        showToast(t('connUiVerifyFailedMsg').replace('{message}', String(data.message)), 'error');
       }
     } catch (err: any) {
-      showToast(err.message || 'Errore durante l\'autorizzazione Google.', 'error');
+      showToast(err.message || t('connUiErrorDuringGoogleAuthorization'), 'error');
     } finally {
       setGoogleAuthPending(false);
     }
@@ -1084,10 +1106,10 @@ export function Connections({ initialExecutionId, initialTab }: ConnectionsProps
         setGoogleCalendars(data.calendars);
         setIsCalendarPickerOpen(true);
       } else {
-        showToast('Nessun calendario Google trovato o errore di lettura.', 'error');
+        showToast(t('connUiNoGoogleCalendarFoundOrRead'), 'error');
       }
     } catch {
-      showToast('Impossibile caricare i calendari Google.', 'error');
+      showToast(t('connUiUnableToLoadTheGoogleCalendars'), 'error');
     }
   };
 
@@ -1102,12 +1124,12 @@ export function Connections({ initialExecutionId, initialTab }: ConnectionsProps
         }),
       });
       if (res.ok) {
-        showToast(`Calendario attivo impostato su: ${summary}`, 'success');
+        showToast(t('connUiActiveCalendarSet').replace('{name}', summary), 'success');
         setIsCalendarPickerOpen(false);
         fetchAll();
       }
     } catch {
-      showToast('Impossibile selezionare il calendario.', 'error');
+      showToast(t('connUiUnableToSelectTheCalendar'), 'error');
     }
   };
 
@@ -1133,8 +1155,8 @@ export function Connections({ initialExecutionId, initialTab }: ConnectionsProps
       if (res.ok) {
         showToast(
           selectedScheduleSource === 'google'
-            ? 'Appuntamento creato su Google Calendar.'
-            : 'Appuntamento registrato sul calendario locale.',
+            ? t('connUiAppointmentCreatedOnGoogleCalendar')
+            : t('connUiAppointmentSavedToTheLocalCalendar'),
           'success'
         );
         setIsEventModalOpen(false);
@@ -1144,7 +1166,7 @@ export function Connections({ initialExecutionId, initialTab }: ConnectionsProps
         fetchAll();
       }
     } catch {
-      showToast('Errore durante la creazione dell\'appuntamento.', 'error');
+      showToast(t('connUiErrorWhileCreatingTheAppointment'), 'error');
     } finally {
       setCreatingEvent(false);
     }
@@ -1165,7 +1187,7 @@ export function Connections({ initialExecutionId, initialTab }: ConnectionsProps
       }
       return true;
     });
-  }, [categoryFilter, searchQuery, connections]);
+  }, [categoryFilter, searchQuery, connections, AVAILABLE_PROVIDERS]);
 
   // Chronologically grouped calendar events
   const groupedEvents = useMemo(() => {
@@ -1183,7 +1205,7 @@ export function Connections({ initialExecutionId, initialTab }: ConnectionsProps
 
     const sortedKeys = Array.from(map.keys()).sort();
     sortedKeys.forEach((key) => {
-      const { label, isToday } = formatDayLabel(key);
+      const { label, isToday } = formatDayLabel(key, t, locale);
       groups.push({
         dateKey: key,
         label,
@@ -1193,7 +1215,7 @@ export function Connections({ initialExecutionId, initialTab }: ConnectionsProps
     });
 
     return groups;
-  }, [selectedScheduleSource, calendarEvents, googleCalendarEvents]);
+  }, [selectedScheduleSource, calendarEvents, googleCalendarEvents, language]);
 
   // Filtered executions
   const filteredExecutions = useMemo(() => {
@@ -1259,10 +1281,10 @@ export function Connections({ initialExecutionId, initialTab }: ConnectionsProps
         title={
           <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
             <Layers size={26} color="hsl(var(--primary))" />
-            <Heading level={1}>Servizi Collegati</Heading>
+            <Heading level={1}>{t('connUiTitle')}</Heading>
           </div>
         }
-        description="Collega le app che usi ogni giorno e lascia che Aether le utilizzi quando servono."
+        description={t('connUiConnectTheAppsYouUseEvery')}
         actions={
           <Stack direction="row" gap="sm" align="center">
             <Button
@@ -1272,7 +1294,7 @@ export function Connections({ initialExecutionId, initialTab }: ConnectionsProps
               disabled={loading}
               leftIcon={<RefreshCw size={14} className={loading ? 'animate-spin' : ''} />}
             >
-              Aggiorna
+              {t('connRefresh')}
             </Button>
             <Button
               variant="primary"
@@ -1281,7 +1303,7 @@ export function Connections({ initialExecutionId, initialTab }: ConnectionsProps
               disabled={syncingAll}
               leftIcon={<RefreshCw size={14} className={syncingAll ? 'animate-spin' : ''} />}
             >
-              {syncingAll ? 'Sincronizzazione…' : 'Sincronizza tutto'}
+              {syncingAll ? t('connSyncing') : t('connUiSyncAll')}
             </Button>
           </Stack>
         }
@@ -1295,17 +1317,17 @@ export function Connections({ initialExecutionId, initialTab }: ConnectionsProps
           options={[
             {
               value: 'apps',
-              label: 'Servizi',
+              label: t('connUiServices'),
               icon: <Globe size={15} />,
             },
             {
               value: 'calendar',
-              label: 'Calendario & Agenda',
+              label: t('connUiCalendarSchedule'),
               icon: <Calendar size={15} />,
             },
             {
               value: 'actions',
-              label: 'Storico Operazioni & Approvazioni',
+              label: t('connUiOperationsApprovalsHistory'),
               icon: <Clock size={15} />,
             },
           ]}
@@ -1330,16 +1352,16 @@ export function Connections({ initialExecutionId, initialTab }: ConnectionsProps
                 value={categoryFilter}
                 onChange={(cat) => setCategoryFilter(cat as CategoryType)}
                 options={[
-                  { value: 'all', label: 'Tutti i servizi' },
-                  { value: 'productivity', label: 'Produttività' },
-                  { value: 'dev', label: 'Sviluppo' },
-                  { value: 'communication', label: 'Comunicazione' },
+                  { value: 'all', label: t('connUiAllServices') },
+                  { value: 'productivity', label: t('connUiProductivity') },
+                  { value: 'dev', label: t('connUiDevelopment') },
+                  { value: 'communication', label: t('connFilterComm') },
                 ]}
               />
 
               <div style={{ minWidth: '240px', flex: '1', maxWidth: '340px' }}>
                 <AetherInput
-                  placeholder="Cerca servizio o capacità…"
+                  placeholder={t('connUiSearchServiceOrCapability')}
                   value={searchQuery}
                   onChange={(e) => setSearchQuery(e.target.value)}
                 />
@@ -1351,11 +1373,11 @@ export function Connections({ initialExecutionId, initialTab }: ConnectionsProps
           {filteredProviders.length === 0 ? (
             <EmptyState
               icon={<Globe size={28} />}
-              title="Nessun servizio trovato"
-              description="Nessun servizio corrisponde ai criteri di ricerca o alla categoria selezionata."
+              title={t('connUiNoServiceFound')}
+              description={t('connUiNoServiceMatchesTheSearchCriteria')}
               action={
                 <Button variant="secondary" onClick={() => { setSearchQuery(''); setCategoryFilter('all'); }}>
-                  Reimposta filtri
+                  {t('connUiResetFilters')}
                 </Button>
               }
             />
@@ -1452,8 +1474,8 @@ export function Connections({ initialExecutionId, initialTab }: ConnectionsProps
 
                       {/* Error notice if connection failed */}
                       {conn && (conn.status === 'error' || conn.status === 'verification_failed') && (
-                        <AlertBanner variant="error" title="Attenzione richiesta">
-                          {conn.last_verification_error || 'Autenticazione scaduta o non valida.'}
+                        <AlertBanner variant="error" title={t('connUiAttentionRequired')}>
+                          {conn.last_verification_error || t('connUiAuthenticationExpiredOrInvalid')}
                         </AlertBanner>
                       )}
                     </Stack>
@@ -1479,7 +1501,7 @@ export function Connections({ initialExecutionId, initialTab }: ConnectionsProps
                             onClick={() => setManageProvider(provider)}
                             leftIcon={<Shield size={14} />}
                           >
-                            Gestisci
+                            {t('connManage')}
                           </Button>
                           <Button
                             variant="ghost"
@@ -1494,7 +1516,7 @@ export function Connections({ initialExecutionId, initialTab }: ConnectionsProps
                               )
                             }
                           >
-                            Verifica
+                            {t('connVerify')}
                           </Button>
                         </>
                       ) : (
@@ -1507,10 +1529,10 @@ export function Connections({ initialExecutionId, initialTab }: ConnectionsProps
                           rightIcon={<ArrowRight size={14} />}
                         >
                           {isConnecting
-                            ? 'Connessione…'
+                            ? t('connUiConnecting')
                             : provider.isOAuth
-                            ? (needsDevSetup ? 'Configura' : 'Collega')
-                            : 'Configura'}
+                            ? (needsDevSetup ? t('configure') : t('connConnect'))
+                            : t('configure')}
                         </Button>
                       )}
                     </div>
@@ -1535,7 +1557,7 @@ export function Connections({ initialExecutionId, initialTab }: ConnectionsProps
                 options={[
                   {
                     value: 'local',
-                    label: 'Calendario Locale Aether',
+                    label: t('connUiAetherLocalCalendar'),
                     icon: <Calendar size={15} />,
                   },
                   {
@@ -1554,7 +1576,7 @@ export function Connections({ initialExecutionId, initialTab }: ConnectionsProps
                     onClick={handleOpenCalendarPicker}
                     leftIcon={<Calendar size={14} />}
                   >
-                    Seleziona calendario
+                    {t('connUiSelectCalendar')}
                   </Button>
                 )}
                 <Button
@@ -1563,7 +1585,7 @@ export function Connections({ initialExecutionId, initialTab }: ConnectionsProps
                   onClick={() => setIsEventModalOpen(true)}
                   leftIcon={<Plus size={14} />}
                 >
-                  Nuovo appuntamento
+                  {t('connUiNewAppointment')}
                 </Button>
               </Stack>
             </Stack>
@@ -1573,11 +1595,11 @@ export function Connections({ initialExecutionId, initialTab }: ConnectionsProps
           {groupedEvents.length === 0 ? (
             <EmptyState
               icon={<Calendar size={28} />}
-              title="Nessun appuntamento in programma"
+              title={t('connUiNoUpcomingAppointments')}
               description={
                 selectedScheduleSource === 'google'
-                  ? 'Nessun evento in programma nei prossimi giorni. Assicurati che l\'integrazione sia attiva o sincronizza gli eventi.'
-                  : 'Il calendario locale è vuoto. Aggiungi il tuo primo impegno per iniziare.'
+                  ? t('connUiNoEventsScheduledInTheComing')
+                  : t('connUiTheLocalCalendarIsEmptyAdd')
               }
               action={
                 <Button
@@ -1585,7 +1607,7 @@ export function Connections({ initialExecutionId, initialTab }: ConnectionsProps
                   onClick={() => setIsEventModalOpen(true)}
                   leftIcon={<Plus size={15} />}
                 >
-                  Aggiungi appuntamento
+                  {t('connUiAddAppointment')}
                 </Button>
               }
             />
@@ -1621,20 +1643,20 @@ export function Connections({ initialExecutionId, initialTab }: ConnectionsProps
                             letterSpacing: '0.04em',
                           }}
                         >
-                          Oggi
+                          {t('connUiToday')}
                         </span>
                       )}
                     </Stack>
                     <Text size="xs" variant="muted">
-                      {group.events.length} {group.events.length === 1 ? 'evento' : 'eventi'}
+                      {group.events.length} {group.events.length === 1 ? t('connUiEvent') : t('connUiEvents')}
                     </Text>
                   </div>
 
                   {/* Day Events */}
                   <Grid minItemWidth={300} gap="md">
                     {group.events.map((evt) => {
-                      const timeStr = formatEventTime(evt);
-                      const isAllDay = timeStr === 'Tutto il giorno';
+                      const timeStr = formatEventTime(evt, t, locale);
+                      const isAllDay = timeStr === t('connUiAllDay');
 
                       return (
                         <Panel key={evt.id} variant="default" style={{ padding: '16px' }}>
@@ -1702,10 +1724,10 @@ export function Connections({ initialExecutionId, initialTab }: ConnectionsProps
                 value={actionStatusFilter}
                 onChange={(f) => setActionStatusFilter(f)}
                 options={[
-                  { value: 'all', label: 'Tutte le azioni' },
-                  { value: 'pending', label: 'In attesa di approvazione' },
-                  { value: 'succeeded', label: 'Completate' },
-                  { value: 'failed', label: 'Fallite o respinte' },
+                  { value: 'all', label: t('connUiAllActions') },
+                  { value: 'pending', label: t('connUiAwaitingApproval') },
+                  { value: 'succeeded', label: t('connUiCompleted') },
+                  { value: 'failed', label: t('connUiFailedOrRejected') },
                 ]}
               />
               <Text size="xs" variant="muted">
@@ -1717,8 +1739,8 @@ export function Connections({ initialExecutionId, initialTab }: ConnectionsProps
           {filteredExecutions.length === 0 ? (
             <EmptyState
               icon={<Clock size={28} />}
-              title="Nessuna operazione registrata"
-              description="Quando Aether eseguirà o richiederà l'approvazione di azioni esterne (email, appuntamenti, commit), compariranno qui."
+              title={t('connUiNoOperationsRecorded')}
+              description={t('connUiWhenAetherRunsOrRequestsApproval')}
             />
           ) : (
             <Stack direction="column" gap="md">
@@ -1754,15 +1776,15 @@ export function Connections({ initialExecutionId, initialTab }: ConnectionsProps
                             }
                             label={
                               isPending
-                                ? 'In attesa di approvazione'
+                                ? t('connUiAwaitingApproval')
                                 : isSuccess
-                                ? 'Completata con successo'
-                                : 'Non riuscita'
+                                ? t('connUiCompletedSuccessfully')
+                                : t('connUiFailed')
                             }
                           />
                         </Stack>
                         <Text size="xs" variant="muted">
-                          {new Date(exec.created_at).toLocaleString('it-IT')} — ID: {exec.id}
+                          {new Date(exec.created_at).toLocaleString(locale)} — ID: {exec.id}
                         </Text>
                       </Stack>
 
@@ -1774,7 +1796,7 @@ export function Connections({ initialExecutionId, initialTab }: ConnectionsProps
                             loading={actionLoadingId === exec.id}
                             onClick={() => handleApproveAction(exec.id)}
                           >
-                            Approva ed esegui
+                            {t('connUiApproveAndRun')}
                           </Button>
                           <Button
                             variant="outline"
@@ -1782,7 +1804,7 @@ export function Connections({ initialExecutionId, initialTab }: ConnectionsProps
                             loading={actionLoadingId === exec.id}
                             onClick={() => handleRejectAction(exec.id)}
                           >
-                            Rifiuta
+                            {t('reject')}
                           </Button>
                         </Stack>
                       )}
@@ -1790,7 +1812,7 @@ export function Connections({ initialExecutionId, initialTab }: ConnectionsProps
 
                     {exec.error_message && (
                       <div style={{ marginTop: '12px' }}>
-                        <AlertBanner variant="error" title="Dettaglio errore">
+                        <AlertBanner variant="error" title={t('connUiErrorDetails')}>
                           {exec.error_message}
                         </AlertBanner>
                       </div>
@@ -1821,12 +1843,12 @@ export function Connections({ initialExecutionId, initialTab }: ConnectionsProps
             isOpen={isGoogleModalOpen}
             onClose={() => setIsGoogleModalOpen(false)}
             size="md"
-            title="Collega Google Calendar"
-            description="Autorizza Aether ad accedere ai tuoi calendari per coordinare la tua agenda in locale."
+            title={t('connUiConnectGoogleCalendar')}
+            description={t('connUiAuthorizeAetherToAccessYourCalendars')}
             footer={
               <AetherFormActions align="between">
                 <Button variant="ghost" onClick={() => setIsGoogleModalOpen(false)}>
-                  Annulla
+                  {t('cancel')}
                 </Button>
                 <Button
                   variant="primary"
@@ -1837,57 +1859,56 @@ export function Connections({ initialExecutionId, initialTab }: ConnectionsProps
                   leftIcon={<Globe size={16} />}
                 >
                   {googleAuthPending
-                    ? 'In attesa di autorizzazione…'
+                    ? t('connUiWaitingForAuthorization')
                     : isFullyConfigured
-                    ? 'Autorizza con Google'
-                    : 'Salva e Autorizza con Google'}
+                    ? t('connUiAuthorizeWithGoogle')
+                    : t('connUiSaveAndAuthorizeWithGoogle')}
                 </Button>
               </AetherFormActions>
             }
           >
             <Stack direction="column" gap="lg">
               {isMissingSecretError && (
-                <AlertBanner variant="error" title="Client Secret richiesto da Google">
-                  Google ha rifiutato l'autorizzazione precedente perché per questo Client ID (tipo 'Applicazione web') è obbligatorio il <strong>Client Secret</strong>.
-                  Inserisci il Client Secret (es. <code>GOCSPX-...</code>) generato su Google Cloud Console e premi <strong>Salva e Autorizza</strong>.
+                <AlertBanner variant="error" title={t('connUiClientSecretRequiredByGoogle')}>
+                  {renderRich(t('connUiMissingSecretBody'))}
                 </AlertBanner>
               )}
 
               {!isFullyConfigured ? (
                 <>
                   {!isMissingSecretError && (
-                    <AlertBanner variant="info" title="Configurazione Credenziali Google Cloud">
-                      Aether si connette direttamente alle API di Google Calendar dal tuo computer. Per autorizzare l'accesso, inserisci il tuo <strong>Client ID</strong> e il <strong>Client Secret</strong> (se la tua app su Google Cloud è di tipo 'Applicazione web').
+                    <AlertBanner variant="info" title={t('connUiGoogleCloudCredentialsSetup')}>
+                      {renderRich(t('connUiGoogleCredsIntro'))}
                     </AlertBanner>
                   )}
 
                   <Panel variant="default" style={{ padding: '16px' }}>
                     <Text size="sm" weight="semibold" style={{ marginBottom: '8px' }}>
-                      Come ottenere le credenziali su Google Cloud (gratuito e personale):
+                      {t('connUiHowToGetYourCredentialsOn')}
                     </Text>
                     <ol style={{ fontSize: '13px', color: 'hsl(var(--fg))', margin: 0, paddingLeft: '20px', lineHeight: '1.6' }}>
                       <li>
-                        Apri la <a href="https://console.cloud.google.com/apis/credentials" target="_blank" rel="noopener noreferrer" style={{ color: 'hsl(var(--primary))', textDecoration: 'underline' }}>Google Cloud Console &rarr; Credenziali</a> (verifica che <em>Google Calendar API</em> sia abilitata nella libreria API).
+                        {t('connUiStepOpenConsolePre')} <a href="https://console.cloud.google.com/apis/credentials" target="_blank" rel="noopener noreferrer" style={{ color: 'hsl(var(--primary))', textDecoration: 'underline' }}>{t('connUiStepOpenConsoleLink')}</a> {renderRich(t('connUiStepOpenConsolePost'))}
                       </li>
                       <li>
-                        Clicca su <strong>Crea credenziali</strong> &rarr; <strong>ID client OAuth</strong>.
+                        {renderRich(t('connUiStepCreateCreds'))}
                       </li>
                       <li>
-                        Seleziona come tipo di applicazione <strong>Applicazione web</strong> (oppure <strong>Applicazione desktop</strong>).
+                        {renderRich(t('connUiStepAppType'))}
                       </li>
                       <li>
-                        Se hai scelto <em>Applicazione web</em>, aggiungi come URI di reindirizzamento autorizzato: <code>http://127.0.0.1:8000/api/connections/google_calendar/oauth/callback</code>.
+                        {renderRich(t('connUiStepRedirect'))} <code>http://127.0.0.1:8000/api/connections/google_calendar/oauth/callback</code>.
                       </li>
                       <li>
-                        Copia l'<strong>ID client</strong> e il <strong>Client Secret</strong> generati e incollali qui sotto.
+                        {renderRich(t('connUiStepCopyIds'))}
                       </li>
                     </ol>
                   </Panel>
 
                   <AetherForm onSubmit={handleStartGoogleOAuth}>
-                    <AetherField label="Google Client ID" required helperText="Identificativo OAuth (termina con .apps.googleusercontent.com)">
+                    <AetherField label="Google Client ID" required helperText={t('connUiOAuthIdentifierEndsWithAppsGoogleusercontent')}>
                       <AetherInput
-                        placeholder="es. 123456789-abcdef.apps.googleusercontent.com"
+                        placeholder={t('connUiEG123456789AbcdefAppsGoogleusercontent')}
                         value={googleClientId}
                         onChange={(e) => setGoogleClientId(e.target.value)}
                         autoFocus={!googleClientId}
@@ -1895,8 +1916,8 @@ export function Connections({ initialExecutionId, initialTab }: ConnectionsProps
                     </AetherField>
 
                     <AetherField
-                      label={isMissingSecretError ? "Google Client Secret (Richiesto da Google)" : "Google Client Secret"}
-                      helperText="Obbligatorio per Applicazioni Web (es. GOCSPX-...). Opzionale solo per Applicazioni Desktop con PKCE."
+                      label={isMissingSecretError ? t('connUiGoogleClientSecretRequiredByGoogle') : "Google Client Secret"}
+                      helperText={t('connUiRequiredForWebApplicationsEG')}
                     >
                       <AetherPasswordInput
                         placeholder="es. GOCSPX-..."
@@ -1909,18 +1930,18 @@ export function Connections({ initialExecutionId, initialTab }: ConnectionsProps
                 </>
               ) : (
                 <>
-                  <AlertBanner variant="info" title="Autorizzazione Sicura e Trasparente">
-                    Il flusso di autorizzazione aprirà il tuo browser di sistema ufficiale. Nessuna password personale viene mai condivisa con Aether e i tuoi token restano memorizzati in modo cifrato esclusivamente sul tuo dispositivo.
+                  <AlertBanner variant="info" title={t('connUiSecureAndTransparentAuthorization')}>
+                    {t('connUiTheAuthorizationFlowWillOpenYour')}
                   </AlertBanner>
 
                   <Panel variant="default" style={{ padding: '14px' }}>
                     <Stack direction="row" align="center" justify="between">
                       <div>
                         <Text size="sm" weight="medium">
-                          Client ID e Client Secret
+                          {t('connUiClientIDAndClientSecret')}
                         </Text>
                         <Text size="xs" variant="muted">
-                          ID: {googleOAuthInfo?.client_id_preview || (googleClientId ? `${googleClientId.slice(0, 8)}...` : 'Configurato')} • Secret: {hasClientSecret ? 'Configurato' : 'Non configurato'}
+                          ID: {googleOAuthInfo?.client_id_preview || (googleClientId ? `${googleClientId.slice(0, 8)}...` : t('connUiConfigured'))} • Secret: {hasClientSecret ? t('connUiConfigured') : t('connUiNotConfigured')}
                         </Text>
                       </div>
                       <Button
@@ -1928,22 +1949,22 @@ export function Connections({ initialExecutionId, initialTab }: ConnectionsProps
                         size="sm"
                         onClick={() => setGoogleAdvOpen(!googleAdvOpen)}
                       >
-                        {googleAdvOpen ? 'Chiudi' : 'Modifica credenziali'}
+                        {googleAdvOpen ? t('close') : t('connUiEditCredentials')}
                       </Button>
                     </Stack>
 
                     {googleAdvOpen && (
                       <div style={{ marginTop: '16px', paddingTop: '14px', borderTop: '1px solid hsl(var(--border))' }}>
                         <AetherForm onSubmit={handleStartGoogleOAuth}>
-                          <AetherField label="Google Client ID" required helperText="Identificativo OAuth (termina con .apps.googleusercontent.com)">
+                          <AetherField label="Google Client ID" required helperText={t('connUiOAuthIdentifierEndsWithAppsGoogleusercontent')}>
                             <AetherInput
-                              placeholder="es. 123456789.apps.googleusercontent.com"
+                              placeholder={t('connUiEG123456789AppsGoogleusercontentCom')}
                               value={googleClientId}
                               onChange={(e) => setGoogleClientId(e.target.value)}
                             />
                           </AetherField>
 
-                          <AetherField label="Google Client Secret" helperText="Obbligatorio per Applicazioni Web (es. GOCSPX-...)">
+                          <AetherField label="Google Client Secret" helperText={t('connUiRequiredForWebApplicationsEG2')}>
                             <AetherPasswordInput
                               placeholder="es. GOCSPX-..."
                               value={googleClientSecret}
@@ -1958,9 +1979,9 @@ export function Connections({ initialExecutionId, initialTab }: ConnectionsProps
                   {googleState && (
                     <Panel variant="default" style={{ padding: '12px' }}>
                       <AetherForm onSubmit={handleManualExchangeCode}>
-                        <AetherField label="Codice autorizzazione da incollare (se il redirect automatico è bloccato)">
+                        <AetherField label={t('connUiAuthorizationCodeToPasteIfThe')}>
                           <AetherInput
-                            placeholder="Incolla qui il codice di autorizzazione restituito dal browser"
+                            placeholder={t('connUiPasteHereTheAuthorizationCodeReturned')}
                             value={googleManualCode}
                             onChange={(e) => setGoogleManualCode(e.target.value)}
                           />
@@ -1972,7 +1993,7 @@ export function Connections({ initialExecutionId, initialTab }: ConnectionsProps
                           onClick={handleManualExchangeCode}
                           loading={googleAuthPending}
                         >
-                          Scambia codice manuale
+                          {t('connUiExchangeCodeManually')}
                         </Button>
                       </AetherForm>
                     </Panel>
@@ -1991,32 +2012,32 @@ export function Connections({ initialExecutionId, initialTab }: ConnectionsProps
         isOpen={Boolean(devSetupModalProvider)}
         onClose={() => setDevSetupModalProvider(null)}
         size="md"
-        title={`Collega ${devSetupModalProvider?.name || 'Servizio'}`}
-        description="Autorizza il servizio per consentire ad Aether di operare in sicurezza."
+        title={t('connUiConnectNamed').replace('{name}', devSetupModalProvider?.name || t('connUiServiceWord'))}
+        description={t('connUiAuthorizeTheServiceToLetAether')}
         footer={
           <AetherFormActions>
             <Button variant="ghost" onClick={() => setDevSetupModalProvider(null)}>
-              Annulla
+              {t('cancel')}
             </Button>
             <Button
               variant="primary"
               loading={savingDevConfig}
               onClick={handleSaveDevOAuthConfig}
             >
-              Salva e autorizza nel browser
+              {t('connUiSaveAndAuthorizeInTheBrowser')}
             </Button>
           </AetherFormActions>
         }
       >
         <AetherForm onSubmit={handleSaveDevOAuthConfig}>
-          <AlertBanner variant="info" title="Configurazione Applicazione">
-            Per garantire privacy e controllo totale, puoi registrare una OAuth App o inserire credenziali dedicate.
+          <AlertBanner variant="info" title={t('connUiApplicationSetup')}>
+            {t('connUiToGuaranteePrivacyAndFullControl')}
           </AlertBanner>
 
           {devSetupModalProvider && oauthProviders[devSetupModalProvider.id] && (
             <Panel variant="default" style={{ padding: '12px 14px' }}>
               <Text size="xs" variant="muted" style={{ marginBottom: '6px' }}>
-                Redirect URI per la tua App:
+                {t('connUiRedirectURIForYourApp')}
               </Text>
               <Stack direction="row" gap="sm" align="center">
                 <AetherInput
@@ -2025,7 +2046,7 @@ export function Connections({ initialExecutionId, initialTab }: ConnectionsProps
                 />
                 <IconButton
                   icon={copiedField === 'redirect' ? <Check size={16} /> : <Copy size={16} />}
-                  ariaLabel="Copia Redirect URI"
+                  ariaLabel={t('connUiCopyRedirectURI')}
                   onClick={() =>
                     copyToClipboard(
                       oauthProviders[devSetupModalProvider.id].redirect_uri,
@@ -2039,7 +2060,7 @@ export function Connections({ initialExecutionId, initialTab }: ConnectionsProps
 
           <AetherField label="Client ID" required>
             <AetherInput
-              placeholder="Inserisci il Client ID fornito dal servizio"
+              placeholder={t('connUiEnterTheClientIDProvidedBy')}
               value={devClientId}
               onChange={(e) => setDevClientId(e.target.value)}
             />
@@ -2047,7 +2068,7 @@ export function Connections({ initialExecutionId, initialTab }: ConnectionsProps
 
           <AetherField label="Client Secret" required>
             <AetherPasswordInput
-              placeholder="Inserisci il Client Secret fornito dal servizio"
+              placeholder={t('connUiEnterTheClientSecretProvidedBy')}
               value={devClientSecret}
               onChange={(e) => setDevClientSecret(e.target.value)}
             />
@@ -2062,12 +2083,12 @@ export function Connections({ initialExecutionId, initialTab }: ConnectionsProps
         isOpen={isTelegramModalOpen}
         onClose={() => setIsTelegramModalOpen(false)}
         size="md"
-        title="Collega Telegram Companion"
-        description="Ricevi notifiche push e approva attività di Aether direttamente dal tuo smartphone."
+        title={t('connUiConnectTelegramCompanion')}
+        description={t('connUiReceivePushNotificationsAndApproveAether')}
         footer={
           <AetherFormActions>
             <Button variant="ghost" onClick={() => setIsTelegramModalOpen(false)}>
-              Annulla
+              {t('cancel')}
             </Button>
             <Button
               variant="primary"
@@ -2075,7 +2096,7 @@ export function Connections({ initialExecutionId, initialTab }: ConnectionsProps
               onClick={handleConnectTelegramGuided}
               leftIcon={<Send size={15} />}
             >
-              Verifica e collega bot
+              {t('connUiVerifyAndConnectBot')}
             </Button>
           </AetherFormActions>
         }
@@ -2083,22 +2104,22 @@ export function Connections({ initialExecutionId, initialTab }: ConnectionsProps
         <AetherForm onSubmit={handleConnectTelegramGuided}>
           <Panel variant="default" style={{ padding: '16px' }}>
             <Heading level={4} style={{ marginBottom: '8px' }}>
-              Come ottenere il token del bot in 3 passi:
+              {t('connUiHowToGetTheBotToken')}
             </Heading>
             <Stack direction="column" gap="xs">
               <Text size="sm">
-                1. Apri Telegram e cerca l'account ufficiale <strong>@BotFather</strong>
+                {renderRich(t('connUiTgStep1'))}
               </Text>
               <Text size="sm">
-                2. Invia il comando <code>/newbot</code> e segui le istruzioni per dargli un nome
+                {renderRich(t('connUiTgStep2'))}
               </Text>
               <Text size="sm">
-                3. Copia la chiave <strong>API Token</strong> generata e incollala nel campo qui sotto
+                {renderRich(t('connUiTgStep3'))}
               </Text>
             </Stack>
           </Panel>
 
-          <AetherField label="Bot Token di Telegram" required>
+          <AetherField label={t('connUiTelegramBotToken')} required>
             <AetherPasswordInput
               placeholder="es. 123456789:ABCdefGhIJKlmNoPQRsTUVwxyZ"
               value={telegramBotToken}
@@ -2109,7 +2130,7 @@ export function Connections({ initialExecutionId, initialTab }: ConnectionsProps
           {testResult && (
             <AlertBanner
               variant={testResult.valid ? 'success' : 'error'}
-              title={testResult.valid ? 'Verifica riuscita' : 'Verifica non riuscita'}
+              title={testResult.valid ? t('connUiVerificationSucceeded') : t('connUiVerificationFailed2')}
             >
               {testResult.message}
             </AlertBanner>
@@ -2119,10 +2140,10 @@ export function Connections({ initialExecutionId, initialTab }: ConnectionsProps
             <Stack direction="row" align="center" justify="between">
               <div>
                 <Text size="sm" weight="medium">
-                  Impostazioni di sicurezza avanzate
+                  {t('connUiAdvancedSecuritySettings')}
                 </Text>
                 <Text size="xs" variant="muted">
-                  Limita i comandi solo al tuo specifico Chat ID Telegram
+                  {t('connUiLimitCommandsToYourSpecificTelegram')}
                 </Text>
               </div>
               <Switch checked={telegramAdvOpen} onChange={setTelegramAdvOpen} />
@@ -2130,7 +2151,7 @@ export function Connections({ initialExecutionId, initialTab }: ConnectionsProps
 
             {telegramAdvOpen && (
               <div style={{ marginTop: '14px', paddingTop: '12px', borderTop: '1px solid hsl(var(--border))' }}>
-                <AetherField label="Chat ID predefinito (opzionale)">
+                <AetherField label={t('connUiDefaultChatIDOptional')}>
                   <AetherInput
                     placeholder="es. 987654321"
                     value={telegramDefaultChatId}
@@ -2150,8 +2171,8 @@ export function Connections({ initialExecutionId, initialTab }: ConnectionsProps
         isOpen={Boolean(configModalProvider)}
         onClose={() => setConfigModalProvider(null)}
         size="md"
-        title={`Configura ${configModalProvider?.name || 'Servizio'}`}
-        description="Inserisci le informazioni di connessione per abilitare il servizio."
+        title={t('connUiConfigureNamed').replace('{name}', configModalProvider?.name || t('connUiServiceWord'))}
+        description={t('connUiEnterTheConnectionDetailsToEnable')}
         footer={
           <AetherFormActions align="between">
             <Button
@@ -2160,25 +2181,25 @@ export function Connections({ initialExecutionId, initialTab }: ConnectionsProps
               loading={testingCreds}
               onClick={handleTestCreds}
             >
-              Testa connessione
+              {t('connUiTestConnection')}
             </Button>
             <Stack direction="row" gap="sm">
               <Button variant="ghost" onClick={() => setConfigModalProvider(null)}>
-                Annulla
+                {t('cancel')}
               </Button>
               <Button
                 variant="primary"
                 loading={savingCreds}
                 onClick={handleSaveAndConnect}
               >
-                Salva e attiva
+                {t('connUiSaveAndActivate')}
               </Button>
             </Stack>
           </AetherFormActions>
         }
       >
         <AetherForm onSubmit={handleSaveAndConnect}>
-          <AetherField label="Nome account di riferimento">
+          <AetherField label={t('connUiReferenceAccountName')}>
             <AetherInput
               value={credAccountName}
               onChange={(e) => setCredAccountName(e.target.value)}
@@ -2187,7 +2208,7 @@ export function Connections({ initialExecutionId, initialTab }: ConnectionsProps
 
           {configModalProvider?.id === 'email' && (
             <Stack direction="column" gap="md">
-              <AetherField label="Server SMTP" required>
+              <AetherField label={t('connUiSMTPServer')} required>
                 <AetherInput
                   placeholder="smtp.gmail.com"
                   value={emailHost}
@@ -2196,30 +2217,30 @@ export function Connections({ initialExecutionId, initialTab }: ConnectionsProps
               </AetherField>
 
               <Grid cols={2} gap="md">
-                <AetherField label="Porta" required>
+                <AetherField label={t('connUiPort')} required>
                   <AetherInput
                     placeholder="587"
                     value={emailPort}
                     onChange={(e) => setEmailPort(e.target.value)}
                   />
                 </AetherField>
-                <AetherField label="Indirizzo mittente">
+                <AetherField label={t('connUiSenderAddress')}>
                   <AetherInput
-                    placeholder="nome@dominio.it"
+                    placeholder={t('connUiNameDomainCom')}
                     value={emailSenderAddr}
                     onChange={(e) => setEmailSenderAddr(e.target.value)}
                   />
                 </AetherField>
               </Grid>
 
-              <AetherField label="Nome utente / Email login" required>
+              <AetherField label={t('connUiUsernameLoginEmail')} required>
                 <AetherInput
                   value={emailUser}
                   onChange={(e) => setEmailUser(e.target.value)}
                 />
               </AetherField>
 
-              <AetherField label="Password o App Password" required>
+              <AetherField label={t('connUiPasswordOrAppPassword')} required>
                 <AetherPasswordInput
                   value={emailPass}
                   onChange={(e) => setEmailPass(e.target.value)}
@@ -2230,20 +2251,20 @@ export function Connections({ initialExecutionId, initialTab }: ConnectionsProps
 
           {configModalProvider?.id === 'http' && (
             <Stack direction="column" gap="md">
-              <AetherField label="URL di base dell'endpoint" required>
+              <AetherField label={t('connUiEndpointBaseURL')} required>
                 <AetherInput
-                  placeholder="https://api.esempio.it/v1"
+                  placeholder={t('connUiHttpsApiExampleComV1')}
                   value={httpBaseUrl}
                   onChange={(e) => setHttpBaseUrl(e.target.value)}
                 />
               </AetherField>
 
-              <AetherField label="Tipo di autenticazione">
+              <AetherField label={t('connUiAuthenticationType')}>
                 <AetherSelect
                   value={httpAuthType}
                   onChange={(e) => setHttpAuthType(e.target.value)}
                   options={[
-                    { value: 'none', label: 'Nessuna autenticazione' },
+                    { value: 'none', label: t('connUiNoAuthentication') },
                     { value: 'bearer', label: 'Bearer Token' },
                     { value: 'api_key', label: 'Header API Key (X-Api-Key)' },
                   ]}
@@ -2251,7 +2272,7 @@ export function Connections({ initialExecutionId, initialTab }: ConnectionsProps
               </AetherField>
 
               {httpAuthType !== 'none' && (
-                <AetherField label="Token o Chiave segreta" required>
+                <AetherField label={t('connUiTokenOrSecretKey')} required>
                   <AetherPasswordInput
                     value={httpToken}
                     onChange={(e) => setHttpToken(e.target.value)}
@@ -2263,17 +2284,17 @@ export function Connections({ initialExecutionId, initialTab }: ConnectionsProps
 
           {configModalProvider?.id === 'openapi' && (
             <Stack direction="column" gap="md">
-              <AetherField label="URL specifica OpenAPI (JSON/YAML)">
+              <AetherField label={t('connUiOpenAPISpecificationURLJSONYAML')}>
                 <AetherInput
-                  placeholder="https://api.servizio.it/openapi.json"
+                  placeholder={t('connUiHttpsApiServiceComOpenapiJson')}
                   value={openapiSpecUrl}
                   onChange={(e) => setOpenapiSpecUrl(e.target.value)}
                 />
               </AetherField>
 
-              <AetherField label="Oppure percorso file locale">
+              <AetherField label={t('connUiOrLocalFilePath')}>
                 <AetherInput
-                  placeholder="/Users/nome/progetti/spec.yaml"
+                  placeholder={t('connUiUsersNameProjectsSpecYaml')}
                   value={openapiSpecPath}
                   onChange={(e) => setOpenapiSpecPath(e.target.value)}
                 />
@@ -2284,7 +2305,7 @@ export function Connections({ initialExecutionId, initialTab }: ConnectionsProps
           {testResult && (
             <AlertBanner
               variant={testResult.valid ? 'success' : 'error'}
-              title={testResult.valid ? 'Test superato' : 'Test fallito'}
+              title={testResult.valid ? t('connUiTestPassed') : t('connUiTestFailed')}
             >
               {testResult.message}
             </AlertBanner>
@@ -2299,37 +2320,37 @@ export function Connections({ initialExecutionId, initialTab }: ConnectionsProps
         isOpen={isEventModalOpen}
         onClose={() => setIsEventModalOpen(false)}
         size="md"
-        title="Crea nuovo appuntamento"
+        title={t('connUiCreateNewAppointment')}
         description={
           selectedScheduleSource === 'google'
-            ? 'L\'evento verrà sincronizzato direttamente con il tuo account Google.'
-            : 'L\'evento verrà memorizzato nel database locale del tuo spazio di lavoro.'
+            ? t('connUiTheEventWillBeSyncedDirectly')
+            : t('connUiTheEventWillBeStoredIn')
         }
         footer={
           <AetherFormActions>
             <Button variant="ghost" onClick={() => setIsEventModalOpen(false)}>
-              Annulla
+              {t('cancel')}
             </Button>
             <Button
               variant="primary"
               loading={creatingEvent}
               onClick={handleCreateEvent}
             >
-              Crea evento
+              {t('connUiCreateEvent')}
             </Button>
           </AetherFormActions>
         }
       >
         <AetherForm onSubmit={handleCreateEvent}>
-          <AetherField label="Titolo dell'appuntamento" required>
+          <AetherField label={t('connUiAppointmentTitle')} required>
             <AetherInput
-              placeholder="es. Allineamento settimanale di progetto"
+              placeholder={t('connUiEGWeeklyProjectAlignment')}
               value={newTitle}
               onChange={(e) => setNewTitle(e.target.value)}
             />
           </AetherField>
 
-          <AetherField label="Data e ora di inizio" required>
+          <AetherField label={t('connUiStartDateAndTime')} required>
             <AetherInput
               type="datetime-local"
               value={newStartTime}
@@ -2337,9 +2358,9 @@ export function Connections({ initialExecutionId, initialTab }: ConnectionsProps
             />
           </AetherField>
 
-          <AetherField label="Luogo o Link riunione (opzionale)">
+          <AetherField label={t('connUiLocationOrMeetingLinkOptional')}>
             <AetherInput
-              placeholder="es. Google Meet / Ufficio Milano"
+              placeholder={t('connUiEGGoogleMeetMilanOffice')}
               value={newLocation}
               onChange={(e) => setNewLocation(e.target.value)}
             />
@@ -2354,8 +2375,8 @@ export function Connections({ initialExecutionId, initialTab }: ConnectionsProps
         isOpen={isCalendarPickerOpen}
         onClose={() => setIsCalendarPickerOpen(false)}
         size="md"
-        title="Seleziona Calendario Google"
-        description="Scegli quale dei tuoi calendari Google utilizzare per la sincronizzazione delle attività."
+        title={t('connUiSelectGoogleCalendar')}
+        description={t('connUiChooseWhichOfYourGoogleCalendars')}
       >
         <Stack direction="column" gap="sm">
           {googleCalendars.map((cal) => (
@@ -2375,7 +2396,7 @@ export function Connections({ initialExecutionId, initialTab }: ConnectionsProps
                   )}
                 </div>
                 {cal.primary && (
-                  <StatusBadge status="connected" label="Principale" />
+                  <StatusBadge status="connected" label={t('connUiPrimary')} />
                 )}
               </Stack>
             </Panel>
@@ -2390,7 +2411,7 @@ export function Connections({ initialExecutionId, initialTab }: ConnectionsProps
         isOpen={Boolean(manageProvider)}
         onClose={() => setManageProvider(null)}
         title={manageProvider?.name}
-        description="Dettagli e gestione dell'integrazione attiva."
+        description={t('connUiDetailsAndManagementOfTheActive')}
         footer={
           <AetherFormActions align="between">
             <Button
@@ -2403,10 +2424,10 @@ export function Connections({ initialExecutionId, initialTab }: ConnectionsProps
               }}
               leftIcon={<Trash2 size={14} />}
             >
-              Scollega servizio
+              {t('connUiDisconnectService')}
             </Button>
             <Button variant="secondary" size="sm" onClick={() => setManageProvider(null)}>
-              Chiudi
+              {t('close')}
             </Button>
           </AetherFormActions>
         }
@@ -2420,7 +2441,7 @@ export function Connections({ initialExecutionId, initialTab }: ConnectionsProps
               <Panel variant="default" style={{ padding: '16px' }}>
                 <Stack direction="row" justify="between" align="center">
                   <Stack gap="none">
-                    <Text size="xs" variant="muted">Stato operativo</Text>
+                    <Text size="xs" variant="muted">{t('connUiOperationalStatus')}</Text>
                     <Heading level={4}>{conn?.account_name || manageProvider.name}</Heading>
                   </Stack>
                   <StatusBadge status={conn?.status || 'NOT_CONFIGURED'} />
@@ -2430,7 +2451,7 @@ export function Connections({ initialExecutionId, initialTab }: ConnectionsProps
               {/* Capabilities checklist */}
               <div>
                 <Heading level={5} style={{ marginBottom: '8px' }}>
-                  Capacità concesse ad Aether:
+                  {t('connUiCapabilitiesGrantedToAether')}
                 </Heading>
                 <Stack direction="column" gap="xs">
                   {manageProvider.capabilitiesList.map((cap, i) => (
@@ -2455,9 +2476,9 @@ export function Connections({ initialExecutionId, initialTab }: ConnectionsProps
               <Panel variant="default" style={{ padding: '14px' }}>
                 <Stack direction="row" justify="between" align="center">
                   <div>
-                    <Text size="sm" weight="medium">Verifica integrità</Text>
+                    <Text size="sm" weight="medium">{t('connUiIntegrityCheck')}</Text>
                     <Text size="xs" variant="muted">
-                      Invia un ping reale per validare la raggiungibilità del servizio
+                      {t('connUiSendARealPingToValidate')}
                     </Text>
                   </div>
                   <Button
@@ -2466,7 +2487,7 @@ export function Connections({ initialExecutionId, initialTab }: ConnectionsProps
                     loading={verifyingProvider === manageProvider.id}
                     onClick={() => handleVerifyConnection(manageProvider.id)}
                   >
-                    Verifica ora
+                    {t('connUiVerifyNow')}
                   </Button>
                 </Stack>
               </Panel>
@@ -2474,18 +2495,18 @@ export function Connections({ initialExecutionId, initialTab }: ConnectionsProps
               {/* Advanced info toggle */}
               <Panel variant="default" style={{ padding: '12px 14px' }}>
                 <Stack direction="row" justify="between" align="center">
-                  <Text size="xs" variant="muted">Dettagli tecnici avanzati</Text>
+                  <Text size="xs" variant="muted">{t('connUiAdvancedTechnicalDetails')}</Text>
                   <Switch checked={showTechDetails} onChange={setShowTechDetails} />
                 </Stack>
 
                 {showTechDetails && conn && (
                   <div style={{ marginTop: '12px', paddingTop: '10px', borderTop: '1px solid hsl(var(--border))' }}>
                     <Text size="xs" mono style={{ wordBreak: 'break-all' }}>
-                      ID Interno: {conn.id}
+                      {t('connUiInternalId')}: {conn.id}
                       <br />
-                      Ultima sincronizzazione: {conn.last_synced_at || 'Mai'}
+                      {t('connUiLastSync')}: {conn.last_synced_at || t('connUiNever')}
                       <br />
-                      Ultima verifica: {conn.last_verified_at || 'Mai'}
+                      {t('connUiLastVerify')}: {conn.last_verified_at || t('connUiNever')}
                     </Text>
                   </div>
                 )}
@@ -2502,25 +2523,25 @@ export function Connections({ initialExecutionId, initialTab }: ConnectionsProps
         isOpen={Boolean(disconnectTarget)}
         onClose={() => setDisconnectTarget(null)}
         size="sm"
-        title="Scollegare il servizio?"
-        description={`Sei sicuro di voler scollegare ${disconnectTarget?.name}? Aether non potrà più coordinare o interagire con questo servizio finché non verrà ricollegato.`}
+        title={t('connUiDisconnectTheService')}
+        description={t('connUiDisconnectConfirm').replace('{name}', disconnectTarget?.name ?? '')}
         footer={
           <AetherFormActions>
             <Button variant="ghost" onClick={() => setDisconnectTarget(null)}>
-              Annulla
+              {t('cancel')}
             </Button>
             <Button
               variant="destructive"
               loading={disconnecting}
               onClick={confirmDisconnect}
             >
-              Scollega definitivamente
+              {t('connUiDisconnectPermanently')}
             </Button>
           </AetherFormActions>
         }
       >
-        <AlertBanner variant="warning" title="Attenzione">
-          Eventuali credenziali e token salvati verranno rimossi in sicurezza dal SecretStore locale.
+        <AlertBanner variant="warning" title={t('connUiWarning')}>
+          {t('connUiAnySavedCredentialsAndTokensWill')}
         </AlertBanner>
       </Modal>
     </PageContainer>

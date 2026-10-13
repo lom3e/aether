@@ -5,6 +5,7 @@ announced, and the ambiguous combination is refused. Nothing here starts a serve
 """
 from __future__ import annotations
 
+import os
 import subprocess
 import sys
 from pathlib import Path
@@ -68,7 +69,10 @@ def test_the_real_command_refuses_before_starting_anything(ws_dir, tmp_path):
                           "--data-dir", str(tmp_path / "data")],
                          cwd=ws_dir, capture_output=True, text=True, timeout=60,
                          env={"PATH": "/usr/bin:/bin", "PYTHONPATH": SRC, "HOME": str(tmp_path / "home"), "PYTHONDONTWRITEBYTECODE": "1",
-                              "PYTHON_KEYRING_BACKEND": "keyring.backends.null.Keyring"})
+                              "PYTHON_KEYRING_BACKEND": "keyring.backends.null.Keyring",
+                              # Windows cannot even initialise sockets without SYSTEMROOT (WinError 10106); nothing else leaks in.
+                              **{k: os.environ[k] for k in ("SYSTEMROOT", "SYSTEMDRIVE") if k in os.environ},
+                              **({"USERPROFILE": str(tmp_path / "home")} if sys.platform == "win32" else {})})
     assert out.returncode == 2 and "does not isolate" in out.stderr
     assert "Uvicorn" not in out.stdout + out.stderr and not (tmp_path / "data").exists()
     assert not (ws_dir / ".aether_migrations").exists()                       # nothing was touched

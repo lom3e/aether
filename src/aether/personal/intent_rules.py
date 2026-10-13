@@ -31,18 +31,44 @@ _HEDGE_RE = re.compile(
 )
 
 
+_PATH_PREFIX = (
+    r"(?:in|su|nel progetto|nel repository|nel percorso|directory|folder|path|workspace|repo)\s+"
+    r"(?:(?:locale|local|corrente|attuale|esistente)\s+)?"
+)
+_PATH_PATTERNS = (
+    # POSIX path after a "where" word (historical behaviour)
+    re.compile(_PATH_PREFIX + r"""[`"'(]?(/[^\s`"')]+)[`"')]?""", re.IGNORECASE),
+    # Windows drive path after a "where" word: quoted (may contain spaces) or bare
+    re.compile(_PATH_PREFIX + r"""[`"']([A-Za-z]:[\\/][^`"']+)[`"']""", re.IGNORECASE),
+    re.compile(_PATH_PREFIX + r"""[(]?([A-Za-z]:[\\/][^\s`"')<>|?*]+)""", re.IGNORECASE),
+    # Bare deep POSIX path anywhere
+    re.compile(r"""[`"'(]?(/[\w.\-]+(?:/[\w.\-]+)+)[`"')]?"""),
+    # Bare Windows path anywhere
+    re.compile(r"""(?:^|[\s`"'(])([A-Za-z]:[\\/][^\s`"')<>|?*]+)"""),
+)
+
+
+def extract_project_path_mention(text: str) -> str | None:
+    """First filesystem path mentioned in ``text``: POSIX ('/a/b') or Windows ('C:\a\b', 'C:/a/b')."""
+    for pattern in _PATH_PATTERNS:
+        match = pattern.search(text or "")
+        if match:
+            return match.group(1)
+    return None
+
+
 def assess_coding_prompt(prompt: str) -> CodingAssessment:
     p_lower = (prompt or "").lower().strip()
     actionable_coding_patterns = [
         # App / CLI / Project creation
-        r"\b(?:crea|creare|realizza|realizzare|sviluppa|sviluppare|costruisci|costruire|build|create|implementa|implementare|implement)\s+(?:un[’'\s]|una\s+|il\s+|la\s+|l[’'\s]|lo\s+|i\s+|le\s+|gli\s+)?(?:piccol[oa]\s+|nuov[oa]\s+|semplice\s+)?(?:applicazione|app|cli|progetto|modulo|script|servizio|tool|package)\b",
+        r"\b(?:crea|creare|realizza|realizzare|sviluppa|sviluppare|costruisci|costruire|build|create|implementa|implementare|implement)\s+(?:un[’'\s]|una\s+|a\s+|an\s+|the\s+|il\s+|la\s+|l[’'\s]|lo\s+|i\s+|le\s+|gli\s+)?(?:piccol[oa]\s+|nuov[oa]\s+|semplice\s+)?(?:applicazione|app|cli|progetto|modulo|script|servizio|tool|package)\b",
         # Function / Component / Code implementation or creation
-        r"\b(?:implementa|implementare|scrivi|scrivere|crea|creare|sviluppa|sviluppare|aggiungi|aggiungere|write|implement|create|add)\s+(?:un[’'\s]|una\s+|il\s+|la\s+|l[’'\s]|lo\s+|i\s+|le\s+|gli\s+)?(?:nuov[oaie]\s+)?(?:codice|funzione|metodo|classe|componente|algoritmo|endpoint|modulo|code|function|method|class|component)\b",
+        r"\b(?:implementa|implementare|scrivi|scrivere|crea|creare|sviluppa|sviluppare|aggiungi|aggiungere|write|implement|create|add)\s+(?:un[’'\s]|una\s+|a\s+|an\s+|the\s+|il\s+|la\s+|l[’'\s]|lo\s+|i\s+|le\s+|gli\s+)?(?:nuov[oaie]\s+)?(?:codice|funzione|metodo|classe|componente|algoritmo|endpoint|modulo|middleware|parser|libreria|plugin|handler|decoratore|code|function|method|class|component|algorithm|library|decorator)\b",
         r"\b(?:implementa|implementare|scrivi|scrivere|crea|creare|sviluppa|sviluppare|aggiungi|aggiungere|write|implement|create|add)\s+.*?\b(?:nel\s+file|in\s+file|su\s+file|nel\s+progetto|in\s+project|\.py|\.ts|\.js|\.rs|\.go|\.java)\b",
         # Test writing / creation / addition
-        r"\b(?:scrivi|scrivere|crea|creare|aggiungi|aggiungere|implementa|implementare|write|create|add|implement)\s+(?:un[’'\s]|una\s+|il\s+|la\s+|l[’'\s]|lo\s+|i\s+|le\s+|gli\s+)?(?:test|test_[\w]+|unit test|test automatic[io]|suite)\b",
+        r"\b(?:scrivi|scrivere|crea|creare|aggiungi|aggiungere|implementa|implementare|write|create|add|implement)\s+(?:un[’'\s]|una\s+|a\s+|an\s+|the\s+|il\s+|la\s+|l[’'\s]|lo\s+|i\s+|le\s+|gli\s+)?(?:test|test_[\w]+|unit test|test automatic[io]|suite)\b",
         # Bug fixing / code modification / refactoring
-        r"\b(?:risolvi|risolvere|correggi|correggere|fixa|fixare|fix|resolve)\s+(?:un[’'\s]|una\s+|il\s+|la\s+|l[’'\s]|lo\s+|i\s+|le\s+|gli\s+)?(?:bug|errore|problema|error|issue)\b",
+        r"\b(?:risolvi|risolvere|correggi|correggere|fixa|fixare|fix|resolve)\s+(?:un[’'\s]|una\s+|a\s+|an\s+|the\s+|il\s+|la\s+|l[’'\s]|lo\s+|i\s+|le\s+|gli\s+)?(?:bug|errore|problema|error|issue)\b",
         r"\b(?:modifica|modificare|aggiorna|aggiornare|modify|update)\s+(?:il\s+|la\s+|i\s+|le\s+|questo\s+)?(?:codice|file|funzione|test|script|code)\b",
         r"\b(?:fai|esegui|perform|do|applica)\s+(?:il\s+)?(?:refactoring|refactor)\b",
         # Explicit delegation to coding agent
@@ -51,7 +77,7 @@ def assess_coding_prompt(prompt: str) -> CodingAssessment:
         r"\b(?:richiesta operativa diretta|esegui direttamente il lavoro)\b",
         # Imperative opening verb aimed at a concrete filesystem location: "Implement parser in /tmp/x",
         # "Refactor files in /Library" are work orders even without an explicit noun like "function".
-        r"^\s*(?:per\s+favore\s+|please\s+)?(?:implement|implementa|refactor|rifattorizza|refattorizza|fix|correggi|risolvi|build|costruisci)\b[^?\n]{0,80}?\s(?:in|su|nel|nella|inside|within)\s+[`'\"(]?/[\w.\-]+",
+        r"^\s*(?:per\s+favore\s+|please\s+)?(?:implement|implementa|refactor|rifattorizza|refattorizza|fix|correggi|risolvi|build|costruisci)\b[^?\n]{0,80}?\s(?:in|su|nel|nella|inside|within)\s+[`'\"(]?(?:/[\w.\-]+|[a-z]:[\\/][\w.\-])",
     ]
 
     has_actionable_coding_directive = any(re.search(pat, p_lower) for pat in actionable_coding_patterns)
@@ -60,13 +86,13 @@ def assess_coding_prompt(prompt: str) -> CodingAssessment:
     # organizzare un viaggio" is not a coding request. They count only with a technical signal in the prompt.
     generic_creation_only = bool(re.search(
         r"\b(?:crea|creare|realizza|realizzare|sviluppa|sviluppare|costruisci|costruire|build|create|implementa|implementare|implement)\s+"
-        r"(?:un[’'\s]|una\s+|il\s+|la\s+|l[’'\s]|lo\s+|i\s+|le\s+|gli\s+)?(?:piccol[oa]\s+|nuov[oa]\s+|semplice\s+)?"
+        r"(?:un[’'\s]|una\s+|a\s+|an\s+|the\s+|il\s+|la\s+|l[’'\s]|lo\s+|i\s+|le\s+|gli\s+)?(?:piccol[oa]\s+|nuov[oa]\s+|semplice\s+)?"
         r"(?:progetto|modulo|script|servizio|tool)\b", p_lower
     ))
     has_technical_context = bool(re.search(
         r"(?:\b(?:python|javascript|typescript|java|rust|golang|django|flask|fastapi|react|node|npm|pip|sql|database|backend|frontend|"
         r"api|cli|codice|code|software|programma|repository|repo|github|git|test|funzione|function|classe|class|endpoint|"
-        r"antigravity|claude\s+code|codex)\b|\.(?:py|ts|tsx|js|jsx|rs|go|java|c|cpp|h|json|md)\b|(?:^|\s)/[\w.\-]+/[\w.\-/]+)", p_lower
+        r"antigravity|claude\s+code|codex)\b|\.(?:py|ts|tsx|js|jsx|rs|go|java|c|cpp|h|json|md)\b|(?:^|\s)/[\w.\-]+/[\w.\-/]+|(?:^|[\s`'\"(])[a-z]:[\\/][\w.\-]+)", p_lower
     ))
     if generic_creation_only and not has_technical_context:
         # Only the generic-noun pattern matched: re-evaluate the remaining, more specific patterns.
@@ -83,7 +109,7 @@ def assess_coding_prompt(prompt: str) -> CodingAssessment:
 
     # Explicit code mutation mandate (imperative directives to write, modify, fix, or build code)
     code_mutation_patterns = [
-        r"\b(?:crea|creare|realizza|realizzare|costruisci|costruire|build|create)\s+(?:un[’'\s]|una\s+|il\s+|la\s+|l[’'\s]|lo\s+|i\s+|le\s+|gli\s+)?(?:piccol[oa]\s+|nuov[oa]\s+|semplice\s+)?(?:applicazione|app|cli|progetto|modulo|script|servizio|tool|package|funzione|componente)\b",
+        r"\b(?:crea|creare|realizza|realizzare|costruisci|costruire|build|create)\s+(?:un[’'\s]|una\s+|a\s+|an\s+|the\s+|il\s+|la\s+|l[’'\s]|lo\s+|i\s+|le\s+|gli\s+)?(?:piccol[oa]\s+|nuov[oa]\s+|semplice\s+)?(?:applicazione|app|cli|progetto|modulo|script|servizio|tool|package|funzione|componente)\b",
         r"\b(?:implementa|implementare|scrivi|scrivere|aggiungi|aggiungere|write|implement|add)\s+.*(?:codice|funzione|metodo|classe|test|code|function)\b",
         r"\b(?:risolvi|risolvere|correggi|correggere|fixa|fixare|fix|resolve)\s+.*(?:bug|errore|problema|error)\b",
         r"\b(?:modifica|modificare|aggiorna|aggiornare)\s+.*(?:codice|file|funzione|test)\b",

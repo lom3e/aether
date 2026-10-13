@@ -10,6 +10,7 @@ from __future__ import annotations
 import json
 import os
 from pathlib import Path
+from contextlib import closing
 import sqlite3
 import pytest
 
@@ -41,7 +42,7 @@ def test_sentinel_residual_scan_across_all_databases(tmp_path: Path, monkeypatch
 
     # 1. Inject raw un-sanitized records into SQLite tables
     conn_db = Path(ws.connections_db_path)
-    with sqlite3.connect(str(conn_db)) as db:
+    with closing(sqlite3.connect(str(conn_db))) as db, db:
         db.execute(
             """
             INSERT INTO connections (id, workspace_id, provider, account_name, status, auth_metadata, created_at, updated_at)
@@ -51,7 +52,7 @@ def test_sentinel_residual_scan_across_all_databases(tmp_path: Path, monkeypatch
         )
 
     notif_db = Path(ws.notifications_db_path)
-    with sqlite3.connect(str(notif_db)) as db:
+    with closing(sqlite3.connect(str(notif_db))) as db, db:
         db.execute(
             """
             INSERT INTO notification_channels (id, workspace_id, channel_type, name, enabled, config, created_at, updated_at)
@@ -61,7 +62,7 @@ def test_sentinel_residual_scan_across_all_databases(tmp_path: Path, monkeypatch
         )
 
     auto_db = Path(ws.automations_db_path)
-    with sqlite3.connect(str(auto_db)) as db:
+    with closing(sqlite3.connect(str(auto_db))) as db, db:
         db.execute(
             """
             INSERT INTO automations (id, name, description, enabled, trigger_json, steps_json, created_at, updated_at)
@@ -132,7 +133,13 @@ def test_email_connector_masks_password_in_errors(monkeypatch):
         "smtp_port": 587,
     })
 
-    # Test verify error masking
+    # Test verify error masking: an unresolvable host, simulated (no DNS lookup is made)
+    import socket as _socket
+
+    def unresolvable_host(*args, **kwargs):
+        raise _socket.gaierror(11001, "getaddrinfo failed")
+
+    monkeypatch.setattr("smtplib.SMTP", unresolvable_host)
     valid, msg = connector.verify(live_check=True)
     assert valid is False
     assert plain_password not in msg

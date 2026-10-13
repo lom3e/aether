@@ -74,34 +74,59 @@ class OllamaProvider(AIProvider):
         super().__init__(config)
         self._base_url = (self.config.base_url or _DEFAULT_BASE_URL).rstrip("/")
         self._endpoint = f"{self._base_url}{_CHAT_PATH}"
-        self._model = self._resolve_model()
+        # Creating a provider performs no I/O. The model is resolved on first use (see ``_model``), which may need to
+        # ask the server which models are installed.
+        self._resolved_model: str | None = None
+
+    @property
+    def _model(self) -> str:
+        """The model used for requests, resolved lazily so that constructing the provider never contacts the server."""
+        if self._resolved_model is None:
+            model, final = self._resolve_model_with_finality()
+            if not final:
+                return model  # fallback because the server could not be asked: try again on the next use
+            self._resolved_model = model
+        return self._resolved_model
+
+    @_model.setter
+    def _model(self, value: str) -> None:
+        self._resolved_model = value
 
     def _resolve_model(self) -> str:
         """Dynamically resolves the best installed model for this Ollama instance."""
+        return self._resolve_model_with_finality()[0]
+
+    def _resolve_model_with_finality(self) -> tuple[str, bool]:
+        """(model, final). ``final`` is False only for the default used because no installed model could be listed."""
         import os
         # 1. Environment variable override (highest priority)
         env_model = os.environ.get("OLLAMA_MODEL") or os.environ.get("AETHER_MODEL")
         if env_model:
-            return env_model.strip()
+            return env_model.strip(), True
 
         configured = (self.config.model or "").strip()
+
+        # A fully qualified tag ("name:tag") is used exactly as configured whether or not it is installed (Ollama
+        # reports a clear error if it is missing), so there is nothing to discover and no server to ask.
+        if configured and ":" in configured and configured != _DEFAULT_MODEL:
+            return configured, True
 
         # 2. Check locally installed models via /api/tags
         installed = self.get_available_models()
         if installed:
             # If user explicitly configured a model that is installed, use it exactly
             if configured and configured in installed:
-                return configured
+                return configured, True
 
             # If user configured a model with prefix match (e.g. "qwen2.5-coder" matches "qwen2.5-coder:14b")
             if configured and configured != _DEFAULT_MODEL:
                 for m in installed:
                     if m == configured or m.startswith(f"{configured}:"):
-                        return m
+                        return m, True
                 # Configured model not currently installed but explicitly set — honour it.
                 # Ollama will surface a clear error if the model is truly missing,
                 # which is better than silently switching to a different model.
-                return configured
+                return configured, True
 
             # No explicit model configured: auto-select from preferred list
             preferred = [
@@ -120,13 +145,13 @@ class OllamaProvider(AIProvider):
             for pref in preferred:
                 for m in installed:
                     if m == pref or m.startswith(pref.split(":")[0]):
-                        return m
+                        return m, True
 
             # Otherwise return first installed model
-            return installed[0]
+            return installed[0], True
 
         # 3. Fallback to configured model or default (Ollama not reachable at init time)
-        return configured or _DEFAULT_MODEL
+        return configured or _DEFAULT_MODEL, False
 
     @property
     def capabilities(self) -> ProviderCapabilities:

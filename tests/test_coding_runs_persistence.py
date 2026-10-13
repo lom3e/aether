@@ -10,6 +10,7 @@ from pathlib import Path
 from unittest.mock import patch
 
 import pytest
+from fake_agent_script import write_agent_script
 
 from aether.actions.executor import ActionExecutor, ActionSafetyPolicy
 from aether.actions.models import ActionExecutionStatus
@@ -35,10 +36,7 @@ def registry(monkeypatch):
 
 
 def make_agent(tmp_path, body):
-    script = tmp_path / "agent.sh"
-    script.write_text("#!/bin/sh\n" + body + "\n", encoding="utf-8")
-    script.chmod(script.stat().st_mode | stat.S_IEXEC)
-    return str(script)
+    return write_agent_script(tmp_path, "agent", body)
 
 
 def orchestrator_for(provider, agent):

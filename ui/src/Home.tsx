@@ -10,7 +10,7 @@ import { ToastContext } from './toast';
 import { AutoArchitectModal } from './AutoArchitectModal';
 import { TopHeader } from './TopHeader';
 import { NotificationCenter } from './NotificationCenter';
-import { submitApprovalDecision } from './canonicalNotification';
+import { submitApprovalDecision, approvalToastKind, approvalIsFinished, approvalIsInProgress } from './canonicalNotification';
 
 interface HomeProps {
   navigate: (view: string, params?: any) => void;
@@ -214,7 +214,7 @@ export function Home({
 
   const toggleListening = () => {
     if (!recognitionRef.current) {
-      showToast('Speech recognition not supported in this browser.', 'warning');
+      showToast(t('homeUiSpeechRecognitionNotSupportedInThis'), 'warning');
       return;
     }
     if (isListening) {
@@ -224,7 +224,7 @@ export function Home({
       try {
         recognitionRef.current.start();
         setIsListening(true);
-        showToast('Listening... Speak your request.', 'info');
+        showToast(t('homeUiListeningSpeakYourRequest'), 'info');
       } catch (e) {
         console.error(e);
       }
@@ -233,7 +233,7 @@ export function Home({
 
   const handleSpeakText = (msgId: string, text: string) => {
     if (!('speechSynthesis' in window)) {
-      showToast('Audio synthesis not supported in this browser.', 'warning');
+      showToast(t('homeUiAudioSynthesisNotSupportedInThis'), 'warning');
       return;
     }
     if (isSpeaking && speakingMessageId === msgId) {
@@ -297,7 +297,7 @@ export function Home({
         fetchOverview();
       } else {
         const errData = await res.json().catch(() => ({}));
-        const errMsg = errData.detail || 'Error processing request.';
+        const errMsg = errData.detail || t('homeUiErrorProcessingRequest');
         showToast(errMsg, 'error');
         setMessages(prev => [...prev, {
           id: `err-${Date.now()}`,
@@ -306,7 +306,7 @@ export function Home({
           tier: 'answer',
           steps: [{
             id: `step-err-${Date.now()}`,
-            title: 'Request failed',
+            title: t('homeUiRequestFailed'),
             status: 'failed',
             category: 'error',
             details: { error: errMsg },
@@ -316,7 +316,7 @@ export function Home({
       }
     } catch (err: any) {
       console.error('Chat error', err);
-      const errMsg = err?.message || 'Network error while contacting Aether.';
+      const errMsg = err?.message || t('homeUiNetworkErrorWhileContactingAether');
       showToast(errMsg, 'error');
       setMessages(prev => [...prev, {
         id: `err-${Date.now()}`,
@@ -325,7 +325,7 @@ export function Home({
         tier: 'answer',
         steps: [{
           id: `step-err-${Date.now()}`,
-          title: 'Network connection failed',
+          title: t('homeUiNetworkConnectionFailed'),
           status: 'failed',
           category: 'error',
           details: { error: errMsg },
@@ -361,23 +361,41 @@ export function Home({
       });
 
       if (res.success) {
-        showToast(res.message, res.status === 'already_completed' ? 'info' : 'success');
+        showToast(res.message, approvalToastKind(res, 'approve'));
         fetchOverview();
-        // Update local message step status
+        // Update the local step with what really happened: finished, still going, or merely started.
+        const finished = approvalIsFinished(res);
+        const inProgress = approvalIsInProgress(res);
         setMessages(prev => prev.map(msg => {
           if (msg.action_execution_id === executionId) {
             return {
               ...msg,
-              steps: msg.steps.map(s => (s.status === 'pending_approval' || s.status === 'waiting_approval') ? { ...s, status: 'completed', title: 'Action approved & executed' } : s),
+              steps: msg.steps.map(s => (s.status === 'pending_approval' || s.status === 'waiting_approval')
+                ? (finished
+                    ? { ...s, status: 'completed', title: t('homeUiActionApprovedExecuted') }
+                    : inProgress
+                    ? { ...s, status: 'running', title: t('homeUiActionApprovedStillInProgress') }
+                    : { ...s, status: 'running', title: t('homeUiActionApproved') })
+                : s),
             };
           }
           return msg;
         }));
       } else {
         showToast(res.message, 'error');
+        fetchOverview(); // the action may have failed after approval: show its real state
+        setMessages(prev => prev.map(msg => {
+          if (msg.action_execution_id === executionId && res.status === 'failed') {
+            return {
+              ...msg,
+              steps: msg.steps.map(s => (s.status === 'pending_approval' || s.status === 'waiting_approval') ? { ...s, status: 'failed', title: t('homeUiActionApprovedButFailed') } : s),
+            };
+          }
+          return msg;
+        }));
       }
     } catch (err: any) {
-      showToast(err.message || 'Error approving action.', 'error');
+      showToast(err.message || t('homeUiErrorApprovingAction'), 'error');
     } finally {
       setActionLoading(null);
     }
@@ -402,7 +420,7 @@ export function Home({
           if (msg.action_execution_id === executionId) {
             return {
               ...msg,
-              steps: msg.steps.map(s => (s.status === 'pending_approval' || s.status === 'waiting_approval') ? { ...s, status: 'failed', title: 'Action declined' } : s),
+              steps: msg.steps.map(s => (s.status === 'pending_approval' || s.status === 'waiting_approval') ? { ...s, status: 'failed', title: t('homeUiActionDeclined') } : s),
             };
           }
           return msg;
@@ -411,7 +429,7 @@ export function Home({
         showToast(res.message, 'error');
       }
     } catch (err: any) {
-      showToast(err.message || 'Error declining action.', 'error');
+      showToast(err.message || t('homeUiErrorDecliningAction'), 'error');
     } finally {
       setActionLoading(null);
     }
@@ -427,14 +445,14 @@ export function Home({
       });
       if (res.ok) {
         const accepted = await res.json().catch(() => ({} as any));
-        showToast('Proposal accepted and authorized for execution.', 'success');
+        showToast(t('homeUiProposalAcceptedAndAuthorizedForExecution'), 'success');
         fetchOverview();
         setMessages(prev => prev.map(msg => {
           if (msg.metadata?.proposal_id === proposalId) {
             return {
               ...msg,
               metadata: { ...msg.metadata, status: 'accepted' },
-              steps: msg.steps.map(s => s.details?.proposal_id === proposalId ? { ...s, status: 'completed', title: 'Proposal accepted' } : s),
+              steps: msg.steps.map(s => s.details?.proposal_id === proposalId ? { ...s, status: 'completed', title: t('homeUiProposalAccepted') } : s),
             };
           }
           return msg;
@@ -462,15 +480,15 @@ export function Home({
             fetchOverview();
           } else {
             const errData = await follow.json().catch(() => ({}));
-            showToast(errData.detail || 'The accepted request could not be started.', 'error');
+            showToast(errData.detail || t('homeUiTheAcceptedRequestCouldNotBe'), 'error');
           }
         }
       } else {
         const err = await res.json().catch(() => ({}));
-        showToast(err.detail || 'Failed to accept proposal.', 'error');
+        showToast(err.detail || t('homeUiFailedToAcceptProposal'), 'error');
       }
     } catch (err: any) {
-      showToast(err.message || 'Error accepting proposal.', 'error');
+      showToast(err.message || t('homeUiErrorAcceptingProposal'), 'error');
     } finally {
       setActionLoading(null);
     }
@@ -485,12 +503,12 @@ export function Home({
           return {
             ...msg,
             metadata: { ...msg.metadata, status: 'rejected' },
-            steps: msg.steps.map(s => s.details?.proposal_id === proposalId ? { ...s, status: 'failed', title: 'Proposal declined' } : s),
+            steps: msg.steps.map(s => s.details?.proposal_id === proposalId ? { ...s, status: 'failed', title: t('homeUiProposalDeclined') } : s),
           };
         }
         return msg;
       }));
-      showToast('Proposal declined.', 'info');
+      showToast(t('homeUiProposalDeclined2'), 'info');
     } finally {
       setActionLoading(null);
     }
@@ -552,7 +570,7 @@ export function Home({
               onClick={fetchOverview}
               style={{ display: 'flex', alignItems: 'center', gap: '6px', fontSize: '13px' }}
             >
-              <RefreshCw size={14} /> Aggiorna
+              <RefreshCw size={14} /> {t('connRefresh')}
             </button>
           </div>
         }
@@ -563,27 +581,27 @@ export function Home({
           <div>
             <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
               <h1 style={{ fontSize: '24px', fontWeight: 700, margin: 0, color: 'hsl(var(--fg))' }}>
-                Di cosa hai bisogno oggi?
+                {t('homeUiWhatDoYouNeedToday')}
               </h1>
               <span className="badge badge-primary" style={{ fontSize: '12px', padding: '2px 8px' }}>
                 {workspaceName}
               </span>
               {overview.pending_approvals?.length > 0 ? (
                 <span className="badge" style={{ backgroundColor: '#f59e0b20', color: '#f59e0b', border: '1px solid #f59e0b50', fontSize: '11px' }}>
-                  {overview.pending_approvals.length} Richiede la tua approvazione
+                  {overview.pending_approvals.length} {t('homeUiNeedsApproval')}
                 </span>
               ) : overview.background_tasks?.some((t: any) => t.status === 'running') ? (
                 <span className="badge" style={{ backgroundColor: 'hsl(var(--primary)/0.15)', color: 'hsl(var(--primary))', fontSize: '11px' }}>
-                  Lavori in corso
+                  {t('homeUiWorkInProgress')}
                 </span>
               ) : (
                 <span className="badge" style={{ backgroundColor: '#10b98115', color: '#10b981', border: '1px solid #10b98130', fontSize: '11px' }}>
-                  Pronto ad aiutarti
+                  {t('homeUiReadyToHelp')}
                 </span>
               )}
             </div>
             <p style={{ margin: '6px 0 0', fontSize: '14px', color: 'hsl(var(--muted-fg))' }}>
-              Descrivi il tuo obiettivo o chiedi ad Aether di occuparsi delle tue attività. Le azioni critiche richiederanno sempre la tua approvazione.
+              {t('homeUiDescribeYourGoalOrAskAether')}
             </p>
           </div>
         </div>
@@ -617,7 +635,7 @@ export function Home({
                 data-testid="companion-input-field"
                 className="input"
                 rows={2}
-                placeholder={isListening ? "In ascolto... Parla chiaramente" : "Cosa vuoi che faccia Aether oggi? (es. 'Pianifica la mia giornata', 'Scrivi un brief', 'Verifica impegni di domani', 'Aether, pensaci tu')"}
+                placeholder={isListening ? t('homeUiListeningSpeakClearly') : t('homeUiWhatWouldYouLikeAetherTo')}
                 value={promptInput}
                 onChange={e => setPromptInput(e.target.value)}
                 onKeyDown={e => {
@@ -634,45 +652,45 @@ export function Home({
                   <button
                     type="button"
                     className="btn btn-ghost"
-                    onClick={() => handleSendPrompt('Aether, fai un punto della situazione e dimmi cosa richiede la mia attenzione oggi')}
+                    onClick={() => handleSendPrompt(t('homeUiAetherGiveMeAStatusUpdate'))}
                     style={{ fontSize: '12px', padding: '4px 10px', borderRadius: '12px', backgroundColor: 'hsl(var(--primary)/0.1)', color: 'hsl(var(--primary))', fontWeight: 600 }}
                   >
-                    <Sparkles size={12} style={{ marginRight: '4px' }} /> Aether, pensaci tu
+                    <Sparkles size={12} style={{ marginRight: '4px' }} /> {t('homeUiAetherHandleIt')}
                   </button>
                   <button
                     type="button"
                     className="btn btn-ghost"
                     onClick={() => {
                       if (onNewTask) onNewTask();
-                      else handleSendPrompt('Nuovo compito');
+                      else handleSendPrompt(t('homeUiNewTask'));
                     }}
                     style={{ fontSize: '12px', padding: '4px 10px', borderRadius: '12px', backgroundColor: 'hsl(var(--muted)/0.5)' }}
                   >
-                    <Plus size={12} style={{ marginRight: '4px' }} /> Nuovo compito
+                    <Plus size={12} style={{ marginRight: '4px' }} /> {t('homeUiNewTask')}
                   </button>
                   <button
                     type="button"
                     className="btn btn-ghost"
-                    onClick={() => handleSendPrompt('Verifica i miei appuntamenti sul calendario per domani')}
+                    onClick={() => handleSendPrompt(t('homeUiCheckMyCalendarAppointmentsForTomorrow'))}
                     style={{ fontSize: '12px', padding: '4px 10px', borderRadius: '12px', backgroundColor: 'hsl(var(--muted)/0.5)' }}
                   >
-                    <Calendar size={12} style={{ marginRight: '4px' }} /> Verifica agenda
+                    <Calendar size={12} style={{ marginRight: '4px' }} /> {t('homeUiCheckSchedule')}
                   </button>
                   <button
                     type="button"
                     className="btn btn-ghost"
-                    onClick={() => handleSendPrompt('Crea un documento con le note operative di progetto')}
+                    onClick={() => handleSendPrompt(t('homeUiCreateADocumentWithTheProject'))}
                     style={{ fontSize: '12px', padding: '4px 10px', borderRadius: '12px', backgroundColor: 'hsl(var(--muted)/0.5)' }}
                   >
-                    <FileText size={12} style={{ marginRight: '4px' }} /> Crea documento
+                    <FileText size={12} style={{ marginRight: '4px' }} /> {t('homeUiCreateDocument')}
                   </button>
                   <button
                     type="button"
                     className="btn btn-ghost"
-                    onClick={() => handleSendPrompt('Delega al team: analizza gli obiettivi del workspace')}
+                    onClick={() => handleSendPrompt(t('homeUiDelegateToTheTeamAnalyzeThe'))}
                     style={{ fontSize: '12px', padding: '4px 10px', borderRadius: '12px', backgroundColor: 'hsl(var(--muted)/0.5)' }}
                   >
-                    <Users size={12} style={{ marginRight: '4px' }} /> Delega al team
+                    <Users size={12} style={{ marginRight: '4px' }} /> {t('homeUiDelegateToTeam')}
                   </button>
                 </div>
 
@@ -682,7 +700,7 @@ export function Home({
                     type="button"
                     data-testid="voice-mic-btn"
                     onClick={toggleListening}
-                    title={isListening ? "Interrompi ascolto" : "Input vocale (clicca per parlare)"}
+                    title={isListening ? t('homeUiStopListening') : t('homeUiVoiceInputClickToSpeak')}
                     className={`btn ${isListening ? 'btn-danger' : 'btn-ghost'}`}
                     style={{
                       padding: '6px 10px',
@@ -694,7 +712,7 @@ export function Home({
                     }}
                   >
                     {isListening ? <MicOff size={16} /> : <Mic size={16} />}
-                    <span style={{ fontSize: '12px' }}>{isListening ? 'In ascolto...' : 'Voce'}</span>
+                    <span style={{ fontSize: '12px' }}>{isListening ? t('homeUiListening') : t('homeUiVoice')}</span>
                   </button>
 
                   <button
@@ -704,7 +722,7 @@ export function Home({
                     onClick={() => handleSendPrompt(promptInput)}
                     style={{ padding: '6px 16px', display: 'flex', alignItems: 'center', gap: '6px', fontSize: '13px' }}
                   >
-                    {isSubmitting ? 'Elaborazione...' : 'Pensaci tu'}
+                    {isSubmitting ? t('homeUiProcessing') : t('homeUiTakeCareOfIt')}
                     <Send size={14} />
                   </button>
                 </div>
@@ -730,7 +748,7 @@ export function Home({
                 <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '8px' }}>
                   <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
                     <span style={{ fontWeight: 600, fontSize: '13px', color: msg.role === 'user' ? 'hsl(var(--fg))' : 'hsl(var(--primary))' }}>
-                      {msg.role === 'user' ? 'Tu' : 'Aether'}
+                      {msg.role === 'user' ? t('homeUiYou') : 'Aether'}
                     </span>
                     <span style={{ fontSize: '11px', color: 'hsl(var(--muted-fg))' }}>
                       {msg.created_at ? new Date(msg.created_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : ''}
@@ -741,7 +759,7 @@ export function Home({
                     <button
                       type="button"
                       onClick={() => handleSpeakText(msg.id, msg.content)}
-                      title={isSpeaking && speakingMessageId === msg.id ? "Interrompi audio" : "Leggi a voce"}
+                      title={isSpeaking && speakingMessageId === msg.id ? t('homeUiStopAudio') : t('homeUiReadAloud')}
                       className="btn btn-ghost"
                       style={{ padding: '4px', height: 'auto', color: 'hsl(var(--muted-fg))' }}
                     >
@@ -779,7 +797,7 @@ export function Home({
                   <div style={{ marginTop: '14px', padding: '12px 16px', borderRadius: '10px', backgroundColor: '#f59e0b10', border: '1px solid #f59e0b40', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
                     <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
                       <Shield size={16} color="#f59e0b" />
-                      <span style={{ fontSize: '13px', fontWeight: 600, color: '#f59e0b' }}>Conferma richiesta</span>
+                      <span style={{ fontSize: '13px', fontWeight: 600, color: '#f59e0b' }}>{t('homeUiConfirmationRequired')}</span>
                     </div>
                     <div style={{ display: 'flex', gap: '8px' }}>
                       <button
@@ -793,7 +811,7 @@ export function Home({
                           opacity: actionLoading === msg.action_execution_id ? 0.6 : 1,
                         }}
                       >
-                        <X size={13} style={{ marginRight: '4px' }} /> Rifiuta
+                        <X size={13} style={{ marginRight: '4px' }} /> {t('reject')}
                       </button>
                       <button
                         className="btn btn-primary"
@@ -812,7 +830,7 @@ export function Home({
                         ) : (
                           <Check size={13} style={{ marginRight: '4px' }} />
                         )}
-                        {actionLoading === msg.action_execution_id ? 'Approvazione…' : 'Approva'}
+                        {actionLoading === msg.action_execution_id ? t('homeUiApproving') : t('approve')}
                       </button>
                     </div>
                   </div>
@@ -823,7 +841,7 @@ export function Home({
                   <div style={{ marginTop: '14px', padding: '12px 16px', borderRadius: '10px', backgroundColor: '#f59e0b10', border: '1px solid #f59e0b40', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
                     <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
                       <Shield size={16} color="#f59e0b" />
-                      <span style={{ fontSize: '13px', fontWeight: 600, color: '#f59e0b' }}>Conferma richiesta</span>
+                      <span style={{ fontSize: '13px', fontWeight: 600, color: '#f59e0b' }}>{t('homeUiConfirmationRequired')}</span>
                     </div>
                     <div style={{ display: 'flex', gap: '8px' }}>
                       <button
@@ -837,7 +855,7 @@ export function Home({
                           opacity: actionLoading === msg.metadata!.proposal_id ? 0.6 : 1,
                         }}
                       >
-                        <X size={13} style={{ marginRight: '4px' }} /> Rifiuta
+                        <X size={13} style={{ marginRight: '4px' }} /> {t('reject')}
                       </button>
                       <button
                         className="btn btn-primary"
@@ -856,7 +874,7 @@ export function Home({
                         ) : (
                           <Check size={13} style={{ marginRight: '4px' }} />
                         )}
-                        {actionLoading === msg.metadata!.proposal_id ? 'Approvazione…' : 'Approva'}
+                        {actionLoading === msg.metadata!.proposal_id ? t('homeUiApproving') : t('approve')}
                       </button>
                     </div>
                   </div>
@@ -877,7 +895,7 @@ export function Home({
                 </h2>
               </div>
               <span style={{ fontSize: '12px', color: '#f59e0b', fontWeight: 500 }}>
-                Operazioni in pausa in attesa della tua conferma
+                {t('homeUiOperationsPausedWaitingForYourConfirmation')}
               </span>
             </div>
             <div style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
@@ -904,33 +922,33 @@ export function Home({
                     <div style={{ flex: 1, marginRight: '16px' }}>
                       <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
                         <span style={{ fontSize: '10px', fontWeight: 700, padding: '2px 7px', borderRadius: '4px', backgroundColor: '#f59e0b20', color: '#f59e0b', textTransform: 'uppercase', letterSpacing: '0.04em' }}>
-                          Conferma richiesta
+                          {t('homeUiConfirmationRequired')}
                         </span>
                         <span style={{ fontWeight: 600, fontSize: '14.5px' }}>{appr.human_summary || appr.action_name}</span>
                       </div>
                       {appr.action_id === 'email.send' && (
                         <div style={{ fontSize: '12.5px', color: 'hsl(var(--fg)/0.85)', marginTop: '6px', padding: '8px 12px', backgroundColor: 'hsl(var(--muted)/0.3)', borderRadius: '6px' }}>
                           <div><strong>A:</strong> {appr.input_data?.to}</div>
-                          <div><strong>Oggetto:</strong> {appr.input_data?.subject}</div>
+                          <div><strong>{t('homeUiSubjectLabel')}</strong> {appr.input_data?.subject}</div>
                           {appr.input_data?.body && <div style={{ marginTop: '4px', whiteSpace: 'pre-wrap', color: 'hsl(var(--muted-fg))' }}>{appr.input_data.body}</div>}
                         </div>
                       )}
                       {appr.action_id === 'github.create_issue' && (
                         <div style={{ fontSize: '12.5px', color: 'hsl(var(--fg)/0.85)', marginTop: '6px', padding: '8px 12px', backgroundColor: 'hsl(var(--muted)/0.3)', borderRadius: '6px' }}>
                           <div><strong>Repository:</strong> {appr.input_data?.owner ? `${appr.input_data.owner}/${appr.input_data.repository}` : (appr.input_data?.repository || 'repository')}</div>
-                          <div><strong>Titolo:</strong> {appr.input_data?.title}</div>
+                          <div><strong>{t('homeUiTitleLabel')}</strong> {appr.input_data?.title}</div>
                           {appr.input_data?.body && <div style={{ marginTop: '4px', whiteSpace: 'pre-wrap', color: 'hsl(var(--muted-fg))' }}>{appr.input_data.body}</div>}
                         </div>
                       )}
                       {appr.action_id === 'slack.send_message' && (
                         <div style={{ fontSize: '12.5px', color: 'hsl(var(--fg)/0.85)', marginTop: '6px', padding: '8px 12px', backgroundColor: 'hsl(var(--muted)/0.3)', borderRadius: '6px' }}>
-                          <div><strong>Canale:</strong> {appr.input_data?.channel || '#general'}</div>
+                          <div><strong>{t('homeUiChannelLabel')}</strong> {appr.input_data?.channel || '#general'}</div>
                           {appr.input_data?.text && <div style={{ marginTop: '4px', whiteSpace: 'pre-wrap', color: 'hsl(var(--muted-fg))' }}>{appr.input_data.text}</div>}
                         </div>
                       )}
                       {appr.action_id === 'calendar.create_event' && (
                         <div style={{ fontSize: '12.5px', color: 'hsl(var(--muted-fg))', marginTop: '4px' }}>
-                          {appr.input_data?.start_time ? `Orario: ${appr.input_data.start_time}` : ''} {appr.input_data?.location ? `• Luogo: ${appr.input_data.location}` : ''}
+                          {appr.input_data?.start_time ? `${t('homeUiTimeLabel')} ${appr.input_data.start_time}` : ''} {appr.input_data?.location ? `• ${t('homeUiLocationLabel')} ${appr.input_data.location}` : ''}
                         </div>
                       )}
                     </div>
@@ -941,7 +959,7 @@ export function Home({
                         onClick={() => handleRejectAction(appr.execution_id)}
                         style={{ fontSize: '12px', padding: '6px 12px', color: 'hsl(var(--destructive))', opacity: isLoading ? 0.6 : 1 }}
                       >
-                        Rifiuta
+                        {t('reject')}
                       </button>
                       <button
                         className="btn btn-primary"
@@ -959,7 +977,7 @@ export function Home({
                         }}
                       >
                         {isLoading && <Loader2 size={13} className="animate-spin" />}
-                        {isLoading ? 'Approvazione…' : 'Approva'}
+                        {isLoading ? t('homeUiApproving') : t('approve')}
                       </button>
                     </div>
                   </div>
@@ -984,7 +1002,7 @@ export function Home({
                 onClick={() => navigate('missions')}
                 style={{ fontSize: '12px', padding: '2px 8px', color: 'hsl(var(--primary))' }}
               >
-                Vedi tutti i lavori →
+                {t('homeUiViewAllJobs')}
               </button>
             </div>
             <div style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
@@ -1004,7 +1022,7 @@ export function Home({
                 >
                   <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
                     <div>
-                      <span style={{ fontWeight: 600, fontSize: '14px' }}>{task.title || 'Attività operativa in background'}</span>
+                      <span style={{ fontWeight: 600, fontSize: '14px' }}>{task.title || t('homeUiBackgroundOperation')}</span>
                       <div style={{ fontSize: '12px', color: 'hsl(var(--muted-fg))', marginTop: '2px' }}>
                         {task.current_step || task.status}
                       </div>
@@ -1013,7 +1031,7 @@ export function Home({
                       className={`badge ${task.status === 'completed' ? 'badge-success' : task.status === 'running' ? 'badge-primary' : 'badge-warning'}`}
                       style={{ fontSize: '11px', textTransform: 'capitalize' }}
                     >
-                      {task.status === 'completed' ? 'Completato' : task.status === 'running' ? 'In esecuzione' : task.status}
+                      {task.status === 'completed' ? t('homeUiCompleted') : task.status === 'running' ? t('homeUiRunning') : task.status}
                     </span>
                   </div>
 
@@ -1061,7 +1079,7 @@ export function Home({
                 onClick={() => navigate('results')}
                 style={{ fontSize: '12px', padding: '2px 8px', color: 'hsl(var(--primary))' }}
               >
-                Apri in Risultati →
+                {t('homeUiOpenInResults')}
               </button>
             </div>
             <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(280px, 1fr))', gap: '12px' }}>
@@ -1123,9 +1141,9 @@ export function Home({
             </div>
             <div style={{ fontSize: '12.5px', color: 'hsl(var(--muted-fg))' }}>
               {overview.active_works?.length > 0 ? (
-                <span><strong>{overview.active_works.length}</strong> missioni attive in esecuzione.</span>
+                <span><strong>{overview.active_works.length}</strong> {t('homeUiActiveMissions')}</span>
               ) : (
-                <span>Progetti in corso e compiti supervisionati.</span>
+                <span>{t('homeUiOngoingProjectsAndSupervisedTasks')}</span>
               )}
             </div>
           </div>
@@ -1143,7 +1161,7 @@ export function Home({
               <ArrowRight size={15} color="hsl(var(--muted-fg))" />
             </div>
             <div style={{ fontSize: '12.5px', color: 'hsl(var(--muted-fg))' }}>
-              <span><strong>{overview.connected_apps_count || 0}</strong> app configurate e verificate.</span>
+              <span><strong>{overview.connected_apps_count || 0}</strong> {t('homeUiAppsVerified')}</span>
             </div>
           </div>
 
@@ -1160,7 +1178,7 @@ export function Home({
               <ArrowRight size={15} color="hsl(var(--muted-fg))" />
             </div>
             <div style={{ fontSize: '12.5px', color: 'hsl(var(--muted-fg))' }}>
-              <span>Pianificazioni automatiche e compiti ricorrenti.</span>
+              <span>{t('homeUiAutomaticSchedulesAndRecurringTasks')}</span>
             </div>
           </div>
 
@@ -1177,7 +1195,7 @@ export function Home({
               <ArrowRight size={15} color="hsl(var(--muted-fg))" />
             </div>
             <div style={{ fontSize: '12.5px', color: 'hsl(var(--muted-fg))' }}>
-              <span>Registro trasparente di tutte le azioni eseguite.</span>
+              <span>{t('homeUiTransparentLogOfAllExecutedActions')}</span>
             </div>
           </div>
         </div>

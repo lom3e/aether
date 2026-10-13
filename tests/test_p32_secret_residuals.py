@@ -13,6 +13,7 @@ import json
 import logging
 import os
 from pathlib import Path
+from contextlib import closing
 import sqlite3
 import pytest
 
@@ -112,7 +113,7 @@ def test_sentinel_residual_scan_across_databases_and_disk(tmp_path: Path, caplog
             )
 
         # Also inspect table contents via SQL queries
-        with sqlite3.connect(str(db_path)) as conn:
+        with closing(sqlite3.connect(str(db_path))) as conn, conn:
             cursor = conn.cursor()
             tables = [r[0] for r in cursor.execute("SELECT name FROM sqlite_master WHERE type='table';").fetchall()]
             for tbl in tables:

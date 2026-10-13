@@ -19,7 +19,11 @@ import subprocess
 import time
 import urllib.request
 from pathlib import Path
+import sys
 import pytest
+
+pytestmark = pytest.mark.skipif(sys.platform != "darwin", reason="macOS-only: tests the Aether.dmg disk image (needs macOS: hdiutil)")
+
 
 
 def _get_repo_root() -> Path:

@@ -1208,14 +1208,24 @@ class MissionStore:
 
     def _list_deliverables_legacy(self, mission_id: str) -> list[Deliverable]:
         """Fallback for un-migrated missions or dynamic activity inspection."""
-        mission = self.get_mission(mission_id, include_milestones=False)
-        if not mission:
+        # Read the two columns we need directly: get_mission() itself calls list_deliverables(), so going through
+        # it from here recursed without bound (one SQLite connection per level) until RecursionError.
+        with self._get_connection() as conn:
+            mission_row = conn.execute(
+                "SELECT conversation_id, metadata FROM missions WHERE id = ?", (mission_id,)
+            ).fetchone()
+        if not mission_row:
             return []
+        try:
+            mission_metadata = json.loads(mission_row["metadata"] or "{}")
+        except Exception:
+            mission_metadata = {}
+        conversation_id = mission_row["conversation_id"]
 
         deliverables: list[Deliverable] = []
         seen_paths: set[str] = set()
 
-        raw_delivs = mission.metadata.get("deliverables") if isinstance(mission.metadata, dict) else None
+        raw_delivs = mission_metadata.get("deliverables") if isinstance(mission_metadata, dict) else None
         if isinstance(raw_delivs, list):
             for item in raw_delivs:
                 if isinstance(item, dict):
@@ -1234,7 +1244,7 @@ class MissionStore:
                     if d.path:
                         seen_paths.add(d.path)
 
-        if mission.conversation_id:
+        if conversation_id:
             try:
                 with self._get_connection() as conn:
                     rows = conn.execute(
@@ -1244,7 +1254,7 @@ class MissionStore:
                         WHERE conversation_id = ? AND (activity_type LIKE '%file%' OR metadata LIKE '%"path"%')
                         ORDER BY created_at ASC
                         """,
-                        (mission.conversation_id,),
+                        (conversation_id,),
                     ).fetchall()
 
                 for row in rows:

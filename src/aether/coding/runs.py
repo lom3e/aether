@@ -29,6 +29,7 @@ from typing import Any, Callable
 
 from aether.coding.evidence import TreeSnapshot, snapshot_from_blob, snapshot_to_blob
 from aether.coding.models import CodingExecutionStatus, CodingTaskExecution
+from aether.core.process_control import new_process_group_kwargs, terminate_process_tree
 from aether.core.sqlite import get_sqlite_connection
 
 logger = logging.getLogger(__name__)
@@ -370,18 +371,14 @@ def run_authorised_tests(
     scratch_home = tempfile.mkdtemp(prefix="aether_testhome_")
     proc = subprocess.Popen(
         list(cmd.argv), cwd=str(project), env=_clean_env(project, scratch_home), stdout=subprocess.PIPE,
-        stderr=subprocess.STDOUT, text=True, start_new_session=True,
+        stderr=subprocess.STDOUT, text=True, **new_process_group_kwargs(),
     )
     timed_out = False
     try:
         out, _ = proc.communicate(timeout=timeout_seconds)
     except subprocess.TimeoutExpired:
         timed_out = True
-        import signal
-        try:
-            os.killpg(os.getpgid(proc.pid), signal.SIGKILL)
-        except Exception:
-            proc.kill()
+        terminate_process_tree(proc, force=True)
         out, _ = proc.communicate()
     shutil.rmtree(scratch_home, ignore_errors=True)
     exit_code = proc.returncode

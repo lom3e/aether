@@ -372,7 +372,39 @@ class NotificationDispatcher:
             return DeliveryStatus.SKIPPED, "notify-send utility not installed on Linux"
 
         elif sys.platform == "win32":
-            return DeliveryStatus.QUEUED, "Windows notification queued"
+            if os.getenv("AETHER_DISABLE_DEV_WINDOWS_TOAST") == "1":
+                return DeliveryStatus.SKIPPED, "Windows toast fallback disabled via environment"
+            powershell = shutil.which("powershell") or shutil.which("pwsh")
+            if not powershell:
+                return DeliveryStatus.SKIPPED, "PowerShell not found; cannot show a Windows toast"
+            # Title and message travel in environment variables, never inside the script text (no command injection).
+            script = (
+                "$ErrorActionPreference='Stop';"
+                "[void][Windows.UI.Notifications.ToastNotificationManager,Windows.UI.Notifications,ContentType=WindowsRuntime];"
+                "[void][Windows.Data.Xml.Dom.XmlDocument,Windows.Data.Xml.Dom.XmlDocument,ContentType=WindowsRuntime];"
+                "$x=New-Object Windows.Data.Xml.Dom.XmlDocument;"
+                "$x.LoadXml('<toast><visual><binding template=\"ToastGeneric\"><text id=\"1\"></text><text id=\"2\"></text></binding></visual></toast>');"
+                "$t=$x.GetElementsByTagName('text');"
+                "[void]$t.Item(0).AppendChild($x.CreateTextNode($env:AETHER_TOAST_TITLE));"
+                "[void]$t.Item(1).AppendChild($x.CreateTextNode($env:AETHER_TOAST_MESSAGE));"
+                r"$id='{1AC14E77-02E7-4E5D-B744-2EB1AE5198B7}\WindowsPowerShell\v1.0\powershell.exe';"
+                "[Windows.UI.Notifications.ToastNotificationManager]::CreateToastNotifier($id).Show("
+                "[Windows.UI.Notifications.ToastNotification]::new($x))"
+            )
+            try:
+                proc = subprocess.run(
+                    [powershell, "-NoProfile", "-NonInteractive", "-Command", script],
+                    capture_output=True,
+                    text=True,
+                    timeout=15,
+                    check=False,
+                    env={**os.environ, "AETHER_TOAST_TITLE": title, "AETHER_TOAST_MESSAGE": message},
+                )
+                if proc.returncode == 0:
+                    return DeliveryStatus.SENT, "Toast submitted to Windows (shown unless Focus Assist is on)"
+                return DeliveryStatus.FAILED, f"Windows toast failed ({proc.returncode}): {proc.stderr.strip()[:200]}"
+            except Exception as e:
+                return DeliveryStatus.FAILED, f"Windows notification failed: {e}"
 
         return DeliveryStatus.SKIPPED, f"Desktop notifications not supported on platform {sys.platform}"
 

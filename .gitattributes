@@ -1,0 +1,5 @@
+# The served UI bundle is hashed byte-for-byte (src/aether/server/static/.build_manifest.json): never let a checkout
+# rewrite its line endings (Windows core.autocrlf=true would turn LF into CRLF and break the integrity check).
+src/aether/server/static/** -text
+ui/public/** -text
+ui/index.html -text

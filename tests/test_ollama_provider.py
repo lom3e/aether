@@ -60,9 +60,10 @@ class TestOllamaProviderDefaults:
 
     def test_custom_config(self) -> None:
         cfg = ProviderConfig(base_url="http://myserver:11434", model="mistral")
-        p = OllamaProvider(cfg)
+        p = OllamaProvider(cfg)  # no I/O
         assert p._endpoint == "http://myserver:11434/api/chat"
-        assert p._model == "mistral"
+        with patch.object(OllamaProvider, "get_available_models", return_value=[]):  # an untagged name is looked up on first use
+            assert p._model == "mistral"
 
 
 class TestOllamaProviderGenerate:
@@ -258,6 +259,7 @@ class TestOllamaProviderErrors:
 
 
 @pytest.mark.integration
+@pytest.mark.ollama  # the only tests allowed to reach the local Ollama port (loopback 11434)
 class TestOllamaProviderIntegration:
     """
     Integration tests — require a running Ollama server.

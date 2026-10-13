@@ -209,7 +209,9 @@ def test_ssrf_validator_blocks_internal_and_loopback_addresses():
         assert "SSRF Protection" in str(exc_v6.value)
 
 
-def test_ssrf_redirect_protection():
+def test_ssrf_redirect_protection(fake_dns):
+    fake_dns["example.com"] = "93.184.216.34"
+    fake_dns["httpbin.org"] = "93.184.216.35"  # public addresses: no DNS query is made
     """SafeRedirectHandler must block redirects leading to private or loopback IPs."""
     from aether.core.security import SafeRedirectHandler, safe_urlopen
     import urllib.request

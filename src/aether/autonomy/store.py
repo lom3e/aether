@@ -4,10 +4,12 @@ Supports ACID persistence, WAL mode, transaction isolation, and querying.
 """
 from __future__ import annotations
 
+from contextlib import contextmanager
+
 import json
 from pathlib import Path
 import sqlite3
-from typing import Any
+from typing import Any, Iterator
 
 from aether.autonomy.models import AutonomousGoal, AutonomousGoalStatus, AutonomousStage
 
@@ -20,9 +22,12 @@ class AutonomousGoalStore:
         Path(self.db_path).parent.mkdir(parents=True, exist_ok=True)
         self._init_db()
 
-    def _get_connection(self) -> sqlite3.Connection:
-        from aether.core.sqlite import get_sqlite_connection
-        return get_sqlite_connection(self.db_path)
+    @contextmanager
+    def _get_connection(self) -> Iterator[sqlite3.Connection]:
+        """Yields a connection in a commit/rollback transaction and always closes it (open handles lock files on Windows)."""
+        from aether.core.sqlite import sqlite_connection
+        with sqlite_connection(self.db_path) as conn:
+            yield conn
 
     def _init_db(self) -> None:
         with self._get_connection() as conn:
