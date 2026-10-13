@@ -163,7 +163,7 @@ def test_c_action_executor_direct_execution_do_tier(temp_workspace_dir):
 
     result = executor.execute(
         action_id="files.create_document",
-        workspace_id=ws.name,
+        workspace_id=ws.id,
         input_data={"filename": "report.md", "content": "Hello World"},
         authority=auth,
     )
@@ -171,7 +171,7 @@ def test_c_action_executor_direct_execution_do_tier(temp_workspace_dir):
     assert result.status == ActionExecutionStatus.SUCCEEDED
     assert result.output_data.get("bytes") == len("Hello World".encode("utf-8"))
 
-    activities = activity_svc.list(ws.name)
+    activities = activity_svc.list(ws.id)
     assert len(activities) == 1
     assert "Completed" in activities[0].title
 
@@ -198,7 +198,7 @@ def test_d_action_executor_safety_gating_act_tier(temp_workspace_dir):
     # With authority but auto_approve=False, HITL gate must still apply
     result = executor.execute(
         action_id="calendar.create_event",
-        workspace_id=ws.name,
+        workspace_id=ws.id,
         input_data={"title": "Client Sync", "start_time": "2026-09-10T10:00:00Z"},
         auto_approve=False,
         authority=auth,
@@ -207,7 +207,7 @@ def test_d_action_executor_safety_gating_act_tier(temp_workspace_dir):
     assert result.status == ActionExecutionStatus.WAITING_APPROVAL
     assert result.completed_at is None
 
-    activities = activity_svc.list(ws.name)
+    activities = activity_svc.list(ws.id)
     assert len(activities) == 1
     assert "Approval needed" in activities[0].title
 
@@ -237,7 +237,7 @@ def test_e_action_executor_approval_lifecycle(temp_workspace_dir):
     # 1. Queue pending execution (with authority, but HITL gate applies)
     pending = executor.execute(
         action_id="calendar.create_event",
-        workspace_id=ws.name,
+        workspace_id=ws.id,
         input_data={"title": "Team Retro", "start_time": "2026-09-12T15:00:00Z"},
         authority=auth,
     )
@@ -250,7 +250,7 @@ def test_e_action_executor_approval_lifecycle(temp_workspace_dir):
     assert approved.output_data.get("status") == "confirmed"
 
     # Verify event persisted in calendar
-    events = conn_svc.get_calendar_connector(ws.name).list_events()
+    events = conn_svc.get_calendar_connector(ws.id).list_events()
     assert len(events) == 1
     assert events[0]["title"] == "Team Retro"
 
@@ -276,7 +276,7 @@ def test_f_action_executor_rejection_lifecycle(temp_workspace_dir):
 
     pending = executor.execute(
         action_id="calendar.create_event",
-        workspace_id=ws.name,
+        workspace_id=ws.id,
         input_data={"title": "Unwanted Event", "start_time": "2026-09-15T09:00:00Z"},
         authority=auth,
     )
@@ -445,7 +445,7 @@ def test_m_personal_agent_answer_flow(workspace):
     personal_svc = workspace.personal
 
     res = personal_svc.process_prompt(
-        workspace_id=workspace.name,
+        workspace_id=workspace.id,
         prompt="Tell me what capabilities are available in Aether",
     )
 
@@ -460,7 +460,7 @@ def test_n_personal_agent_do_flow(workspace):
     personal_svc = workspace.personal
 
     res = personal_svc.process_prompt(
-        workspace_id=workspace.name,
+        workspace_id=workspace.id,
         prompt="Create a file named summary.txt with the meeting notes",
     )
 
@@ -476,7 +476,7 @@ def test_o_personal_agent_act_flow_with_safety_gate(workspace):
     personal_svc = workspace.personal
 
     res = personal_svc.process_prompt(
-        workspace_id=workspace.name,
+        workspace_id=workspace.id,
         prompt="Schedule a meeting with the Board of Directors for Friday",
     )
 
@@ -491,7 +491,7 @@ def test_p_personal_agent_delegate_flow(workspace):
     personal_svc = workspace.personal
 
     res = personal_svc.process_prompt(
-        workspace_id=workspace.name,
+        workspace_id=workspace.id,
         prompt="Launch mission: Conduct competitive analysis on European AI startups",
     )
 
@@ -506,12 +506,12 @@ def test_q_personal_overview_aggregation(workspace):
     personal_svc = workspace.personal
 
     # Connect a tool
-    workspace.connections.connect(workspace.name, "github", "lom3e")
+    workspace.connections.connect(workspace.id, "github", "lom3e")
 
     # Log an activity
-    workspace.activity.log(workspace.name, "Manual test", "Overview verification")
+    workspace.activity.log(workspace.id, "Manual test", "Overview verification")
 
-    overview = personal_svc.get_overview(workspace.name)
+    overview = personal_svc.get_overview(workspace.id)
     assert overview["connected_apps_count"] >= 1
     assert len(overview["recent_activities"]) >= 1
 
@@ -528,14 +528,14 @@ async def test_r_rest_personal_chat_and_sessions(workspace):
     req1 = make_request("POST", "/api/personal/chat")
     res1 = await personal_chat_route(
         req1,
-        PersonalChatPayload(prompt="What's on my calendar?", workspace_id=workspace.name),
+        PersonalChatPayload(prompt="What's on my calendar?", workspace_id=workspace.id),
     )
     assert res1["role"] == "assistant"
     session_id = res1["session_id"]
 
     # 2. List sessions
     req2 = make_request("GET", "/api/personal/sessions")
-    sess_list = await list_personal_sessions_route(req2, workspace_id=workspace.name)
+    sess_list = await list_personal_sessions_route(req2, workspace_id=workspace.id)
     assert len(sess_list) >= 1
 
     # 3. Get session details
@@ -545,7 +545,7 @@ async def test_r_rest_personal_chat_and_sessions(workspace):
 
     # 4. Overview endpoint
     req4 = make_request("GET", "/api/personal/overview")
-    ov_data = await get_personal_overview_route(req4, workspace_id=workspace.name)
+    ov_data = await get_personal_overview_route(req4, workspace_id=workspace.id)
     assert "pending_approvals" in ov_data
 
 
@@ -567,7 +567,7 @@ async def test_s_rest_actions_endpoints(workspace):
             ExecuteActionPayload(
                 action_id="calendar.create_event",
                 input_data={"title": "Unauthorized", "start_time": "2026-09-18T11:00:00Z"},
-                workspace_id=workspace.name,
+                workspace_id=workspace.id,
             ),
         )
     assert exc.value.status_code == 403
@@ -580,7 +580,7 @@ async def test_s_rest_actions_endpoints(workspace):
         ExecuteActionPayload(
             action_id="calendar.create_event",
             input_data={"title": "Design Review", "start_time": "2026-09-18T11:00:00Z"},
-            workspace_id=workspace.name,
+            workspace_id=workspace.id,
             authority=auth.to_dict(),
         ),
     )
@@ -594,7 +594,7 @@ async def test_s_rest_actions_endpoints(workspace):
 
     # 4. List executions
     req4 = make_request("GET", "/api/actions/executions")
-    execs_list = await list_action_executions_route(req4, workspace_id=workspace.name)
+    execs_list = await list_action_executions_route(req4, workspace_id=workspace.id)
     assert len(execs_list) >= 1
 
 
@@ -609,14 +609,14 @@ async def test_t_rest_connections_and_activity(workspace):
         ConnectPayload(
             provider="slack",
             account_name="engineering-workspace",
-            workspace_id=workspace.name,
+            workspace_id=workspace.id,
         ),
     )
     assert conn_data["status"] == "not_configured"
 
     # 2. List connections
     req2 = make_request("GET", "/api/connections")
-    conns_list = await list_connections_route(req2, workspace_id=workspace.name)
+    conns_list = await list_connections_route(req2, workspace_id=workspace.id)
     assert any(c["provider"] == "slack" for c in conns_list)
 
     # 3. Calendar events
@@ -626,18 +626,18 @@ async def test_t_rest_connections_and_activity(workspace):
         CreateCalendarEventPayload(
             title="Quarterly All Hands",
             start_time="2026-09-20T16:00:00Z",
-            workspace_id=workspace.name,
+            workspace_id=workspace.id,
         ),
     )
     assert cal_event["title"] == "Quarterly All Hands"
 
     req4 = make_request("GET", "/api/connections/calendar/events")
-    cal_list = await list_calendar_events_route(req4, workspace_id=workspace.name)
+    cal_list = await list_calendar_events_route(req4, workspace_id=workspace.id)
     assert len(cal_list) >= 1
 
     # 4. Activity feed
     req5 = make_request("GET", "/api/activity")
-    acts = await list_activity_route(req5, workspace_id=workspace.name)
+    acts = await list_activity_route(req5, workspace_id=workspace.id)
     assert len(acts) >= 1
 
 
@@ -652,7 +652,7 @@ async def test_u_personal_agent_real_file_operations_and_intelligence(workspace)
 
     # 1. Proposal generation boundary: mutating DO intent produces proposal without direct execution
     res_proposal = personal_svc.process_prompt(
-        workspace_id=workspace.name,
+        workspace_id=workspace.id,
         prompt="Create a file called release_notes.txt with version 1.6.0 updates",
     )
     assert res_proposal.metadata.get("status") == "proposal_pending"
@@ -672,7 +672,7 @@ async def test_u_personal_agent_real_file_operations_and_intelligence(workspace)
 
     # 3. Execute with genuine ExecutionAuthority
     res_create = personal_svc.process_prompt(
-        workspace_id=workspace.name,
+        workspace_id=workspace.id,
         prompt="Create a file called release_notes.txt with version 1.6.0 updates",
         authority=auth,
     )
@@ -689,7 +689,7 @@ async def test_u_personal_agent_real_file_operations_and_intelligence(workspace)
     assert intent_read.action_id == "files.read_document"
 
     res_read = personal_svc.process_prompt(
-        workspace_id=workspace.name,
+        workspace_id=workspace.id,
         prompt="Read file release_notes.txt",
     )
     assert res_read.tier == IntentTier.ANSWER
@@ -698,7 +698,7 @@ async def test_u_personal_agent_real_file_operations_and_intelligence(workspace)
 
     # 3. Intelligent operational synthesis on query
     res_query = personal_svc.process_prompt(
-        workspace_id=workspace.name,
+        workspace_id=workspace.id,
         prompt="Who are you and what can you do?",
     )
     assert "Aether" in res_query.content
@@ -749,7 +749,7 @@ async def test_v_connection_verification_and_secret_masking(workspace):
         ConnectPayload(
             provider="github",
             account_name="Engineering Org",
-            workspace_id=workspace.name,
+            workspace_id=workspace.id,
             auth_metadata={"token": raw_token, "org": "aether-corp"},
         ),
     )
@@ -761,13 +761,13 @@ async def test_v_connection_verification_and_secret_masking(workspace):
 
     # 4. List connections also masks secrets
     req_list = make_request("GET", "/api/connections")
-    conns = await list_connections_route(req_list, workspace_id=workspace.name)
+    conns = await list_connections_route(req_list, workspace_id=workspace.id)
     gh_conn = next(c for c in conns if c["provider"] == "github")
     assert gh_conn["auth_metadata"]["token"] != raw_token
     assert "..." in gh_conn["auth_metadata"]["token"]
 
     # 5. Underlying store keeps actual secret for backend tool execution
-    db_conn = workspace.connections.get_connection(workspace.name, "github")
+    db_conn = workspace.connections.get_connection(workspace.id, "github")
     assert db_conn.auth_metadata["token"] == raw_token
 
 

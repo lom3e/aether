@@ -1,0 +1,210 @@
+/* ==========================================================================
+   THOUGHT BUBBLES — LIGHTWEIGHT OPERATIONAL SURFACES
+   Orbital Emergence • Micro / Status / Attention Hierarchy • Field Transition
+   ========================================================================== */
+
+.thought-bubbles-container {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  z-index: 15;
+}
+
+/* Individual Thought Bubble Base */
+.thought-bubble {
+  position: absolute;
+  pointer-events: auto;
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+  background: rgba(18, 20, 29, 0.78);
+  backdrop-filter: blur(24px);
+  -webkit-backdrop-filter: blur(24px);
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  box-shadow: 0 12px 32px -8px rgba(0, 0, 0, 0.7), 0 0 16px rgba(140, 92, 246, 0.08);
+  color: var(--text-primary);
+  font-size: 13px;
+  line-height: 1.4;
+  padding: 8px 16px;
+  border-radius: var(--radius-pill);
+  transform-origin: center center;
+  animation: bubbleFloatIn 420ms var(--spring-smooth) forwards;
+  transition: all var(--duration-normal) var(--spring-smooth);
+}
+
+.thought-bubble:hover {
+  background: rgba(24, 27, 40, 0.9);
+  border-color: rgba(255, 255, 255, 0.18);
+  box-shadow: 0 16px 38px -6px rgba(0, 0, 0, 0.8), 0 0 24px rgba(140, 92, 246, 0.18);
+  transform: translateY(-2px) scale(1.02);
+}
+
+/* Bubble Icon / Indicator */
+.thought-bubble-icon {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 18px;
+  height: 18px;
+  border-radius: 50%;
+  background: rgba(140, 92, 246, 0.15);
+  color: var(--aether-violet-light);
+  flex-shrink: 0;
+}
+
+.thought-bubble-icon svg {
+  width: 11px;
+  height: 11px;
+}
+
+.thought-bubble-text {
+  font-weight: 450;
+  letter-spacing: 0.01em;
+  white-space: nowrap;
+}
+
+/* --------------------------------------------------------------------------
+   HIERARCHY: 1. MICRO BUBBLE
+   Very brief info, light pill, delicate presence
+   -------------------------------------------------------------------------- */
+.thought-bubble.bubble-micro {
+  padding: 6px 14px;
+  font-size: 12px;
+  color: var(--text-secondary);
+  background: rgba(15, 17, 24, 0.7);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+}
+
+.thought-bubble.bubble-micro .thought-bubble-icon {
+  width: 14px;
+  height: 14px;
+}
+
+.thought-bubble.bubble-micro .thought-bubble-icon svg {
+  width: 9px;
+  height: 9px;
+}
+
+/* --------------------------------------------------------------------------
+   HIERARCHY: 2. STATUS BUBBLE
+   Useful operational info, remains longer, structured
+   -------------------------------------------------------------------------- */
+.thought-bubble.bubble-status {
+  padding: 9px 18px;
+  font-size: 13px;
+  color: var(--text-primary);
+  background: rgba(20, 23, 34, 0.82);
+  border: 1px solid rgba(140, 92, 246, 0.25);
+  box-shadow: 0 14px 36px -8px rgba(0, 0, 0, 0.75), 0 0 22px rgba(140, 92, 246, 0.15);
+}
+
+.thought-bubble.bubble-status .thought-bubble-count {
+  background: var(--aether-violet-dim);
+  border: 1px solid rgba(140, 92, 246, 0.3);
+  color: var(--aether-violet-light);
+  padding: 1px 7px;
+  border-radius: var(--radius-pill);
+  font-size: 11px;
+  font-weight: 600;
+  margin-left: 4px;
+}
+
+/* --------------------------------------------------------------------------
+   HIERARCHY: 3. ATTENTION BUBBLE
+   Requires decision, warms amber, prominent, actionable
+   -------------------------------------------------------------------------- */
+.thought-bubble.bubble-attention {
+  padding: 12px 22px;
+  font-size: 14px;
+  font-weight: 500;
+  color: #fff;
+  background: rgba(28, 24, 20, 0.88);
+  border: 1px solid rgba(245, 158, 11, 0.45);
+  box-shadow: 0 18px 46px -10px rgba(0, 0, 0, 0.85), 0 0 35px rgba(245, 158, 11, 0.3);
+  cursor: pointer;
+  animation: attentionBubbleIn 500ms var(--spring-bounce) forwards;
+}
+
+.thought-bubble.bubble-attention:hover {
+  border-color: rgba(245, 158, 11, 0.65);
+  box-shadow: 0 22px 55px -8px rgba(0, 0, 0, 0.9), 0 0 45px rgba(245, 158, 11, 0.45);
+  transform: translateY(-3px) scale(1.03);
+}
+
+.thought-bubble.bubble-attention .thought-bubble-icon {
+  width: 22px;
+  height: 22px;
+  background: rgba(245, 158, 11, 0.2);
+  color: #fbbf24;
+}
+
+.thought-bubble.bubble-attention .thought-bubble-action {
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: #fbbf24;
+  background: rgba(245, 158, 11, 0.15);
+  border: 1px solid rgba(245, 158, 11, 0.3);
+  padding: 3px 8px;
+  border-radius: var(--radius-pill);
+  margin-left: 6px;
+}
+
+/* --------------------------------------------------------------------------
+   BUBBLE -> FIELD TRANSITION METAMORPHOSIS
+   When a sequence of bubbles coalesces into the Aether Field
+   -------------------------------------------------------------------------- */
+.thought-bubble.bubble-morphing-to-field {
+  animation: morphToField 650ms var(--spring-smooth) forwards;
+}
+
+/* Float animations */
+@keyframes bubbleFloatIn {
+  0% {
+    opacity: 0;
+    transform: translateY(18px) scale(0.85);
+  }
+  100% {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+}
+
+@keyframes attentionBubbleIn {
+  0% {
+    opacity: 0;
+    transform: translateY(16px) scale(0.92);
+  }
+  100% {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+}
+
+@keyframes bubbleFloatSubtle {
+  0%, 100% { transform: translateY(0); }
+  50% { transform: translateY(-5px); }
+}
+
+@keyframes morphToField {
+  0% {
+    opacity: 1;
+    transform: scale(1);
+  }
+  60% {
+    opacity: 0.6;
+    transform: translateY(40px) scale(1.1);
+    filter: blur(4px);
+  }
+  100% {
+    opacity: 0;
+    transform: translateY(80px) scale(1.2);
+    filter: blur(12px);
+  }
+}
+
+.bubble-closing {
+  opacity: 0;
+  transform: translateY(-10px) scale(0.9);
+  transition: all 300ms ease-out;
+}

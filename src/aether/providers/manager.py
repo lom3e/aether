@@ -92,6 +92,10 @@ class ProviderManager:
                 from aether.providers.ollama import OllamaProvider
                 cls = OllamaProvider
                 self._registry[name] = cls
+            elif name == "groq":
+                from aether.providers.groq_provider import GroqProvider
+                cls = GroqProvider
+                self._registry[name] = cls
             elif name == "mock":
                 import os
                 is_testing = os.environ.get("AETHER_ENABLE_TEST_PROVIDERS") == "1"

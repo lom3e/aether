@@ -261,7 +261,7 @@ async def test_canonical_approval_endpoints_action_flow(temp_workspace, accepted
     # Create pending execution
     execution = executor.execute(
         action_id="calendar.create_event",
-        workspace_id=temp_workspace.name,
+        workspace_id=temp_workspace.id,
         input_data={"title": "Client Sync", "start_time": "2026-10-10T12:00:00Z"},
         auto_approve=False,
         authority=auth,
@@ -270,7 +270,7 @@ async def test_canonical_approval_endpoints_action_flow(temp_workspace, accepted
     # Create associated unread notification
     notif = Notification(
         id="notif-restart-1",
-        workspace_id=temp_workspace.name,
+        workspace_id=temp_workspace.id,
         type=NotificationType.APPROVAL_REQUIRED,
         title="Client Sync Review",
         message="Review calendar create event",
@@ -296,7 +296,7 @@ async def test_canonical_approval_endpoints_action_flow(temp_workspace, accepted
     payload = CanonicalApprovalPayload(
         target_type="action_execution",
         approver="admin",
-        workspace_id=temp_workspace.name,
+        workspace_id=temp_workspace.id,
     )
     res1 = await approve_canonical_target_route(req, target_id=execution.id, payload=payload)
     assert res1["success"] is True
@@ -322,7 +322,7 @@ async def test_canonical_approval_reject_flow(temp_workspace, accepted_authority
 
     execution = executor.execute(
         action_id="calendar.create_event",
-        workspace_id=temp_workspace.name,
+        workspace_id=temp_workspace.id,
         input_data={"title": "Declined Sync", "start_time": "2026-10-10T12:00:00Z"},
         auto_approve=False,
         authority=auth,
@@ -330,7 +330,7 @@ async def test_canonical_approval_reject_flow(temp_workspace, accepted_authority
 
     notif = Notification(
         id="notif-wipe-1",
-        workspace_id=temp_workspace.name,
+        workspace_id=temp_workspace.id,
         type=NotificationType.APPROVAL_REQUIRED,
         title="Sync Review",
         message="Review sync",
@@ -345,7 +345,7 @@ async def test_canonical_approval_reject_flow(temp_workspace, accepted_authority
         target_type="action_execution",
         approver="admin",
         reason="Blocked by policy",
-        workspace_id=temp_workspace.name,
+        workspace_id=temp_workspace.id,
     )
     res1 = await reject_canonical_target_route(req, target_id=execution.id, payload=payload)
     assert res1["success"] is True
@@ -384,7 +384,7 @@ def test_personal_agent_truthful_act_and_do_flows(temp_workspace, accepted_autho
 
     # 1. ACT Flow with approval requirement
     res_act = personal_svc.process_prompt(
-        workspace_id=temp_workspace.name,
+        workspace_id=temp_workspace.id,
         prompt="Schedule a meeting with investor tomorrow at 9am",
         authority=auth_act,
     )
@@ -397,7 +397,7 @@ def test_personal_agent_truthful_act_and_do_flows(temp_workspace, accepted_autho
 
     # 2. DO Flow executes truthfully
     res_do = personal_svc.process_prompt(
-        workspace_id=temp_workspace.name,
+        workspace_id=temp_workspace.id,
         prompt="Create a file named notes.md with project overview",
         authority=auth_do,
     )

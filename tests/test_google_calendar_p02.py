@@ -106,6 +106,40 @@ async def test_oauth_start(temp_ws):
     assert len(state_data.code_verifier) >= 43
 
 
+@pytest.mark.asyncio
+async def test_oauth_start_fails_without_client_id(temp_ws):
+    ws = temp_ws
+    req = make_request(ws)
+    from fastapi import HTTPException
+    payload = GoogleOAuthStartPayload(workspace_id=ws.id, client_id=None)
+    with pytest.raises(HTTPException) as exc_info:
+        await start_google_oauth_route(req, payload)
+    assert exc_info.value.status_code == 400
+    assert "Google Client ID is not configured" in str(exc_info.value.detail)
+
+
+@pytest.mark.asyncio
+async def test_oauth_start_with_stored_client_id(temp_ws):
+    ws = temp_ws
+    # Save connection with client_id in auth_metadata
+    conn = Connection(
+        id="conn-google",
+        workspace_id=ws.id,
+        provider="google_calendar",
+        account_name="Google Calendar",
+        status=ConnectionStatus.NOT_CONFIGURED,
+        auth_metadata={"client_id": "stored-desktop.apps.googleusercontent.com"},
+    )
+    ws.connections.save_connection(conn)
+
+    req = make_request(ws)
+    # Start OAuth without passing client_id in payload, should resolve from store
+    data = await start_google_oauth_route(req, GoogleOAuthStartPayload(workspace_id=ws.id))
+    assert "auth_url" in data
+    assert "client_id=stored-desktop.apps.googleusercontent.com" in data["auth_url"]
+    assert "code_challenge=" in data["auth_url"]
+
+
 # ---------------------------------------------------------------------------
 # 2. Invalid & missing state
 # ---------------------------------------------------------------------------
@@ -420,7 +454,10 @@ async def test_calendar_selection(temp_ws):
 async def test_verified_state_persistence(temp_ws):
     ws = temp_ws
     req = make_request(ws)
-    _, state = GoogleOAuthManager.create_auth_flow(workspace_id=ws.id)
+    _, state = GoogleOAuthManager.create_auth_flow(
+        workspace_id=ws.id,
+        client_id="test-client.apps.googleusercontent.com",
+    )
 
     token_payload = {"access_token": "ya29.live_token", "refresh_token": "1//refresh", "expires_in": 3600}
     userinfo_payload = {"email": "founder@aether.ai"}
@@ -462,7 +499,10 @@ async def test_verified_state_persistence(temp_ws):
 async def test_verification_failure_persistence(temp_ws):
     ws = temp_ws
     req = make_request(ws)
-    _, state = GoogleOAuthManager.create_auth_flow(workspace_id=ws.id)
+    _, state = GoogleOAuthManager.create_auth_flow(
+        workspace_id=ws.id,
+        client_id="test-client.apps.googleusercontent.com",
+    )
 
     token_payload = {"access_token": "ya29.invalid_perms", "refresh_token": "1//refresh", "expires_in": 3600}
     userinfo_payload = {"email": "denied@aether.ai"}

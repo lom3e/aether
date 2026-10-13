@@ -7,6 +7,7 @@ from __future__ import annotations
 from datetime import datetime, timezone
 import json
 import logging
+from pathlib import Path
 import re
 from typing import Any
 import uuid
@@ -226,18 +227,36 @@ class ProposalGenerator:
         """Derives title, objective, and why narrative."""
         prompt = intent.raw_input.strip()
 
-        # Clean title extraction
+        # Clean title extraction without forcing lowercase or corrupting case-sensitive paths
         p_clean = re.sub(r"^(please|per favore|aether|esegui|fai|run|execute)\s+", "", prompt, flags=re.IGNORECASE)
-        words = p_clean.split()
+        # Strip backticks from path mentions in raw title
+        p_clean_nobackticks = re.sub(r"`([^`]+)`", r"\1", p_clean)
+        words = p_clean_nobackticks.split()
         short_title = " ".join(words[:6])
         if len(words) > 6:
             short_title += "..."
-        title = short_title.capitalize() or "Operational Mission"
+        # Preserve original casing; capitalize only the first letter if not already uppercase
+        if short_title:
+            title = short_title[0].upper() + short_title[1:]
+        else:
+            title = "Operational Mission"
+
+        # Provide a clean, specific title for coding delegation
+        if intent.action_args and intent.action_id == "coding.delegate":
+            prov = intent.action_args.get("provider_id", "antigravity")
+            prov_lbl = "Google Antigravity" if prov == "antigravity" else ("Claude Code" if prov == "claude_code" else "OpenAI Codex" if prov == "codex" else prov.capitalize())
+            files = intent.action_args.get("context_files", [])
+            proj_p = intent.action_args.get("project_path")
+            proj_str = f" su {Path(proj_p).name}" if proj_p else ""
+            if files:
+                title = f"Delega coding a {prov_lbl}{proj_str}: {', '.join(files[:2])}"
+            else:
+                title = f"Delega coding a {prov_lbl}{proj_str}"
 
         objective = intent.inferred_goal or prompt
         why = f"Requested via {intent.source_surface} to address user directive '{short_title}'."
 
-        matched_projects = [e for e in context.resolved_entities if e.entity_type == "project" and e.resolution_state == ResolutionState.MATCHED]
+        matched_projects = [e for e in context.resolved_entities if e.entity_type in ("project", "repository") and e.resolution_state == ResolutionState.MATCHED]
         if matched_projects:
             why += f" Scoped within verified project '{matched_projects[0].display_name}'."
 
@@ -284,16 +303,16 @@ class ProposalGenerator:
                     required_tools_or_actions=["automations.create_draft", "automations.create", "automations.update", "automations.enable"],
                 )
             )
-        elif is_code:
+        elif is_code or any("coding" in str(c) for c in (intent.constraints or [])):
             steps.append(
                 ProposedStep(
                     id=f"step-2",
                     order_idx=1,
-                    title="Codebase Inspection & Modification",
-                    description="Inspect relevant source files, draft modifications, and verify localized changes.",
-                    assigned_team_or_role="Developer Specialist",
+                    title="External Coding Agent Execution & Modification",
+                    description="Delegate code modifications to autonomous external coding agent and verify changes.",
+                    assigned_team_or_role="External Coding Agent Orchestrator",
                     dependencies=["step-1"],
-                    required_tools_or_actions=["files.read_document", "files.create_document"],
+                    required_tools_or_actions=["coding.delegate", "coding.results", "files.read_document"],
                 )
             )
         elif is_research:
@@ -387,7 +406,7 @@ class ProposalGenerator:
                 )
             )
 
-        if any(k in prompt for k in ["pull request", "pr", "create pr", "crea pr", "push"]):
+        if re.search(r"\b(?:pull request|create pr|crea pr|push)\b|\bpr\b", prompt):
             approvals.append(
                 RequiredApprovalSpec(
                     id=f"appr-pr",
@@ -414,6 +433,20 @@ class ProposalGenerator:
                     action_or_boundary="agents.delegate_external",
                     reason="Delegating tasks to external or remote agent workers executes outside local control.",
                     sensitive_fields=["agent_name", "instruction"],
+                )
+            )
+
+        if (
+            (intent.action_id and "coding" in intent.action_id)
+            or any("coding" in str(c) for c in (intent.constraints or []))
+            or any(k in prompt for k in ["coding", "implementa", "scrivi codice", "modifica codice", "refactor", "aggiungi una funzione", "aggiungi funzione", "crea funzione"])
+        ):
+            approvals.append(
+                RequiredApprovalSpec(
+                    id=f"appr-coding",
+                    action_or_boundary="coding.delegate",
+                    reason="Delegating code modifications to an external coding agent modifies repository files.",
+                    sensitive_fields=["instruction", "project_path"],
                 )
             )
 
@@ -452,7 +485,7 @@ class ProposalGenerator:
                 )
             )
 
-        if any(k in prompt for k in ["pull request", "pr"]):
+        if re.search(r"\b(?:pull request)\b|\bpr\b", prompt):
             constraints.append(
                 OutcomeConstraint(
                     id=f"oc-pr",

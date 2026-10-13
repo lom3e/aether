@@ -356,7 +356,15 @@ async def test_fastapi_content_routes():
         from unittest.mock import patch, AsyncMock
         from aether.providers.health import ProviderHealthStatus
 
-        # 4a. With provider offline, MUST raise 503 Service Unavailable (NEVER 405 or fake success)
+        # 4-0. Block B contract: with NO provider configured the route refuses explicitly and contacts nothing
+        #      (it used to probe a local Ollama by default).
+        with pytest.raises(HTTPException) as no_prov:
+            await repurpose_content_route(req, rep_payload)
+        assert no_prov.value.status_code == 503 and "no AI provider is configured" in no_prov.value.detail
+
+        # 4a. With an EXPLICITLY configured provider that is offline, MUST raise 503 (NEVER 405 or fake success)
+        ws._config_cache = {**ws.config, "workspace": {**(ws.config.get("workspace") or {}),
+                                                       "default_provider": "ollama", "default_model": "qwen3.5:9b"}}
         with patch("aether.providers.health.ProviderHealthChecker.acheck_health", new_callable=AsyncMock) as mock_health:
             mock_health.return_value = ProviderHealthStatus(
                 provider="ollama",

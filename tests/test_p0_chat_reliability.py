@@ -334,7 +334,7 @@ async def test_successful_task_records_model_and_provider_metadata(tmp_path, mon
     """When a task succeeds, assistant message metadata explicitly records the executed model."""
     ws_dir = tmp_path / "chat-meta-ws"
     ws = Workspace.init(ws_dir, name="Chat Meta WS")
-    PresetApplier().apply_preset("starter-workforce", ws)
+    PresetApplier().apply_preset("starter-workforce", ws, provider="ollama", model="qwen3.5:9b")  # explicit: a preset only suggests a provider
 
     app.state.workspace = ws
     app.state.workspace_root = ws.root

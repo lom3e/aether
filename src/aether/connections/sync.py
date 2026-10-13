@@ -245,7 +245,7 @@ class ConnectorSyncEngine:
 
         try:
             connector = workspace.connections.get_google_calendar_connector(workspace.id)
-            events = connector.list_events(limit=int(options.get("limit", 100)))
+            events = connector.list_events(calendar_id="all", limit=int(options.get("limit", 150)))
         except Exception as e:
             logger.error(f"Failed to access Google Calendar events for sync: {e}")
             return ConnectorSyncResult(
@@ -265,28 +265,29 @@ class ConnectorSyncEngine:
             end_time = ev.get("end_time")
             location = ev.get("location") or ""
             desc = ev.get("description") or ""
+            cal_name = ev.get("calendar_summary") or "Google Calendar"
 
             # 1. Ingest as structured FACT memory into WorkforceMemoryStore
             time_span = f"starts at {start_time}" + (f" and ends at {end_time}" if end_time else "")
             loc_txt = f" Location: {location}." if location else ""
             desc_txt = f" Description: {desc}." if desc else ""
-            content = f"Google Calendar event '{title}' {time_span}.{loc_txt}{desc_txt}"
+            content = f"Google Calendar event '{title}' [{cal_name}] {time_span}.{loc_txt}{desc_txt}"
 
             mem = WorkforceMemory(
                 id=f"mem_gcal_{ev_id}",
                 workspace_id=workspace.id,
                 category=MemoryCategory.FACT,
-                summary=f"Google Calendar Event: {title} ({start_time[:10]})",
+                summary=f"Google Calendar [{cal_name}]: {title} ({start_time[:10]})",
                 content=content,
                 provenance=MemoryProvenance(
                     source_entity="google_calendar_sync",
                     source_id=ev_id,
                     author_agent="GoogleCalendarConnector",
                     verification_status="verified",
-                    evidence={"event_id": ev_id, "start_time": start_time, "location": location},
+                    evidence={"event_id": ev_id, "start_time": start_time, "location": location, "calendar": cal_name},
                 ),
                 confidence=1.0,
-                tags=["google_calendar", "calendar", "event", "schedule", "meeting"],
+                tags=["google_calendar", "calendar", "event", "schedule", "meeting", cal_name.lower()[:20]],
                 created_at=now_iso,
                 updated_at=now_iso,
             )

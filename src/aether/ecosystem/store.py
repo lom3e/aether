@@ -522,7 +522,7 @@ class EcosystemStore:
         if not pkg:
             raise ValueError(f"Package '{package_id}' not found in ecosystem catalog.")
 
-        ws_id = getattr(workspace, "name", "default")
+        ws_id = getattr(workspace, "id", None) or getattr(workspace, "name", "default")
         install_path: str | None = None
         now = datetime.now(timezone.utc).isoformat()
 
@@ -604,7 +604,7 @@ class EcosystemStore:
 
     def uninstall_package(self, package_id: str, workspace: Any) -> bool:
         """Removes an installed package and its physical artifacts from the workspace."""
-        ws_id = getattr(workspace, "name", "default")
+        ws_id = getattr(workspace, "id", None) or getattr(workspace, "name", "default")
         with self._get_connection() as conn:
             cur = conn.execute(
                 "SELECT install_path FROM installed_packages WHERE package_id = ? AND workspace_id = ?",

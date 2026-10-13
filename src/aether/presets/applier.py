@@ -71,9 +71,26 @@ class PresetApplier:
         if not team_config.color and manifest.color:
             team_config.color = manifest.color
 
-        # Apply provider/model overrides if supplied
+        # A preset's provider/model is a SUGGESTION, not the user's choice. It is recorded as metadata and only
+        # becomes the team's configuration when the caller chooses a provider explicitly.
+        suggested_provider, suggested_model = team_config.default_provider, team_config.default_model
+        if suggested_provider:
+            team_config.metadata["suggested_provider"] = suggested_provider
+        if suggested_model:
+            team_config.metadata["suggested_model"] = suggested_model
+        team_config.default_provider = None
+        team_config.default_model = None
+        for agent in team_config.agents:
+            if agent.provider == suggested_provider:
+                agent.provider = None
+            if agent.model and agent.model == suggested_model:
+                agent.model = None
+
         if provider:
             team_config.default_provider = provider
+            # The suggested model belongs to the suggested provider: keep it only when the user picked that provider.
+            if not model and provider == suggested_provider:
+                team_config.default_model = suggested_model
             for agent in team_config.agents:
                 if not agent.provider:
                     agent.provider = provider

@@ -81,7 +81,13 @@ class AgentTool(Tool):
                 "delegation_depth": child_ctx.depth,
                 "delegation_chain": child_ctx.chain,
                 "cancellation_token": cancellation_token,
+                # Controlled handoff: the specialist receives the same bounded, provenance-tagged context as its
+                # coordinator (and stays linked to the mission), not an empty room.
+                **({"aether_context": (context.metadata or {}).get("aether_context"),
+                    "aether_context_has_intelligence": (context.metadata or {}).get("aether_context_has_intelligence", False)}
+                   if context and (context.metadata or {}).get("aether_context") else {}),
             },
+            mission_id=(context.metadata or {}).get("mission_id") if context else None,
         )
 
         source_agent = context.agent_name if context else "unknown"

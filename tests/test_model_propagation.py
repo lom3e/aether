@@ -44,7 +44,7 @@ from aether.providers.ollama import OllamaProvider
 def workspace_fixture(tmp_path):
     ws_dir = tmp_path / "model_prop_ws"
     ws = Workspace.init(ws_dir, name="Model Propagation Workspace")
-    PresetApplier().apply_preset("developer-workforce", ws)
+    PresetApplier().apply_preset("developer-workforce", ws, provider="ollama")  # explicit: a preset only suggests a provider
     return ws
 
 

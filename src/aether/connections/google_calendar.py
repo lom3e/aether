@@ -112,6 +112,7 @@ class GoogleOAuthManager:
         client_secret: str | None = None,
         redirect_uri: str | None = None,
         scopes: list[str] | None = None,
+        store: ConnectionStore | None = None,
     ) -> tuple[str, str]:
         """
         Creates a new PKCE OAuth state and builds the Google Authorization URL.
@@ -119,17 +120,28 @@ class GoogleOAuthManager:
         """
         cls._cleanup_expired()
 
+        if store:
+            conn = store.get_connection_by_provider(workspace_id, "google_calendar")
+            if conn and conn.auth_metadata:
+                if not client_id:
+                    client_id = str(conn.auth_metadata.get("client_id") or "").strip()
+                if not client_secret:
+                    client_secret = str(conn.auth_metadata.get("client_secret") or "").strip()
+
         cid = (
-            client_id
-            or os.environ.get("GOOGLE_CLIENT_ID")
-            or os.environ.get("AETHER_GOOGLE_CLIENT_ID")
-            or "aether-desktop-client.apps.googleusercontent.com"
+            (client_id or "")
+            or os.environ.get("GOOGLE_CLIENT_ID", "")
+            or os.environ.get("AETHER_GOOGLE_CLIENT_ID", "")
         ).strip()
+        if not cid:
+            raise ConnectorConfigurationError(
+                "Google Client ID is not configured. Please provide a Google Cloud Desktop OAuth Client ID in settings or via GOOGLE_CLIENT_ID."
+            )
+
         csec = (
-            client_secret
-            or os.environ.get("GOOGLE_CLIENT_SECRET")
-            or os.environ.get("AETHER_GOOGLE_CLIENT_SECRET")
-            or ""
+            (client_secret or "")
+            or os.environ.get("GOOGLE_CLIENT_SECRET", "")
+            or os.environ.get("AETHER_GOOGLE_CLIENT_SECRET", "")
         ).strip()
         r_uri = (redirect_uri or "http://127.0.0.1:8000/api/connections/google_calendar/oauth/callback").strip()
 
@@ -182,6 +194,12 @@ class GoogleOAuthManager:
         Exchanges the authorization code and PKCE verifier for Google access & refresh tokens.
         Also retrieves the authorized user's email address.
         """
+        csec = (
+            state_data.client_secret
+            or os.environ.get("GOOGLE_CLIENT_SECRET", "")
+            or os.environ.get("AETHER_GOOGLE_CLIENT_SECRET", "")
+        ).strip()
+
         payload = {
             "client_id": state_data.client_id,
             "code": code,
@@ -189,8 +207,8 @@ class GoogleOAuthManager:
             "grant_type": "authorization_code",
             "redirect_uri": state_data.redirect_uri,
         }
-        if state_data.client_secret:
-            payload["client_secret"] = state_data.client_secret
+        if csec:
+            payload["client_secret"] = csec
 
         encoded = urllib.parse.urlencode(payload).encode("utf-8")
         req = urllib.request.Request(
@@ -209,6 +227,12 @@ class GoogleOAuthManager:
         except urllib.error.HTTPError as exc:
             err_body = exc.read().decode("utf-8", errors="replace")
             logger.error("Google token exchange failed HTTP %s: %s", exc.code, err_body)
+            if "client_secret is missing" in err_body:
+                raise ConnectorAuthError(
+                    "Google token exchange failed (400): client_secret is missing. "
+                    "Google richiede il Client Secret per questo Client ID (tipo 'Applicazione web'). "
+                    "Inserisci il Client Secret (es. GOCSPX-...) generato su Google Cloud Console nelle impostazioni di Aether Connections."
+                ) from exc
             raise ConnectorAuthError(f"Google token exchange failed ({exc.code}): {err_body}") from exc
         except Exception as exc:
             logger.error("Google token exchange network failure: %s", exc)
@@ -227,7 +251,7 @@ class GoogleOAuthManager:
 
         return {
             "client_id": state_data.client_id,
-            "client_secret": state_data.client_secret,
+            "client_secret": csec,
             "access_token": access_token,
             "refresh_token": refresh_token,
             "token_expiry": token_expiry,
@@ -318,6 +342,7 @@ class GoogleCalendarConnector(BaseConnector):
             "google_calendar.update_event",
             "google_calendar.delete_event",
             "google_calendar.list_calendars",
+            "google_calendar.list_all_events",
         ]
 
     @property
@@ -376,7 +401,7 @@ class GoogleCalendarConnector(BaseConnector):
         except Exception:
             return False
 
-    def refresh_access_token(self) -> str:
+    def refresh_access_token(self, force: bool = False) -> str:
         """Refreshes the access token using the stored refresh_token with concurrency lock."""
         refresh_token = self.auth_metadata.get("refresh_token")
         if not refresh_token:
@@ -385,22 +410,24 @@ class GoogleCalendarConnector(BaseConnector):
         lock_key = refresh_token
         lock = self._get_refresh_lock(lock_key)
         with lock:
-            # Double-checked locking: re-check if token was refreshed by concurrent caller
-            if not self._is_token_expired() and self.auth_metadata.get("access_token"):
+            # Double-checked locking: re-check if token was refreshed by concurrent caller (unless force=True)
+            if not force and not self._is_token_expired() and self.auth_metadata.get("access_token"):
                 return self.auth_metadata["access_token"]
 
             client_id = (
                 self.auth_metadata.get("client_id")
                 or os.environ.get("GOOGLE_CLIENT_ID")
                 or os.environ.get("AETHER_GOOGLE_CLIENT_ID")
-                or "aether-desktop-client.apps.googleusercontent.com"
-            )
+                or ""
+            ).strip()
+            if not client_id:
+                raise ConnectorConfigurationError("Cannot refresh Google access token: Google Client ID is missing.")
             client_secret = (
                 self.auth_metadata.get("client_secret")
                 or os.environ.get("GOOGLE_CLIENT_SECRET")
                 or os.environ.get("AETHER_GOOGLE_CLIENT_SECRET")
                 or ""
-            )
+            ).strip()
 
             payload = {
                 "client_id": client_id,
@@ -447,6 +474,9 @@ class GoogleCalendarConnector(BaseConnector):
             conn = self.store.get_connection_by_provider(self.workspace_id, "google_calendar")
             if conn:
                 conn.auth_metadata.update(self.auth_metadata)
+                conn.status = ConnectionStatus.VERIFIED
+                conn.last_verification_error = None
+                conn.last_verified_at = datetime.now(timezone.utc).isoformat()
                 conn.updated_at = datetime.now(timezone.utc).isoformat()
                 self.store.save_connection(conn)
 
@@ -519,7 +549,7 @@ class GoogleCalendarConnector(BaseConnector):
             if exc.code == 401 and retry_on_401 and self.auth_metadata.get("refresh_token"):
                 logger.info("Google API returned 401. Refreshing token and retrying...")
                 try:
-                    self.refresh_access_token()
+                    self.refresh_access_token(force=True)
                     return self._api_request(
                         endpoint=endpoint,
                         method=method,
@@ -601,44 +631,134 @@ class GoogleCalendarConnector(BaseConnector):
     # ---------------------------------------------------------------------------
 
     def list_calendars(self) -> list[dict[str, Any]]:
-        """Retrieves list of calendars for the authenticated Google user."""
-        res = self._api_request("users/me/calendarList", method="GET")
-        items = res.get("items", [])
-        return [
-            {
-                "id": c.get("id"),
-                "summary": c.get("summary", "Untitled Calendar"),
-                "description": c.get("description", ""),
-                "primary": bool(c.get("primary", False)),
-                "timeZone": c.get("timeZone", "UTC"),
-                "accessRole": c.get("accessRole", "reader"),
-            }
-            for c in items
-        ]
+        """Retrieves list of all accessible calendars for the authenticated Google user."""
+        calendars: list[dict[str, Any]] = []
+        page_token = None
+        while True:
+            params: dict[str, Any] = {"maxResults": 100}
+            if page_token:
+                params["pageToken"] = page_token
+            res = self._api_request("users/me/calendarList", method="GET", params=params)
+            items = res.get("items", [])
+            for c in items:
+                calendars.append({
+                    "id": c.get("id"),
+                    "summary": c.get("summary", "Untitled Calendar"),
+                    "description": c.get("description", ""),
+                    "primary": bool(c.get("primary", False)),
+                    "selected": bool(c.get("selected", True)),
+                    "timeZone": c.get("timeZone", "UTC"),
+                    "accessRole": c.get("accessRole", "reader"),
+                })
+            page_token = res.get("nextPageToken")
+            if not page_token:
+                break
+        return calendars
 
-    def list_events(
+    def list_events_multi_calendar(
         self,
-        calendar_id: str | None = None,
+        time_min: str | None = None,
+        time_max: str | None = None,
+        query: str | None = None,
         limit: int = 50,
     ) -> list[dict[str, Any]]:
-        """Lists events from the specified or selected calendar."""
-        cal_id = urllib.parse.quote(
-            calendar_id or self.auth_metadata.get("selected_calendar_id") or "primary",
-            safe="",
-        )
-        params = {
+        """
+        Lists events across ALL accessible Google calendars.
+        Expands recurring instances (singleEvents=true), merges, tags with calendar metadata,
+        deduplicates, and sorts chronologically.
+        """
+        try:
+            calendars = self.list_calendars()
+        except Exception as exc:
+            logger.warning("Failed to retrieve calendarList for multi-calendar search: %s", exc)
+            calendars = [{"id": "primary", "summary": "Primary Calendar", "primary": True}]
+
+        if not calendars:
+            calendars = [{"id": "primary", "summary": "Primary Calendar", "primary": True}]
+
+        all_events: list[dict[str, Any]] = []
+        seen_keys: set[str] = set()
+
+        for cal in calendars:
+            cal_id = cal.get("id")
+            if not cal_id:
+                continue
+            # Skip calendars where user only has free/busy access without event details
+            if cal.get("accessRole") == "freeBusyReader":
+                continue
+
+            cal_summary = cal.get("summary") or cal_id
+            is_prim = bool(cal.get("primary", False))
+
+            try:
+                events = self._fetch_calendar_events_raw(
+                    calendar_id=cal_id,
+                    limit=limit,
+                    time_min=time_min,
+                    time_max=time_max,
+                    query=query,
+                )
+                for ev in events:
+                    ev["calendar_id"] = cal_id
+                    ev["calendar_summary"] = cal_summary
+                    ev["is_primary"] = is_prim
+
+                    # Deduplication key: prefer id, or title+time
+                    dedup_key = ev.get("id") or f"{ev.get('title', '').strip().lower()}_{ev.get('start_time', '')}"
+                    if dedup_key not in seen_keys:
+                        seen_keys.add(dedup_key)
+                        all_events.append(ev)
+            except Exception as cal_err:
+                logger.warning("Error fetching events from calendar '%s' (%s): %s", cal_summary, cal_id, cal_err)
+                continue
+
+        # Sort chronologically by start_time / start_date
+        def _sort_key(ev: dict[str, Any]) -> str:
+            return ev.get("start_time") or ev.get("start_date") or ""
+
+        all_events.sort(key=_sort_key)
+        return all_events[:limit]
+
+    def _fetch_calendar_events_raw(
+        self,
+        calendar_id: str,
+        limit: int = 50,
+        time_min: str | None = None,
+        time_max: str | None = None,
+        query: str | None = None,
+    ) -> list[dict[str, Any]]:
+        """Low-level fetch for a specific calendar ID."""
+        cal_id = urllib.parse.quote(calendar_id, safe="")
+        params: dict[str, Any] = {
             "maxResults": min(max(1, limit), 250),
             "singleEvents": "true",
             "orderBy": "startTime",
         }
+        if time_min:
+            params["timeMin"] = time_min
+        else:
+            now = datetime.now(timezone.utc)
+            today_start = datetime(now.year, now.month, now.day, 0, 0, 0, tzinfo=timezone.utc)
+            params["timeMin"] = today_start.isoformat()
+
+        if time_max:
+            params["timeMax"] = time_max
+
+        if query:
+            params["q"] = query
+
         res = self._api_request(f"calendars/{cal_id}/events", method="GET", params=params)
         items = res.get("items", [])
         return [
             {
                 "id": ev.get("id"),
-                "title": ev.get("summary", "Untitled Event"),
+                "title": ev.get("summary", "Senza titolo"),
                 "start_time": (ev.get("start") or {}).get("dateTime") or (ev.get("start") or {}).get("date") or "",
                 "end_time": (ev.get("end") or {}).get("dateTime") or (ev.get("end") or {}).get("date"),
+                "is_all_day": bool((ev.get("start") or {}).get("date") and not (ev.get("start") or {}).get("dateTime")),
+                "start_date": (ev.get("start") or {}).get("date") or "",
+                "end_date": (ev.get("end") or {}).get("date") or "",
+                "time_zone": (ev.get("start") or {}).get("timeZone") or "",
                 "description": ev.get("description", ""),
                 "location": ev.get("location", ""),
                 "status": ev.get("status", "confirmed"),
@@ -646,6 +766,30 @@ class GoogleCalendarConnector(BaseConnector):
             }
             for ev in items
         ]
+
+    def list_events(
+        self,
+        calendar_id: str | None = None,
+        limit: int = 50,
+        time_min: str | None = None,
+        time_max: str | None = None,
+        query: str | None = None,
+    ) -> list[dict[str, Any]]:
+        """
+        Lists events from the specified calendar, or across all accessible calendars
+        if calendar_id is 'all' / '*' / None.
+        """
+        effective_cal = calendar_id or self.auth_metadata.get("selected_calendar_id")
+        if not effective_cal or effective_cal in ("all", "*", "all_calendars"):
+            return self.list_events_multi_calendar(time_min=time_min, time_max=time_max, query=query, limit=limit)
+
+        return self._fetch_calendar_events_raw(
+            calendar_id=effective_cal,
+            limit=limit,
+            time_min=time_min,
+            time_max=time_max,
+            query=query,
+        )
 
     def get_event(
         self,
@@ -788,10 +932,13 @@ class GoogleCalendarConnector(BaseConnector):
 
     def execute(self, operation: str, params: dict[str, Any]) -> ConnectorResult:
         clean_op = operation.lower().strip()
-        if clean_op in ("google_calendar.list_events", "list_events"):
+        if clean_op in ("google_calendar.list_events", "list_events", "google_calendar.list_all_events"):
             res = self.list_events(
                 calendar_id=params.get("calendar_id"),
                 limit=int(params.get("limit", 50)),
+                time_min=params.get("time_min"),
+                time_max=params.get("time_max"),
+                query=params.get("query"),
             )
             return ConnectorResult(success=True, operation=operation, provider=self.provider, data={"events": res})
 

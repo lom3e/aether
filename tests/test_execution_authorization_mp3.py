@@ -90,7 +90,7 @@ def test_authority_expiration_fails_closed(tmp_path):
     # 1. Proposal with past expires_at constraint
     prop_expired = _create_test_proposal(
         p_store=p_store,
-        workspace_id=ws.name,
+        workspace_id=ws.id,
         prop_id="prop-expired-1",
         title="Expired Proposal",
         constraints=[f"expires_at:{past_iso}", "allow:files.read_document"],
@@ -100,7 +100,7 @@ def test_authority_expiration_fails_closed(tmp_path):
     with pytest.raises(UnauthorizedExecutionError) as exc_info:
         ExecutionBoundary.validate_authority(
             authority=auth_expired,
-            workspace_id=ws.name,
+            workspace_id=ws.id,
             store=p_store,
             action_or_boundary="files.read_document",
         )
@@ -109,7 +109,7 @@ def test_authority_expiration_fails_closed(tmp_path):
     # 2. Proposal with malformed expires_at constraint must fail closed (not pass silently)
     prop_malformed = _create_test_proposal(
         p_store=p_store,
-        workspace_id=ws.name,
+        workspace_id=ws.id,
         prop_id="prop-malformed-1",
         title="Malformed Expiry Proposal",
         constraints=["expires_at:NOT_A_DATE", "allow:files.read_document"],
@@ -119,7 +119,7 @@ def test_authority_expiration_fails_closed(tmp_path):
     with pytest.raises(UnauthorizedExecutionError) as exc_info:
         ExecutionBoundary.validate_authority(
             authority=auth_malformed,
-            workspace_id=ws.name,
+            workspace_id=ws.id,
             store=p_store,
             action_or_boundary="files.read_document",
         )
@@ -128,7 +128,7 @@ def test_authority_expiration_fails_closed(tmp_path):
     # 3. ExecutionAuthority with expired expires_at
     prop_valid = _create_test_proposal(
         p_store=p_store,
-        workspace_id=ws.name,
+        workspace_id=ws.id,
         prop_id="prop-valid-1",
         title="Valid Proposal",
         constraints=["allow:files.read_document"],
@@ -137,14 +137,14 @@ def test_authority_expiration_fails_closed(tmp_path):
     auth_with_past_expiry = ExecutionAuthority(
         proposal_id=prop_valid.id,
         proposal_version=prop_valid.version,
-        workspace_id=ws.name,
+        workspace_id=ws.id,
         granted_at=now.isoformat(),
         expires_at=past_iso,
     )
     with pytest.raises(UnauthorizedExecutionError) as exc_info:
         ExecutionBoundary.validate_authority(
             authority=auth_with_past_expiry,
-            workspace_id=ws.name,
+            workspace_id=ws.id,
             store=p_store,
             action_or_boundary="files.read_document",
         )
@@ -165,7 +165,7 @@ def test_scope_derived_from_proposed_steps(tmp_path):
     )
     prop = _create_test_proposal(
         p_store=p_store,
-        workspace_id=ws.name,
+        workspace_id=ws.id,
         prop_id="prop-steps-1",
         title="Steps Proposal",
         proposed_steps=[step1],
@@ -176,7 +176,7 @@ def test_scope_derived_from_proposed_steps(tmp_path):
     # Authorized action succeeds validation
     validated = ExecutionBoundary.validate_authority(
         authority=auth,
-        workspace_id=ws.name,
+        workspace_id=ws.id,
         store=p_store,
         action_or_boundary="files.read_document",
     )
@@ -186,7 +186,7 @@ def test_scope_derived_from_proposed_steps(tmp_path):
     with pytest.raises(UnauthorizedExecutionError) as exc_info:
         ExecutionBoundary.validate_authority(
             authority=auth,
-            workspace_id=ws.name,
+            workspace_id=ws.id,
             store=p_store,
             action_or_boundary="email.send",
         )
@@ -203,7 +203,7 @@ def test_argument_digest_binding_and_verification(tmp_path):
 
     prop = _create_test_proposal(
         p_store=p_store,
-        workspace_id=ws.name,
+        workspace_id=ws.id,
         prop_id="prop-digest-1",
         title="Digest Bound Proposal",
         constraints=[f"allow:email.send", f"args_digest:{digest}"],
@@ -213,7 +213,7 @@ def test_argument_digest_binding_and_verification(tmp_path):
     # 1. Matching arguments pass validation
     ExecutionBoundary.validate_authority(
         authority=auth,
-        workspace_id=ws.name,
+        workspace_id=ws.id,
         store=p_store,
         action_or_boundary="email.send",
         input_data=authorized_args,
@@ -224,7 +224,7 @@ def test_argument_digest_binding_and_verification(tmp_path):
     with pytest.raises(UnauthorizedExecutionError) as exc_info:
         ExecutionBoundary.validate_authority(
             authority=auth,
-            workspace_id=ws.name,
+            workspace_id=ws.id,
             store=p_store,
             action_or_boundary="email.send",
             input_data=tampered_args,
@@ -235,7 +235,7 @@ def test_argument_digest_binding_and_verification(tmp_path):
     with pytest.raises(UnauthorizedExecutionError) as exc_info:
         ExecutionBoundary.validate_authority(
             authority=auth,
-            workspace_id=ws.name,
+            workspace_id=ws.id,
             store=p_store,
             action_or_boundary="email.send",
             input_data=None,
@@ -259,7 +259,7 @@ def test_step_idempotency_and_single_use_enforcement(tmp_path):
 
     prop = _create_test_proposal(
         p_store=p_store,
-        workspace_id=ws.name,
+        workspace_id=ws.id,
         prop_id="prop-once-1",
         title="Single Use Proposal",
         constraints=["allow:files.create_document", "single_use"],
@@ -269,7 +269,7 @@ def test_step_idempotency_and_single_use_enforcement(tmp_path):
     # First execution succeeds
     res1 = executor.execute(
         action_id="files.create_document",
-        workspace_id=ws.name,
+        workspace_id=ws.id,
         input_data={"filename": "note1.txt", "content": "Important notes"},
         authority=auth,
         auto_approve=True,
@@ -280,7 +280,7 @@ def test_step_idempotency_and_single_use_enforcement(tmp_path):
     with pytest.raises(UnauthorizedExecutionError) as exc_info:
         executor.execute(
             action_id="files.create_document",
-            workspace_id=ws.name,
+            workspace_id=ws.id,
             input_data={"filename": "note2.txt", "content": "More notes"},
             authority=auth,
             auto_approve=True,
@@ -304,7 +304,7 @@ def test_agents_delegate_external_rejects_unregistered_local_commands(tmp_path):
 
     prop = _create_test_proposal(
         p_store=p_store,
-        workspace_id=ws.name,
+        workspace_id=ws.id,
         prop_id="prop-ext-1",
         title="External Worker Proposal",
         constraints=["allow:agents.delegate_external"],
@@ -314,7 +314,7 @@ def test_agents_delegate_external_rejects_unregistered_local_commands(tmp_path):
     # 1. agents.delegate_external requires confirmation and cannot be silently auto-approved
     exec_res = executor.execute(
         action_id="agents.delegate_external",
-        workspace_id=ws.name,
+        workspace_id=ws.id,
         input_data={
             "agent_name": "malicious_cli",
             "instruction": "Run dangerous command",
@@ -340,7 +340,7 @@ async def test_mcp_api_blocks_arbitrary_commands_and_ssrf(tmp_path):
 
     prop = _create_test_proposal(
         p_store=p_store,
-        workspace_id=ws.name,
+        workspace_id=ws.id,
         prop_id="prop-mcp-1",
         title="MCP Proposal",
         constraints=["allow:mcp.tool:safe_tool"],
@@ -441,7 +441,7 @@ def test_issue_authority_rejects_blanket_unconstrained_proposal(tmp_path):
 
     prop_blanket = _create_test_proposal(
         p_store=p_store,
-        workspace_id=ws.name,
+        workspace_id=ws.id,
         prop_id="prop-blanket-1",
         title="Blanket Proposal",
         constraints=[],
@@ -464,7 +464,7 @@ def test_validate_authority_rejects_proposal_without_action_scope(tmp_path):
     future_iso = (datetime.now(timezone.utc) + timedelta(hours=1)).isoformat()
     prop_no_scope = _create_test_proposal(
         p_store=p_store,
-        workspace_id=ws.name,
+        workspace_id=ws.id,
         prop_id="prop-no-scope-1",
         title="No Scope Proposal",
         constraints=[f"expires_at:{future_iso}"],
@@ -476,14 +476,14 @@ def test_validate_authority_rejects_proposal_without_action_scope(tmp_path):
     auth = ExecutionAuthority(
         proposal_id=prop_no_scope.id,
         proposal_version=prop_no_scope.version,
-        workspace_id=ws.name,
+        workspace_id=ws.id,
         granted_at=datetime.now(timezone.utc).isoformat(),
     )
 
     with pytest.raises(UnauthorizedExecutionError) as exc_info:
         ExecutionBoundary.validate_authority(
             authority=auth,
-            workspace_id=ws.name,
+            workspace_id=ws.id,
             store=p_store,
             action_or_boundary="files.read_document",
         )
@@ -554,7 +554,7 @@ def test_replay_with_step_id_blocked_before_handler(tmp_path):
 
     prop = _create_test_proposal(
         p_store=p_store,
-        workspace_id=ws.name,
+        workspace_id=ws.id,
         prop_id="prop-step-replay-1",
         title="Step Replay Test",
         constraints=["allow:test.mutate"],
@@ -562,7 +562,7 @@ def test_replay_with_step_id_blocked_before_handler(tmp_path):
     auth = ExecutionAuthority(
         proposal_id=prop.id,
         proposal_version=prop.version,
-        workspace_id=ws.name,
+        workspace_id=ws.id,
         granted_at=datetime.now(timezone.utc).isoformat(),
         step_id="step-fixed-01",
     )
@@ -570,7 +570,7 @@ def test_replay_with_step_id_blocked_before_handler(tmp_path):
     # 1. First execution succeeds
     res1 = executor.execute(
         action_id="test.mutate",
-        workspace_id=ws.name,
+        workspace_id=ws.id,
         input_data={"data": "val1"},
         authority=auth,
     )
@@ -581,7 +581,7 @@ def test_replay_with_step_id_blocked_before_handler(tmp_path):
     with pytest.raises((UnauthorizedExecutionError, RuntimeError)):
         executor.execute(
             action_id="test.mutate",
-            workspace_id=ws.name,
+            workspace_id=ws.id,
             input_data={"data": "val2"},
             authority=auth,
         )
@@ -623,7 +623,7 @@ def test_replay_without_step_id_blocked_before_handler(tmp_path):
 
     prop = _create_test_proposal(
         p_store=p_store,
-        workspace_id=ws.name,
+        workspace_id=ws.id,
         prop_id="prop-nostep-replay-1",
         title="No Step Replay Test",
         constraints=["allow:test.mutate_no_step"],
@@ -631,7 +631,7 @@ def test_replay_without_step_id_blocked_before_handler(tmp_path):
     auth = ExecutionAuthority(
         proposal_id=prop.id,
         proposal_version=prop.version,
-        workspace_id=ws.name,
+        workspace_id=ws.id,
         granted_at=datetime.now(timezone.utc).isoformat(),
         step_id=None,  # No step_id on authority
     )
@@ -639,7 +639,7 @@ def test_replay_without_step_id_blocked_before_handler(tmp_path):
     # 1. First execution succeeds
     res1 = executor.execute(
         action_id="test.mutate_no_step",
-        workspace_id=ws.name,
+        workspace_id=ws.id,
         input_data={"param": 1},
         authority=auth,
     )
@@ -650,7 +650,7 @@ def test_replay_without_step_id_blocked_before_handler(tmp_path):
     with pytest.raises((UnauthorizedExecutionError, RuntimeError)):
         executor.execute(
             action_id="test.mutate_no_step",
-            workspace_id=ws.name,
+            workspace_id=ws.id,
             input_data={"param": 2},
             authority=auth,
         )
@@ -695,7 +695,7 @@ def test_concurrent_replay_exact_single_execution(tmp_path):
 
     prop = _create_test_proposal(
         p_store=p_store,
-        workspace_id=ws.name,
+        workspace_id=ws.id,
         prop_id="prop-concurrent-1",
         title="Concurrent Test",
         constraints=["allow:test.concurrent_action"],
@@ -703,7 +703,7 @@ def test_concurrent_replay_exact_single_execution(tmp_path):
     auth = ExecutionAuthority(
         proposal_id=prop.id,
         proposal_version=prop.version,
-        workspace_id=ws.name,
+        workspace_id=ws.id,
         granted_at=datetime.now(timezone.utc).isoformat(),
     )
 
@@ -716,7 +716,7 @@ def test_concurrent_replay_exact_single_execution(tmp_path):
             barrier.wait()
             res = executor.execute(
                 action_id="test.concurrent_action",
-                workspace_id=ws.name,
+                workspace_id=ws.id,
                 input_data={"data": "concurrent"},
                 authority=auth,
             )
@@ -775,7 +775,7 @@ def test_ledger_failure_blocks_mutation_fail_closed(tmp_path, monkeypatch):
 
     prop = _create_test_proposal(
         p_store=p_store,
-        workspace_id=ws.name,
+        workspace_id=ws.id,
         prop_id="prop-ledger-fail-1",
         title="Ledger Fail Test",
         constraints=["allow:test.ledger_fail_action"],
@@ -783,7 +783,7 @@ def test_ledger_failure_blocks_mutation_fail_closed(tmp_path, monkeypatch):
     auth = ExecutionAuthority(
         proposal_id=prop.id,
         proposal_version=prop.version,
-        workspace_id=ws.name,
+        workspace_id=ws.id,
         granted_at=datetime.now(timezone.utc).isoformat(),
     )
 
@@ -795,7 +795,7 @@ def test_ledger_failure_blocks_mutation_fail_closed(tmp_path, monkeypatch):
     with pytest.raises(RuntimeError) as exc_info:
         executor.execute(
             action_id="test.ledger_fail_action",
-            workspace_id=ws.name,
+            workspace_id=ws.id,
             input_data={"data": "test"},
             authority=auth,
         )

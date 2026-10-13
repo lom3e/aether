@@ -18,6 +18,7 @@ const DEFAULT_MODELS: Record<string, string[]> = {
   openai: ['gpt-4o', 'gpt-4o-mini', 'o3-mini', 'gpt-4-turbo'],
   anthropic: ['claude-3-5-sonnet-20241022', 'claude-3-5-haiku-20241022', 'claude-3-opus-20240229'],
   gemini: ['gemini-2.0-flash', 'gemini-1.5-pro', 'gemini-1.5-flash'],
+  groq: ['llama-3.3-70b-versatile', 'llama-3.1-8b-instant', 'mixtral-8x7b-32768', 'gemma2-9b-it'],
 };
 
 export function WorkspaceModal({
@@ -35,9 +36,10 @@ export function WorkspaceModal({
   const [name, setName] = useState('');
   const [description, setDescription] = useState('');
   const [presetId, setPresetId] = useState('starter-workforce');
-  const [provider, setProvider] = useState('ollama');
-  const [model, setModel] = useState('qwen3.5:9b');
-  const [availableModels, setAvailableModels] = useState<string[]>(DEFAULT_MODELS.ollama);
+  // '' = no provider chosen: the workspace is created unconfigured and nothing is contacted.
+  const [provider, setProvider] = useState('');
+  const [model, setModel] = useState('');
+  const [availableModels, setAvailableModels] = useState<string[]>([]);
   const [isCustomModel, setIsCustomModel] = useState(false);
   const [apiKey, setApiKey] = useState('');
 
@@ -53,29 +55,19 @@ export function WorkspaceModal({
   }, [initialMode]);
 
   useEffect(() => {
+    if (!provider) {          // nothing chosen: no request at all (in particular none to a local Ollama)
+      setAvailableModels([]);
+      return;
+    }
     const fallback = DEFAULT_MODELS[provider] || [];
     fetch(apiUrl(`/api/settings/provider/models?provider=${provider}`))
       .then(res => res.json())
       .then(data => {
-        if (data.models && data.models.length > 0) {
-          setAvailableModels(data.models);
-          if (!isCustomModel) {
-            setModel(data.default || data.models[0]);
-          }
-        } else {
-          setAvailableModels(fallback);
-          if (!isCustomModel) {
-            setModel(fallback[0] || '');
-          }
-        }
+        // The list is a set of SUGGESTIONS: the model is chosen by the user, never pre-selected.
+        setAvailableModels(data.models && data.models.length > 0 ? data.models : fallback);
       })
-      .catch(() => {
-        setAvailableModels(fallback);
-        if (!isCustomModel) {
-          setModel(fallback[0] || '');
-        }
-      });
-  }, [provider, isCustomModel]);
+      .catch(() => setAvailableModels(fallback));
+  }, [provider]);
 
   const fetchWorkspaces = () => {
     fetch(apiUrl('/api/workspaces'))
@@ -99,6 +91,10 @@ export function WorkspaceModal({
   const handleCreate = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!name.trim()) return;
+    if (provider && !model.trim()) {
+      showToast('Choose a model for the selected provider, or leave the provider unset to configure it later.', 'error');
+      return;
+    }
 
     setLoading(true);
     try {
@@ -109,9 +105,9 @@ export function WorkspaceModal({
           name: name.trim(),
           description: description.trim(),
           preset_id: presetId,
-          provider,
-          model,
-          api_key: apiKey || null
+          provider: provider || null,
+          model: provider ? model : null,
+          api_key: provider ? (apiKey || null) : null
         })
       });
 
@@ -374,13 +370,16 @@ export function WorkspaceModal({
                     value={provider}
                     onChange={e => {
                       setProvider(e.target.value);
+                      setModel('');
                       setIsCustomModel(false);
                     }}
                   >
+                    <option value="">— Configura più tardi —</option>
                     <option value="ollama">Ollama (Local)</option>
                     <option value="openai">OpenAI</option>
                     <option value="anthropic">Anthropic</option>
                     <option value="gemini">Google Gemini</option>
+                    <option value="groq">Groq</option>
                   </select>
                 </div>
 
@@ -394,8 +393,7 @@ export function WorkspaceModal({
                       onClick={() => {
                         if (isCustomModel) {
                           setIsCustomModel(false);
-                          const list = availableModels.length > 0 ? availableModels : (DEFAULT_MODELS[provider] || []);
-                          setModel(list[0] || '');
+                          setModel('');
                         } else {
                           setIsCustomModel(true);
                         }
@@ -417,6 +415,7 @@ export function WorkspaceModal({
                     <select
                       className="form-select"
                       value={model}
+                      disabled={!provider}
                       onChange={e => {
                         if (e.target.value === '__custom__') {
                           setIsCustomModel(true);
@@ -425,6 +424,7 @@ export function WorkspaceModal({
                         }
                       }}
                     >
+                      <option value="">{provider ? '— Scegli un modello —' : '— Nessun provider —'}</option>
                       {availableModels.map(m => (
                         <option key={m} value={m}>{m}</option>
                       ))}
@@ -434,7 +434,7 @@ export function WorkspaceModal({
                 </div>
               </div>
 
-              {provider !== 'ollama' && (
+              {provider && provider !== 'ollama' && (
                 <div>
                   <label className="form-label" style={{ fontWeight: 600, fontSize: '13px' }}>{t('apiKey')}</label>
                   <input

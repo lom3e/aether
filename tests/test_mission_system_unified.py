@@ -115,7 +115,7 @@ async def test_c_execution_through_runtime(tmp_path: Path, accepted_authority_fa
     mission = store.create_mission(
         title="Automated Audit",
         objective="Perform security audit",
-        workspace_id=ws.name,
+        workspace_id=ws.id,
         milestones=[{"title": "Scan Vulnerabilities", "description": "Scan open ports"}],
     )
 
@@ -287,7 +287,7 @@ def test_e_workforce_delegation_agent_tool(tmp_path: Path, accepted_authority_fa
     _, auth = accepted_authority_factory(ws, title="Conduct quantitative research on energy sector")
     task = Task(
         instruction="Conduct quantitative research on energy sector",
-        workspace_id=ws.name,
+        workspace_id=ws.id,
         session_id="sess-e",
         mission_id="msn-e",
         mode=ExecutionMode.DELEGATE,
@@ -424,7 +424,7 @@ async def test_i_truthful_failure_handling(tmp_path: Path, accepted_authority_fa
     mission = store.create_mission(
         title="Faulty Task",
         objective="Run task that fails",
-        workspace_id=ws.name,
+        workspace_id=ws.id,
         milestones=[{"title": "Failing Stage", "description": "Will fail"}],
     )
 

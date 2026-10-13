@@ -80,7 +80,7 @@ def normalize_provider_error(
     code = "TASK_FAILED"
     message = "L'attività non è stata completata a causa di un errore imprevisto."
     retryable = True
-    prov = provider or "ollama"
+    prov = provider or "unknown"
     mod = model
 
     # Check for specific error types or message patterns

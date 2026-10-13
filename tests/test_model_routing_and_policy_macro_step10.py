@@ -132,7 +132,7 @@ def test_resilient_routing_provider_failover():
 
 def test_policy_store_lifecycle(temp_ws: Workspace):
     policy_store = temp_ws.policy_store
-    ws_id = temp_ws.name
+    ws_id = temp_ws.id
 
     # 1. Retrieve default policy
     policy = policy_store.get_policy(ws_id)
@@ -163,7 +163,7 @@ def test_policy_store_lifecycle(temp_ws: Workspace):
 
 def test_policy_service_autopilot_tiers(temp_ws: Workspace):
     policy_svc = temp_ws.policy
-    ws_id = temp_ws.name
+    ws_id = temp_ws.id
 
     # Prohibited action check
     can_exec, reason = policy_svc.evaluate_action(
@@ -238,7 +238,7 @@ def test_action_executor_with_policy_governance(temp_ws: Workspace, accepted_aut
         safety_policy=safety_policy,
         personal_store=temp_ws.personal_store,
     )
-    ws_id = temp_ws.name
+    ws_id = temp_ws.id
 
     # 1. Prohibited action execution is immediately blocked with FAILED status
     registry.register(
@@ -348,13 +348,13 @@ async def test_server_policy_and_routing_routes(temp_ws: Workspace):
     mock_req.app.state.workspace = temp_ws
 
     # 1. GET /api/policies
-    policy_data = await get_workspace_policy_route(mock_req, workspace_id=temp_ws.name)
-    assert policy_data["workspace_id"] == temp_ws.name
+    policy_data = await get_workspace_policy_route(mock_req, workspace_id=temp_ws.id)
+    assert policy_data["workspace_id"] == temp_ws.id
     assert "autopilot_tier" in policy_data
 
     # 2. POST /api/policies
     payload = UpdatePolicyPayload(
-        workspace_id=temp_ws.name,
+        workspace_id=temp_ws.id,
         autopilot_tier="supervised",
         monthly_spending_cap=350.0,
     )
@@ -363,7 +363,7 @@ async def test_server_policy_and_routing_routes(temp_ws: Workspace):
     assert updated_data["monthly_spending_cap"] == 350.0
 
     # 3. GET /api/routing/status
-    routing_data = await get_model_routing_status_route(mock_req, workspace_id=temp_ws.name)
+    routing_data = await get_model_routing_status_route(mock_req, workspace_id=temp_ws.id)
     assert "tiers" in routing_data
     assert "fast" in routing_data["tiers"]
     assert "coding" in routing_data["tiers"]

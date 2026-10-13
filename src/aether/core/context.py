@@ -26,6 +26,7 @@ class PreparedContext:
     workforce_summary: str = ""
     evidence: list[Any] = field(default_factory=list)
     intel_context: Any = None
+    assembled: Any = None
     metadata: dict[str, Any] = field(default_factory=dict)
 
 
@@ -37,10 +38,15 @@ def prepare_execution_context(
     intelligence_service: Any = None,
     team: Any = None,
     max_history_turns: int = 5,
+    assembled: Any = None,
+    purpose: str = "answer",
 ) -> PreparedContext:
     """
     Standardized context preparation for Aether execution requests.
-    Enforces budget boundaries and ensures consistent context injection across all runtime paths.
+
+    Retrieval is delegated to the canonical ``ContextAssembler`` (memory + graph + documents + lessons, with
+    provenance and a budget). Pass ``assembled`` when the caller already retrieved the context for this very
+    request, so the same retrieval is never run twice.
     """
     ws_name = workspace_id
     if workspace and hasattr(workspace, "name") and workspace.name:
@@ -65,40 +71,45 @@ def prepare_execution_context(
 
     workforce_summary = "\n".join(workforce_lines)
 
-    # 2. Retrieve bounded organizational intelligence
-    intel_context = None
-    evidence_items: list[str] = []
-    if intelligence_service is not None and hasattr(intelligence_service, "retrieve_unified_context"):
+    # 2. Retrieve bounded shared context (once)
+    if assembled is None:
         try:
-            intel_context = intelligence_service.retrieve_unified_context(
-                workspace_id=ws_name,
-                task_instruction=instruction,
+            from aether.context import ContextAssembler
+            assembled = ContextAssembler(workspace, intelligence=intelligence_service).assemble(
+                instruction, purpose=purpose, workspace_id=workspace_id, exclude=("history",),
             )
-            if intel_context and getattr(intel_context, "evidence", None):
-                for e in intel_context.evidence[:5]:
-                    title = getattr(e, "title", "Evidence")
-                    src = getattr(e, "source", "memory")
-                    content = str(getattr(e, "content", ""))[:140]
-                    evidence_items.append(f"- [{src}] {title}: {content}")
         except Exception as e:
-            logger.debug(f"Intelligence retrieval skipped during context prep: {e}")
+            logger.debug(f"Context assembly skipped during context prep: {e}")
+            assembled = None
+    intel_context = assembled
 
     # 3. Build canonical system prompt
     prompt_parts = [
-        f"You are Personal Aether, the personal operational AI companion for workspace '{ws_name}'.",
-        "You are concise, direct, helpful, and action-oriented.",
-        "You coordinate workspace files, calendar events, background tasks, and the Digital Workforce.",
-        "Always respond in the same language as the user (Italian if addressed in Italian, English if addressed in English).",
+        f"You are Aether, the user's personal AI assistant for this workspace ('{ws_name}').",
+        "Your permanent product promise: 'Tu dimmi cosa vuoi ottenere. Aether si occupa del resto.'",
+        "",
+        "Core Behavioral Guidelines:",
+        "1. Conversazione naturale e saluti:",
+        "   - Quando l'utente ti saluta semplicemente (es. 'Ciao', 'Buongiorno', 'Salve', 'Hello'), rispondi in modo naturale, caldo, amichevole e conciso (es. 'Ciao! Sono qui. Che facciamo oggi?' oppure 'Ciao! Come posso aiutarti?').",
+        "   - NON presentarti con formule robotiche ripetitive (es. 'Sono Personal Aether, il tuo assistente operativo...') ad ogni saluto informale.",
+        "   - Quando l'utente ringrazia (es. 'Grazie', 'Thank you'), rispondi con cortesia naturale (es. 'Prego!', 'Di nulla! Fammi sapere se ti serve altro.').",
+        "2. Domande informative sulle capacità:",
+        "   - Se l'utente chiede cosa puoi fare (es. 'Che cosa puoi fare per me?', 'Come puoi aiutarmi?'), rispondi con una spiegazione breve, concreta, chiara e comprensibile delle tue capacità reali (organizzare la giornata e il calendario, gestire note e documenti del workspace, seguire attività ed eseguire analisi o progetti approfonditi).",
+        "   - NON usare gergo architetturale interno né elencare i nomi tecnici degli agenti interni (manager, researcher, writer, DAG, ecc.) a meno che l'utente non ti chieda esplicitamente i dettagli tecnici interni.",
+        "3. Tono e stile:",
+        "   - Calmo, orientato al risultato, premuroso ed efficiente. Zero tecnicismi inutili, zero servilismo.",
+        "   - Rispondi sempre nella stessa lingua dell'utente (italiano se l'utente scrive in italiano, inglese se scrive in inglese).",
+        "4. Modifiche e generazione codice:",
+        "   - Tu NON scrivi né modifichi file di codice direttamente con il modello interno. Qualsiasi richiesta di implementazione, modifica, refactoring o fix di codice deve essere delegata agli agenti di coding autonomi esterni (Google Antigravity, Claude Code, Codex). Se nessun agente è disponibile, informa chiaramente l'utente di questo confine di sicurezza e chiedi come procedere.",
+        "5. Veridicità delle deleghe ed esecuzioni:",
+        "   - Quando rispondi in modalità informativa, NON affermare MAI di aver avviato o delegato un'attività operativa esterna o di essere in attesa dell'agente. Rispondi con trasparenza fornendo spiegazioni o indicando come avviare l'esecuzione autorizzata.",
     ]
 
     if workforce_summary:
-        prompt_parts.append(f"\nDigital Workforce Available in this Workspace:\n{workforce_summary}")
+        prompt_parts.append(f"\nInternal Workforce Capabilities (use autonomously for tasks, do not recite to user):\n{workforce_summary}")
 
-    if intel_context and getattr(intel_context, "summary", None):
-        prompt_parts.append(f"\nOrganizational Memory Summary:\n{intel_context.summary}")
-
-    if evidence_items:
-        prompt_parts.append(f"\nRelevant Memory Evidence:\n" + "\n".join(evidence_items))
+    if assembled is not None and getattr(assembled, "rendered", ""):
+        prompt_parts.append("\n" + assembled.rendered)
 
     system_prompt = "\n".join(prompt_parts)
 
@@ -121,7 +132,11 @@ def prepare_execution_context(
         system_prompt=system_prompt,
         messages=messages,
         workforce_summary=workforce_summary,
-        evidence=intel_context.evidence if intel_context and hasattr(intel_context, "evidence") else [],
-        intel_context=intel_context,
-        metadata={"history_turns": len(messages) - 2},
+        evidence=list(assembled.items) if assembled is not None else [],
+        intel_context=assembled,
+        assembled=assembled,
+        metadata={
+            "history_turns": len(messages) - 2,
+            "context_trace": assembled.trace() if assembled is not None else None,
+        },
     )

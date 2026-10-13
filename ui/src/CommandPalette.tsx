@@ -1,7 +1,8 @@
 import { useState, useEffect, useRef } from 'react';
 import {
   Search, Plus, MessageSquare, Bot, Users, Database, Settings, ShoppingBag,
-  Moon, Sun, Globe, X, Sparkles, ArrowRight, Layers, Zap, Keyboard, Puzzle
+  Moon, Sun, Globe, X, Sparkles, ArrowRight, Layers, Zap, Keyboard, Puzzle,
+  Target, Link2, FileCheck
 } from 'lucide-react';
 import { useTranslation } from './i18n';
 import { useTheme } from './theme';
@@ -56,9 +57,27 @@ export function CommandPalette({
     },
     {
       id: 'go_home',
-      label: t('cmdGoHome'),
+      label: t('cmdGoHome') || 'Vai a Home / Ufficio',
       icon: <Sparkles size={16} />,
       run: () => { onNavigate('home'); onClose(); }
+    },
+    {
+      id: 'go_work',
+      label: 'Vai a Lavori',
+      icon: <Target size={16} />,
+      run: () => { onNavigate('missions'); onClose(); }
+    },
+    {
+      id: 'go_connections',
+      label: 'Vai a Servizi & App',
+      icon: <Link2 size={16} />,
+      run: () => { onNavigate('connections'); onClose(); }
+    },
+    {
+      id: 'go_results',
+      label: 'Vai a Risultati & Documenti',
+      icon: <FileCheck size={16} />,
+      run: () => { onNavigate('results'); onClose(); }
     },
     {
       id: 'go_agents',

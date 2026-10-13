@@ -3,8 +3,12 @@ Deterministic Provider & Model Resolution Contract for Aether.
 Ensures single, unified precedence across Agent, Team, Workspace, and Runtime:
 1. Explicit Agent configuration (agent.provider, agent.model)
 2. Inherited Team / Workspace default configuration (default_provider, default_model)
-3. Global / default provider configuration (environment variables via ProviderManager)
-4. Safe local auto-discovery (Ollama tags if reachable with installed models)
+3. Credentials the user stored for exactly a provider (workspace SecretStore, then the provider's own *_API_KEY
+   environment variable), tried in the fixed order openai, anthropic, gemini, groq
+No local provider is ever chosen implicitly: when nothing above names a provider the result is ``None`` (the
+documented "no provider configured" state) and nothing is contacted. Ollama is used only when it is named
+explicitly (agent, team, workspace, CLI flag or API parameter). A named provider that cannot be built becomes an
+``UnresolvedProvider`` that fails every call with the real reason: there is no substitution.
 """
 from __future__ import annotations
 
@@ -16,6 +20,20 @@ from aether.providers.base import AIProvider
 from aether.providers.types import ProviderConfig
 
 logger = logging.getLogger(__name__)
+
+
+def _workspace_max_tokens(workspace: Any | None) -> int | None:
+    """
+    Optional, EXPLICIT output cap from the workspace settings (``workspace.default_max_tokens``). Some providers/tiers
+    refuse a request whose estimated output exceeds a per-minute budget unless the caller sets a cap; this is how a
+    user sets one. Absent or invalid -> None (nothing is assumed).
+    """
+    try:
+        cfg = getattr(workspace, "config", None)
+        value = (cfg.get("workspace", {}) if isinstance(cfg, dict) else {}).get("default_max_tokens")
+        return int(value) if value is not None and int(value) > 0 else None
+    except (TypeError, ValueError):
+        return None
 
 
 def resolve_provider(
@@ -81,29 +99,32 @@ def resolve_provider(
         api_key = None
         if s_store:
             api_key = s_store.get_secret(f"provider_api_key:{provider_name.lower()}")
-        cfg = ProviderConfig(model=model_name, api_key=api_key, timeout=timeout or 60.0)
+        cfg = ProviderConfig(model=model_name, api_key=api_key, timeout=timeout or 60.0, max_tokens=_workspace_max_tokens(workspace))
         try:
             return mgr.get(provider_name, config=cfg)
         except Exception as e:
-            logger.debug(f"Could not resolve explicit provider '{provider_name}': {e}")
-            return None
+            # Explicitly configured but unusable: keep the identity visible and fail loudly at use time.
+            from aether.providers.groq_provider import redact
+            from aether.providers.unresolved import UnresolvedProvider
+            logger.warning("Could not resolve configured provider '%s': %s", provider_name, type(e).__name__)
+            return UnresolvedProvider(provider_name, model_name, redact(str(e), api_key))
 
     # 4. Workspace SecretStore / Global environment key based resolution
-    for p_name, env_var in (("openai", "OPENAI_API_KEY"), ("anthropic", "ANTHROPIC_API_KEY"), ("gemini", "GEMINI_API_KEY")):
+    for p_name, env_var in (("openai", "OPENAI_API_KEY"), ("anthropic", "ANTHROPIC_API_KEY"), ("gemini", "GEMINI_API_KEY"), ("groq", "GROQ_API_KEY")):
         key = None
         if s_store:
             key = s_store.get_secret(f"provider_api_key:{p_name}")
         if not key:
             key = os.environ.get(env_var)
         if key:
-            return mgr.get(p_name, ProviderConfig(model=model_name, api_key=key, timeout=timeout or 60.0))
+            try:
+                return mgr.get(p_name, ProviderConfig(model=model_name, api_key=key, timeout=timeout or 60.0, max_tokens=_workspace_max_tokens(workspace)))
+            except Exception as e:
+                from aether.providers.groq_provider import redact
+                from aether.providers.unresolved import UnresolvedProvider
+                logger.warning("Could not build provider '%s' from stored credentials: %s", p_name, type(e).__name__)
+                return UnresolvedProvider(p_name, model_name, redact(str(e), key))
 
-    # 5. Safe local auto-discovery: fallback to Ollama if reachable with installed models
-    try:
-        p = mgr.get("ollama", ProviderConfig(model=model_name, timeout=timeout or 60.0))
-        if hasattr(p, "get_available_models") and p.get_available_models():
-            return p
-    except Exception:
-        pass
-
+    # No provider named and no stored credential: do NOT guess a local service. "Not configured" is an explicit state
+    # that callers report to the user (they never receive a provider they did not choose).
     return None

@@ -268,6 +268,8 @@ class IntentRequest:
     ambiguity: list[str] = field(default_factory=list)
     provenance: ContextProvenance | None = None
     status: str = "received"
+    action_id: str | None = None
+    action_args: dict[str, Any] = field(default_factory=dict)
 
     def __init__(
         self,
@@ -285,6 +287,8 @@ class IntentRequest:
         ambiguity: list[str] | None = None,
         provenance: ContextProvenance | dict[str, Any] | None = None,
         status: str = "received",
+        action_id: str | None = None,
+        action_args: dict[str, Any] | None = None,
     ) -> None:
         if not workspace_id or not workspace_id.strip():
             raise ValueError("workspace_id is mandatory for IntentRequest")
@@ -306,6 +310,8 @@ class IntentRequest:
             provenance = ContextProvenance.from_dict(provenance)
         object.__setattr__(self, "provenance", provenance)
         object.__setattr__(self, "status", status)
+        object.__setattr__(self, "action_id", action_id)
+        object.__setattr__(self, "action_args", dict(action_args or {}))
 
     @property
     def raw_input(self) -> str:
@@ -334,6 +340,8 @@ class IntentRequest:
             "ambiguity": list(self.ambiguity),
             "provenance": self.provenance.to_dict() if self.provenance else None,
             "status": self.status,
+            "action_id": self.action_id,
+            "action_args": dict(self.action_args),
         }
 
     @classmethod
@@ -360,6 +368,8 @@ class IntentRequest:
             ambiguity=list(data.get("ambiguity") or []),
             provenance=prov,
             status=data.get("status", "received"),
+            action_id=data.get("action_id"),
+            action_args=data.get("action_args"),
         )
 
 

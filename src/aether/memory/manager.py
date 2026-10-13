@@ -133,7 +133,7 @@ class MemoryManager:
         self.context_char_budget = context_char_budget if context_char_budget is not None else CONTEXT_CHAR_BUDGET
         self.memory_excerpt_max_chars = memory_excerpt_max_chars if memory_excerpt_max_chars is not None else MEMORY_EXCERPT_MAX_CHARS
 
-    def load_context(self, context: AgentContext) -> None:
+    def load_context(self, context: AgentContext, inject_intelligence: bool = True) -> None:
         """
         Load historical messages and inject relevant verified workforce memories & knowledge graph into the AgentContext.
 
@@ -145,7 +145,9 @@ class MemoryManager:
           5. Inject as a single system message only if at least one evidence item qualifies.
           6. If nothing qualifies, add nothing — zero-injection rule applies.
         """
-        system_msg = next((m for m in context.messages if m.role == "system"), None)
+        system_msgs = [m for m in context.messages if m.role == "system"]
+        system_msg = system_msgs[0] if system_msgs else None
+        extra_system_msgs = system_msgs[1:]  # skills, shared context, tool notes: must survive history merging
         incoming_non_system = [m for m in context.messages if m.role != "system"]
 
         # 1. Load conversation history if it exists for this session/task
@@ -173,6 +175,7 @@ class MemoryManager:
             combined_messages: list[Message] = []
             if system_msg:
                 combined_messages.append(system_msg)
+            combined_messages.extend(extra_system_msgs)
             combined_messages.extend(past_messages)
             combined_messages.extend(new_messages)
             context.messages = combined_messages
@@ -180,16 +183,18 @@ class MemoryManager:
             combined_messages = []
             if system_msg:
                 combined_messages.append(system_msg)
+            combined_messages.extend(extra_system_msgs)
             combined_messages.extend(incoming_non_system)
             context.messages = combined_messages
 
         # 2. Relevance-gated, budget-aware workforce intelligence injection (Phase B Macro Slice 3)
         injected = False
-        if (self.workforce_memory_store is not None or self.knowledge_graph_store is not None or self.intelligence_service is not None) and self.workspace_id:
+        if inject_intelligence and (self.workforce_memory_store is not None or self.knowledge_graph_store is not None or self.intelligence_service is not None) and self.workspace_id:
             injected = self._inject_workforce_memory(context)
 
         # 3. Fallback to legacy semantic memory ONLY when workforce memory not injected
-        if not injected and self.semantic_memory:
+        #    (and never when the caller already supplied the shared context: it would duplicate it)
+        if inject_intelligence and not injected and self.semantic_memory:
             facts = self.semantic_memory.search(context.task.instruction, limit=3)
             if facts:
                 facts_str = "\n".join(f"- {doc.content}" for doc in facts)

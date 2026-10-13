@@ -71,6 +71,7 @@ def test_action_store_crash_recovery_preserves_waiting_approval(tmp_path: Path):
         status=ProposalStatus.ACCEPTED,
     )
     p_store.save_proposal(prop)
+    p_store.backfill_legacy_consents()  # a proposal accepted outside accept_proposal: recorded as a legacy consent
     auth = ExecutionBoundary.issue_authority(prop)
 
     # 1. Seed executions in various states
@@ -229,7 +230,7 @@ def test_mission_runtime_stale_executions_recovery(tmp_path: Path):
     from aether.missions.models import Mission
     m = Mission(
         id="msn-recover-test",
-        workspace_id=ws.name,
+        workspace_id=ws.id,
         title="Recovery Test Mission",
         objective="Verify crash recovery",
     )

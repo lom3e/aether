@@ -244,8 +244,8 @@ class WorkspaceRegistry:
         name: str,
         description: str = "",
         preset_id: str = "starter-workforce",
-        provider: str = "ollama",
-        model: str = "qwen3.5:9b",
+        provider: str | None = None,
+        model: str | None = None,
         api_key: str | None = None,
         target_dir: str | Path | None = None,
     ) -> Workspace:
@@ -301,11 +301,10 @@ class WorkspaceRegistry:
         else:
             # Create minimal empty default team
             default_team_path = ws.teams_dir / "default.yaml"
+            provider_lines = (f"  provider: {provider}\n" if provider else "") + (f"  model: {model}\n" if provider and model else "")
             default_yaml = f"""team:
   name: default
-  provider: {provider}
-  model: {model}
-
+{provider_lines}
 agents:
   - name: manager
     role: "AI Workforce Coordinator"

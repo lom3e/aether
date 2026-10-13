@@ -25,6 +25,29 @@ class AutopilotTier(str, Enum):
     TIER_3_AUTONOMOUS = "autonomous"
 
 
+class PolicyOutcome(str, Enum):
+    """Typed result of evaluating an action against workspace policy."""
+    ALLOW = "allow"                    # may run without a human prompt
+    NEEDS_APPROVAL = "needs_approval"  # a human must approve; approval is sufficient
+    DENY = "deny"                      # hard refusal: no approval, authority or flag can override it
+
+
+@dataclass(frozen=True)
+class PolicyDecision:
+    """Policy verdict with a stable machine-readable ``code`` (never parse ``reason``)."""
+    outcome: PolicyOutcome
+    code: str
+    reason: str
+
+    @property
+    def can_auto_execute(self) -> bool:
+        return self.outcome == PolicyOutcome.ALLOW
+
+    @property
+    def is_denied(self) -> bool:
+        return self.outcome == PolicyOutcome.DENY
+
+
 @dataclass
 class WorkspacePolicy:
     """Workspace-wide governance policy and budgetary controls."""

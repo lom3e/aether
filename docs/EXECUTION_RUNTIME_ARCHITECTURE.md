@@ -67,21 +67,28 @@ Authoritative execution output with truthful state tracking:
 
 ## 3. Deterministic Provider Precedence (`aether.providers.resolution`)
 
-Provider and model resolution adheres strictly to a deterministic 4-stage precedence contract:
+Provider and model resolution adheres strictly to a deterministic contract. Nothing is chosen implicitly:
 
 ```text
 1. Explicit Agent Config
-   └── If agent.provider and agent.model are configured, resolve via ProviderManager.
+   └── If agent.provider / agent.model are configured, resolve via ProviderManager.
 2. Inherited Team / Workspace Config
-   └── If agent config is empty, inherit team.default_provider and team.default_model.
-3. Global Environment Variables
-   └── Check ProviderManager with OPENAI_API_KEY, ANTHROPIC_API_KEY, GEMINI_API_KEY.
-4. Safe Local Auto-Discovery
-   └── Inspect local Ollama (127.0.0.1:11434) with timeout=60.0. Only active if reachable
-       and at least one model is installed.
+   └── If agent config is empty, inherit team.default_provider / default_model, then the workspace's.
+3. Stored credentials
+   └── Only if nothing above names a provider: a key the user stored for a provider (workspace SecretStore, then the
+       provider's own *_API_KEY variable), tried in the fixed order openai, anthropic, gemini, groq.
+(no step 4)  No local provider is ever discovered or chosen automatically. Ollama runs only when it is named explicitly.
 ```
 
-If no provider is available or reachable, the runtime never crashes and never fakes completion: it produces a truthful diagnostic synthesis directing the user to configure an API key or start local Ollama.
+- A provider that is **named but cannot be built** (missing key, unknown name, missing SDK) resolves to an
+  `UnresolvedProvider`: every call fails with the real reason and no other provider is substituted.
+- **Nothing configured** resolves to `None`; the runtime then returns `NO_PROVIDER` ("No AI provider configured"),
+  routes answer 503/unconfigured, and no service is contacted.
+- Remote failures are returned as failures (`PROVIDER_ERROR` with `error_type` and `provider` in the metadata:
+  authentication, rate limit, connection, timeout...), never as answers.
+- Built-in presets still declare their own provider in their `team.yaml`: that is a visible, editable setting of the
+  workspace created from them. When a workspace has no team, the scaffold team used for delegation ignores it and
+  uses the provider the runtime resolved (or none).
 
 ---
 

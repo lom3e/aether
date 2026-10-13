@@ -110,6 +110,9 @@ class Task:
     expected_output: str | None = None
     metadata: dict[str, Any] = field(default_factory=dict)
     authority: ExecutionAuthority | None = None
+    # Structured consent for the policy layer. It is honoured only together with a validated
+    # authority and can never override a policy denial. Never read from ``action_args``.
+    auto_approve: bool = False
 
 
 # Canonical alias for unified execution requests
@@ -319,6 +322,38 @@ class ExecutionAuthority:
         )
 
 
+_CODING_FOLLOWUP_ACTIONS = ("coding.interact", "coding.send_message", "coding.run_tests", "coding.release_project")
+
+
+def _workspaces_match(a: str | None, b: str | None, canonicalize: Any = None) -> bool:
+    """
+    Strict workspace identity: identical strings, or two identifiers that BOTH resolve unambiguously
+    to the very same active workspace (same root). Unknown or ambiguous names never match.
+    """
+    a = (a or "").strip()
+    b = (b or "").strip()
+    if not a or not b:
+        return False
+    if a == b:
+        return True
+    if canonicalize is not None:
+        # Relative to ONE specific workspace instance: its own aliases (name, folder) map to its id, so
+        # this is unambiguous even when other workspaces happen to share the same display name.
+        try:
+            if canonicalize(a) == canonicalize(b):
+                return True
+        except Exception:
+            pass
+    try:
+        from aether.workspace.workspace import Workspace
+        wa, wb = Workspace.resolve_unique(a), Workspace.resolve_unique(b)
+        if wa is None or wb is None:
+            return False
+        return wa is wb or wa.root.resolve() == wb.root.resolve()
+    except Exception:
+        return False
+
+
 class ExecutionBoundary:
     """
     Canonical persistent execution boundary.
@@ -398,6 +433,7 @@ class ExecutionBoundary:
         action_or_boundary: str | None = None,
         input_data: dict[str, Any] | None = None,
         step_id: str | None = None,
+        canonicalize: Any = None,
     ) -> Any:
         """
         Validates the authority against persistent proposal state in PersonalStore.
@@ -419,16 +455,7 @@ class ExecutionBoundary:
             raise UnauthorizedExecutionError(
                 f"Invalid authority type for '{op_name}': expected ExecutionAuthority, got {type(authority).__name__}."
             )
-        ws_matches = (authority.workspace_id == workspace_id)
-        if not ws_matches:
-            from aether.workspace.workspace import Workspace
-            ws_inst = Workspace.get(workspace_id)
-            if ws_inst and authority.workspace_id in (ws_inst.id, ws_inst.name, ws_inst.root.name, str(ws_inst.root)):
-                ws_matches = True
-            else:
-                auth_ws_inst = Workspace.get(authority.workspace_id)
-                if auth_ws_inst and workspace_id in (auth_ws_inst.id, auth_ws_inst.name, auth_ws_inst.root.name, str(auth_ws_inst.root)):
-                    ws_matches = True
+        ws_matches = _workspaces_match(authority.workspace_id, workspace_id, canonicalize)
 
         if not ws_matches:
             raise UnauthorizedExecutionError(
@@ -467,12 +494,7 @@ class ExecutionBoundary:
             raise UnauthorizedExecutionError(
                 f"Referenced proposal '{authority.proposal_id}' does not exist in workspace '{workspace_id}'."
             )
-        prop_ws_matches = (proposal.workspace_id == workspace_id or proposal.workspace_id == authority.workspace_id)
-        if not prop_ws_matches:
-            from aether.workspace.workspace import Workspace
-            ws_chk = Workspace.get(workspace_id)
-            if ws_chk and proposal.workspace_id in (ws_chk.id, ws_chk.name, ws_chk.root.name):
-                prop_ws_matches = True
+        prop_ws_matches = _workspaces_match(proposal.workspace_id, workspace_id, canonicalize) or _workspaces_match(proposal.workspace_id, authority.workspace_id, canonicalize)
         if not prop_ws_matches:
             raise UnauthorizedExecutionError(
                 f"Proposal workspace '{proposal.workspace_id}' does not match execution workspace '{workspace_id}'."
@@ -494,6 +516,26 @@ class ExecutionBoundary:
                 f"Proposal '{proposal.id}' is not in '{ProposalStatus.ACCEPTED.value}' state (current status: '{status_str}'). "
                 f"Unaccepted or revoked proposals cannot authorize execution."
             )
+
+        # Consent: acceptance must be backed by a recorded, unrevoked consent for THIS version and content.
+        get_consent = getattr(personal_store, "get_consent", None)
+        if callable(get_consent):
+            from aether.personal.store import PersonalStore
+            from aether.planning.consent import ConsentRecord, proposal_digest
+            consent = get_consent(proposal.id, proposal.version)
+            if isinstance(consent, ConsentRecord) or (consent is None and isinstance(personal_store, PersonalStore)):
+                if consent is None:
+                    raise UnauthorizedExecutionError(
+                        f"Proposal '{proposal.id}' v{proposal.version} has no recorded consent; acceptance alone is not enough."
+                    )
+                if not consent.is_active:
+                    raise UnauthorizedExecutionError(
+                        f"Consent for proposal '{proposal.id}' v{proposal.version} was revoked ({consent.revoke_reason})."
+                    )
+                if consent.content_digest != proposal_digest(proposal):
+                    raise UnauthorizedExecutionError(
+                        f"Proposal '{proposal.id}' was modified after consent was given; consent no longer applies."
+                    )
 
         constraints = getattr(proposal, "constraints", []) or []
 
@@ -602,6 +644,13 @@ class ExecutionBoundary:
                 has_match = False
                 if act_clean in allowed_actions or base_act in allowed_actions:
                     has_match = True
+                elif act_clean.startswith("mission.start:") and any(a.startswith("workforce.delegate") for a in allowed_actions):
+                    # A mission started from an accepted workforce delegation is the delegation itself.
+                    has_match = True
+                elif act_clean in _CODING_FOLLOWUP_ACTIONS and "coding.delegate" in allowed_actions:
+                    # Replying to a coding run is part of the delegation the user accepted; the executor
+                    # additionally binds the run to this very proposal and workspace.
+                    has_match = True
                 else:
                     for allowed in allowed_actions:
                         if allowed in ("*", "all"):
@@ -631,6 +680,37 @@ class ExecutionBoundary:
                 raise UnauthorizedExecutionError(
                     f"Execution of '{act_clean}' rejected: proposal '{proposal.id}' has no defined action scope or steps."
                 )
+
+            # B2. Filesystem perimeter: allow_path:<dir> constraints bound project_path/context_files
+            perimeter = [str(c).strip()[len("allow_path:"):].strip() for c in constraints
+                         if str(c).strip().lower().startswith("allow_path:")]
+            perimeter = [x for x in perimeter if x]
+            if perimeter and act_clean.startswith("coding.") and act_clean not in _CODING_FOLLOWUP_ACTIONS \
+                    and input_data is not None and act_clean != "coding.list_providers":
+                from pathlib import Path as _P
+                roots = [_P(x).resolve() for x in perimeter]
+
+                def _in_perimeter(candidate: str, base: Any = None) -> bool:
+                    pth = _P(candidate)
+                    if not pth.is_absolute() and base is not None:
+                        pth = base / pth
+                    pth = pth.resolve()
+                    return any(pth == r or r in pth.parents for r in roots)
+
+                proj = input_data.get("project_path")
+                if not proj:
+                    raise UnauthorizedExecutionError(
+                        f"Proposal '{proposal.id}' restricts the filesystem perimeter; an explicit project_path is required."
+                    )
+                if not _in_perimeter(str(proj)):
+                    raise UnauthorizedExecutionError(
+                        f"Project path '{proj}' is outside the perimeter authorised by proposal '{proposal.id}'."
+                    )
+                for cf in input_data.get("context_files") or []:
+                    if not _in_perimeter(str(cf), _P(str(proj)).resolve()):
+                        raise UnauthorizedExecutionError(
+                            f"Context file '{cf}' is outside the perimeter authorised by proposal '{proposal.id}'."
+                        )
 
             # C. Mission binding check
             if act_clean.startswith("mission.") and ":" in act_clean:

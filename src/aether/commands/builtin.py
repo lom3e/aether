@@ -150,8 +150,8 @@ def register_builtin_commands(registry: CommandRegistry) -> None:
             proj_info = f"`{ctx.workspace.project_path.name}` ({ctx.workspace.project_path})"
 
         team_name = ctx.team.config.name if ctx.team else "Default Workforce"
-        provider = ctx.team.config.default_provider if ctx.team else "ollama"
-        model = ctx.team.config.default_model if ctx.team else "qwen3.5:9b"
+        provider = ctx.team.config.default_provider if ctx.team else None
+        model = ctx.team.config.default_model if ctx.team else None
 
         is_running = False
         if ctx.app_state and hasattr(ctx.app_state, "active_tasks"):
@@ -159,6 +159,8 @@ def register_builtin_commands(registry: CommandRegistry) -> None:
 
         prov_health = None
         try:
+            if not provider:
+                raise LookupError("no provider configured")   # nothing to check, and nothing may be contacted
             from aether.providers.health import get_default_health_checker
             api_key = None
             if ctx.workspace and hasattr(ctx.workspace, "secret_store") and ctx.workspace.secret_store:
@@ -191,8 +193,8 @@ def register_builtin_commands(registry: CommandRegistry) -> None:
             f"- **Workspace**: `{ws_name}`\n"
             f"- **Conversation**: `{conv_title}` (`{conv_id}`)\n"
             f"- **Linked Project**: {proj_info}\n"
-            f"- **Active Provider**: `{provider}` ({prov_indicator})\n"
-            f"- **Default Model**: `{model}`\n"
+            f"- **Active Provider**: `{provider or 'not configured'}` ({prov_indicator if provider else '🟡 No provider configured'})\n"
+            f"- **Default Model**: `{model or 'not set'}`\n"
             f"- **Workforce Team**: `{team_name}` ({len(ctx.team.agents()) if ctx.team else 0} agents)\n"
             f"- **Task State**: `{'⚡ Running' if is_running else '🟢 Idle'}`\n"
         )

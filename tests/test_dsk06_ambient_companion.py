@@ -221,7 +221,7 @@ async def test_f_companion_creates_personal_session(workspace):
     payload = PersonalChatPayload(
         prompt="Summarize project progress",
         session_id=None,
-        workspace_id=workspace.name,
+        workspace_id=workspace.id,
     )
     res = await personal_chat_route(req, payload)
 
@@ -248,7 +248,7 @@ async def test_g_background_task_visibility(workspace):
     task = PersonalTask(
         id="ptask-test-1",
         session_id="test-sess-1",
-        workspace_id=workspace.name,
+        workspace_id=workspace.id,
         title="Autonomous Code Analysis",
         status=PersonalTaskStatus.RUNNING,
         tier=IntentTier.DELEGATE,
@@ -259,7 +259,7 @@ async def test_g_background_task_visibility(workspace):
 
     # Fetch overview as Companion does
     req = make_request("GET", "/api/personal/overview")
-    ov = await get_personal_overview_route(req, workspace_id=workspace.name)
+    ov = await get_personal_overview_route(req, workspace_id=workspace.id)
 
     bg_tasks = ov.get("background_tasks", [])
     assert any(t["id"] == task.id for t in bg_tasks)
@@ -278,7 +278,7 @@ async def test_h_notification_visibility(workspace):
 
     from aether.notifications.models import NotificationType
     notif = workspace.notifications.notify(
-        workspace_id=workspace.name,
+        workspace_id=workspace.id,
         type=NotificationType.TASK_COMPLETED,
         title="Action Complete",
         message="Autonomous report generated.",
@@ -286,11 +286,11 @@ async def test_h_notification_visibility(workspace):
     )
 
     req = make_request("GET", "/api/personal/overview")
-    ov = await get_personal_overview_route(req, workspace_id=workspace.name)
+    ov = await get_personal_overview_route(req, workspace_id=workspace.id)
     assert ov.get("unread_notifications", 0) >= 1
 
     req_notifs = make_request("GET", "/api/notifications")
-    notifs = await list_notifications_route(req_notifs, workspace_id=workspace.name)
+    notifs = await list_notifications_route(req_notifs, workspace_id=workspace.id)
     assert any(n["id"] == notif.id for n in notifs)
 
 
@@ -307,7 +307,7 @@ async def test_i_approval_card_executes_action(workspace, accepted_authority_fac
     exec_req = make_request("POST", "/api/actions/execute")
     payload = ExecuteActionPayload(
         action_id="calendar.create_event",
-        workspace_id=workspace.name,
+        workspace_id=workspace.id,
         input_data={"title": "Team Sync", "start_time": "2026-10-01T10:00:00Z"},
         auto_approve=False,
         authority=auth.to_dict(),
@@ -318,7 +318,7 @@ async def test_i_approval_card_executes_action(workspace, accepted_authority_fac
 
     # 2. Companion overview reflects pending approval
     ov_req = make_request("GET", "/api/personal/overview")
-    ov = await get_personal_overview_route(ov_req, workspace_id=workspace.name)
+    ov = await get_personal_overview_route(ov_req, workspace_id=workspace.id)
     approvals = ov.get("pending_approvals", [])
     assert any(a.get("execution_id") == execution_id for a in approvals)
 
@@ -424,7 +424,7 @@ async def test_o_acceptance_simulation_22_steps(workspace, accepted_authority_fa
     req1 = make_request("POST", "/api/personal/chat")
     res1 = await personal_chat_route(
         req1,
-        PersonalChatPayload(prompt="Organize today project schedule", workspace_id=workspace.name),
+        PersonalChatPayload(prompt="Organize today project schedule", workspace_id=workspace.id),
     )
     # Step 7: Verify Personal Agent session created
     session_id = res1["session_id"]
@@ -435,7 +435,7 @@ async def test_o_acceptance_simulation_22_steps(workspace, accepted_authority_fa
     task = PersonalTask(
         id="ptask-test-2",
         session_id=session_id,
-        workspace_id=workspace.name,
+        workspace_id=workspace.id,
         title="Autonomous Schedule Compilation",
         status=PersonalTaskStatus.RUNNING,
         tier=IntentTier.DELEGATE,
@@ -456,7 +456,7 @@ async def test_o_acceptance_simulation_22_steps(workspace, accepted_authority_fa
 
     # Step 12: Verify task state is current in Companion overview
     ov_req1 = make_request("GET", "/api/personal/overview")
-    ov1 = await get_personal_overview_route(ov_req1, workspace_id=workspace.name)
+    ov1 = await get_personal_overview_route(ov_req1, workspace_id=workspace.id)
     bg_task_entry = next((t for t in ov1["background_tasks"] if t["id"] == task.id), None)
     assert bg_task_entry is not None
     assert bg_task_entry["progress_percent"] == 70
@@ -465,7 +465,7 @@ async def test_o_acceptance_simulation_22_steps(workspace, accepted_authority_fa
     # Step 13: Notification created and visible
     from aether.notifications.models import NotificationType
     notif = workspace.notifications.notify(
-        workspace_id=workspace.name,
+        workspace_id=workspace.id,
         type=NotificationType.TASK_COMPLETED,
         title="Schedule Compilation Updated",
         message="70% complete",
@@ -480,7 +480,7 @@ async def test_o_acceptance_simulation_22_steps(workspace, accepted_authority_fa
         exec_req,
         ExecuteActionPayload(
             action_id="calendar.create_event",
-            workspace_id=workspace.name,
+            workspace_id=workspace.id,
             input_data={"title": "Sprint Review", "start_time": "2026-10-02T14:00:00Z"},
             auto_approve=False,
             authority=auth.to_dict(),
@@ -491,7 +491,7 @@ async def test_o_acceptance_simulation_22_steps(workspace, accepted_authority_fa
 
     # Step 15: Verify approval appears in Companion overview
     ov_req2 = make_request("GET", "/api/personal/overview")
-    ov2 = await get_personal_overview_route(ov_req2, workspace_id=workspace.name)
+    ov2 = await get_personal_overview_route(ov_req2, workspace_id=workspace.id)
     assert any(a.get("execution_id") == execution_id for a in ov2["pending_approvals"])
 
     # Step 16: Approve it via Companion
@@ -561,7 +561,7 @@ async def test_q_conversational_natural_greetings(workspace):
     req1 = make_request("POST", "/api/personal/chat")
     res1 = await personal_chat_route(
         req1,
-        PersonalChatPayload(prompt="ciao come stai?", workspace_id=workspace.name),
+        PersonalChatPayload(prompt="ciao come stai?", workspace_id=workspace.id),
     )
     assert res1["role"] == "assistant"
     assert "Ciao!" in res1["content"]
@@ -571,7 +571,7 @@ async def test_q_conversational_natural_greetings(workspace):
     req2 = make_request("POST", "/api/personal/chat")
     res2 = await personal_chat_route(
         req2,
-        PersonalChatPayload(prompt="hello, how are you?", workspace_id=workspace.name),
+        PersonalChatPayload(prompt="hello, how are you?", workspace_id=workspace.id),
     )
     assert res2["role"] == "assistant"
     assert "Hello!" in res2["content"]
@@ -580,7 +580,7 @@ async def test_q_conversational_natural_greetings(workspace):
     req3 = make_request("POST", "/api/personal/chat")
     res3 = await personal_chat_route(
         req3,
-        PersonalChatPayload(prompt="grazie mille!", workspace_id=workspace.name),
+        PersonalChatPayload(prompt="grazie mille!", workspace_id=workspace.id),
     )
     assert res3["role"] == "assistant"
     assert "Prego!" in res3["content"]
@@ -603,7 +603,7 @@ async def test_r_carshine_specialist_delegation(workspace):
         req,
         PersonalChatPayload(
             prompt="Analisi di mercato per CarShine",
-            workspace_id=workspace.name,
+            workspace_id=workspace.id,
         ),
     )
     assert res["role"] == "assistant"
@@ -613,12 +613,12 @@ async def test_r_carshine_specialist_delegation(workspace):
     # Authorize execution of delegated workforce via accepted proposal authority
     if "proposal_id" in res.get("metadata", {}):
         prop_id = res["metadata"]["proposal_id"]
-        _, authority = workspace.personal.accept_proposal(prop_id, workspace_id=workspace.name)
+        _, authority = workspace.personal.accept_proposal(prop_id, workspace_id=workspace.id)
         await personal_chat_route(
             req,
             PersonalChatPayload(
                 prompt="Analisi di mercato per CarShine",
-                workspace_id=workspace.name,
+                workspace_id=workspace.id,
                 authority=authority.to_dict(),
             ),
         )
@@ -626,7 +626,7 @@ async def test_r_carshine_specialist_delegation(workspace):
     # Wait for the background worker thread to finish
     workspace.personal.task_manager._executor.shutdown(wait=True)
 
-    tasks = workspace.personal.task_manager.list_tasks(workspace_id=workspace.name)
+    tasks = workspace.personal.task_manager.list_tasks(workspace_id=workspace.id)
     assert len(tasks) >= 1
     carshine_task = next((t for t in tasks if "CarShine" in t.title), None)
     assert carshine_task is not None
@@ -638,7 +638,11 @@ async def test_r_carshine_specialist_delegation(workspace):
     assert deliv_file.exists()
     report_text = deliv_file.read_text(encoding="utf-8")
     assert "CarShine" in report_text
-    assert "Strategic Market Analysis" in report_text
+    # The delegate no longer invents report sections ("Strategic Market Analysis" used to be fabricated text): the
+    # deliverable is the workforce's own synthesis, labelled as model-generated and not yet verified, and it names the
+    # specialists that were actually registered for the delegation.
+    assert "Model-generated by the workforce" in report_text and "Not independently verified" in report_text
+    assert "specialists:" in report_text and "researcher" in report_text and "writer" in report_text
 
 
 # ---------------------------------------------------------------------------
@@ -658,7 +662,7 @@ async def test_s_generic_workforce_delegation_arbitrary_topic(workspace):
         req,
         PersonalChatPayload(
             prompt="Audit di sicurezza per AuthModule",
-            workspace_id=workspace.name,
+            workspace_id=workspace.id,
         ),
     )
     assert res["role"] == "assistant"
@@ -667,19 +671,19 @@ async def test_s_generic_workforce_delegation_arbitrary_topic(workspace):
 
     if "proposal_id" in res.get("metadata", {}):
         prop_id = res["metadata"]["proposal_id"]
-        _, authority = workspace.personal.accept_proposal(prop_id, workspace_id=workspace.name)
+        _, authority = workspace.personal.accept_proposal(prop_id, workspace_id=workspace.id)
         await personal_chat_route(
             req,
             PersonalChatPayload(
                 prompt="Audit di sicurezza per AuthModule",
-                workspace_id=workspace.name,
+                workspace_id=workspace.id,
                 authority=authority.to_dict(),
             ),
         )
 
     workspace.personal.task_manager._executor.shutdown(wait=True)
 
-    tasks = workspace.personal.task_manager.list_tasks(workspace_id=workspace.name)
+    tasks = workspace.personal.task_manager.list_tasks(workspace_id=workspace.id)
     auth_task = next((t for t in tasks if "AuthModule" in t.title), None)
     assert auth_task is not None
     assert auth_task.status == PersonalTaskStatus.COMPLETED

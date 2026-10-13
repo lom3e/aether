@@ -114,10 +114,10 @@ def test_package_installation_and_cleanup(temp_ws: Workspace):
     store = temp_ws.ecosystem
 
     # 1. Install Skill Package
-    assert not store.is_installed("skill-docker-k8s", temp_ws.name)
+    assert not store.is_installed("skill-docker-k8s", temp_ws.id)
     installed_skill = store.install_package("skill-docker-k8s", temp_ws)
     assert installed_skill.package_id == "skill-docker-k8s"
-    assert store.is_installed("skill-docker-k8s", temp_ws.name)
+    assert store.is_installed("skill-docker-k8s", temp_ws.id)
 
     # Check physical file creation
     skill_file = temp_ws.root / ".aether" / "skills" / "docker-k8s" / "SKILL.md"
@@ -127,15 +127,15 @@ def test_package_installation_and_cleanup(temp_ws: Workspace):
     # 2. Install Workflow Template Package
     installed_wf = store.install_package("workflow-continuous-security", temp_ws)
     assert installed_wf.package_id == "workflow-continuous-security"
-    assert store.is_installed("workflow-continuous-security", temp_ws.name)
+    assert store.is_installed("workflow-continuous-security", temp_ws.id)
 
     # Check that workflow was persisted in workspace.workflows
-    wf = temp_ws.workflows.get_workflow("wf_workflow_continuous_security", workspace_id=temp_ws.name)
+    wf = temp_ws.workflows.get_workflow("wf_workflow_continuous_security", workspace_id=temp_ws.id)
     assert wf is not None
     assert len(wf.graph.nodes) >= 3
 
     # 3. List installed
-    installed_list = store.list_installed(temp_ws.name)
+    installed_list = store.list_installed(temp_ws.id)
     assert len(installed_list) >= 2
     installed_ids = {p.package_id for p in installed_list}
     assert "skill-docker-k8s" in installed_ids
@@ -144,14 +144,14 @@ def test_package_installation_and_cleanup(temp_ws: Workspace):
     # 4. Uninstall Skill Package
     uninstalled = store.uninstall_package("skill-docker-k8s", temp_ws)
     assert uninstalled is True
-    assert not store.is_installed("skill-docker-k8s", temp_ws.name)
+    assert not store.is_installed("skill-docker-k8s", temp_ws.id)
     assert not skill_file.exists()
 
     # 5. Uninstall Workflow Package
     uninstalled_wf = store.uninstall_package("workflow-continuous-security", temp_ws)
     assert uninstalled_wf is True
-    assert not store.is_installed("workflow-continuous-security", temp_ws.name)
-    assert temp_ws.workflows.get_workflow("wf_workflow_continuous_security", workspace_id=temp_ws.name) is None
+    assert not store.is_installed("workflow-continuous-security", temp_ws.id)
+    assert temp_ws.workflows.get_workflow("wf_workflow_continuous_security", workspace_id=temp_ws.id) is None
 
 
 # ---------------------------------------------------------------------------
@@ -172,13 +172,13 @@ def test_action_executor_marketplace_actions(temp_ws: Workspace, accepted_author
     )
 
     # 1. marketplace.list
-    res_list = executor.execute("marketplace.list", temp_ws.name, {})
+    res_list = executor.execute("marketplace.list", temp_ws.id, {})
     assert res_list.status == ActionExecutionStatus.SUCCESS
     assert res_list.output_data["count"] >= 7
     assert len(res_list.output_data["packages"]) >= 7
 
     # 2. marketplace.inspect
-    res_inspect = executor.execute("marketplace.inspect", temp_ws.name, {"package_id": "workforce-fullstack-dev"})
+    res_inspect = executor.execute("marketplace.inspect", temp_ws.id, {"package_id": "workforce-fullstack-dev"})
     assert res_inspect.status == ActionExecutionStatus.SUCCESS
     assert res_inspect.output_data["package"]["id"] == "workforce-fullstack-dev"
     assert "security_summary" in res_inspect.output_data
@@ -186,7 +186,7 @@ def test_action_executor_marketplace_actions(temp_ws: Workspace, accepted_author
     # 3. marketplace.install
     res_install = executor.execute(
         "marketplace.install",
-        temp_ws.name,
+        temp_ws.id,
         {"package_id": "tool-sql-introspect"},
         auto_approve=True,
         authority=auth,
@@ -194,12 +194,12 @@ def test_action_executor_marketplace_actions(temp_ws: Workspace, accepted_author
     assert res_install.status == ActionExecutionStatus.SUCCESS
     assert res_install.output_data["package_id"] == "tool-sql-introspect"
     assert res_install.output_data["installed"] is True
-    assert temp_ws.ecosystem.is_installed("tool-sql-introspect", temp_ws.name)
+    assert temp_ws.ecosystem.is_installed("tool-sql-introspect", temp_ws.id)
 
     # 4. marketplace.uninstall
     res_uninstall = executor.execute(
         "marketplace.uninstall",
-        temp_ws.name,
+        temp_ws.id,
         {"package_id": "tool-sql-introspect"},
         auto_approve=True,
         authority=auth,
@@ -207,7 +207,7 @@ def test_action_executor_marketplace_actions(temp_ws: Workspace, accepted_author
     assert res_uninstall.status == ActionExecutionStatus.SUCCESS
     assert res_uninstall.output_data["package_id"] == "tool-sql-introspect"
     assert res_uninstall.output_data["uninstalled"] is True
-    assert not temp_ws.ecosystem.is_installed("tool-sql-introspect", temp_ws.name)
+    assert not temp_ws.ecosystem.is_installed("tool-sql-introspect", temp_ws.id)
 
 
 # ---------------------------------------------------------------------------
@@ -260,7 +260,7 @@ async def test_fastapi_marketplace_routes(temp_ws: Workspace):
     mock_req.app.state.workspace = temp_ws
 
     # 1. GET /api/marketplace/packages
-    pkgs = await list_marketplace_packages_route(mock_req, workspace_id=temp_ws.name)
+    pkgs = await list_marketplace_packages_route(mock_req, workspace_id=temp_ws.id)
     assert len(pkgs) >= 7
 
     # 2. GET /api/marketplace/packages/{package_id}

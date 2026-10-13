@@ -1,0 +1,332 @@
+/* ==========================================================================
+   PROTOTYPE CONTROLS — HIGH-FIDELITY DESIGN LAB DOCK
+   State Selector • Scenario 10-Step Scrubber • Voice Simulation Toggle
+   ========================================================================== */
+
+.prototype-bar {
+  position: fixed;
+  top: 68px;
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 45;
+  background: rgba(14, 16, 24, 0.88);
+  backdrop-filter: blur(28px);
+  -webkit-backdrop-filter: blur(28px);
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  box-shadow: 0 16px 40px -10px rgba(0, 0, 0, 0.7), 0 0 25px rgba(140, 92, 246, 0.08);
+  border-radius: var(--radius-pill);
+  padding: 6px 10px;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  font-size: 12px;
+  transition: all var(--duration-normal) var(--spring-smooth);
+}
+
+.prototype-tag {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 10px;
+  border-radius: var(--radius-pill);
+  background: rgba(140, 92, 246, 0.14);
+  border: 1px solid rgba(140, 92, 246, 0.3);
+  color: var(--aether-violet-light);
+  font-weight: 600;
+  font-size: 10px;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+
+.prototype-tag svg {
+  width: 12px;
+  height: 12px;
+}
+
+/* State Quick Switcher Buttons */
+.states-pill-group {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.state-btn {
+  background: transparent;
+  border: 1px solid transparent;
+  color: var(--text-secondary);
+  font-size: 11px;
+  font-weight: 500;
+  padding: 5px 10px;
+  border-radius: var(--radius-pill);
+  cursor: pointer;
+  transition: all var(--duration-fast) ease;
+  white-space: nowrap;
+}
+
+.state-btn:hover {
+  background: rgba(255, 255, 255, 0.06);
+  color: var(--text-primary);
+}
+
+.state-btn.active {
+  background: rgba(255, 255, 255, 0.1);
+  border-color: rgba(255, 255, 255, 0.18);
+  color: #fff;
+  box-shadow: 0 2px 10px rgba(0, 0, 0, 0.4);
+}
+
+.prototype-divider {
+  width: 1px;
+  height: 20px;
+  background: rgba(255, 255, 255, 0.1);
+}
+
+/* Scenario Stepper Controls */
+.scenario-controls {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.scenario-play-btn {
+  background: var(--aether-violet);
+  color: #fff;
+  border: none;
+  border-radius: var(--radius-pill);
+  padding: 5px 12px;
+  font-size: 11px;
+  font-weight: 500;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  cursor: pointer;
+  transition: all var(--duration-fast) ease;
+}
+
+.scenario-play-btn:hover {
+  background: #7c3aed;
+  box-shadow: 0 0 12px rgba(140, 92, 246, 0.4);
+}
+
+.scenario-step-btn {
+  width: 26px;
+  height: 26px;
+  border-radius: 50%;
+  background: rgba(255, 255, 255, 0.05);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  color: var(--text-secondary);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  transition: all var(--duration-fast) ease;
+}
+
+.scenario-step-btn:hover {
+  background: rgba(255, 255, 255, 0.1);
+  color: #fff;
+}
+
+.scenario-indicator {
+  font-size: 11px;
+  color: var(--text-muted);
+  font-family: 'JetBrains Mono', monospace;
+  padding: 0 4px;
+}
+
+/* Audio Simulation Pill */
+.audio-sim-pill {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 10px;
+  border-radius: var(--radius-pill);
+  background: rgba(255, 255, 255, 0.035);
+  border: 1px solid rgba(255, 255, 255, 0.07);
+  color: var(--text-secondary);
+  font-size: 11px;
+  cursor: pointer;
+  transition: all var(--duration-fast) ease;
+}
+
+.audio-sim-pill:hover {
+  background: rgba(255, 255, 255, 0.08);
+  color: var(--text-primary);
+}
+
+.audio-sim-pill.sound-active {
+  background: rgba(168, 85, 247, 0.18);
+  border-color: rgba(168, 85, 247, 0.4);
+  color: #c084fc;
+}
+
+/* Adaptive Quality Switcher */
+.quality-pill-group {
+  display: flex;
+  align-items: center;
+  gap: 3px;
+}
+
+.ctrl-sublabel {
+  font-size: 10px;
+  color: var(--text-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  margin-right: 2px;
+}
+
+.quality-btn {
+  background: transparent;
+  border: 1px solid transparent;
+  color: var(--text-secondary);
+  font-size: 10px;
+  font-weight: 500;
+  padding: 3px 7px;
+  border-radius: var(--radius-pill);
+  cursor: pointer;
+  transition: all var(--duration-fast) ease;
+}
+
+.quality-btn:hover {
+  background: rgba(255, 255, 255, 0.08);
+  color: var(--text-primary);
+}
+
+.quality-btn.active {
+  background: rgba(255, 255, 255, 0.12);
+  border-color: rgba(255, 255, 255, 0.18);
+  color: #fff;
+}
+
+/* Reduced Motion Toggle */
+.motion-toggle-btn {
+  background: rgba(255, 255, 255, 0.04);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  color: var(--text-secondary);
+  font-size: 11px;
+  font-weight: 500;
+  padding: 4px 10px;
+  border-radius: var(--radius-pill);
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  cursor: pointer;
+  transition: all var(--duration-fast) ease;
+}
+
+.motion-toggle-btn:hover {
+  background: rgba(255, 255, 255, 0.08);
+  color: var(--text-primary);
+}
+
+.motion-toggle-btn.active-reduced {
+  background: rgba(56, 189, 248, 0.14);
+  border-color: rgba(56, 189, 248, 0.35);
+  color: #7dd3fc;
+}
+
+/* Performance Telemetry HUD Pill */
+.telemetry-pill {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 10px;
+  background: rgba(0, 0, 0, 0.45);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: var(--radius-pill);
+  font-size: 10px;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+  color: #a1a1aa;
+  letter-spacing: 0.02em;
+}
+
+.telemetry-dot {
+  width: 5px;
+  height: 5px;
+  border-radius: 50%;
+  background: #10b981;
+  box-shadow: 0 0 6px #10b981;
+}
+
+/* Floating Step Explanation Card (Walkthrough narration) */
+.scenario-toast {
+  position: fixed;
+  top: 130px;
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 44;
+  background: rgba(18, 20, 29, 0.9);
+  backdrop-filter: blur(24px);
+  -webkit-backdrop-filter: blur(24px);
+  border: 1px solid rgba(140, 92, 246, 0.25);
+  box-shadow: 0 16px 40px rgba(0, 0, 0, 0.6);
+  border-radius: var(--radius-pill);
+  padding: 8px 20px;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  pointer-events: none;
+  animation: slideUpFade 240ms ease-out;
+  transition: all var(--duration-normal) var(--spring-smooth);
+}
+
+.scenario-toast-step {
+  font-size: 10px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: var(--aether-violet-light);
+  background: var(--aether-violet-dim);
+  padding: 2px 7px;
+  border-radius: var(--radius-pill);
+}
+
+.scenario-toast-text {
+  font-size: 12px;
+  color: var(--text-primary);
+  font-weight: 500;
+}
+
+/* Responsive Prototype Controls for Mobile and Tablets */
+@media (max-width: 960px) {
+  .prototype-bar {
+    top: 62px;
+    max-width: 96vw;
+    overflow-x: auto;
+    -webkit-overflow-scrolling: touch;
+    scrollbar-width: none;
+    padding: 5px 8px;
+    gap: 8px;
+  }
+  .prototype-bar::-webkit-scrollbar {
+    display: none;
+  }
+  .scenario-toast {
+    top: 110px;
+    max-width: 92vw;
+    padding: 6px 14px;
+  }
+  .scenario-toast-text {
+    font-size: 11px;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+}
+
+@media (max-width: 600px) {
+  .prototype-tag {
+    display: none;
+  }
+  .telemetry-pill {
+    display: none;
+  }
+  .prototype-bar {
+    top: 58px;
+    padding: 4px 6px;
+    gap: 6px;
+  }
+  .scenario-toast {
+    display: none;
+  }
+}

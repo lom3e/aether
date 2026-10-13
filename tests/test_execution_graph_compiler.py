@@ -315,7 +315,7 @@ async def test_runtime_execution_compiles_graph_and_broadcasts(temp_workspace: W
         title="Autonomous Mission",
         objective="Compile execution DAG on runtime steps",
         team_name="Engineering",
-        workspace_id=temp_workspace.name,
+        workspace_id=temp_workspace.id,
     )
     store.create_milestone(mission.id, title="Alpha Task", order_idx=0)
 

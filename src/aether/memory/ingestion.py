@@ -104,7 +104,11 @@ class MemoryIngestionService:
             source_mission_id=eff_mission_id,
             source_execution_id=eff_execution_id,
             author_agent=eff_reviewer or "QualityGate Reviewer",
-            verification_status="verified",
+            # Only a pass backed by a reviewer model or concrete technical evidence is a *verified* fact that future
+            # contexts may rely on; a purely structural pass is recorded as inferred (and so never auto-injected).
+            verification_status=(
+                "verified" if (eval_result is None or getattr(eval_result, "semantically_verified", True)) else "inferred"
+            ),
             evidence=evidence,
         )
 
@@ -121,6 +125,62 @@ class MemoryIngestionService:
             tags=[eff_type, "deliverable", "verified"],
         )
         saved = effective_store.create_memory(mem)
+        if knowledge_graph_store is not None:
+            try:
+                from aether.knowledge.graph.builder import KnowledgeGraphBuilder
+                KnowledgeGraphBuilder.compile_memory(saved, knowledge_graph_store)
+            except Exception:
+                pass
+        return saved
+
+    @staticmethod
+    def ingest_mission_outcome(
+        memory_store: Any,
+        workspace_id: str,
+        mission_id: str,
+        execution_id: str,
+        title: str,
+        objective: str,
+        stage_outputs: list[str],
+        eval_result: Any = None,
+        deliverables: list[Any] | None = None,
+        evidence: dict[str, Any] | None = None,
+        knowledge_graph_store: Any = None,
+    ) -> Any:
+        """
+        Records WHAT a finished mission achieved, once per mission (idempotent), so later missions can reuse it.
+        Only a pass backed by a reviewer model or concrete technical evidence is stored as ``verified`` (and thus
+        retrievable into future contexts); a purely structural pass is stored as ``inferred`` and stays out of them.
+        """
+        source_id = f"mission:{mission_id}"
+        for existing in memory_store.list_memories(workspace_id, limit=500):
+            if getattr(existing.provenance, "source_id", None) == source_id:
+                return existing
+        verified = eval_result is None or getattr(eval_result, "semantically_verified", False)
+        names = [getattr(d, "name", str(d)) for d in (deliverables or [])][:8]
+        body = "\n".join(o.strip() for o in stage_outputs if o and o.strip())[:900]
+        content = f"Objective: {objective[:300]}\nResult: {body}" + (f"\nDeliverables: {', '.join(names)}" if names else "")
+        prov = MemoryProvenance(
+            source_entity="mission_outcome",
+            source_mission_id=mission_id,
+            source_execution_id=execution_id,
+            source_id=source_id,
+            author_agent=getattr(eval_result, "reviewer_agent", None) or "QualityGate Reviewer",
+            verification_status="verified" if verified else "inferred",
+            evidence={
+                "gate_method": getattr(eval_result, "method", None),
+                "gate_score": getattr(eval_result, "score", None),
+                "not_checked": list(getattr(eval_result, "not_checked", []) or []),
+                **(evidence or {}),
+            },
+        )
+        mem = WorkforceMemory.create(
+            workspace_id=workspace_id, category=MemoryCategory.OUTCOME, summary=f"Mission outcome: {title}"[:200],
+            content=content, provenance=prov, mission_id=mission_id, execution_id=execution_id,
+            confidence=((getattr(eval_result, "score", 0) or 0) / 100.0) or 0.8,
+            tags=["mission_outcome", "verified" if verified else "unverified"],
+        )
+        saved = memory_store.create_memory(mem)
         if knowledge_graph_store is not None:
             try:
                 from aether.knowledge.graph.builder import KnowledgeGraphBuilder

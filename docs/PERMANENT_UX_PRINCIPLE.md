@@ -1,5 +1,68 @@
 # Aether — Permanent UX Principle
 
+## 0. PRINCIPIO FONDAMENTALE DI PRODOTTO — AETHER SI OCCUPA DI TE
+
+### La promessa
+
+> **Tu dimmi cosa vuoi ottenere. Aether si occupa del resto.**
+
+Aether deve offrire l'esperienza di un assistente personale estremamente capace, attento e premuroso, che si prende carico del lavoro invece di trasferire la complessità sull'utente.
+
+L'utente deve sentirsi **servito, seguito e libero di concentrarsi su ciò che conta**, senza dover comprendere l'architettura del sistema o controllare ogni singolo passaggio.
+
+Non voglio un'applicazione che espone tutte le sue funzionalità.
+Voglio un'applicazione che sappia quali funzionalità utilizzare, quando utilizzarle e quali dettagli sono davvero importanti per l'utente.
+
+### 1. L'utente esprime un obiettivo, non dirige una macchina
+L'utente dovrebbe poter dire:
+- «Organizzami la giornata.»
+- «Sistema questo progetto.»
+- «Occupati di questo cliente.»
+- «Preparami qualcosa da pubblicare.»
+- «Ricordami di fare questa cosa domani.»
+
+Aether deve interpretare l'obiettivo, recuperare il contesto pertinente, individuare le capacità necessarie e organizzare il lavoro.
+L'utente non deve dover selezionare agenti, scegliere modelli, costruire workflow, configurare passaggi tecnici o decidere connettori. La gestione manuale resta disponibile, ma secondaria.
+
+### 2. La complessità compare solo quando serve davvero (Progressive Disclosure a 4 Livelli)
+- **Livello 1 — L'essenziale:** Mostra soltanto la conversazione, la risposta o l'azione principale.
+- **Livello 2 — Ciò che è utile sapere:** Mostra un aggiornamento, un risultato o un dettaglio che aiuta l'utente a capire cosa sta succedendo.
+- **Livello 3 — Ciò che richiede attenzione:** Mostra una decisione, un'approvazione o un chiarimento necessario (con spiegazione di cosa, perché, conseguenze e opzione proposta).
+- **Livello 4 — I dettagli completi:** Rendi accessibili procedure, configurazioni, log e dettagli tecnici solo quando richiesti. Non costringere nessuno a vivere continuamente al livello 4.
+
+### 3. Aether deve togliere lavoro all'utente, non aggiungerne
+Valutazione costante: *«Questa cosa aiuta davvero l'utente oppure gli sta chiedendo di gestire Aether?»*
+Evitare indicatori tecnici, decine di stati, scelte equivalenti, approvazioni innocue senza motivo o flussi rumorosi.
+
+### 4. Iniziativa intelligente, senza domande inutili
+- Intento chiaro + rischio basso: procedere autonomamente con scelte ragionevoli.
+- Ambiguità materiale: domanda breve e precisa.
+- Decisione importante: spiegare cosa decidere, perché è importante, conseguenze, opzione proposta con motivazione.
+- Rispettare rigorosamente i guardrail di sicurezza reali.
+
+### 5. L'utente deve sentirsi seguito
+Tono affidabile, discreto e orientato al risultato. Nessun servilismo, nessun falso entusiasmo. Aggiornamenti proporzionati all'importanza.
+
+### 6. I risultati contano più dei processi
+L'utente non deve seguire ogni fase. Riceve cosa è stato fatto, il risultato pronto, eventuali elementi aperti e link ai dettagli. Mai dichiarare riuscito ciò che non lo è.
+
+### 7. Un prodotto semplice davanti, un sistema potente dietro
+La potenza deve rendere l'esperienza più semplice, non più complicata.
+
+### 8. Criterio di valutazione obbligatorio (5 domande filtro)
+1. L'utente deve davvero vedere questa informazione?
+2. Deve vederla proprio adesso?
+3. Può Aether occuparsene autonomamente?
+4. Questa scelta riduce o aumenta il carico mentale?
+5. La stessa informazione può essere presentata in modo più semplice?
+
+**La sensazione finale desiderata:**
+- *«Posso chiedergli quello che mi serve.»*
+- *«Non devo spiegargli ogni singolo passaggio.»*
+- *«Si è occupato della cosa. So cosa ha fatto e ho il risultato.»*
+
+---
+
 ## 1. Simple by Default
 
 Aether can have an arbitrarily sophisticated, deep, and multi-layered internal architecture, but the user must **never** perceive that architectural complexity as interface complexity.

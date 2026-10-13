@@ -1403,7 +1403,7 @@ export function Missions({ navigate, initialMissionId }: MissionsProps) {
           </div>
 
           {/* Missions List Container */}
-          <div style={{ flex: 1, overflowY: 'auto', padding: '16px' }}>
+          <div style={{ flex: 1, overflowY: 'auto', overscrollBehavior: 'contain', padding: '16px' }}>
             <div style={{
               maxWidth: selectedMission ? '100%' : '860px',
               margin: '0 auto',
@@ -1608,6 +1608,7 @@ export function Missions({ navigate, initialMissionId }: MissionsProps) {
             flexDirection: 'column',
             height: '100%',
             overflowY: 'auto',
+            overscrollBehavior: 'contain',
             backgroundColor: 'hsl(var(--bg))'
           }}>
             {/* Cockpit Executive Header */}

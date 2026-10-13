@@ -120,6 +120,14 @@ Aether is designed to run 100% locally and privately without sending any data to
 
 To stop the Aether server, press **`Ctrl + C`** in the terminal window where `aether ui` is running.
 
+#### Which workspace does `aether ui` open? (safe, isolated runs)
+
+The server opens, in this order: `--workspace` / `AETHER_WORKSPACE`, then the **current directory** if it contains an `aether.yaml`, then the last active workspace, then the first registered one. It prints `Aether workspace: <path> (selected by: …)` at startup. `--data-dir` only moves Aether's own data (registry, global config, new workspaces): it does **not** isolate a workspace found in the current directory, so `aether ui --data-dir …` run from inside a workspace is refused. For tests or experiments always pick the workspace explicitly:
+
+```bash
+aether ui --workspace /path/to/temp-workspace --data-dir /path/to/temp-data
+```
+
 All workspace state, agent identities, conversations, and knowledge indexes are persisted in local SQLite databases under `data/` and will be restored immediately when you launch `aether ui` again.
 
 ---

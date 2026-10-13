@@ -1,15 +1,41 @@
-import { useState, useEffect, useContext, useMemo } from 'react';
+import React, { useState, useEffect, useContext, useMemo } from 'react';
 import {
-  Calendar, Mail, GitBranch, MessageSquare, FileText, CheckCircle2,
-  AlertCircle, ShieldCheck, Settings, Plus, RefreshCw, Clock, Zap, Globe, Send,
-  Check, X, Loader2, Search, ChevronDown, ChevronUp, AlertTriangle, Shield,
-  Lock, Trash2, ExternalLink, Copy
+  Calendar, Mail, GitBranch, MessageSquare, FileText,
+  RefreshCw, Clock, Zap, Globe, Send,
+  Shield, Trash2, Copy, Check,
+  Plus, CheckCircle2, ArrowRight, Layers
 } from 'lucide-react';
 import { apiUrl } from './api';
 import { ToastContext } from './toast';
 import { submitApprovalDecision } from './canonicalNotification';
-import { useTranslation } from './i18n';
 import { openExternalUrl } from './desktop';
+
+// Design System Core Imports
+import {
+  PageContainer,
+  Section,
+  Stack,
+  Grid,
+  Panel,
+  Modal,
+  Drawer,
+  Heading,
+  Text,
+  Button,
+  IconButton,
+  Switch,
+  SegmentedControl,
+  StatusBadge,
+  AlertBanner,
+  EmptyState,
+  LoadingSpinner,
+  AetherForm,
+  AetherField,
+  AetherInput,
+  AetherPasswordInput,
+  AetherSelect,
+  AetherFormActions,
+} from './design-system';
 
 interface OAuthProviderInfo {
   provider: string;
@@ -47,7 +73,87 @@ interface CalendarEventItem {
   end_time?: string;
   description?: string;
   location?: string;
+  is_all_day?: boolean;
+  start_date?: string;
+  end_date?: string;
+  time_zone?: string;
+  html_link?: string;
 }
+
+function getEventDateKey(evt: CalendarEventItem): string {
+  if (evt.start_date) {
+    return evt.start_date;
+  }
+  if (evt.start_time) {
+    if (/^\d{4}-\d{2}-\d{2}$/.test(evt.start_time.trim())) {
+      return evt.start_time.trim();
+    }
+    const d = new Date(evt.start_time);
+    if (!isNaN(d.getTime())) {
+      const year = d.getFullYear();
+      const month = String(d.getMonth() + 1).padStart(2, '0');
+      const day = String(d.getDate()).padStart(2, '0');
+      return `${year}-${month}-${day}`;
+    }
+  }
+  return 'Senza data';
+}
+
+function formatDayLabel(dateKey: string): { label: string; isToday: boolean } {
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(dateKey)) {
+    return { label: dateKey, isToday: false };
+  }
+  const [y, m, d] = dateKey.split('-').map(Number);
+  const eventDate = new Date(y, m - 1, d);
+  const today = new Date();
+  today.setHours(0, 0, 0, 0);
+
+  const targetDateOnly = new Date(y, m - 1, d);
+  targetDateOnly.setHours(0, 0, 0, 0);
+
+  const diffDays = Math.round((targetDateOnly.getTime() - today.getTime()) / (1000 * 60 * 60 * 24));
+
+  const formattedDate = eventDate.toLocaleDateString('it-IT', {
+    weekday: 'long',
+    day: 'numeric',
+    month: 'long',
+  });
+  const capDate = formattedDate.charAt(0).toUpperCase() + formattedDate.slice(1);
+
+  if (diffDays === 0) {
+    return { label: `Oggi — ${capDate}`, isToday: true };
+  }
+  if (diffDays === 1) {
+    return { label: `Domani — ${capDate}`, isToday: false };
+  }
+  if (diffDays === -1) {
+    return { label: `Ieri — ${capDate}`, isToday: false };
+  }
+  return { label: capDate, isToday: false };
+}
+
+function formatEventTime(evt: CalendarEventItem): string {
+  const isAllDay = evt.is_all_day || /^\d{4}-\d{2}-\d{2}$/.test(evt.start_time?.trim() || '');
+  if (isAllDay) {
+    return 'Tutto il giorno';
+  }
+  try {
+    const start = new Date(evt.start_time);
+    if (isNaN(start.getTime())) return '';
+    const startStr = start.toLocaleTimeString('it-IT', { hour: '2-digit', minute: '2-digit' });
+    if (evt.end_time) {
+      const end = new Date(evt.end_time);
+      if (!isNaN(end.getTime())) {
+        const endStr = end.toLocaleTimeString('it-IT', { hour: '2-digit', minute: '2-digit' });
+        return `${startStr} – ${endStr}`;
+      }
+    }
+    return startStr;
+  } catch {
+    return '';
+  }
+}
+
 
 interface ActionExecutionItem {
   id: string;
@@ -70,7 +176,7 @@ type CategoryType = 'all' | 'productivity' | 'dev' | 'communication';
 interface ProviderDefinition {
   id: string;
   name: string;
-  icon: any;
+  icon: React.ComponentType<{ size?: number; color?: string; className?: string }>;
   category: 'productivity' | 'dev' | 'communication';
   description: string;
   capabilitiesText: string;
@@ -80,8 +186,163 @@ interface ProviderDefinition {
   isOAuth: boolean;
 }
 
-export function Connections({ navigate: _navigate, initialExecutionId, initialTab }: ConnectionsProps) {
-  const { t } = useTranslation();
+const AVAILABLE_PROVIDERS: ProviderDefinition[] = [
+  {
+    id: 'calendar',
+    name: 'Aether Calendario (Locale)',
+    icon: Calendar,
+    category: 'productivity',
+    description: 'Agenda e archivio impegni integrato nel tuo spazio di lavoro, attivo anche senza connessione internet.',
+    capabilitiesText: 'Consulta appuntamenti e memorizza incontri nello spazio di lavoro locale',
+    capabilitiesList: [
+      'Consulta impegni e riunioni',
+      'Archiviazione sicura su database locale',
+      'Funziona senza dipendenze cloud',
+      'Indicizzazione automatica per la workforce',
+    ],
+    color: '#06b6d4',
+    builtIn: true,
+    isOAuth: false,
+  },
+  {
+    id: 'google_calendar',
+    name: 'Google Calendar',
+    icon: Calendar,
+    category: 'productivity',
+    description: 'Integrazione ufficiale con Google per coordinare impegni personali e professionali con autorizzazione diretta.',
+    capabilitiesText: 'Leggi calendari Google e pianifica riunioni con autorizzazione controllata',
+    capabilitiesList: [
+      'Lettura calendari personali e di team',
+      'Pianificazione automatica di riunioni',
+      'Aggiornamento impegni con supervisione',
+      'Sincronizzazione continua nello spazio di lavoro',
+    ],
+    color: '#4285F4',
+    builtIn: false,
+    isOAuth: true,
+  },
+  {
+    id: 'notion',
+    name: 'Notion',
+    icon: FileText,
+    category: 'productivity',
+    description: 'Sincronizza pagine di progetto, documentazione aziendale e tabelle di deliverable.',
+    capabilitiesText: 'Accedi a database e pagine Notion per recuperare e pubblicare contenuti',
+    capabilitiesList: [
+      'Ricerca e indicizzazione note di progetto',
+      'Lettura tabelle e proprietà di database',
+      'Pubblicazione deliverable verificati',
+      'Sincronizzazione bidirezionale con la memoria',
+    ],
+    color: '#000000',
+    builtIn: false,
+    isOAuth: true,
+  },
+  {
+    id: 'github',
+    name: 'GitHub',
+    icon: GitBranch,
+    category: 'dev',
+    description: 'Accedi a repository, rami di sviluppo, issue e review automatiche di pull request.',
+    capabilitiesText: 'Ispeziona codice sorgente, apri issue e suggerisci pull request supervisionate',
+    capabilitiesList: [
+      'Ispezione albero di codice e file',
+      'Monitoraggio rami e commit recenti',
+      'Creazione issue e note tecniche',
+      'Preparazione pull request verificate',
+    ],
+    color: '#2dba4e',
+    builtIn: false,
+    isOAuth: true,
+  },
+  {
+    id: 'openapi',
+    name: 'Specifica OpenAPI 3.x',
+    icon: Zap,
+    category: 'dev',
+    description: 'Collega qualsiasi API REST aziendale tramite il relativo file di specifica OpenAPI.',
+    capabilitiesText: 'Scopri dinamicamente gli endpoint e valida le chiamate tramite schema formale',
+    capabilitiesList: [
+      'Scansione automatica degli endpoint disponibili',
+      'Validazione rigorosa degli input',
+      'Supporto per token e chiavi API',
+      'Esecuzione controllata delle chiamate REST',
+    ],
+    color: '#8B5CF6',
+    builtIn: false,
+    isOAuth: false,
+  },
+  {
+    id: 'http',
+    name: 'Webhook / API HTTP Generica',
+    icon: Globe,
+    category: 'dev',
+    description: 'Interagisci con servizi web generici e webhook personalizzati con policy di sicurezza.',
+    capabilitiesText: 'Esegui chiamate HTTP (GET, POST, PUT, DELETE) con autenticazione via intestazione',
+    capabilitiesList: [
+      'Chiamate HTTP con intestazioni custom',
+      'Supporto Bearer Token, API Key e Basic Auth',
+      'Protezione SSRF e controllo degli accessi',
+      'Supervisione delle azioni di modifica',
+    ],
+    color: '#6366f1',
+    builtIn: false,
+    isOAuth: false,
+  },
+  {
+    id: 'slack',
+    name: 'Slack',
+    icon: MessageSquare,
+    category: 'communication',
+    description: 'Invia brief operativi, notifica i canali di team e ricevi feedback dalle conversazioni.',
+    capabilitiesText: 'Pubblica aggiornamenti di stato e avvisi sui canali con approvazione',
+    capabilitiesList: [
+      'Invio report di avanzamento ai canali',
+      'Notifiche operative in tempo reale',
+      'Supporto Bot Token o Incoming Webhook',
+      'Canale di destinazione predefinito configurabile',
+    ],
+    color: '#4A154B',
+    builtIn: false,
+    isOAuth: true,
+  },
+  {
+    id: 'email',
+    name: 'Email Aziendale / SMTP',
+    icon: Mail,
+    category: 'communication',
+    description: 'Prepara bozze di riepilogo, redigi comunicazioni e invia email verificate via SMTP sicuro.',
+    capabilitiesText: 'Prepara e invia email via SMTP previa esplicita approvazione dell\'utente',
+    capabilitiesList: [
+      'Composizione guidata di email strutturate',
+      'Cifratura STARTTLS e SSL/TLS nativa',
+      'Indirizzo mittente e alias personalizzabili',
+      'Invio controllato con gating di approvazione',
+    ],
+    color: '#EA4335',
+    builtIn: false,
+    isOAuth: false,
+  },
+  {
+    id: 'telegram',
+    name: 'Telegram Companion Bot',
+    icon: Send,
+    category: 'communication',
+    description: 'Comunica con Aether da smartphone, ricevi notifiche istantanee e approva azioni in mobilità.',
+    capabilitiesText: 'Ricevi comandi da smartphone e gestisci approvazioni con bottoni interattivi',
+    capabilitiesList: [
+      'Notifiche push istantanee su Telegram',
+      'Approvazione rapida di task con pulsanti inline',
+      'Protezione tramite lista di utenti autorizzati',
+      'Esecuzione remota di compiti per il Companion',
+    ],
+    color: '#229ED9',
+    builtIn: false,
+    isOAuth: false,
+  },
+];
+
+export function Connections({ initialExecutionId, initialTab }: ConnectionsProps) {
   const showToast = useContext(ToastContext);
 
   const [activeTab, setActiveTab] = useState<'apps' | 'calendar' | 'actions'>(
@@ -96,11 +357,10 @@ export function Connections({ navigate: _navigate, initialExecutionId, initialTa
   const [calendarEvents, setCalendarEvents] = useState<CalendarEventItem[]>([]);
   const [executions, setExecutions] = useState<ActionExecutionItem[]>([]);
   const [loading, setLoading] = useState(false);
-  const [syncingProvider, setSyncingProvider] = useState<string | null>(null);
   const [verifyingProvider, setVerifyingProvider] = useState<string | null>(null);
   const [syncingAll, setSyncingAll] = useState(false);
 
-  // Manage Connection Drawer / Modal
+  // Manage Connection Drawer
   const [manageProvider, setManageProvider] = useState<ProviderDefinition | null>(null);
   const [showTechDetails, setShowTechDetails] = useState(false);
 
@@ -117,7 +377,7 @@ export function Connections({ navigate: _navigate, initialExecutionId, initialTa
   const [googleAuthPending, setGoogleAuthPending] = useState(false);
   const [googleManualCode, setGoogleManualCode] = useState('');
   const [googleState, setGoogleState] = useState('');
-  const [lastGoogleAuthUrl, setLastGoogleAuthUrl] = useState('');
+  const [googleAdvOpen, setGoogleAdvOpen] = useState(false);
   const [isCalendarPickerOpen, setIsCalendarPickerOpen] = useState(false);
   const [googleCalendars, setGoogleCalendars] = useState<{ id: string; summary: string; primary: boolean; description?: string }[]>([]);
 
@@ -127,7 +387,6 @@ export function Connections({ navigate: _navigate, initialExecutionId, initialTa
 
   // Dedicated Developer App Setup Modal (GitHub, Slack, Notion)
   const [devSetupModalProvider, setDevSetupModalProvider] = useState<ProviderDefinition | null>(null);
-  const [devSetupTab, setDevSetupTab] = useState<'oauth' | 'manual'>('oauth');
   const [devClientId, setDevClientId] = useState('');
   const [devClientSecret, setDevClientSecret] = useState('');
   const [savingDevConfig, setSavingDevConfig] = useState(false);
@@ -145,9 +404,8 @@ export function Connections({ navigate: _navigate, initialExecutionId, initialTa
   const [newLocation, setNewLocation] = useState('');
   const [creatingEvent, setCreatingEvent] = useState(false);
 
-  // Config Modal State
+  // Config Modal State (Generic Credentials)
   const [configModalProvider, setConfigModalProvider] = useState<ProviderDefinition | null>(null);
-  const [isConfigured, setIsConfigured] = useState(false);
   const [credAccountName, setCredAccountName] = useState('');
   const [githubToken, setGithubToken] = useState('');
   const [slackToken, setSlackToken] = useState('');
@@ -178,179 +436,25 @@ export function Connections({ navigate: _navigate, initialExecutionId, initialTa
   const [savingCreds, setSavingCreds] = useState(false);
   const [testResult, setTestResult] = useState<{ valid: boolean; message: string } | null>(null);
 
-  const availableProviders: ProviderDefinition[] = [
-    {
-      id: 'calendar',
-      name: 'Aether Calendar (Local)',
-      icon: Calendar,
-      category: 'productivity',
-      description: 'Built-in local workspace schedule and event storage with zero external dependencies.',
-      capabilitiesText: 'Can view schedule, list local events, and record meetings directly in workspace storage',
-      capabilitiesList: [
-        'Inspect workspace schedules & appointments',
-        'Record meetings directly in local SQLite storage',
-        'Zero cloud or external network dependencies',
-        'Offline calendar event querying & indexing',
-      ],
-      color: '#06b6d4',
-      builtIn: true,
-      isOAuth: false,
-    },
-    {
-      id: 'google_calendar',
-      name: 'Google Calendar',
-      icon: Calendar,
-      category: 'productivity',
-      description: 'Real Google Calendar integration via OAuth 2.0 PKCE. Reads calendars, syncs meetings, and schedules events.',
-      capabilitiesText: 'Can read Google calendars and create or update events via official Google Calendar APIs',
-      capabilitiesList: [
-        'Read personal and organizational calendars',
-        'Schedule and coordinate new meetings',
-        'Update and cancel events with confirmation',
-        'Bidirectional sync into workspace memory',
-      ],
-      color: '#4285F4',
-      builtIn: false,
-      isOAuth: true,
-    },
-    {
-      id: 'notion',
-      name: 'Notion',
-      icon: FileText,
-      category: 'productivity',
-      description: 'Read and sync project documentation, deliverable specs, and workspace database tables.',
-      capabilitiesText: 'Can read and synchronize workspace pages and databases',
-      capabilitiesList: [
-        'Search workspace pages & documents',
-        'Read databases, schema properties, and entries',
-        'Export verified deliverables directly to Notion pages',
-        'Sync specifications into workspace knowledge',
-      ],
-      color: '#000000',
-      builtIn: false,
-      isOAuth: true,
-    },
-    {
-      id: 'github',
-      name: 'GitHub',
-      icon: GitBranch,
-      category: 'dev',
-      description: 'Access repositories, codebases, commits, pull requests, and automated review workflows.',
-      capabilitiesText: 'Can read repositories, create issues, and open pull requests',
-      capabilitiesList: [
-        'Inspect repositories, files, and tree structure',
-        'List and inspect git branches',
-        'Create, update, and comment on issues',
-        'Open pull requests with automated summaries',
-      ],
-      color: '#2dba4e',
-      builtIn: false,
-      isOAuth: true,
-    },
-    {
-      id: 'openapi',
-      name: 'OpenAPI 3.x',
-      icon: Zap,
-      category: 'dev',
-      description: 'Parse OpenAPI specifications to dynamically discover, validate, and execute REST operations.',
-      capabilitiesText: 'Can discover endpoints, validate schemas, and execute API actions dynamically',
-      capabilitiesList: [
-        'Dynamically discover API tools and operations',
-        'Validate input schemas against spec definitions',
-        'Execute authenticated REST operations',
-        'Support remote URLs and local schema files',
-      ],
-      color: '#8B5CF6',
-      builtIn: false,
-      isOAuth: false,
-    },
-    {
-      id: 'http',
-      name: 'Generic HTTP / API',
-      icon: Globe,
-      category: 'dev',
-      description: 'Interact with external REST endpoints and Web APIs with security policies and header authentication.',
-      capabilitiesText: 'Can perform authenticated HTTP operations (GET, POST, PUT, DELETE)',
-      capabilitiesList: [
-        'Authenticated HTTP requests (GET, POST, PUT, DELETE)',
-        'Bearer Token, API Key, and Basic Auth authentication',
-        'Custom header configuration',
-        'Safe execution with confirmation gating',
-      ],
-      color: '#6366f1',
-      builtIn: false,
-      isOAuth: false,
-    },
-    {
-      id: 'slack',
-      name: 'Slack',
-      icon: MessageSquare,
-      category: 'communication',
-      description: 'Receive notifications, post operational status reports, and notify channels with bot or webhook.',
-      capabilitiesText: 'Can post messages and status updates to Slack channels with confirmation',
-      capabilitiesList: [
-        'Post status briefs and updates to team channels',
-        'Send direct operational alerts',
-        'Support Bot User OAuth tokens & Incoming Webhooks',
-        'Configurable default destination channel',
-      ],
-      color: '#4A154B',
-      builtIn: false,
-      isOAuth: true,
-    },
-    {
-      id: 'email',
-      name: 'Email / SMTP',
-      icon: Mail,
-      category: 'communication',
-      description: 'Draft briefs, prepare automated summaries, and dispatch outbound messages via secure SMTP.',
-      capabilitiesText: 'Can draft and dispatch emails via SMTP with explicit user approval',
-      capabilitiesList: [
-        'Draft and send structured outbound emails',
-        'STARTTLS and direct SSL/TLS encryption support',
-        'Custom sender addresses and display aliases',
-        'Supervised dispatch with explicit confirmation',
-      ],
-      color: '#EA4335',
-      builtIn: false,
-      isOAuth: false,
-    },
-    {
-      id: 'telegram',
-      name: 'Telegram Bot',
-      icon: Send,
-      category: 'communication',
-      description: 'Mobile companion, real-time alerts, remote task delegation, and inline interactive approvals.',
-      capabilitiesText: 'Can receive mobile commands, dispatch notifications, and handle interactive approvals',
-      capabilitiesList: [
-        'Direct push alerts to mobile devices',
-        'Interactive inline approval buttons',
-        'Authorized chat ID whitelist enforcement',
-        'Remote companion command execution',
-      ],
-      color: '#229ED9',
-      builtIn: false,
-      isOAuth: false,
-    },
-  ];
-
   const fetchAll = () => {
     setLoading(true);
     Promise.all([
-      fetch(apiUrl('/api/connections')).then(r => r.json()),
-      fetch(apiUrl('/api/connections/calendar/events')).then(r => r.json()),
-      fetch(apiUrl('/api/connections/google_calendar/events')).then(r => r.ok ? r.json() : []).catch(() => []),
-      fetch(apiUrl('/api/actions/executions')).then(r => r.json()),
-      fetch(apiUrl('/api/connections/oauth/providers')).then(r => r.ok ? r.json() : {}).catch(() => ({})),
+      fetch(apiUrl('/api/connections')).then((r) => r.json()),
+      fetch(apiUrl('/api/connections/calendar/events')).then((r) => r.json()),
+      fetch(apiUrl('/api/connections/google_calendar/events')).then((r) => (r.ok ? r.json() : [])).catch(() => []),
+      fetch(apiUrl('/api/actions/executions')).then((r) => r.json()),
+      fetch(apiUrl('/api/connections/oauth/providers')).then((r) => (r.ok ? r.json() : {})).catch(() => ({})),
     ])
       .then(([conns, evts, gEvts, execs, oauths]) => {
         if (Array.isArray(conns)) setConnections(conns);
         if (Array.isArray(evts)) setCalendarEvents(evts);
         if (Array.isArray(gEvts)) setGoogleCalendarEvents(gEvts);
         if (Array.isArray(execs)) setExecutions(execs);
-        if (oauths && typeof oauths === 'object') setOauthProviders(oauths as Record<string, OAuthProviderInfo>);
+        if (oauths && typeof oauths === 'object') {
+          setOauthProviders(oauths as Record<string, OAuthProviderInfo>);
+        }
       })
-      .catch(err => {
+      .catch((err) => {
         console.error('Error loading connections data', err);
       })
       .finally(() => setLoading(false));
@@ -368,17 +472,6 @@ export function Connections({ navigate: _navigate, initialExecutionId, initialTa
     }
   }, [initialTab, initialExecutionId]);
 
-  useEffect(() => {
-    if (activeTab === 'actions' && initialExecutionId && executions.length > 0) {
-      setTimeout(() => {
-        const el = document.getElementById(`exec-card-${initialExecutionId}`);
-        if (el) {
-          el.scrollIntoView({ behavior: 'smooth', block: 'center' });
-        }
-      }, 100);
-    }
-  }, [activeTab, initialExecutionId, executions]);
-
   const handleApproveAction = async (executionId: string) => {
     if (actionLoadingId === executionId) return;
     setActionLoadingId(executionId);
@@ -390,13 +483,13 @@ export function Connections({ navigate: _navigate, initialExecutionId, initialTa
         approver: 'user',
       });
       if (res.success) {
-        showToast(res.message || t('connActionApproved'), res.status === 'already_completed' ? 'info' : 'success');
+        showToast(res.message || 'Operazione approvata con successo.', 'success');
         fetchAll();
       } else {
-        showToast(res.message || 'Failed to approve action execution.', 'error');
+        showToast(res.message || 'Impossibile approvare l\'operazione.', 'error');
       }
     } catch (err: any) {
-      showToast(err.message || 'Error approving action.', 'error');
+      showToast(err.message || 'Errore durante l\'approvazione.', 'error');
     } finally {
       setActionLoadingId(null);
     }
@@ -410,16 +503,16 @@ export function Connections({ navigate: _navigate, initialExecutionId, initialTa
         target_type: 'action_execution',
         target_id: executionId,
         decision: 'reject',
-        reason: 'Declined by user',
+        reason: 'Rifiutato dall\'utente',
       });
       if (res.success) {
-        showToast(res.message || t('connActionDeclined'), 'info');
+        showToast(res.message || 'Operazione rifiutata.', 'info');
         fetchAll();
       } else {
-        showToast(res.message || 'Failed to decline action execution.', 'error');
+        showToast(res.message || 'Impossibile rifiutare l\'operazione.', 'error');
       }
     } catch (err: any) {
-      showToast(err.message || 'Error declining action.', 'error');
+      showToast(err.message || 'Errore durante il rifiuto.', 'error');
     } finally {
       setActionLoadingId(null);
     }
@@ -427,8 +520,7 @@ export function Connections({ navigate: _navigate, initialExecutionId, initialTa
 
   const openConfigModal = (provider: ProviderDefinition, existingConn?: ConnectionItem) => {
     setConfigModalProvider(provider);
-    setCredAccountName(existingConn?.account_name || `Personal ${provider.name}`);
-    setIsConfigured(Boolean(existingConn && existingConn.status !== 'not_configured' && existingConn.status !== 'disconnected'));
+    setCredAccountName(existingConn?.account_name || `Account ${provider.name}`);
     setTestResult(null);
     setGithubToken('');
     setSlackToken('');
@@ -467,15 +559,15 @@ export function Connections({ navigate: _navigate, initialExecutionId, initialTa
         if (meta.sender_address) setEmailSenderAddr(meta.sender_address);
         if (meta.test_recipient) setEmailTestRecipient(meta.test_recipient);
       }
-      if (provider.id === 'slack') {
-        if (meta.default_channel) setSlackDefaultChannel(meta.default_channel);
+      if (provider.id === 'slack' && meta.default_channel) {
+        setSlackDefaultChannel(meta.default_channel);
       }
       if (provider.id === 'http') {
         if (meta.base_url) setHttpBaseUrl(meta.base_url);
         if (meta.auth_type) setHttpAuthType(meta.auth_type);
       }
-      if (provider.id === 'notion') {
-        if (meta.default_database_id) setNotionDbId(meta.default_database_id);
+      if (provider.id === 'notion' && meta.default_database_id) {
+        setNotionDbId(meta.default_database_id);
       }
       if (provider.id === 'openapi') {
         if (meta.spec_url) setOpenapiSpecUrl(meta.spec_url);
@@ -486,7 +578,11 @@ export function Connections({ navigate: _navigate, initialExecutionId, initialTa
       if (provider.id === 'telegram') {
         if (meta.default_chat_id) setTelegramDefaultChatId(String(meta.default_chat_id));
         if (meta.allowed_chat_ids) {
-          setTelegramAllowedChats(Array.isArray(meta.allowed_chat_ids) ? meta.allowed_chat_ids.join(', ') : String(meta.allowed_chat_ids));
+          setTelegramAllowedChats(
+            Array.isArray(meta.allowed_chat_ids)
+              ? meta.allowed_chat_ids.join(', ')
+              : String(meta.allowed_chat_ids)
+          );
         }
       }
     }
@@ -502,148 +598,51 @@ export function Connections({ navigate: _navigate, initialExecutionId, initialTa
       });
       const data = await res.json();
       if (data.valid) {
-        showToast(`Verified ${providerId} successfully.`, 'success');
+        showToast('Verifica completata: il servizio è attivo e funzionante.', 'success');
       } else {
-        showToast(data.message || `Verification failed for ${providerId}.`, 'error');
+        showToast(data.message || 'La verifica ha rilevato un problema di autenticazione.', 'error');
       }
       await fetchAll();
     } catch (err: any) {
-      showToast(err.message || 'Verification request failed.', 'error');
+      showToast(err.message || 'Richiesta di verifica non riuscita.', 'error');
     } finally {
       setVerifyingProvider(null);
     }
   };
 
-  const diagnoseError = (rawErr?: string) => {
-    if (!rawErr) return null;
-    const errLow = rawErr.toLowerCase();
-    if (errLow.includes('401') || errLow.includes('unauthorized') || errLow.includes('invalid token') || errLow.includes('bad credentials') || errLow.includes('invalid_grant') || errLow.includes('password') || errLow.includes('authentication')) {
-      return {
-        title: t('connErrAuth'),
-        desc: t('connErrAuthDesc'),
-        raw: rawErr,
-      };
-    }
-    if (errLow.includes('403') || errLow.includes('forbidden') || errLow.includes('scope') || errLow.includes('permission') || errLow.includes('denied')) {
-      return {
-        title: t('connErrPerm'),
-        desc: t('connErrPermDesc'),
-        raw: rawErr,
-      };
-    }
-    if (errLow.includes('refused') || errLow.includes('timeout') || errLow.includes('timed out') || errLow.includes('unreachable') || errLow.includes('dns') || errLow.includes('network')) {
-      return {
-        title: t('connErrNet'),
-        desc: t('connErrNetDesc'),
-        raw: rawErr,
-      };
-    }
-    return {
-      title: t('connErrConfig'),
-      desc: t('connErrConfigDesc'),
-      raw: rawErr,
-    };
-  };
-
-  const getActionSummary = (exec: ActionExecutionItem) => {
-    const input = exec.input_data || {};
-    switch (exec.action_id) {
-      case 'email.send':
-        return `Send email to ${input.to || 'recipient'} — "${input.subject || '(no subject)'}"`;
-      case 'github.create_issue':
-        return `Create issue in ${input.owner ? `${input.owner}/${input.repository}` : (input.repository || 'repo')}: "${input.title || ''}"`;
-      case 'github.inspect_repo':
-        return `Inspect repository ${input.owner ? `${input.owner}/${input.repository}` : (input.repository || 'repo')}`;
-      case 'github.list_branches':
-        return `List branches in ${input.owner ? `${input.owner}/${input.repository}` : (input.repository || 'repo')}`;
-      case 'github.list_issues':
-        return `List issues in ${input.owner ? `${input.owner}/${input.repository}` : (input.repository || 'repo')}`;
-      case 'github.create_pull_request':
-        return `Open PR in ${input.owner ? `${input.owner}/${input.repository}` : (input.repository || 'repo')}: "${input.title || ''}"`;
-      case 'slack.send_message':
-        return `Post message to ${input.channel || 'channel'}: "${(input.text || '').slice(0, 60)}${(input.text || '').length > 60 ? '...' : ''}"`;
-      case 'telegram.send_message':
-        return `Send Telegram message to ${input.chat_id || 'authorized chat'}: "${(input.text || '').slice(0, 60)}${(input.text || '').length > 60 ? '...' : ''}"`;
-      case 'calendar.create_event':
-        return `Create event "${input.title || 'Event'}"${input.start_time ? ` at ${input.start_time}` : ''}`;
-      case 'http.request':
-        return `${(input.method || 'GET').toUpperCase()} ${input.url || input.endpoint || ''}`;
-      case 'notion.search':
-        return `Search Notion: "${input.query || ''}"`;
-      case 'notion.create_page':
-        return `Create Notion page: "${input.title || ''}"`;
-      case 'notion.get_page':
-        return `Get Notion page: ${input.page_id || ''}`;
-      case 'notion.get_me':
-        return `Check Notion bot info`;
-      case 'openapi.execute_tool':
-        return `Execute API tool: ${input.tool_name || input.operation_id || ''}`;
-      case 'openapi.list_tools':
-        return `List OpenAPI operations`;
-      default:
-        if (input.title) return String(input.title);
-        if (input.name) return String(input.name);
-        return exec.action_id;
-    }
-  };
-
-  const getActionDetail = (exec: ActionExecutionItem) => {
-    const input = exec.input_data || {};
-    if (exec.action_id === 'email.send' && input.body) {
-      return input.body.length > 80 ? input.body.slice(0, 80) + '...' : input.body;
-    }
-    if (exec.action_id === 'github.create_issue' && input.body) {
-      return input.body.length > 80 ? input.body.slice(0, 80) + '...' : input.body;
-    }
-    if (exec.action_id === 'slack.send_message' && input.text) {
-      return input.text.length > 80 ? input.text.slice(0, 80) + '...' : input.text;
-    }
-    if (exec.action_id === 'telegram.send_message' && input.text) {
-      return input.text.length > 80 ? input.text.slice(0, 80) + '...' : input.text;
-    }
-    if (exec.action_id === 'notion.create_page' && input.content) {
-      return input.content.length > 80 ? input.content.slice(0, 80) + '...' : input.content;
-    }
-    if (exec.action_id === 'openapi.execute_tool' && input.parameters) {
-      const pStr = typeof input.parameters === 'string' ? input.parameters : JSON.stringify(input.parameters);
-      return pStr.length > 80 ? pStr.slice(0, 80) + '...' : pStr;
-    }
-    return null;
-  };
-
   const buildAuthMetadata = (providerId: string) => {
     const meta: Record<string, any> = {};
-    if (providerId === 'github') {
-      if (githubToken.trim()) meta.token = githubToken.trim();
-    }
+    if (providerId === 'github') meta.token = githubToken.trim();
     if (providerId === 'slack') {
-      if (slackToken.trim()) meta.bot_token = slackToken.trim();
+      if (slackToken.trim()) meta.token = slackToken.trim();
       if (slackWebhook.trim()) meta.webhook_url = slackWebhook.trim();
       if (slackDefaultChannel.trim()) meta.default_channel = slackDefaultChannel.trim();
     }
     if (providerId === 'email') {
-      if (emailUser.trim()) meta.username = emailUser.trim();
-      if (emailPass.trim()) meta.password = emailPass.trim();
-      if (emailHost.trim()) meta.smtp_host = emailHost.trim();
-      if (emailPort.trim()) meta.smtp_port = parseInt(emailPort.trim(), 10) || 587;
+      meta.username = emailUser.trim();
+      meta.password = emailPass;
+      meta.smtp_host = emailHost.trim();
+      meta.smtp_port = parseInt(emailPort, 10) || 587;
       meta.use_tls = emailUseTls;
       meta.use_ssl = emailUseSsl;
       if (emailSenderAddr.trim()) meta.sender_address = emailSenderAddr.trim();
       if (emailTestRecipient.trim()) meta.test_recipient = emailTestRecipient.trim();
     }
-    if (providerId === 'telegram') {
-      if (telegramBotToken.trim()) meta.bot_token = telegramBotToken.trim();
-      if (telegramDefaultChatId.trim()) meta.default_chat_id = telegramDefaultChatId.trim();
-      if (telegramAllowedChats.trim()) meta.allowed_chat_ids = telegramAllowedChats.trim();
-    }
     if (providerId === 'http') {
-      if (httpBaseUrl.trim()) meta.base_url = httpBaseUrl.trim();
-      if (httpAuthType.trim()) meta.auth_type = httpAuthType.trim();
+      meta.base_url = httpBaseUrl.trim();
+      meta.auth_type = httpAuthType;
       if (httpToken.trim()) meta.token = httpToken.trim();
     }
     if (providerId === 'notion') {
-      if (notionToken.trim()) meta.token = notionToken.trim();
+      meta.token = notionToken.trim();
       if (notionDbId.trim()) meta.default_database_id = notionDbId.trim();
+    }
+    if (providerId === 'telegram') {
+      meta.bot_token = telegramBotToken.trim();
+      if (telegramDefaultChatId.trim()) meta.default_chat_id = telegramDefaultChatId.trim();
+      if (telegramAllowedChats.trim()) {
+        meta.allowed_chat_ids = telegramAllowedChats.split(',').map((s) => s.trim()).filter(Boolean);
+      }
     }
     if (providerId === 'openapi') {
       if (openapiSpecUrl.trim()) meta.spec_url = openapiSpecUrl.trim();
@@ -672,20 +671,20 @@ export function Connections({ navigate: _navigate, initialExecutionId, initialTa
       const data = await res.json();
       setTestResult({
         valid: Boolean(data.valid),
-        message: data.message || (data.valid ? 'Credentials verified successfully.' : 'Verification failed.'),
+        message: data.message || (data.valid ? 'Credenziali verificate con successo.' : 'Verifica non riuscita.'),
       });
-    } catch (err) {
+    } catch {
       setTestResult({
         valid: false,
-        message: 'Could not connect to backend server for verification.',
+        message: 'Impossibile contattare il server locale per la verifica.',
       });
     } finally {
       setTestingCreds(false);
     }
   };
 
-  const handleSaveAndConnect = async (e: React.FormEvent) => {
-    e.preventDefault();
+  const handleSaveAndConnect = async (e?: React.FormEvent) => {
+    if (e) e.preventDefault();
     if (!configModalProvider) return;
 
     const authMeta = buildAuthMetadata(configModalProvider.id);
@@ -696,21 +695,21 @@ export function Connections({ navigate: _navigate, initialExecutionId, initialTa
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           provider: configModalProvider.id,
-          account_name: credAccountName.trim() || `Personal ${configModalProvider.name}`,
+          account_name: credAccountName.trim() || `Account ${configModalProvider.name}`,
           auth_metadata: authMeta,
           live_check: false,
         }),
       });
       if (res.ok) {
-        showToast(`Configuration saved for ${configModalProvider.name}.`, 'success');
+        showToast(`Servizio ${configModalProvider.name} collegato con successo.`, 'success');
         setConfigModalProvider(null);
         fetchAll();
       } else {
         const err = await res.json().catch(() => ({}));
-        showToast(err.detail || 'Failed to save connection.', 'error');
+        showToast(err.detail || 'Impossibile salvare la connessione.', 'error');
       }
-    } catch (err) {
-      showToast('Error connecting service.', 'error');
+    } catch {
+      showToast('Errore durante il salvataggio del servizio.', 'error');
     } finally {
       setSavingCreds(false);
     }
@@ -723,16 +722,16 @@ export function Connections({ navigate: _navigate, initialExecutionId, initialTa
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           provider: 'calendar',
-          account_name: 'Aether Calendar (Local)',
+          account_name: 'Aether Calendario (Locale)',
           auth_metadata: { type: 'sqlite_built_in' },
         }),
       });
       if (res.ok) {
-        showToast('Aether Calendar ready.', 'success');
+        showToast('Calendario locale pronto e attivo.', 'success');
         fetchAll();
       }
-    } catch (e) {
-      showToast('Failed to initialize Calendar.', 'error');
+    } catch {
+      showToast('Impossibile inizializzare il calendario locale.', 'error');
     }
   };
 
@@ -744,66 +743,34 @@ export function Connections({ navigate: _navigate, initialExecutionId, initialTa
         method: 'POST',
       });
       if (res.ok) {
-        showToast(`Disconnected ${disconnectTarget.name}.`, 'info');
+        showToast(`Servizio ${disconnectTarget.name} scollegato.`, 'info');
         setDisconnectTarget(null);
         setManageProvider(null);
         fetchAll();
       } else {
-        showToast('Failed to disconnect service.', 'error');
+        showToast('Impossibile scollegare il servizio.', 'error');
       }
-    } catch (e) {
-      showToast('Failed to disconnect service.', 'error');
+    } catch {
+      showToast('Errore di comunicazione durante la disconnessione.', 'error');
     } finally {
       setDisconnecting(false);
     }
   };
 
-  const handleSync = async (providerId: string) => {
-    try {
-      setSyncingProvider(providerId);
-      const res = await fetch(apiUrl(`/api/connections/${providerId}/sync`), {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-      });
-      const data = await res.json();
-      if (!res.ok) {
-        throw new Error(data.detail || data.summary || 'Sync failed');
-      }
-      if (data.status === 'unsupported') {
-        showToast(`Sync unsupported for ${providerId}: ${data.summary || 'connector has no ingestion sync'}`, 'warning');
-      } else if (data.status === 'skipped') {
-        showToast(`Sync skipped for ${providerId}: ${data.summary || 'connection not active'}`, 'info');
-      } else {
-        showToast(`Synced ${data.items_synced || 0} items into workspace memory and knowledge!`, 'success');
-      }
-      await fetchAll();
-    } catch (err: any) {
-      showToast(err.message || 'Failed to sync connection', 'error');
-    } finally {
-      setSyncingProvider(null);
-    }
-  };
-
   const handleSyncAll = async () => {
+    setSyncingAll(true);
     try {
-      setSyncingAll(true);
-      const res = await fetch(apiUrl('/api/connections/sync'), {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-      });
+      const res = await fetch(apiUrl('/api/connections/sync_all'), { method: 'POST' });
       const data = await res.json();
-      if (!res.ok) {
-        throw new Error(data.detail || 'Sync all failed');
-      }
-      const total = data.total_items_synced || 0;
+      const total = data.total_items_ingested || 0;
       if (total === 0) {
-        showToast('Sync completed: 0 items ingested (unsupported providers skipped).', 'info');
+        showToast('Sincronizzazione completata: nessun nuovo elemento rilevato.', 'info');
       } else {
-        showToast(`Synced ${total} external items into workspace intelligence!`, 'success');
+        showToast(`Sincronizzati ${total} elementi nella memoria dello spazio di lavoro!`, 'success');
       }
       await fetchAll();
     } catch (err: any) {
-      showToast(err.message || 'Failed to sync connections', 'error');
+      showToast(err.message || 'Impossibile sincronizzare i servizi.', 'error');
     } finally {
       setSyncingAll(false);
     }
@@ -811,38 +778,58 @@ export function Connections({ navigate: _navigate, initialExecutionId, initialTa
 
   const handleStartGoogleOAuth = async (e?: React.FormEvent) => {
     if (e) e.preventDefault();
+    const gInfo = oauthProviders['google_calendar'];
+    const trimmedId = googleClientId.trim();
+    const trimmedSecret = googleClientSecret.trim();
+
+    if (!gInfo?.has_client_id && !trimmedId) {
+      showToast('Configura il tuo Google Client ID prima di avviare l\'autorizzazione.', 'error');
+      return;
+    }
+
     setGoogleAuthPending(true);
     try {
+      // If user provided or changed client ID or secret in modal, save config first
+      if (trimmedId || trimmedSecret) {
+        await fetch(apiUrl('/api/connections/google_calendar/oauth/config'), {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            client_id: trimmedId || undefined,
+            client_secret: trimmedSecret || undefined,
+          }),
+        });
+      }
+
       const res = await fetch(apiUrl('/api/connections/google_calendar/oauth/start'), {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          client_id: googleClientId.trim() || undefined,
-          client_secret: googleClientSecret.trim() || undefined,
+          client_id: trimmedId || undefined,
+          client_secret: trimmedSecret || undefined,
         }),
       });
       const data = await res.json();
       if (!res.ok) {
-        throw new Error(data.detail || 'Could not start Google authorization.');
+        throw new Error(data.detail || 'Impossibile avviare l\'autorizzazione Google.');
       }
       setGoogleState(data.state || '');
-      setLastGoogleAuthUrl(data.auth_url || '');
 
-      // Launch authorization flow in host/system browser directly
+      // Open in host/system browser directly
       await openExternalUrl(data.auth_url);
 
       const messageHandler = (event: MessageEvent) => {
         if (event.data?.type === 'aether_oauth_success' && event.data?.provider === 'google_calendar') {
           window.removeEventListener('message', messageHandler);
           clearInterval(pollTimer);
-          showToast(t('connGoogleConnected'), 'success');
+          showToast('Google Calendar collegato con successo!', 'success');
           setIsGoogleModalOpen(false);
           setGoogleAuthPending(false);
           fetchAll();
         } else if (event.data?.type === 'aether_oauth_error' && event.data?.provider === 'google_calendar') {
           window.removeEventListener('message', messageHandler);
           clearInterval(pollTimer);
-          showToast(`Google Calendar authorization failed: ${event.data.error || 'error'}`, 'error');
+          showToast(`Autorizzazione Google fallita: ${event.data.error || 'errore'}`, 'error');
           setGoogleAuthPending(false);
           fetchAll();
         }
@@ -852,7 +839,7 @@ export function Connections({ navigate: _navigate, initialExecutionId, initialTa
       let attempts = 0;
       const pollTimer = setInterval(async () => {
         attempts++;
-        if (attempts > 80) { // 2 minute timeout
+        if (attempts > 80) {
           clearInterval(pollTimer);
           window.removeEventListener('message', messageHandler);
           setGoogleAuthPending(false);
@@ -867,19 +854,17 @@ export function Connections({ navigate: _navigate, initialExecutionId, initialTa
               if (gc && (gc.status === 'verified' || gc.status === 'connected')) {
                 clearInterval(pollTimer);
                 window.removeEventListener('message', messageHandler);
-                showToast(t('connGoogleConnected'), 'success');
+                showToast('Google Calendar collegato e verificato!', 'success');
                 setIsGoogleModalOpen(false);
                 setGoogleAuthPending(false);
                 fetchAll();
               }
             }
           }
-        } catch {
-          // ignore transient poll failure
-        }
+        } catch {}
       }, 1500);
     } catch (err: any) {
-      showToast(err.message || 'Failed to start Google OAuth', 'error');
+      showToast(err.message || 'Errore durante l\'avvio di Google OAuth', 'error');
       setGoogleAuthPending(false);
     }
   };
@@ -901,7 +886,7 @@ export function Connections({ navigate: _navigate, initialExecutionId, initialTa
       });
       const data = await res.json();
       if (!res.ok) {
-        throw new Error(data.detail || `Could not start ${provider} authorization.`);
+        throw new Error(data.detail || `Impossibile avviare l'autorizzazione per ${provider}.`);
       }
       if (data.auth_url) {
         await openExternalUrl(data.auth_url);
@@ -912,12 +897,12 @@ export function Connections({ navigate: _navigate, initialExecutionId, initialTa
           notion: 'Notion',
         };
         const pName = nameMap[provider] || provider;
-        showToast(`Apertura autorizzazione ${pName} nel browser...`, 'info');
+        showToast(`Apertura pagina di autorizzazione per ${pName}...`, 'info');
 
         let attempts = 0;
         const pollTimer = setInterval(async () => {
           attempts++;
-          if (attempts > 80) { // 2 minute timeout
+          if (attempts > 80) {
             clearInterval(pollTimer);
             setOauthPendingProvider(null);
             return;
@@ -931,7 +916,7 @@ export function Connections({ navigate: _navigate, initialExecutionId, initialTa
                 if (conn && (conn.status === 'verified' || conn.status === 'connected')) {
                   clearInterval(pollTimer);
                   setOauthPendingProvider(null);
-                  showToast(`${pName} collegato e verificato!`, 'success');
+                  showToast(`${pName} collegato e attivo!`, 'success');
                   fetchAll();
                 }
               }
@@ -947,8 +932,7 @@ export function Connections({ navigate: _navigate, initialExecutionId, initialTa
 
   const openDevSetupModal = (p: ProviderDefinition) => {
     setDevSetupModalProvider(p);
-    setDevSetupTab('oauth');
-    const existing = connections.find(c => c.provider === p.id);
+    const existing = connections.find((c) => c.provider === p.id);
     if (existing?.auth_metadata?.client_id) {
       setDevClientId(existing.auth_metadata.client_id);
     } else {
@@ -977,16 +961,15 @@ export function Connections({ navigate: _navigate, initialExecutionId, initialTa
       });
       if (!res.ok) {
         const err = await res.json();
-        throw new Error(err.detail || 'Impossibile salvare la configurazione sviluppatore.');
+        throw new Error(err.detail || 'Impossibile salvare la configurazione per sviluppatori.');
       }
-      showToast(t('connOAuthConfigSaved'), 'success');
+      showToast('Credenziali applicazione salvate con successo!', 'success');
       await fetchAll();
       const targetProv = devSetupModalProvider.id;
       setDevSetupModalProvider(null);
-      // Immediately launch 1-click authorization!
       await handleStartOAuth(targetProv);
     } catch (err: any) {
-      showToast(err.message || 'Errore salvataggio configurazione.', 'error');
+      showToast(err.message || 'Errore salvataggio credenziali.', 'error');
     } finally {
       setSavingDevConfig(false);
     }
@@ -1009,7 +992,7 @@ export function Connections({ navigate: _navigate, initialExecutionId, initialTa
   const handleConnectTelegramGuided = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!telegramBotToken.trim()) {
-      showToast('Il Bot Token è obbligatorio.', 'error');
+      showToast('Il Bot Token è obbligatorio per Telegram.', 'error');
       return;
     }
     setVerifyingTelegram(true);
@@ -1029,23 +1012,22 @@ export function Connections({ navigate: _navigate, initialExecutionId, initialTa
       });
       const verifyData = await verifyRes.json();
       if (!verifyData.valid) {
-        setTestResult({ valid: false, message: verifyData.message || 'Verifica token fallita.' });
+        setTestResult({ valid: false, message: verifyData.message || 'Verifica del token non riuscita.' });
         return;
       }
 
-      // Save connection
       const saveRes = await fetch(apiUrl('/api/connections'), {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           provider: 'telegram',
-          account_name: 'Telegram Bot',
+          account_name: 'Telegram Companion',
           auth_metadata: authMeta,
           live_check: true,
         }),
       });
       if (saveRes.ok) {
-        showToast(verifyData.message || 'Telegram Bot collegato e verificato!', 'success');
+        showToast('Telegram Companion collegato e attivo!', 'success');
         setIsTelegramModalOpen(false);
         fetchAll();
       } else {
@@ -1062,7 +1044,7 @@ export function Connections({ navigate: _navigate, initialExecutionId, initialTa
   const handleManualExchangeCode = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!googleManualCode.trim() || !googleState.trim()) {
-      showToast('Both authorization code and state are required.', 'error');
+      showToast('Codice di autorizzazione e parametro di stato sono entrambi richiesti.', 'error');
       return;
     }
     setGoogleAuthPending(true);
@@ -1077,18 +1059,18 @@ export function Connections({ navigate: _navigate, initialExecutionId, initialTa
       });
       const data = await res.json();
       if (!res.ok) {
-        throw new Error(data.detail || 'Code exchange failed.');
+        throw new Error(data.detail || 'Scambio del codice di autorizzazione fallito.');
       }
       if (data.valid) {
-        showToast('Google Calendar authorized and verified successfully!', 'success');
+        showToast('Google Calendar autorizzato e verificato con successo!', 'success');
         setIsGoogleModalOpen(false);
         setGoogleManualCode('');
         fetchAll();
       } else {
-        showToast(`Verification failed: ${data.message}`, 'error');
+        showToast(`Verifica fallita: ${data.message}`, 'error');
       }
     } catch (err: any) {
-      showToast(err.message || 'Failed to exchange Google OAuth code', 'error');
+      showToast(err.message || 'Errore durante l\'autorizzazione Google.', 'error');
     } finally {
       setGoogleAuthPending(false);
     }
@@ -1102,10 +1084,10 @@ export function Connections({ navigate: _navigate, initialExecutionId, initialTa
         setGoogleCalendars(data.calendars);
         setIsCalendarPickerOpen(true);
       } else {
-        showToast('No Google calendars found or error loading calendars.', 'error');
+        showToast('Nessun calendario Google trovato o errore di lettura.', 'error');
       }
-    } catch (err) {
-      showToast('Failed to load Google calendars.', 'error');
+    } catch {
+      showToast('Impossibile caricare i calendari Google.', 'error');
     }
   };
 
@@ -1120,12 +1102,12 @@ export function Connections({ navigate: _navigate, initialExecutionId, initialTa
         }),
       });
       if (res.ok) {
-        showToast(`Active Google Calendar set to: ${summary}`, 'success');
+        showToast(`Calendario attivo impostato su: ${summary}`, 'success');
         setIsCalendarPickerOpen(false);
         fetchAll();
       }
-    } catch (err) {
-      showToast('Failed to select calendar.', 'error');
+    } catch {
+      showToast('Impossibile selezionare il calendario.', 'error');
     }
   };
 
@@ -1134,9 +1116,10 @@ export function Connections({ navigate: _navigate, initialExecutionId, initialTa
     if (!newTitle.trim()) return;
     setCreatingEvent(true);
     try {
-      const endpoint = selectedScheduleSource === 'google'
-        ? '/api/connections/google_calendar/events'
-        : '/api/connections/calendar/events';
+      const endpoint =
+        selectedScheduleSource === 'google'
+          ? '/api/connections/google_calendar/events'
+          : '/api/connections/calendar/events';
 
       const res = await fetch(apiUrl(endpoint), {
         method: 'POST',
@@ -1148,2972 +1131,1398 @@ export function Connections({ navigate: _navigate, initialExecutionId, initialTa
         }),
       });
       if (res.ok) {
-        showToast(selectedScheduleSource === 'google' ? 'Google Calendar event created.' : 'Aether Calendar event created.', 'success');
+        showToast(
+          selectedScheduleSource === 'google'
+            ? 'Appuntamento creato su Google Calendar.'
+            : 'Appuntamento registrato sul calendario locale.',
+          'success'
+        );
         setIsEventModalOpen(false);
         setNewTitle('');
         setNewStartTime('');
         setNewLocation('');
         fetchAll();
       }
-    } catch (err) {
-      showToast('Error creating calendar event.', 'error');
+    } catch {
+      showToast('Errore durante la creazione dell\'appuntamento.', 'error');
     } finally {
       setCreatingEvent(false);
     }
   };
 
-  // Grouping and Filtering
+  // Grouping & Filtering
   const filteredProviders = useMemo(() => {
-    return availableProviders.filter(p => {
+    return AVAILABLE_PROVIDERS.filter((p) => {
       if (categoryFilter !== 'all' && p.category !== categoryFilter) return false;
       if (searchQuery.trim()) {
         const query = searchQuery.toLowerCase().trim();
-        const conn = connections.find(c => c.provider === p.id);
+        const conn = connections.find((c) => c.provider === p.id);
         const nameMatch = p.name.toLowerCase().includes(query);
         const descMatch = p.description.toLowerCase().includes(query);
         const accountMatch = conn?.account_name?.toLowerCase().includes(query);
-        const capMatch = p.capabilitiesList.some(cap => cap.toLowerCase().includes(query));
+        const capMatch = p.capabilitiesList.some((cap) => cap.toLowerCase().includes(query));
         if (!nameMatch && !descMatch && !accountMatch && !capMatch) return false;
       }
       return true;
     });
-  }, [availableProviders, categoryFilter, searchQuery, connections]);
+  }, [categoryFilter, searchQuery, connections]);
 
-  const verifiedProviders = useMemo(() => {
-    return filteredProviders.filter(p => {
-      const conn = connections.find(c => c.provider === p.id);
-      return conn && (conn.status === 'verified' || conn.status === 'connected');
+  // Chronologically grouped calendar events
+  const groupedEvents = useMemo(() => {
+    const list = selectedScheduleSource === 'local' ? calendarEvents : googleCalendarEvents;
+    const groups: { dateKey: string; label: string; isToday: boolean; events: CalendarEventItem[] }[] = [];
+    const map = new Map<string, CalendarEventItem[]>();
+
+    list.forEach((evt) => {
+      const key = getEventDateKey(evt);
+      if (!map.has(key)) {
+        map.set(key, []);
+      }
+      map.get(key)!.push(evt);
     });
-  }, [filteredProviders, connections]);
 
-  const attentionProviders = useMemo(() => {
-    return filteredProviders.filter(p => {
-      const conn = connections.find(c => c.provider === p.id);
-      if (!conn) return false;
-      return (
-        conn.status === 'configured' ||
-        conn.status === 'verification_failed' ||
-        conn.status === 'error' ||
-        conn.status === 'verification_required' ||
-        conn.status === 'needs_auth'
-      );
+    const sortedKeys = Array.from(map.keys()).sort();
+    sortedKeys.forEach((key) => {
+      const { label, isToday } = formatDayLabel(key);
+      groups.push({
+        dateKey: key,
+        label,
+        isToday,
+        events: map.get(key)!,
+      });
     });
-  }, [filteredProviders, connections]);
 
-  const availableToConnectProviders = useMemo(() => {
-    return filteredProviders.filter(p => {
-      const conn = connections.find(c => c.provider === p.id);
-      return !conn || conn.status === 'not_configured' || conn.status === 'disconnected';
-    });
-  }, [filteredProviders, connections]);
-
-  // Overall metric counts across all providers
-  const totalVerifiedCount = connections.filter(c => c.status === 'verified' || c.status === 'connected').length;
-  const totalAttentionCount = connections.filter(c =>
-    c.status === 'configured' ||
-    c.status === 'verification_failed' ||
-    c.status === 'error' ||
-    c.status === 'verification_required' ||
-    c.status === 'needs_auth'
-  ).length;
-  const totalAvailableCount = availableProviders.length - totalVerifiedCount - totalAttentionCount;
+    return groups;
+  }, [selectedScheduleSource, calendarEvents, googleCalendarEvents]);
 
   // Filtered executions
   const filteredExecutions = useMemo(() => {
     if (actionStatusFilter === 'all') return executions;
     if (actionStatusFilter === 'pending') {
-      return executions.filter(e => e.status === 'pending_approval' || e.status === 'waiting_approval');
+      return executions.filter((e) => e.status === 'pending_approval' || e.status === 'waiting_approval');
     }
     if (actionStatusFilter === 'succeeded') {
-      return executions.filter(e => e.status === 'success' || e.status === 'succeeded');
+      return executions.filter((e) => e.status === 'success' || e.status === 'succeeded');
     }
     if (actionStatusFilter === 'failed') {
-      return executions.filter(e => e.status === 'failed' || e.status === 'error');
+      return executions.filter((e) => e.status === 'failed' || e.status === 'error');
     }
     return executions;
   }, [executions, actionStatusFilter]);
 
-  // Manage Connection Details
-  const activeManageConn = manageProvider ? connections.find(c => c.provider === manageProvider.id) : null;
-  const manageRecentExecutions = manageProvider
-    ? executions.filter(e => e.action_id.startsWith(manageProvider.id) || (manageProvider.id === 'google_calendar' && e.action_id.startsWith('calendar.'))).slice(0, 5)
-    : [];
+  // Primary Connect Action Handler
+  const handlePrimaryAction = (provider: ProviderDefinition, conn?: ConnectionItem) => {
+    const isConn = conn && (conn.status === 'verified' || conn.status === 'connected');
+    if (isConn) {
+      setManageProvider(provider);
+      return;
+    }
+
+    if (provider.id === 'calendar') {
+      handleConnectCalendar();
+      return;
+    }
+
+    if (provider.id === 'google_calendar') {
+      const existing = connections.find((c) => c.provider === 'google_calendar');
+      if (existing?.auth_metadata?.client_id && !googleClientId) {
+        setGoogleClientId(existing.auth_metadata.client_id);
+      }
+      setIsGoogleModalOpen(true);
+      return;
+    }
+
+    if (provider.id === 'telegram') {
+      openTelegramModal(conn);
+      return;
+    }
+
+    // Providers with OAuth capability (GitHub, Slack, Notion)
+    const oInfo = oauthProviders[provider.id];
+    if (provider.isOAuth && oInfo?.supports_oauth) {
+      if (oInfo.ready_for_user_connect) {
+        handleStartOAuth(provider.id);
+      } else {
+        openDevSetupModal(provider);
+      }
+      return;
+    }
+
+    // Default configuration form
+    openConfigModal(provider, conn);
+  };
 
   return (
-    <div style={{ flex: 1, overflowY: 'auto', width: '100%', height: '100%' }}>
-      <div style={{ padding: '28px', maxWidth: '1120px', margin: '0 auto' }}>
-      {/* Header */}
-      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: '24px', flexWrap: 'wrap', gap: '16px' }}>
-        <div>
-          <h1 style={{ fontSize: '24px', fontWeight: 700, margin: '0 0 6px', color: 'hsl(var(--fg))' }}>
-            {t('connHeaderTitle')}
-          </h1>
-          <p style={{ margin: 0, fontSize: '14px', color: 'hsl(var(--muted-fg))', maxWidth: '640px', lineHeight: 1.5 }}>
-            {t('connHeaderSubtitle')}
-          </p>
-        </div>
-        <div style={{ display: 'flex', gap: '10px', alignItems: 'center' }}>
-          <button
-            className="btn btn-secondary"
-            onClick={fetchAll}
-            disabled={loading}
-            style={{ display: 'flex', alignItems: 'center', gap: '6px', fontSize: '13px' }}
-          >
-            <RefreshCw size={14} className={loading ? 'animate-spin' : ''} /> {t('connRefresh')}
-          </button>
-          <button
-            className="btn btn-primary"
-            onClick={handleSyncAll}
-            disabled={syncingAll}
-            style={{ display: 'flex', alignItems: 'center', gap: '6px', fontSize: '13px' }}
-            title="Sync all connected external tools into workspace memory and knowledge"
-          >
-            <RefreshCw size={14} className={syncingAll ? 'animate-spin' : ''} />
-            {syncingAll ? t('connSyncing') : t('connSyncAll')}
-          </button>
-        </div>
-      </div>
-
-      {/* Summary KPI Banner */}
-      <div style={{
-        display: 'grid',
-        gridTemplateColumns: 'repeat(auto-fit, minmax(210px, 1fr))',
-        gap: '14px',
-        marginBottom: '24px'
-      }}>
-        <div className="card" style={{ padding: '16px 20px', borderRadius: '12px', display: 'flex', alignItems: 'center', gap: '14px' }}>
-          <div style={{ width: '42px', height: '42px', borderRadius: '10px', backgroundColor: 'hsl(var(--primary)/0.1)', color: 'hsl(var(--primary))', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-            <Zap size={22} />
+    <PageContainer size="xl">
+      {/* 1. Header Section */}
+      <Section
+        title={
+          <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+            <Layers size={26} color="hsl(var(--primary))" />
+            <Heading level={1}>Servizi Collegati</Heading>
           </div>
-          <div>
-            <div style={{ fontSize: '20px', fontWeight: 700, color: 'hsl(var(--fg))' }}>{availableProviders.length}</div>
-            <div style={{ fontSize: '12px', color: 'hsl(var(--muted-fg))', fontWeight: 500 }}>{t('connTotalServices')}</div>
-          </div>
-        </div>
-
-        <div className="card" style={{ padding: '16px 20px', borderRadius: '12px', display: 'flex', alignItems: 'center', gap: '14px', borderLeft: '4px solid #10b981' }}>
-          <div style={{ width: '42px', height: '42px', borderRadius: '10px', backgroundColor: '#10b98115', color: '#10b981', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-            <CheckCircle2 size={22} />
-          </div>
-          <div>
-            <div style={{ fontSize: '20px', fontWeight: 700, color: 'hsl(var(--fg))' }}>{totalVerifiedCount}</div>
-            <div style={{ fontSize: '12px', color: 'hsl(var(--muted-fg))', fontWeight: 500 }}>{t('connVerifiedCount')}</div>
-          </div>
-        </div>
-
-        <div className="card" style={{ padding: '16px 20px', borderRadius: '12px', display: 'flex', alignItems: 'center', gap: '14px', borderLeft: totalAttentionCount > 0 ? '4px solid #f59e0b' : undefined }}>
-          <div style={{ width: '42px', height: '42px', borderRadius: '10px', backgroundColor: '#f59e0b15', color: '#f59e0b', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-            <AlertCircle size={22} />
-          </div>
-          <div>
-            <div style={{ fontSize: '20px', fontWeight: 700, color: 'hsl(var(--fg))' }}>{totalAttentionCount}</div>
-            <div style={{ fontSize: '12px', color: 'hsl(var(--muted-fg))', fontWeight: 500 }}>{t('connNeedsAttentionCount')}</div>
-          </div>
-        </div>
-
-        <div className="card" style={{ padding: '16px 20px', borderRadius: '12px', display: 'flex', alignItems: 'center', gap: '14px' }}>
-          <div style={{ width: '42px', height: '42px', borderRadius: '10px', backgroundColor: 'hsl(var(--muted)/0.4)', color: 'hsl(var(--muted-fg))', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-            <Plus size={22} />
-          </div>
-          <div>
-            <div style={{ fontSize: '20px', fontWeight: 700, color: 'hsl(var(--fg))' }}>{totalAvailableCount}</div>
-            <div style={{ fontSize: '12px', color: 'hsl(var(--muted-fg))', fontWeight: 500 }}>{t('connAvailableCount')}</div>
-          </div>
-        </div>
-      </div>
-
-      {/* Navigation Tabs */}
-      <div style={{ display: 'flex', gap: '8px', borderBottom: '1px solid hsl(var(--border))', marginBottom: '24px', flexWrap: 'wrap' }}>
-        <button
-          className={`btn btn-ghost ${activeTab === 'apps' ? 'active' : ''}`}
-          onClick={() => setActiveTab('apps')}
-          style={{
-            borderBottom: activeTab === 'apps' ? '2px solid hsl(var(--primary))' : 'none',
-            borderRadius: 0,
-            padding: '10px 18px',
-            fontWeight: 600,
-            fontSize: '14px',
-            color: activeTab === 'apps' ? 'hsl(var(--primary))' : undefined
-          }}
-        >
-          {t('connTabConnectedApps')} ({totalVerifiedCount + totalAttentionCount})
-        </button>
-        <button
-          className={`btn btn-ghost ${activeTab === 'calendar' ? 'active' : ''}`}
-          onClick={() => setActiveTab('calendar')}
-          style={{
-            borderBottom: activeTab === 'calendar' ? '2px solid hsl(var(--primary))' : 'none',
-            borderRadius: 0,
-            padding: '10px 18px',
-            fontWeight: 600,
-            fontSize: '14px',
-            color: activeTab === 'calendar' ? 'hsl(var(--primary))' : undefined
-          }}
-        >
-          {t('connTabCalendarSchedule')} ({calendarEvents.length + googleCalendarEvents.length})
-        </button>
-        <button
-          className={`btn btn-ghost ${activeTab === 'actions' ? 'active' : ''}`}
-          onClick={() => setActiveTab('actions')}
-          style={{
-            borderBottom: activeTab === 'actions' ? '2px solid hsl(var(--primary))' : 'none',
-            borderRadius: 0,
-            padding: '10px 18px',
-            fontWeight: 600,
-            fontSize: '14px',
-            color: activeTab === 'actions' ? 'hsl(var(--primary))' : undefined
-          }}
-        >
-          {t('connTabActionLog')} ({executions.length})
-        </button>
-      </div>
-
-      {/* TAB 1: CONNECTED APPS */}
-      {activeTab === 'apps' && (
-        <div style={{ display: 'flex', flexDirection: 'column', gap: '28px' }}>
-          {/* Controls: Categories & Search */}
-          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '14px' }}>
-            <div style={{ display: 'flex', gap: '6px', flexWrap: 'wrap' }}>
-              {(['all', 'productivity', 'dev', 'communication'] as CategoryType[]).map(cat => {
-                const label = cat === 'all' ? t('connFilterAll')
-                  : cat === 'productivity' ? t('connFilterProductivity')
-                  : cat === 'dev' ? t('connFilterDev')
-                  : t('connFilterComm');
-                const isSelected = categoryFilter === cat;
-                return (
-                  <button
-                    key={cat}
-                    onClick={() => setCategoryFilter(cat)}
-                    style={{
-                      padding: '6px 14px',
-                      borderRadius: '20px',
-                      fontSize: '12px',
-                      fontWeight: 600,
-                      cursor: 'pointer',
-                      border: isSelected ? '1px solid hsl(var(--primary))' : '1px solid hsl(var(--border))',
-                      backgroundColor: isSelected ? 'hsl(var(--primary)/0.12)' : 'transparent',
-                      color: isSelected ? 'hsl(var(--primary))' : 'hsl(var(--muted-fg))',
-                      transition: 'all 0.15s ease',
-                    }}
-                  >
-                    {label}
-                  </button>
-                );
-              })}
-            </div>
-
-            <div style={{ position: 'relative', width: '280px' }}>
-              <Search size={14} style={{ position: 'absolute', left: '12px', top: '50%', transform: 'translateY(-50%)', color: 'hsl(var(--muted-fg))' }} />
-              <input
-                type="text"
-                className="input"
-                placeholder={t('connSearchPlaceholder')}
-                value={searchQuery}
-                onChange={e => setSearchQuery(e.target.value)}
-                style={{ width: '100%', paddingLeft: '34px', fontSize: '13px', borderRadius: '8px' }}
-              />
-            </div>
-          </div>
-
-          {/* Section 1: Verified & Operational */}
-          {verifiedProviders.length > 0 && (
-            <div>
-              <div style={{ marginBottom: '14px' }}>
-                <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-                  <span style={{ width: '8px', height: '8px', borderRadius: '50%', backgroundColor: '#10b981' }} />
-                  <h2 style={{ fontSize: '16px', fontWeight: 700, margin: 0, color: 'hsl(var(--fg))' }}>
-                    {t('connSecVerified')} ({verifiedProviders.length})
-                  </h2>
-                </div>
-                <p style={{ margin: '3px 0 0 16px', fontSize: '13px', color: 'hsl(var(--muted-fg))' }}>
-                  {t('connSecVerifiedDesc')}
-                </p>
-              </div>
-
-              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(340px, 1fr))', gap: '16px' }}>
-                {verifiedProviders.map(p => {
-                  const conn = connections.find(c => c.provider === p.id);
-                  const Icon = p.icon;
-                  const isGoogle = p.id === 'google_calendar';
-                  const isLocalCal = p.id === 'calendar';
-
-                  return (
-                    <div
-                      key={p.id}
-                      className="card"
-                      style={{
-                        padding: '20px',
-                        borderRadius: '12px',
-                        border: '1px solid #10b98140',
-                        borderLeft: '4px solid #10b981',
-                        display: 'flex',
-                        flexDirection: 'column',
-                        justifyContent: 'space-between',
-                        gap: '16px',
-                        backgroundColor: 'hsl(var(--card))',
-                        boxShadow: '0 2px 8px rgba(0, 0, 0, 0.04)',
-                      }}
-                    >
-                      <div>
-                        {/* Provider Header */}
-                        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '12px' }}>
-                          <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
-                            <div style={{
-                              width: '40px',
-                              height: '40px',
-                              borderRadius: '10px',
-                              backgroundColor: `${p.color}15`,
-                              display: 'flex',
-                              alignItems: 'center',
-                              justifyContent: 'center',
-                              color: p.color,
-                            }}>
-                              <Icon size={20} />
-                            </div>
-                            <div>
-                              <div style={{ fontWeight: 600, fontSize: '15px', color: 'hsl(var(--fg))' }}>{p.name}</div>
-                              <div style={{ fontSize: '12px', color: 'hsl(var(--muted-fg))', fontWeight: 500 }}>
-                                {conn?.account_name || 'Active Account'}
-                              </div>
-                            </div>
-                          </div>
-
-                          <span style={{
-                            display: 'inline-flex',
-                            alignItems: 'center',
-                            gap: '4px',
-                            fontSize: '11px',
-                            color: '#10b981',
-                            fontWeight: 600,
-                            backgroundColor: '#10b98115',
-                            padding: '4px 10px',
-                            borderRadius: '12px',
-                          }}>
-                            <CheckCircle2 size={13} /> {isGoogle ? t('connStatusConnectedVerified') : t('connStatusVerified')}
-                          </span>
-                        </div>
-
-                        {/* Description */}
-                        <p style={{ fontSize: '13px', color: 'hsl(var(--muted-fg))', margin: '0 0 12px', lineHeight: 1.45 }}>
-                          {p.description}
-                        </p>
-
-                        {/* Key Capabilities Chips */}
-                        <div style={{ display: 'flex', flexWrap: 'wrap', gap: '5px', marginBottom: '12px' }}>
-                          {p.capabilitiesList.slice(0, 3).map((cap, i) => (
-                            <span
-                              key={i}
-                              style={{
-                                fontSize: '11px',
-                                backgroundColor: 'hsl(var(--muted)/0.4)',
-                                color: 'hsl(var(--fg))',
-                                padding: '2px 8px',
-                                borderRadius: '4px',
-                                display: 'inline-flex',
-                                alignItems: 'center',
-                                gap: '3px',
-                              }}
-                            >
-                              <Check size={10} style={{ color: '#10b981' }} /> {cap}
-                            </span>
-                          ))}
-                        </div>
-
-                        {/* Live Metadata Badges */}
-                        <div style={{ display: 'flex', flexDirection: 'column', gap: '4px', fontSize: '11px', color: 'hsl(var(--muted-fg))' }}>
-                          {isGoogle && conn?.auth_metadata && (
-                            <div style={{ color: '#4285F4', display: 'flex', alignItems: 'center', gap: '4px', fontWeight: 500 }}>
-                              <Calendar size={11} /> {t('connPrimaryCalendar')}: {conn.auth_metadata.selected_calendar_summary || conn.auth_metadata.selected_calendar_id || 'Primary'}
-                            </div>
-                          )}
-                          {conn?.last_verified_at && (
-                            <div style={{ display: 'flex', alignItems: 'center', gap: '4px', color: '#10b981' }}>
-                              <ShieldCheck size={11} /> {t('connLastVerified')}: {new Date(conn.last_verified_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', month: 'short', day: 'numeric' })}
-                              {conn.verification_method ? ` (${conn.verification_method})` : ''}
-                            </div>
-                          )}
-                          {conn?.last_synced_at && (
-                            <div style={{ display: 'flex', alignItems: 'center', gap: '4px' }}>
-                              <Clock size={11} /> {t('connLastSynced')}: {new Date(conn.last_synced_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', month: 'short', day: 'numeric' })}
-                            </div>
-                          )}
-                          {conn?.last_successful_operation && (
-                            <div style={{ display: 'flex', alignItems: 'center', gap: '4px' }}>
-                              <Zap size={11} /> {t('connLastOp')}: {conn.last_successful_operation}
-                            </div>
-                          )}
-                        </div>
-                      </div>
-
-                      {/* Primary Actions */}
-                      <div style={{ display: 'flex', justifyContent: 'flex-end', flexWrap: 'wrap', gap: '8px', borderTop: '1px solid hsl(var(--border)/0.5)', paddingTop: '14px' }}>
-                        {isLocalCal ? (
-                          <button
-                            className="btn btn-secondary"
-                            onClick={() => {
-                              setSelectedScheduleSource('local');
-                              setActiveTab('calendar');
-                            }}
-                            style={{ fontSize: '12px', padding: '6px 12px' }}
-                          >
-                            {t('connViewSchedule')}
-                          </button>
-                        ) : isGoogle ? (
-                          <>
-                            <button
-                              className="btn btn-secondary"
-                              onClick={() => {
-                                setSelectedScheduleSource('google');
-                                setActiveTab('calendar');
-                              }}
-                              style={{ fontSize: '12px', padding: '6px 12px' }}
-                            >
-                              {t('connViewSchedule')}
-                            </button>
-                            <button
-                              className="btn btn-secondary"
-                              onClick={() => handleSync(p.id)}
-                              disabled={syncingProvider === p.id}
-                              style={{ fontSize: '12px', padding: '6px 12px', display: 'flex', alignItems: 'center', gap: '4px' }}
-                              title="Sync external entities into persistent memory and knowledge"
-                            >
-                              <RefreshCw size={12} className={syncingProvider === p.id ? 'animate-spin' : ''} />
-                              {syncingProvider === p.id ? t('connSyncing') : t('connSyncNow')}
-                            </button>
-                            <button
-                              className="btn btn-secondary"
-                              onClick={handleOpenCalendarPicker}
-                              style={{ fontSize: '12px', padding: '6px 12px', display: 'flex', alignItems: 'center', gap: '4px' }}
-                            >
-                              <Calendar size={12} /> Select Calendar
-                            </button>
-                          </>
-                        ) : (
-                          <button
-                            className="btn btn-secondary"
-                            onClick={() => handleSync(p.id)}
-                            disabled={syncingProvider === p.id}
-                            style={{ fontSize: '12px', padding: '6px 12px', display: 'flex', alignItems: 'center', gap: '4px' }}
-                            title="Sync external entities into persistent memory and knowledge"
-                          >
-                            <RefreshCw size={12} className={syncingProvider === p.id ? 'animate-spin' : ''} />
-                            {syncingProvider === p.id ? t('connSyncing') : t('connSyncNow')}
-                          </button>
-                        )}
-
-                        <button
-                          className="btn btn-secondary"
-                          onClick={() => setManageProvider(p)}
-                          style={{ fontSize: '12px', padding: '6px 12px', display: 'flex', alignItems: 'center', gap: '4px' }}
-                        >
-                          <Settings size={12} /> {t('connManage')}
-                        </button>
-                      </div>
-                    </div>
-                  );
-                })}
-              </div>
-            </div>
-          )}
-
-          {/* Section 2: Needs Attention */}
-          {attentionProviders.length > 0 && (
-            <div>
-              <div style={{ marginBottom: '14px' }}>
-                <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-                  <span style={{ width: '8px', height: '8px', borderRadius: '50%', backgroundColor: '#f59e0b' }} />
-                  <h2 style={{ fontSize: '16px', fontWeight: 700, margin: 0, color: 'hsl(var(--fg))' }}>
-                    {t('connSecNeedsAttention')} ({attentionProviders.length})
-                  </h2>
-                </div>
-                <p style={{ margin: '3px 0 0 16px', fontSize: '13px', color: 'hsl(var(--muted-fg))' }}>
-                  {t('connSecNeedsAttentionDesc')}
-                </p>
-              </div>
-
-              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(340px, 1fr))', gap: '16px' }}>
-                {attentionProviders.map(p => {
-                  const conn = connections.find(c => c.provider === p.id);
-                  const Icon = p.icon;
-                  const status = conn?.status;
-                  const isFailed = status === 'verification_failed' || status === 'error';
-                  const isNeedsAuth = status === 'verification_required' || status === 'needs_auth';
-                  const isVerifying = verifyingProvider === p.id || (p.id === 'google_calendar' && googleAuthPending);
-                  const diagnostic = diagnoseError(conn?.last_verification_error);
-
-                  return (
-                    <div
-                      key={p.id}
-                      className="card"
-                      style={{
-                        padding: '20px',
-                        borderRadius: '12px',
-                        border: isFailed ? '1px solid #ef444440' : '1px solid #f59e0b40',
-                        borderLeft: isFailed ? '4px solid #ef4444' : '4px solid #f59e0b',
-                        display: 'flex',
-                        flexDirection: 'column',
-                        justifyContent: 'space-between',
-                        gap: '16px',
-                        backgroundColor: 'hsl(var(--card))',
-                      }}
-                    >
-                      <div>
-                        {/* Provider Header */}
-                        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '12px' }}>
-                          <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
-                            <div style={{
-                              width: '40px',
-                              height: '40px',
-                              borderRadius: '10px',
-                              backgroundColor: `${p.color}15`,
-                              display: 'flex',
-                              alignItems: 'center',
-                              justifyContent: 'center',
-                              color: p.color,
-                            }}>
-                              <Icon size={20} />
-                            </div>
-                            <div>
-                              <div style={{ fontWeight: 600, fontSize: '15px', color: 'hsl(var(--fg))' }}>{p.name}</div>
-                              <div style={{ fontSize: '12px', color: 'hsl(var(--muted-fg))', fontWeight: 500 }}>
-                                {conn?.account_name || 'Configured'}
-                              </div>
-                            </div>
-                          </div>
-
-                          {isVerifying ? (
-                            <span style={{ display: 'inline-flex', alignItems: 'center', gap: '4px', fontSize: '11px', color: '#f59e0b', fontWeight: 600, backgroundColor: '#f59e0b15', padding: '4px 10px', borderRadius: '12px' }}>
-                              <RefreshCw size={12} className="animate-spin" /> {t('connStatusVerifying')}
-                            </span>
-                          ) : isFailed ? (
-                            <span style={{ display: 'inline-flex', alignItems: 'center', gap: '4px', fontSize: '11px', color: '#ef4444', fontWeight: 600, backgroundColor: '#ef444415', padding: '4px 10px', borderRadius: '12px' }}>
-                              <AlertCircle size={12} /> {t('connStatusVerifFailed')}
-                            </span>
-                          ) : isNeedsAuth ? (
-                            <span style={{ display: 'inline-flex', alignItems: 'center', gap: '4px', fontSize: '11px', color: '#f59e0b', fontWeight: 600, backgroundColor: '#f59e0b15', padding: '4px 10px', borderRadius: '12px' }}>
-                              <AlertCircle size={12} /> {t('connStatusNeedsAuth')}
-                            </span>
-                          ) : (
-                            <span style={{ display: 'inline-flex', alignItems: 'center', gap: '4px', fontSize: '11px', color: '#38bdf8', fontWeight: 600, backgroundColor: '#38bdf815', padding: '4px 10px', borderRadius: '12px' }}>
-                              <ShieldCheck size={12} /> {t('connStatusConfigured')}
-                            </span>
-                          )}
-                        </div>
-
-                        {/* Error Diagnostic Box */}
-                        {isFailed && diagnostic ? (
-                          <div style={{
-                            padding: '10px 12px',
-                            borderRadius: '8px',
-                            backgroundColor: '#ef444410',
-                            border: '1px solid #ef444420',
-                            marginBottom: '12px',
-                          }}>
-                            <div style={{ fontWeight: 600, fontSize: '12px', color: '#ef4444', display: 'flex', alignItems: 'center', gap: '6px' }}>
-                              <AlertTriangle size={13} /> {diagnostic.title}
-                            </div>
-                            <div style={{ fontSize: '11px', color: 'hsl(var(--fg))', marginTop: '2px', lineHeight: 1.4 }}>
-                              {diagnostic.desc}
-                            </div>
-                            {conn?.last_verification_error && (
-                              <details style={{ marginTop: '6px', fontSize: '10px', color: 'hsl(var(--muted-fg))' }}>
-                                <summary style={{ cursor: 'pointer', userSelect: 'none' }}>{t('connShowTechDetails')}</summary>
-                                <pre style={{ margin: '4px 0 0', padding: '6px', backgroundColor: 'hsl(var(--muted)/0.5)', borderRadius: '4px', overflowX: 'auto', fontFamily: 'monospace' }}>
-                                  {conn.last_verification_error}
-                                </pre>
-                              </details>
-                            )}
-                          </div>
-                        ) : (
-                          <div style={{
-                            padding: '8px 12px',
-                            borderRadius: '8px',
-                            backgroundColor: '#38bdf810',
-                            border: '1px solid #38bdf820',
-                            marginBottom: '12px',
-                            fontSize: '12px',
-                            color: '#0284c7',
-                            display: 'flex',
-                            alignItems: 'center',
-                            gap: '6px',
-                          }}>
-                            <ShieldCheck size={14} />
-                            <span>Credentials saved in encrypted vault. Awaiting live network probe.</span>
-                          </div>
-                        )}
-
-                        <p style={{ fontSize: '13px', color: 'hsl(var(--muted-fg))', margin: 0, lineHeight: 1.4 }}>
-                          {p.description}
-                        </p>
-                      </div>
-
-                      {/* Primary Actions */}
-                      <div style={{ display: 'flex', justifyContent: 'flex-end', flexWrap: 'wrap', gap: '8px', borderTop: '1px solid hsl(var(--border)/0.5)', paddingTop: '14px' }}>
-                        {p.id === 'google_calendar' ? (
-                          <button
-                            className="btn btn-primary"
-                            onClick={() => {
-                              if (conn?.auth_metadata?.client_id) setGoogleClientId(conn.auth_metadata.client_id);
-                              setIsGoogleModalOpen(true);
-                            }}
-                            disabled={oauthPendingProvider === 'google_calendar'}
-                            style={{ fontSize: '12px', padding: '6px 14px', backgroundColor: '#4285F4', borderColor: '#4285F4', color: '#fff' }}
-                          >
-                            {oauthPendingProvider === 'google_calendar' ? (
-                              <span style={{ display: 'flex', alignItems: 'center', gap: '4px' }}>
-                                <RefreshCw size={12} className="animate-spin" /> {t('connGoogleVerifyingBtn')}
-                              </span>
-                            ) : (
-                              t('connGoogleAuthorizeBtn')
-                            )}
-                          </button>
-                        ) : p.id === 'github' && oauthProviders.github?.ready_for_user_connect ? (
-                          <button
-                            className="btn btn-primary"
-                            onClick={() => handleStartOAuth('github')}
-                            disabled={oauthPendingProvider === 'github'}
-                            style={{ fontSize: '12px', padding: '6px 14px', backgroundColor: '#2dba4e', borderColor: '#2dba4e', color: '#fff' }}
-                          >
-                            {oauthPendingProvider === 'github' ? (
-                              <span style={{ display: 'flex', alignItems: 'center', gap: '4px' }}>
-                                <RefreshCw size={12} className="animate-spin" /> {t('connGoogleVerifyingBtn')}
-                              </span>
-                            ) : (
-                              t('connReconnect')
-                            )}
-                          </button>
-                        ) : p.id === 'slack' && oauthProviders.slack?.ready_for_user_connect ? (
-                          <button
-                            className="btn btn-primary"
-                            onClick={() => handleStartOAuth('slack')}
-                            disabled={oauthPendingProvider === 'slack'}
-                            style={{ fontSize: '12px', padding: '6px 14px', backgroundColor: '#4A154B', borderColor: '#4A154B', color: '#fff' }}
-                          >
-                            {oauthPendingProvider === 'slack' ? (
-                              <span style={{ display: 'flex', alignItems: 'center', gap: '4px' }}>
-                                <RefreshCw size={12} className="animate-spin" /> {t('connGoogleVerifyingBtn')}
-                              </span>
-                            ) : (
-                              t('connReconnect')
-                            )}
-                          </button>
-                        ) : p.id === 'notion' && oauthProviders.notion?.ready_for_user_connect ? (
-                          <button
-                            className="btn btn-primary"
-                            onClick={() => handleStartOAuth('notion')}
-                            disabled={oauthPendingProvider === 'notion'}
-                            style={{ fontSize: '12px', padding: '6px 14px', backgroundColor: '#000000', borderColor: '#000000', color: '#fff' }}
-                          >
-                            {oauthPendingProvider === 'notion' ? (
-                              <span style={{ display: 'flex', alignItems: 'center', gap: '4px' }}>
-                                <RefreshCw size={12} className="animate-spin" /> {t('connGoogleVerifyingBtn')}
-                              </span>
-                            ) : (
-                              t('connReconnect')
-                            )}
-                          </button>
-                        ) : p.id === 'telegram' ? (
-                          <button
-                            className="btn btn-primary"
-                            onClick={() => openTelegramModal(conn)}
-                            style={{ fontSize: '12px', padding: '6px 14px', backgroundColor: '#229ED9', borderColor: '#229ED9', color: '#fff' }}
-                          >
-                            {t('connReconnect')}
-                          </button>
-                        ) : (
-                          <button
-                            className="btn btn-primary"
-                            onClick={() => handleVerifyConnection(p.id)}
-                            disabled={isVerifying}
-                            style={{ fontSize: '12px', padding: '6px 14px', display: 'flex', alignItems: 'center', gap: '4px' }}
-                          >
-                            <ShieldCheck size={13} className={isVerifying ? 'animate-spin' : ''} />
-                            {isVerifying ? t('connStatusVerifying') : isFailed ? t('connRetryVerify') : t('connVerify')}
-                          </button>
-                        )}
-
-                        <button
-                          className="btn btn-secondary"
-                          onClick={() => setManageProvider(p)}
-                          style={{ fontSize: '12px', padding: '6px 12px', display: 'flex', alignItems: 'center', gap: '4px' }}
-                        >
-                          <Settings size={12} /> {t('connManage')}
-                        </button>
-                      </div>
-                    </div>
-                  );
-                })}
-              </div>
-            </div>
-          )}
-
-          {/* Section 3: Available to Connect */}
-          {availableToConnectProviders.length > 0 && (
-            <div>
-              <div style={{ marginBottom: '14px' }}>
-                <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-                  <span style={{ width: '8px', height: '8px', borderRadius: '50%', backgroundColor: 'hsl(var(--muted-fg))' }} />
-                  <h2 style={{ fontSize: '16px', fontWeight: 700, margin: 0, color: 'hsl(var(--fg))' }}>
-                    {t('connSecAvailable')} ({availableToConnectProviders.length})
-                  </h2>
-                </div>
-                <p style={{ margin: '3px 0 0 16px', fontSize: '13px', color: 'hsl(var(--muted-fg))' }}>
-                  {t('connSecAvailableDesc')}
-                </p>
-              </div>
-
-              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(340px, 1fr))', gap: '16px' }}>
-                {availableToConnectProviders.map(p => {
-                  const conn = connections.find(c => c.provider === p.id);
-                  const Icon = p.icon;
-                  const isDisconnected = conn?.status === 'disconnected';
-
-                  return (
-                    <div
-                      key={p.id}
-                      className="card"
-                      style={{
-                        padding: '20px',
-                        borderRadius: '12px',
-                        border: '1px solid hsl(var(--border))',
-                        display: 'flex',
-                        flexDirection: 'column',
-                        justifyContent: 'space-between',
-                        gap: '16px',
-                        backgroundColor: 'hsl(var(--card))',
-                      }}
-                    >
-                      <div>
-                        {/* Provider Header */}
-                        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '12px' }}>
-                          <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
-                            <div style={{
-                              width: '40px',
-                              height: '40px',
-                              borderRadius: '10px',
-                              backgroundColor: `${p.color}15`,
-                              display: 'flex',
-                              alignItems: 'center',
-                              justifyContent: 'center',
-                              color: p.color,
-                            }}>
-                              <Icon size={20} />
-                            </div>
-                            <div>
-                              <div style={{ fontWeight: 600, fontSize: '15px', color: 'hsl(var(--fg))' }}>{p.name}</div>
-                              <div style={{ fontSize: '12px', color: 'hsl(var(--muted-fg))' }}>
-                                {p.builtIn ? 'Local Workspace Engine' : isDisconnected ? t('connStatusDisconnected') : t('connStatusNotConfigured')}
-                              </div>
-                            </div>
-                          </div>
-
-                          <span style={{ fontSize: '11px', color: 'hsl(var(--muted-fg))', backgroundColor: 'hsl(var(--muted)/0.4)', padding: '3px 8px', borderRadius: '10px' }}>
-                            {isDisconnected ? t('connStatusDisconnected') : t('connStatusNotConfigured')}
-                          </span>
-                        </div>
-
-                        {/* Description */}
-                        <p style={{ fontSize: '13px', color: 'hsl(var(--muted-fg))', margin: '0 0 12px', lineHeight: 1.45 }}>
-                          {p.description}
-                        </p>
-
-                        {/* Capabilities Preview */}
-                        <div style={{ display: 'flex', flexWrap: 'wrap', gap: '5px' }}>
-                          {p.capabilitiesList.slice(0, 2).map((cap, i) => (
-                            <span
-                              key={i}
-                              style={{
-                                fontSize: '11px',
-                                backgroundColor: 'hsl(var(--muted)/0.4)',
-                                color: 'hsl(var(--muted-fg))',
-                                padding: '2px 8px',
-                                borderRadius: '4px',
-                              }}
-                            >
-                              • {cap}
-                            </span>
-                          ))}
-                        </div>
-                      </div>
-
-                      {/* Primary Connect Action */}
-                      <div style={{ display: 'flex', justifyContent: 'flex-end', borderTop: '1px solid hsl(var(--border)/0.5)', paddingTop: '14px' }}>
-                        {p.id === 'calendar' ? (
-                          <button
-                            className="btn btn-primary"
-                            onClick={handleConnectCalendar}
-                            style={{ fontSize: '12px', padding: '6px 14px' }}
-                          >
-                            {t('connLocalInitCalendar')}
-                          </button>
-                        ) : p.id === 'google_calendar' ? (
-                          <button
-                            className="btn btn-primary"
-                            onClick={() => {
-                              if (conn?.auth_metadata?.client_id) setGoogleClientId(conn.auth_metadata.client_id);
-                              setIsGoogleModalOpen(true);
-                            }}
-                            disabled={oauthPendingProvider === 'google_calendar'}
-                            style={{ fontSize: '12px', padding: '6px 14px', backgroundColor: '#4285F4', borderColor: '#4285F4', color: '#fff' }}
-                          >
-                            {oauthPendingProvider === 'google_calendar' ? (
-                              <span style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
-                                <RefreshCw size={12} className="animate-spin" /> {t('connGoogleVerifyingBtn')}
-                              </span>
-                            ) : (
-                              t('connGoogleAuthorizeBtn')
-                            )}
-                          </button>
-                        ) : p.id === 'github' ? (
-                          oauthProviders.github?.ready_for_user_connect ? (
-                            <button
-                              className="btn btn-primary"
-                              onClick={() => handleStartOAuth('github')}
-                              disabled={oauthPendingProvider === 'github'}
-                              style={{ fontSize: '12px', padding: '6px 14px', backgroundColor: '#2dba4e', borderColor: '#2dba4e', color: '#fff' }}
-                            >
-                              {oauthPendingProvider === 'github' ? (
-                                <span style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
-                                  <RefreshCw size={12} className="animate-spin" /> {t('connGoogleVerifyingBtn')}
-                                </span>
-                              ) : (
-                                t('connConnectGithub')
-                              )}
-                            </button>
-                          ) : (
-                            <button
-                              className="btn btn-primary"
-                              onClick={() => openDevSetupModal(p)}
-                              style={{ fontSize: '12px', padding: '6px 14px' }}
-                            >
-                              {t('connSetupGithub')}
-                            </button>
-                          )
-                        ) : p.id === 'slack' ? (
-                          oauthProviders.slack?.ready_for_user_connect ? (
-                            <button
-                              className="btn btn-primary"
-                              onClick={() => handleStartOAuth('slack')}
-                              disabled={oauthPendingProvider === 'slack'}
-                              style={{ fontSize: '12px', padding: '6px 14px', backgroundColor: '#4A154B', borderColor: '#4A154B', color: '#fff' }}
-                            >
-                              {oauthPendingProvider === 'slack' ? (
-                                <span style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
-                                  <RefreshCw size={12} className="animate-spin" /> {t('connGoogleVerifyingBtn')}
-                                </span>
-                              ) : (
-                                t('connConnectSlack')
-                              )}
-                            </button>
-                          ) : (
-                            <button
-                              className="btn btn-primary"
-                              onClick={() => openDevSetupModal(p)}
-                              style={{ fontSize: '12px', padding: '6px 14px' }}
-                            >
-                              {t('connSetupSlack')}
-                            </button>
-                          )
-                        ) : p.id === 'notion' ? (
-                          oauthProviders.notion?.ready_for_user_connect ? (
-                            <button
-                              className="btn btn-primary"
-                              onClick={() => handleStartOAuth('notion')}
-                              disabled={oauthPendingProvider === 'notion'}
-                              style={{ fontSize: '12px', padding: '6px 14px', backgroundColor: '#000000', borderColor: '#000000', color: '#fff' }}
-                            >
-                              {oauthPendingProvider === 'notion' ? (
-                                <span style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
-                                  <RefreshCw size={12} className="animate-spin" /> {t('connGoogleVerifyingBtn')}
-                                </span>
-                              ) : (
-                                t('connConnectNotion')
-                              )}
-                            </button>
-                          ) : (
-                            <button
-                              className="btn btn-primary"
-                              onClick={() => openDevSetupModal(p)}
-                              style={{ fontSize: '12px', padding: '6px 14px' }}
-                            >
-                              {t('connSetupNotion')}
-                            </button>
-                          )
-                        ) : p.id === 'telegram' ? (
-                          <button
-                            className="btn btn-primary"
-                            onClick={() => openTelegramModal(conn)}
-                            style={{ fontSize: '12px', padding: '6px 14px', backgroundColor: '#229ED9', borderColor: '#229ED9', color: '#fff' }}
-                          >
-                            {t('connSetupTelegram')}
-                          </button>
-                        ) : p.id === 'email' ? (
-                          <button
-                            className="btn btn-primary"
-                            onClick={() => openConfigModal(p, conn)}
-                            style={{ fontSize: '12px', padding: '6px 14px' }}
-                          >
-                            {t('connConfigureEmail')}
-                          </button>
-                        ) : p.id === 'http' ? (
-                          <button
-                            className="btn btn-primary"
-                            onClick={() => openConfigModal(p, conn)}
-                            style={{ fontSize: '12px', padding: '6px 14px' }}
-                          >
-                            {t('connConfigureHttp')}
-                          </button>
-                        ) : p.id === 'openapi' ? (
-                          <button
-                            className="btn btn-primary"
-                            onClick={() => openConfigModal(p, conn)}
-                            style={{ fontSize: '12px', padding: '6px 14px' }}
-                          >
-                            {t('connConfigureOpenapi')}
-                          </button>
-                        ) : (
-                          <button
-                            className="btn btn-primary"
-                            onClick={() => openConfigModal(p, conn)}
-                            style={{ fontSize: '12px', padding: '6px 14px' }}
-                          >
-                            {isDisconnected ? t('connReconnect') : t('connConnect')}
-                          </button>
-                        )}
-                      </div>
-                    </div>
-                  );
-                })}
-              </div>
-            </div>
-          )}
-        </div>
-      )}
-
-      {/* TAB 2: CALENDAR SCHEDULE */}
-      {activeTab === 'calendar' && (
-        <div>
-          {/* Calendar Source Switcher */}
-          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '16px', flexWrap: 'wrap', gap: '10px' }}>
-            <div style={{ display: 'flex', gap: '8px' }}>
-              <button
-                className={`btn ${selectedScheduleSource === 'local' ? 'btn-primary' : 'btn-secondary'}`}
-                onClick={() => setSelectedScheduleSource('local')}
-                style={{ fontSize: '12px', padding: '6px 14px' }}
-              >
-                Aether Calendar (Local) ({calendarEvents.length})
-              </button>
-              {connections.some(c => c.provider === 'google_calendar' && (c.status === 'verified' || c.status === 'connected')) && (
-                <button
-                  className={`btn ${selectedScheduleSource === 'google' ? 'btn-primary' : 'btn-secondary'}`}
-                  onClick={() => setSelectedScheduleSource('google')}
-                  style={{
-                    fontSize: '12px',
-                    padding: '6px 14px',
-                    backgroundColor: selectedScheduleSource === 'google' ? '#4285F4' : undefined,
-                    borderColor: selectedScheduleSource === 'google' ? '#4285F4' : undefined,
-                    color: selectedScheduleSource === 'google' ? '#fff' : undefined,
-                  }}
-                >
-                  Google Calendar ({googleCalendarEvents.length})
-                </button>
-              )}
-            </div>
-
-            <button
-              className="btn btn-primary"
-              onClick={() => setIsEventModalOpen(true)}
-              style={{ display: 'flex', alignItems: 'center', gap: '6px', fontSize: '13px' }}
+        }
+        description="Collega le app che usi ogni giorno e lascia che Aether le utilizzi quando servono."
+        actions={
+          <Stack direction="row" gap="sm" align="center">
+            <Button
+              variant="secondary"
+              size="sm"
+              onClick={fetchAll}
+              disabled={loading}
+              leftIcon={<RefreshCw size={14} className={loading ? 'animate-spin' : ''} />}
             >
-              <Plus size={14} /> New Event ({selectedScheduleSource === 'google' ? 'Google' : 'Local'})
-            </button>
-          </div>
+              Aggiorna
+            </Button>
+            <Button
+              variant="primary"
+              size="sm"
+              onClick={handleSyncAll}
+              disabled={syncingAll}
+              leftIcon={<RefreshCw size={14} className={syncingAll ? 'animate-spin' : ''} />}
+            >
+              {syncingAll ? 'Sincronizzazione…' : 'Sincronizza tutto'}
+            </Button>
+          </Stack>
+        }
+      />
 
-          <div style={{ fontSize: '13px', color: 'hsl(var(--muted-fg))', marginBottom: '12px' }}>
-            {selectedScheduleSource === 'google'
-              ? 'Real Google Calendar events synchronized via official Google Calendar API:'
-              : 'Real scheduled events managed via Aether Local Calendar (SQLite storage):'}
-          </div>
+      {/* 2. Navigation View Switcher (Tabs) */}
+      <Stack direction="column" gap="lg" style={{ marginBottom: '24px' }}>
+        <SegmentedControl
+          value={activeTab}
+          onChange={(tab) => setActiveTab(tab as any)}
+          options={[
+            {
+              value: 'apps',
+              label: 'Servizi',
+              icon: <Globe size={15} />,
+            },
+            {
+              value: 'calendar',
+              label: 'Calendario & Agenda',
+              icon: <Calendar size={15} />,
+            },
+            {
+              value: 'actions',
+              label: 'Storico Operazioni & Approvazioni',
+              icon: <Clock size={15} />,
+            },
+          ]}
+        />
+      </Stack>
 
-          {((selectedScheduleSource === 'google' ? googleCalendarEvents : calendarEvents).length === 0) ? (
-            <div className="card" style={{ padding: '40px', textAlign: 'center', color: 'hsl(var(--muted-fg))' }}>
-              <Calendar size={32} style={{ margin: '0 auto 12px', opacity: 0.5, color: selectedScheduleSource === 'google' ? '#4285F4' : undefined }} />
-              <div style={{ fontWeight: 600, marginBottom: '4px' }}>
-                {selectedScheduleSource === 'google' ? 'No Google Calendar events found' : 'No local calendar events found'}
+      {/* =========================================================================
+          TAB 1: SERVIZI COLLEGATI (APPS)
+          ========================================================================= */}
+      {activeTab === 'apps' && (
+        <Stack direction="column" gap="lg">
+          {/* Filter Bar: Categories & Search */}
+          <Panel variant="default" style={{ padding: '14px 18px' }}>
+            <Stack
+              direction="row"
+              gap="md"
+              align="center"
+              justify="between"
+              wrap
+            >
+              <SegmentedControl
+                value={categoryFilter}
+                onChange={(cat) => setCategoryFilter(cat as CategoryType)}
+                options={[
+                  { value: 'all', label: 'Tutti i servizi' },
+                  { value: 'productivity', label: 'Produttività' },
+                  { value: 'dev', label: 'Sviluppo' },
+                  { value: 'communication', label: 'Comunicazione' },
+                ]}
+              />
+
+              <div style={{ minWidth: '240px', flex: '1', maxWidth: '340px' }}>
+                <AetherInput
+                  placeholder="Cerca servizio o capacità…"
+                  value={searchQuery}
+                  onChange={(e) => setSearchQuery(e.target.value)}
+                />
               </div>
-              <div style={{ fontSize: '13px' }}>
-                {selectedScheduleSource === 'google'
-                  ? 'Click "New Event" to create an event on Google Calendar, or click "Sync Now" on the Google Calendar card.'
-                  : 'Ask Personal Aether to schedule an appointment or click "New Event".'}
-              </div>
-            </div>
+            </Stack>
+          </Panel>
+
+          {/* Provider Grid */}
+          {filteredProviders.length === 0 ? (
+            <EmptyState
+              icon={<Globe size={28} />}
+              title="Nessun servizio trovato"
+              description="Nessun servizio corrisponde ai criteri di ricerca o alla categoria selezionata."
+              action={
+                <Button variant="secondary" onClick={() => { setSearchQuery(''); setCategoryFilter('all'); }}>
+                  Reimposta filtri
+                </Button>
+              }
+            />
           ) : (
-            <div style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
-              {(selectedScheduleSource === 'google' ? googleCalendarEvents : calendarEvents).map(evt => (
-                <div
-                  key={evt.id}
-                  className="card"
-                  style={{
-                    padding: '16px 20px',
-                    display: 'flex',
-                    alignItems: 'center',
-                    justifyContent: 'space-between',
-                    borderRadius: '10px',
-                    borderLeft: selectedScheduleSource === 'google' ? '3px solid #4285F4' : '3px solid #06b6d4',
-                  }}
-                >
-                  <div style={{ display: 'flex', alignItems: 'center', gap: '14px' }}>
-                    <div style={{
-                      width: '42px',
-                      height: '42px',
-                      borderRadius: '8px',
-                      backgroundColor: selectedScheduleSource === 'google' ? '#4285F415' : 'hsl(var(--primary)/0.1)',
-                      color: selectedScheduleSource === 'google' ? '#4285F4' : 'hsl(var(--primary))',
-                      display: 'flex',
-                      flexDirection: 'column',
-                      alignItems: 'center',
-                      justifyContent: 'center',
-                      fontWeight: 700,
-                      fontSize: '11px',
-                    }}>
-                      <Calendar size={18} />
-                    </div>
-                    <div>
-                      <div style={{ fontWeight: 600, fontSize: '15px', color: 'hsl(var(--fg))' }}>{evt.title}</div>
-                      <div style={{ fontSize: '12px', color: 'hsl(var(--muted-fg))', display: 'flex', gap: '12px', marginTop: '2px' }}>
-                        <span><Clock size={12} style={{ display: 'inline', marginRight: '4px' }} />{evt.start_time.replace('T', ' ').slice(0, 16)}</span>
-                        {evt.location && <span>Location: {evt.location}</span>}
-                      </div>
-                    </div>
-                  </div>
-                  <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-                    <span style={{
-                      fontSize: '11px',
-                      color: selectedScheduleSource === 'google' ? '#4285F4' : '#06b6d4',
-                      backgroundColor: selectedScheduleSource === 'google' ? '#4285F415' : '#06b6d415',
-                      padding: '2px 8px',
-                      borderRadius: '4px',
-                      fontWeight: 600,
-                    }}>
-                      {selectedScheduleSource === 'google' ? 'Google Calendar' : 'Local Workspace'}
-                    </span>
-                    <span style={{ fontSize: '12px', color: '#10b981', fontWeight: 600, backgroundColor: '#10b98115', padding: '3px 10px', borderRadius: '12px' }}>
-                      Confirmed
-                    </span>
-                  </div>
-                </div>
-              ))}
-            </div>
-          )}
-        </div>
-      )}
+            <Grid minItemWidth={330} gap="lg">
+              {filteredProviders.map((provider) => {
+                const conn = connections.find((c) => c.provider === provider.id);
+                const isConnected = conn && (conn.status === 'verified' || conn.status === 'connected');
+                const isConnecting = oauthPendingProvider === provider.id || verifyingProvider === provider.id;
+                const IconComponent = provider.icon;
 
-      {/* TAB 3: ACTION EXECUTIONS LOG */}
-      {activeTab === 'actions' && (
-        <div>
-          {/* Action Status Filters */}
-          <div style={{ display: 'flex', gap: '8px', marginBottom: '16px', alignItems: 'center' }}>
-            <span style={{ fontSize: '12px', color: 'hsl(var(--muted-fg))', fontWeight: 600 }}>Filter:</span>
-            {['all', 'pending', 'succeeded', 'failed'].map(f => (
-              <button
-                key={f}
-                onClick={() => setActionStatusFilter(f)}
-                style={{
-                  padding: '4px 10px',
-                  borderRadius: '12px',
-                  fontSize: '11px',
-                  fontWeight: 600,
-                  cursor: 'pointer',
-                  border: actionStatusFilter === f ? '1px solid hsl(var(--primary))' : '1px solid hsl(var(--border))',
-                  backgroundColor: actionStatusFilter === f ? 'hsl(var(--primary)/0.12)' : 'transparent',
-                  color: actionStatusFilter === f ? 'hsl(var(--primary))' : 'hsl(var(--muted-fg))',
-                }}
-              >
-                {f.toUpperCase()}
-              </button>
-            ))}
-          </div>
+                // Truthful status determination
+                const oInfo = oauthProviders[provider.id];
+                const needsDevSetup = provider.isOAuth && oInfo?.supports_oauth && !oInfo.ready_for_user_connect;
 
-          <div style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
-            {filteredExecutions.length === 0 ? (
-              <div className="card" style={{ padding: '40px', textAlign: 'center', color: 'hsl(var(--muted-fg))' }}>
-                <Zap size={32} style={{ margin: '0 auto 12px', opacity: 0.5 }} />
-                <div style={{ fontWeight: 600, marginBottom: '4px' }}>No action executions recorded yet</div>
-                <div style={{ fontSize: '13px' }}>Actions executed by Aether or requiring approval will be audited here.</div>
-              </div>
-            ) : (
-              filteredExecutions.map(exec => {
-                const summary = getActionSummary(exec);
-                const detail = getActionDetail(exec);
-                const isTargeted = initialExecutionId === exec.id;
+                let displayStatus = 'NOT_CONFIGURED';
+                if (isConnecting) {
+                  displayStatus = 'CONNECTING';
+                } else if (conn && conn.status !== 'not_configured') {
+                  displayStatus = conn.status;
+                } else if (needsDevSetup) {
+                  displayStatus = 'SETUP_REQUIRED';
+                }
+
                 return (
-                  <div
-                    key={exec.id}
-                    id={`exec-card-${exec.id}`}
-                    className="card"
+                  <Panel
+                    key={provider.id}
+                    variant="default"
+                    className="ds-panel--interactive"
                     style={{
-                      padding: '16px 20px',
-                      borderRadius: '10px',
                       display: 'flex',
                       flexDirection: 'column',
-                      gap: '8px',
-                      border: isTargeted ? '2px solid hsl(var(--primary))' : undefined,
-                      boxShadow: isTargeted ? '0 0 16px rgba(99, 102, 241, 0.25)' : undefined,
-                      transition: 'all 0.3s ease',
+                      justifyContent: 'space-between',
+                      height: '100%',
                     }}
+                    onClick={() => handlePrimaryAction(provider, conn)}
                   >
-                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', flexWrap: 'wrap', gap: '8px' }}>
-                      <div>
-                        <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-                          <span style={{
-                            fontSize: '11px',
-                            fontWeight: 700,
-                            padding: '2px 8px',
-                            borderRadius: '4px',
-                            backgroundColor: 'hsl(var(--muted)/0.4)',
-                            color: 'hsl(var(--fg))',
-                          }}>
-                            {exec.action_id}
-                          </span>
-                          <span style={{ fontWeight: 600, fontSize: '14px', color: 'hsl(var(--fg))' }}>
-                            {summary}
-                          </span>
-                        </div>
-                        {detail && (
-                          <div style={{ fontSize: '12px', color: 'hsl(var(--muted-fg))', marginTop: '4px', paddingLeft: '4px', fontStyle: 'italic' }}>
-                            "{detail}"
+                    <Stack direction="column" gap="md">
+                      {/* Card Header: Icon, Title & Status Badge */}
+                      <Stack direction="row" gap="md" align="center" justify="between">
+                        <Stack direction="row" gap="md" align="center">
+                          <div
+                            style={{
+                              width: '42px',
+                              height: '42px',
+                              borderRadius: '10px',
+                              backgroundColor: `${provider.color}18`,
+                              color: provider.color,
+                              display: 'flex',
+                              alignItems: 'center',
+                              justifyContent: 'center',
+                              flexShrink: 0,
+                            }}
+                          >
+                            <IconComponent size={22} color={provider.color} />
                           </div>
-                        )}
-                        <div style={{ fontSize: '11px', color: 'hsl(var(--muted-fg))', marginTop: '6px' }}>
-                          ID: {exec.id} • {exec.created_at ? new Date(exec.created_at).toLocaleString() : ''}
-                        </div>
-                      </div>
-                      <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: '4px' }}>
-                        <span style={{
-                          fontSize: '11px',
-                          fontWeight: 600,
-                          padding: '3px 10px',
-                          borderRadius: '10px',
-                          backgroundColor: (exec.status === 'success' || exec.status === 'succeeded') ? '#10b98115' : (exec.status === 'pending_approval' || exec.status === 'waiting_approval') ? '#f59e0b15' : (exec.status === 'running' || exec.status === 'queued') ? '#3b82f615' : '#ef444415',
-                          color: (exec.status === 'success' || exec.status === 'succeeded') ? '#10b981' : (exec.status === 'pending_approval' || exec.status === 'waiting_approval') ? '#f59e0b' : (exec.status === 'running' || exec.status === 'queued') ? '#3b82f6' : '#ef4444',
-                        }}>
-                          {exec.status.toUpperCase()}
+                          <Stack gap="none">
+                            <Heading level={4}>{provider.name}</Heading>
+                            {isConnected && conn?.account_name && (
+                              <Text size="xs" variant="muted" style={{ display: 'flex', alignItems: 'center', gap: '4px' }}>
+                                <Shield size={12} color="hsl(var(--success))" />
+                                {conn.account_name}
+                              </Text>
+                            )}
+                          </Stack>
+                        </Stack>
+
+                        <StatusBadge status={displayStatus} />
+                      </Stack>
+
+                      {/* Card Body: Simple description */}
+                      <Text size="sm" variant="muted" style={{ minHeight: '40px' }}>
+                        {provider.description}
+                      </Text>
+
+                      {/* Capabilities pill */}
+                      <div
+                        style={{
+                          backgroundColor: 'hsl(var(--muted) / 0.4)',
+                          borderRadius: '6px',
+                          padding: '6px 10px',
+                          fontSize: '12px',
+                          color: 'hsl(var(--fg))',
+                          display: 'flex',
+                          alignItems: 'center',
+                          gap: '6px',
+                        }}
+                      >
+                        <Zap size={13} color="hsl(var(--primary))" style={{ flexShrink: 0 }} />
+                        <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                          {provider.capabilitiesText}
                         </span>
                       </div>
-                    </div>
 
-                    {exec.error_message && (
-                      <div style={{
-                        fontSize: '12px',
-                        color: '#ef4444',
-                        backgroundColor: '#ef444410',
-                        border: '1px solid #ef444420',
-                        padding: '8px 12px',
-                        borderRadius: '6px',
-                        marginTop: '4px',
-                      }}>
-                        <strong>Error:</strong> {exec.error_message}
-                      </div>
-                    )}
+                      {/* Error notice if connection failed */}
+                      {conn && (conn.status === 'error' || conn.status === 'verification_failed') && (
+                        <AlertBanner variant="error" title="Attenzione richiesta">
+                          {conn.last_verification_error || 'Autenticazione scaduta o non valida.'}
+                        </AlertBanner>
+                      )}
+                    </Stack>
 
-                    {(exec.status === 'success' || exec.status === 'succeeded') && exec.output_data && (
-                      <div style={{
-                        fontSize: '12px',
-                        color: 'hsl(var(--muted-fg))',
-                        backgroundColor: 'hsl(var(--muted)/0.2)',
-                        padding: '6px 10px',
-                        borderRadius: '6px',
-                        fontFamily: 'monospace',
-                        overflow: 'hidden',
-                        textOverflow: 'ellipsis',
-                        whiteSpace: 'nowrap',
-                      }}>
-                        Result: {typeof exec.output_data === 'string' ? exec.output_data : JSON.stringify(exec.output_data).slice(0, 160)}
-                      </div>
-                    )}
-
-                    {(exec.status === 'pending_approval' || exec.status === 'waiting_approval') && (
-                      <div style={{ display: 'flex', gap: '8px', marginTop: '8px', justifyContent: 'flex-end', borderTop: '1px solid hsl(var(--border)/0.4)', paddingTop: '10px' }}>
-                        <button
-                          onClick={() => handleRejectAction(exec.id)}
-                          disabled={actionLoadingId === exec.id}
-                          style={{
-                            display: 'inline-flex',
-                            alignItems: 'center',
-                            gap: '6px',
-                            padding: '6px 12px',
-                            borderRadius: '6px',
-                            border: '1px solid hsl(var(--border))',
-                            backgroundColor: 'transparent',
-                            color: '#ef4444',
-                            fontSize: '12px',
-                            fontWeight: 600,
-                            cursor: actionLoadingId === exec.id ? 'not-allowed' : 'pointer',
-                            opacity: actionLoadingId === exec.id ? 0.6 : 1,
-                          }}
-                        >
-                          {actionLoadingId === exec.id ? <Loader2 size={13} className="animate-spin" /> : <X size={13} />}
-                          Decline
-                        </button>
-                        <button
-                          onClick={() => handleApproveAction(exec.id)}
-                          disabled={actionLoadingId === exec.id}
-                          style={{
-                            display: 'inline-flex',
-                            alignItems: 'center',
-                            gap: '6px',
-                            padding: '6px 14px',
-                            borderRadius: '6px',
-                            border: 'none',
-                            backgroundColor: '#10b981',
-                            color: '#ffffff',
-                            fontSize: '12px',
-                            fontWeight: 600,
-                            cursor: actionLoadingId === exec.id ? 'not-allowed' : 'pointer',
-                            opacity: actionLoadingId === exec.id ? 0.6 : 1,
-                          }}
-                        >
-                          {actionLoadingId === exec.id ? <Loader2 size={13} className="animate-spin" /> : <Check size={13} />}
-                          Approve & Run
-                        </button>
-                      </div>
-                    )}
-                  </div>
-                );
-              })
-            )}
-          </div>
-        </div>
-      )}
-
-      {/* MANAGE CONNECTION MODAL / DRAWER */}
-      {manageProvider && (
-        <div style={{
-          position: 'fixed',
-          inset: 0,
-          backgroundColor: 'rgba(0, 0, 0, 0.65)',
-          backdropFilter: 'blur(4px)',
-          display: 'flex',
-          alignItems: 'center',
-          justifyContent: 'center',
-          zIndex: 1000,
-        }}>
-          <div className="card" style={{ width: '560px', maxHeight: '90vh', overflowY: 'auto', padding: '28px', borderRadius: '14px', display: 'flex', flexDirection: 'column', gap: '20px' }}>
-            {/* Header */}
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
-              <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
-                <div style={{
-                  width: '44px',
-                  height: '44px',
-                  borderRadius: '12px',
-                  backgroundColor: `${manageProvider.color}15`,
-                  display: 'flex',
-                  alignItems: 'center',
-                  justifyContent: 'center',
-                  color: manageProvider.color,
-                }}>
-                  <manageProvider.icon size={24} />
-                </div>
-                <div>
-                  <h3 style={{ margin: 0, fontSize: '18px', fontWeight: 700, color: 'hsl(var(--fg))' }}>
-                    {manageProvider.name}
-                  </h3>
-                  <div style={{ fontSize: '13px', color: 'hsl(var(--muted-fg))' }}>
-                    {activeManageConn?.account_name || 'Configured Integration'}
-                  </div>
-                </div>
-              </div>
-              <button
-                className="btn btn-ghost"
-                onClick={() => {
-                  setManageProvider(null);
-                  setShowTechDetails(false);
-                }}
-                style={{ padding: '6px', borderRadius: '50%' }}
-              >
-                <X size={18} />
-              </button>
-            </div>
-
-            {/* Status & Identity Card */}
-            <div style={{
-              padding: '14px 16px',
-              borderRadius: '10px',
-              backgroundColor: 'hsl(var(--muted)/0.3)',
-              border: '1px solid hsl(var(--border))',
-              display: 'flex',
-              alignItems: 'center',
-              justifyContent: 'space-between',
-            }}>
-              <div>
-                <div style={{ fontSize: '11px', textTransform: 'uppercase', letterSpacing: '0.05em', color: 'hsl(var(--muted-fg))', fontWeight: 600 }}>
-                  Current Status
-                </div>
-                <div style={{ fontSize: '14px', fontWeight: 600, color: 'hsl(var(--fg))', marginTop: '2px' }}>
-                  {activeManageConn?.status ? activeManageConn.status.toUpperCase() : 'NOT CONFIGURED'}
-                </div>
-              </div>
-
-              {activeManageConn?.status === 'verified' || activeManageConn?.status === 'connected' ? (
-                <span style={{ display: 'inline-flex', alignItems: 'center', gap: '4px', fontSize: '12px', color: '#10b981', fontWeight: 600, backgroundColor: '#10b98115', padding: '4px 10px', borderRadius: '12px' }}>
-                  <CheckCircle2 size={14} /> Operational
-                </span>
-              ) : activeManageConn?.status === 'verification_failed' ? (
-                <span style={{ display: 'inline-flex', alignItems: 'center', gap: '4px', fontSize: '12px', color: '#ef4444', fontWeight: 600, backgroundColor: '#ef444415', padding: '4px 10px', borderRadius: '12px' }}>
-                  <AlertCircle size={14} /> Verification Failed
-                </span>
-              ) : (
-                <span style={{ display: 'inline-flex', alignItems: 'center', gap: '4px', fontSize: '12px', color: '#f59e0b', fontWeight: 600, backgroundColor: '#f59e0b15', padding: '4px 10px', borderRadius: '12px' }}>
-                  <AlertCircle size={14} /> Needs Attention
-                </span>
-              )}
-            </div>
-
-            {/* What Aether Can Do */}
-            <div>
-              <div style={{ fontSize: '14px', fontWeight: 700, color: 'hsl(var(--fg))', marginBottom: '8px' }}>
-                {t('connWhatAetherCanDo')}
-              </div>
-              <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
-                {manageProvider.capabilitiesList.map((cap, i) => (
-                  <div key={i} style={{ display: 'flex', alignItems: 'center', gap: '8px', fontSize: '13px', color: 'hsl(var(--fg))' }}>
-                    <Check size={14} style={{ color: '#10b981', flexShrink: 0 }} />
-                    <span>{cap}</span>
-                  </div>
-                ))}
-              </div>
-              <div style={{
-                marginTop: '10px',
-                padding: '8px 12px',
-                borderRadius: '8px',
-                backgroundColor: 'hsl(var(--muted)/0.2)',
-                fontSize: '11px',
-                color: 'hsl(var(--muted-fg))',
-                lineHeight: 1.4,
-                display: 'flex',
-                alignItems: 'center',
-                gap: '8px',
-              }}>
-                <Shield size={14} style={{ color: 'hsl(var(--primary))', flexShrink: 0 }} />
-                <span>{t('connSafetyNote')}</span>
-              </div>
-            </div>
-
-            {/* Recent Activity */}
-            <div>
-              <div style={{ fontSize: '14px', fontWeight: 700, color: 'hsl(var(--fg))', marginBottom: '8px' }}>
-                {t('connRecentActivity')}
-              </div>
-              {manageRecentExecutions.length === 0 ? (
-                <div style={{ fontSize: '12px', color: 'hsl(var(--muted-fg))', fontStyle: 'italic', padding: '8px 0' }}>
-                  {t('connNoRecentActivity')}
-                </div>
-              ) : (
-                <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
-                  {manageRecentExecutions.map(exec => (
+                    {/* Card Footer: Single Primary Action */}
                     <div
-                      key={exec.id}
                       style={{
-                        padding: '8px 12px',
-                        borderRadius: '6px',
-                        backgroundColor: 'hsl(var(--muted)/0.2)',
+                        marginTop: '16px',
+                        paddingTop: '14px',
+                        borderTop: '1px solid hsl(var(--border))',
                         display: 'flex',
                         alignItems: 'center',
                         justifyContent: 'space-between',
-                        fontSize: '12px',
+                        gap: '8px',
                       }}
+                      onClick={(e) => e.stopPropagation()}
                     >
-                      <div style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', maxWidth: '340px' }}>
-                        <span style={{ fontWeight: 600, marginRight: '6px' }}>{exec.action_id}:</span>
-                        <span style={{ color: 'hsl(var(--muted-fg))' }}>{getActionSummary(exec)}</span>
-                      </div>
-                      <span style={{
-                        fontSize: '10px',
-                        fontWeight: 600,
-                        padding: '2px 6px',
-                        borderRadius: '4px',
-                        backgroundColor: (exec.status === 'success' || exec.status === 'succeeded') ? '#10b98115' : '#ef444415',
-                        color: (exec.status === 'success' || exec.status === 'succeeded') ? '#10b981' : '#ef4444',
-                      }}>
-                        {exec.status.toUpperCase()}
-                      </span>
-                    </div>
-                  ))}
-                </div>
-              )}
-            </div>
-
-            {/* Advanced Diagnostics Toggle */}
-            <div style={{ borderTop: '1px solid hsl(var(--border))', paddingTop: '12px' }}>
-              <button
-                type="button"
-                onClick={() => setShowTechDetails(!showTechDetails)}
-                style={{
-                  background: 'none',
-                  border: 'none',
-                  padding: 0,
-                  fontSize: '12px',
-                  fontWeight: 600,
-                  color: 'hsl(var(--muted-fg))',
-                  display: 'flex',
-                  alignItems: 'center',
-                  gap: '4px',
-                  cursor: 'pointer',
-                }}
-              >
-                {showTechDetails ? <ChevronUp size={14} /> : <ChevronDown size={14} />}
-                {t('connDiagnostics')}
-              </button>
-
-              {showTechDetails && (
-                <div style={{
-                  marginTop: '10px',
-                  padding: '12px',
-                  borderRadius: '8px',
-                  backgroundColor: 'hsl(var(--muted)/0.2)',
-                  fontSize: '11px',
-                  fontFamily: 'monospace',
-                  display: 'flex',
-                  flexDirection: 'column',
-                  gap: '6px',
-                  color: 'hsl(var(--fg))',
-                }}>
-                  <div><strong>{t('connConnId')}:</strong> {activeManageConn?.id || 'none'}</div>
-                  <div><strong>{t('connMethod')}:</strong> {activeManageConn?.verification_method || 'none'}</div>
-                  <div><strong>{t('connScopes')}:</strong> {activeManageConn?.scopes?.join(', ') || 'default'}</div>
-                  <div><strong>{t('connLastVerified')}:</strong> {activeManageConn?.last_verified_at || 'Never'}</div>
-                  <div><strong>{t('connLastSynced')}:</strong> {activeManageConn?.last_synced_at || 'Never'}</div>
-                  <div><strong>Last Successful Op:</strong> {activeManageConn?.last_successful_operation || 'None'}</div>
-                  {activeManageConn?.last_verification_error && (
-                    <div style={{ color: '#ef4444' }}>
-                      <strong>Last Error:</strong> {activeManageConn.last_verification_error}
-                    </div>
-                  )}
-                </div>
-              )}
-            </div>
-
-            {/* Modal Actions */}
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', borderTop: '1px solid hsl(var(--border))', paddingTop: '16px' }}>
-              <button
-                className="btn btn-ghost"
-                onClick={() => setDisconnectTarget({ id: manageProvider.id, name: manageProvider.name })}
-                style={{ color: '#ef4444', fontSize: '12px', display: 'flex', alignItems: 'center', gap: '4px' }}
-              >
-                <Trash2 size={13} /> {t('connDisconnect')}
-              </button>
-
-              <div style={{ display: 'flex', gap: '8px' }}>
-                {!manageProvider.builtIn && !manageProvider.isOAuth && (
-                  <button
-                    className="btn btn-secondary"
-                    onClick={() => {
-                      const p = manageProvider;
-                      const c = activeManageConn;
-                      setManageProvider(null);
-                      if (p) openConfigModal(p, c || undefined);
-                    }}
-                    style={{ fontSize: '12px' }}
-                  >
-                    {t('connEditCredentials')}
-                  </button>
-                )}
-
-                {manageProvider.isOAuth ? (
-                  <>
-                    <button
-                      className="btn btn-secondary"
-                      onClick={() => {
-                        setManageProvider(null);
-                        handleOpenCalendarPicker();
-                      }}
-                      style={{ fontSize: '12px', display: 'flex', alignItems: 'center', gap: '4px' }}
-                    >
-                      <Calendar size={12} /> Select Calendar
-                    </button>
-                    <button
-                      className="btn btn-primary"
-                      onClick={() => {
-                        if (activeManageConn?.auth_metadata?.client_id) setGoogleClientId(activeManageConn.auth_metadata.client_id);
-                        setManageProvider(null);
-                        setIsGoogleModalOpen(true);
-                      }}
-                      style={{ fontSize: '12px', backgroundColor: '#4285F4', borderColor: '#4285F4', color: '#fff' }}
-                    >
-                      Re-authorize Google
-                    </button>
-                  </>
-                ) : (
-                  <button
-                    className="btn btn-primary"
-                    onClick={async () => {
-                      await handleVerifyConnection(manageProvider.id);
-                    }}
-                    disabled={verifyingProvider === manageProvider.id}
-                    style={{ fontSize: '12px', display: 'flex', alignItems: 'center', gap: '4px' }}
-                  >
-                    <ShieldCheck size={13} className={verifyingProvider === manageProvider.id ? 'animate-spin' : ''} />
-                    {verifyingProvider === manageProvider.id ? t('connStatusVerifying') : t('connReverify')}
-                  </button>
-                )}
-              </div>
-            </div>
-          </div>
-        </div>
-      )}
-
-      {/* DISCONNECT CONFIRMATION MODAL */}
-      {disconnectTarget && (
-        <div style={{
-          position: 'fixed',
-          inset: 0,
-          backgroundColor: 'rgba(0, 0, 0, 0.7)',
-          backdropFilter: 'blur(4px)',
-          display: 'flex',
-          alignItems: 'center',
-          justifyContent: 'center',
-          zIndex: 1100,
-        }}>
-          <div className="card" style={{ width: '420px', padding: '24px', borderRadius: '12px', display: 'flex', flexDirection: 'column', gap: '14px' }}>
-            <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
-              <div style={{ width: '40px', height: '40px', borderRadius: '10px', backgroundColor: '#ef444415', color: '#ef4444', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-                <AlertTriangle size={20} />
-              </div>
-              <h3 style={{ margin: 0, fontSize: '17px', fontWeight: 600 }}>
-                {t('connDisconnectTitle').replace('{provider}', disconnectTarget.name)}
-              </h3>
-            </div>
-
-            <p style={{ fontSize: '13px', color: 'hsl(var(--muted-fg))', lineHeight: 1.5, margin: 0 }}>
-              {t('connDisconnectDesc')}
-            </p>
-
-            <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '8px', marginTop: '6px' }}>
-              <button
-                type="button"
-                className="btn btn-ghost"
-                onClick={() => setDisconnectTarget(null)}
-                disabled={disconnecting}
-              >
-                {t('connCancel')}
-              </button>
-              <button
-                type="button"
-                className="btn btn-primary"
-                onClick={confirmDisconnect}
-                disabled={disconnecting}
-                style={{ backgroundColor: '#ef4444', borderColor: '#ef4444', color: '#fff' }}
-              >
-                {disconnecting ? 'Disconnecting...' : t('connConfirmDisconnect')}
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
-
-      {/* CREATE EVENT MODAL */}
-      {isEventModalOpen && (
-        <div style={{
-          position: 'fixed',
-          inset: 0,
-          backgroundColor: 'rgba(0, 0, 0, 0.5)',
-          display: 'flex',
-          alignItems: 'center',
-          justifyContent: 'center',
-          zIndex: 1000,
-        }}>
-          <div className="card" style={{ width: '400px', padding: '24px', borderRadius: '12px' }}>
-            <h3 style={{ margin: '0 0 16px', fontSize: '18px', fontWeight: 600 }}>Create Calendar Event</h3>
-            <form onSubmit={handleCreateEvent} style={{ display: 'flex', flexDirection: 'column', gap: '14px' }}>
-              <div>
-                <label style={{ fontSize: '12px', fontWeight: 600, display: 'block', marginBottom: '4px' }}>Title</label>
-                <input
-                  type="text"
-                  className="input"
-                  required
-                  placeholder="e.g. Planning Meeting"
-                  value={newTitle}
-                  onChange={e => setNewTitle(e.target.value)}
-                  style={{ width: '100%' }}
-                />
-              </div>
-              <div>
-                <label style={{ fontSize: '12px', fontWeight: 600, display: 'block', marginBottom: '4px' }}>Start Time (ISO or description)</label>
-                <input
-                  type="text"
-                  className="input"
-                  placeholder="2026-09-15T10:00:00Z"
-                  value={newStartTime}
-                  onChange={e => setNewStartTime(e.target.value)}
-                  style={{ width: '100%' }}
-                />
-              </div>
-              <div>
-                <label style={{ fontSize: '12px', fontWeight: 600, display: 'block', marginBottom: '4px' }}>Location</label>
-                <input
-                  type="text"
-                  className="input"
-                  placeholder="e.g. Zoom / Office"
-                  value={newLocation}
-                  onChange={e => setNewLocation(e.target.value)}
-                  style={{ width: '100%' }}
-                />
-              </div>
-              <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '8px', marginTop: '10px' }}>
-                <button
-                  type="button"
-                  className="btn btn-ghost"
-                  onClick={() => setIsEventModalOpen(false)}
-                >
-                  Cancel
-                </button>
-                <button
-                  type="submit"
-                  className="btn btn-primary"
-                  disabled={creatingEvent}
-                >
-                  {creatingEvent ? 'Creating...' : 'Save Event'}
-                </button>
-              </div>
-            </form>
-          </div>
-        </div>
-      )}
-
-      {/* CREDENTIAL CONFIGURATION MODAL */}
-      {configModalProvider && (
-        <div style={{
-          position: 'fixed',
-          inset: 0,
-          backgroundColor: 'rgba(0, 0, 0, 0.65)',
-          backdropFilter: 'blur(4px)',
-          display: 'flex',
-          alignItems: 'center',
-          justifyContent: 'center',
-          zIndex: 1000,
-        }}>
-          <div className="card" style={{ width: '500px', maxHeight: '90vh', overflowY: 'auto', padding: '26px', borderRadius: '14px' }}>
-            <div style={{ display: 'flex', alignItems: 'center', gap: '12px', marginBottom: '16px' }}>
-              <div style={{
-                width: '38px',
-                height: '38px',
-                borderRadius: '10px',
-                backgroundColor: `${configModalProvider.color}15`,
-                display: 'flex',
-                alignItems: 'center',
-                justifyContent: 'center',
-                color: configModalProvider.color,
-              }}>
-                <configModalProvider.icon size={22} />
-              </div>
-              <div>
-                <h3 style={{ margin: 0, fontSize: '18px', fontWeight: 600 }}>Configure {configModalProvider.name}</h3>
-                <div style={{ fontSize: '12px', color: 'hsl(var(--muted-fg))' }}>
-                  {isConfigured ? 'Update credentials (leave secrets blank to keep current)' : 'Provide authentic credentials to enable real agentic actions'}
-                </div>
-              </div>
-            </div>
-
-            {/* Encrypted Vault Protection Notice */}
-            <div style={{
-              padding: '8px 12px',
-              borderRadius: '8px',
-              backgroundColor: 'hsl(var(--muted)/0.3)',
-              border: '1px solid hsl(var(--border))',
-              marginBottom: '14px',
-              display: 'flex',
-              alignItems: 'center',
-              gap: '8px',
-              fontSize: '11px',
-              color: 'hsl(var(--muted-fg))',
-            }}>
-              <Lock size={13} style={{ color: '#10b981', flexShrink: 0 }} />
-              <span>{t('connSecuredKeychain')}</span>
-            </div>
-
-            {/* Test result message if any */}
-            {testResult && (
-              <div style={{
-                padding: '10px 14px',
-                borderRadius: '8px',
-                marginBottom: '16px',
-                fontSize: '13px',
-                display: 'flex',
-                alignItems: 'center',
-                gap: '8px',
-                backgroundColor: testResult.valid ? '#10b98115' : '#ef444415',
-                color: testResult.valid ? '#10b981' : '#ef4444',
-                border: `1px solid ${testResult.valid ? '#10b98130' : '#ef444430'}`
-              }}>
-                {testResult.valid ? <CheckCircle2 size={16} /> : <AlertCircle size={16} />}
-                <span>{testResult.message}</span>
-              </div>
-            )}
-
-            <form onSubmit={handleSaveAndConnect} style={{ display: 'flex', flexDirection: 'column', gap: '14px' }}>
-              <div>
-                <label style={{ fontSize: '12px', fontWeight: 600, display: 'block', marginBottom: '4px' }}>Account Name / Label</label>
-                <input
-                  type="text"
-                  className="input"
-                  required
-                  placeholder={`e.g. Primary ${configModalProvider.name}`}
-                  value={credAccountName}
-                  onChange={e => setCredAccountName(e.target.value)}
-                  style={{ width: '100%' }}
-                />
-              </div>
-
-              {/* Provider-specific inputs */}
-              {configModalProvider.id === 'github' && (
-                <div>
-                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '4px' }}>
-                    <label style={{ fontSize: '12px', fontWeight: 600, margin: 0 }}>Personal Access Token (PAT)</label>
-                    <button
-                      type="button"
-                      className="btn btn-ghost"
-                      style={{ fontSize: '11px', padding: '2px 8px', color: 'hsl(var(--primary))' }}
-                      onClick={() => openExternalUrl('https://github.com/settings/tokens/new?description=Aether%20Agentic%20Desktop&scopes=repo,read:user')}
-                    >
-                      <ExternalLink size={12} style={{ marginRight: '4px' }} />
-                      {t('connGithubOpenTokenLink')}
-                    </button>
-                  </div>
-                  <input
-                    type="password"
-                    className="input"
-                    required={!isConfigured}
-                    placeholder={isConfigured ? '•••••••••••••••• (leave blank to keep current)' : 'ghp_xxxxxxxxxxxxxxxxxxxx or github_pat_...'}
-                    value={githubToken}
-                    onChange={e => { setGithubToken(e.target.value); setTestResult(null); }}
-                    style={{ width: '100%' }}
-                  />
-                  <div style={{ fontSize: '11px', color: 'hsl(var(--muted-fg))', marginTop: '4px' }}>
-                    {t('connGithubTokenHelp')}
-                  </div>
-                </div>
-              )}
-
-              {configModalProvider.id === 'slack' && (
-                <>
-                  <div>
-                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '4px' }}>
-                      <label style={{ fontSize: '12px', fontWeight: 600, margin: 0 }}>Bot User OAuth Token</label>
-                      <button
-                        type="button"
-                        className="btn btn-ghost"
-                        style={{ fontSize: '11px', padding: '2px 8px', color: 'hsl(var(--primary))' }}
-                        onClick={() => openExternalUrl('https://api.slack.com/apps')}
-                      >
-                        <ExternalLink size={12} style={{ marginRight: '4px' }} />
-                        {t('connSlackOpenApps')}
-                      </button>
-                    </div>
-                    <input
-                      type="password"
-                      className="input"
-                      placeholder={isConfigured ? '•••••••••••••••• (leave blank to keep current)' : 'xoxb-xxxxxxxxxxxx-xxxxxxxxxxxx'}
-                      value={slackToken}
-                      onChange={e => { setSlackToken(e.target.value); setTestResult(null); }}
-                      style={{ width: '100%' }}
-                    />
-                    <div style={{ fontSize: '11px', color: 'hsl(var(--muted-fg))', marginTop: '4px' }}>
-                      {t('connSlackBotHelp')}
-                    </div>
-                  </div>
-                  <div style={{ textAlign: 'center', fontSize: '11px', color: 'hsl(var(--muted-fg))' }}>— OR —</div>
-                  <div>
-                    <label style={{ fontSize: '12px', fontWeight: 600, display: 'block', marginBottom: '4px' }}>Incoming Webhook URL</label>
-                    <input
-                      type="url"
-                      className="input"
-                      placeholder={isConfigured ? '•••••••••••••••• (leave blank to keep current)' : 'https://hooks.slack.com/services/...'}
-                      value={slackWebhook}
-                      onChange={e => { setSlackWebhook(e.target.value); setTestResult(null); }}
-                      style={{ width: '100%' }}
-                    />
-                  </div>
-                  <div>
-                    <label style={{ fontSize: '12px', fontWeight: 600, display: 'block', marginBottom: '4px' }}>Default Channel (Optional)</label>
-                    <input
-                      type="text"
-                      className="input"
-                      placeholder="e.g. #general"
-                      value={slackDefaultChannel}
-                      onChange={e => { setSlackDefaultChannel(e.target.value); setTestResult(null); }}
-                      style={{ width: '100%' }}
-                    />
-                  </div>
-                </>
-              )}
-
-              {configModalProvider.id === 'email' && (
-                <>
-                  <div>
-                    <label style={{ fontSize: '12px', fontWeight: 600, display: 'block', marginBottom: '4px' }}>Email Address / Username</label>
-                    <input
-                      type="email"
-                      className="input"
-                      required
-                      placeholder="user@example.com"
-                      value={emailUser}
-                      onChange={e => { setEmailUser(e.target.value); setTestResult(null); }}
-                      style={{ width: '100%' }}
-                    />
-                  </div>
-                  <div>
-                    <label style={{ fontSize: '12px', fontWeight: 600, display: 'block', marginBottom: '4px' }}>App Password / Token</label>
-                    <input
-                      type="password"
-                      className="input"
-                      required={!isConfigured}
-                      placeholder={isConfigured ? '•••••••••••••••• (leave blank to keep current)' : 'Application specific password'}
-                      value={emailPass}
-                      onChange={e => { setEmailPass(e.target.value); setTestResult(null); }}
-                      style={{ width: '100%' }}
-                    />
-                  </div>
-                  <div style={{ display: 'grid', gridTemplateColumns: '2fr 1fr', gap: '8px' }}>
-                    <div>
-                      <label style={{ fontSize: '12px', fontWeight: 600, display: 'block', marginBottom: '4px' }}>SMTP Host</label>
-                      <input
-                        type="text"
-                        className="input"
-                        placeholder="smtp.gmail.com"
-                        value={emailHost}
-                        onChange={e => { setEmailHost(e.target.value); setTestResult(null); }}
-                        style={{ width: '100%' }}
-                      />
-                    </div>
-                    <div>
-                      <label style={{ fontSize: '12px', fontWeight: 600, display: 'block', marginBottom: '4px' }}>Port</label>
-                      <input
-                        type="text"
-                        className="input"
-                        placeholder="587"
-                        value={emailPort}
-                        onChange={e => { setEmailPort(e.target.value); setTestResult(null); }}
-                        style={{ width: '100%' }}
-                      />
-                    </div>
-                  </div>
-                  <div style={{ display: 'flex', gap: '16px', alignItems: 'center', marginTop: '2px' }}>
-                    <label style={{ fontSize: '12px', display: 'flex', alignItems: 'center', gap: '6px', cursor: 'pointer' }}>
-                      <input
-                        type="checkbox"
-                        checked={emailUseTls}
-                        onChange={e => { setEmailUseTls(e.target.checked); setTestResult(null); }}
-                      />
-                      <span>Use STARTTLS</span>
-                    </label>
-                    <label style={{ fontSize: '12px', display: 'flex', alignItems: 'center', gap: '6px', cursor: 'pointer' }}>
-                      <input
-                        type="checkbox"
-                        checked={emailUseSsl}
-                        onChange={e => { setEmailUseSsl(e.target.checked); setTestResult(null); }}
-                      />
-                      <span>Direct SSL (Port 465)</span>
-                    </label>
-                  </div>
-                  <div>
-                    <label style={{ fontSize: '12px', fontWeight: 600, display: 'block', marginBottom: '4px' }}>Sender Address / Name (Optional)</label>
-                    <input
-                      type="text"
-                      className="input"
-                      placeholder="e.g. Aether Assistant <assistant@example.com>"
-                      value={emailSenderAddr}
-                      onChange={e => { setEmailSenderAddr(e.target.value); setTestResult(null); }}
-                      style={{ width: '100%' }}
-                    />
-                  </div>
-                  <div>
-                    <label style={{ fontSize: '12px', fontWeight: 600, display: 'block', marginBottom: '4px' }}>Test Recipient (Optional)</label>
-                    <input
-                      type="email"
-                      className="input"
-                      placeholder="Send live verification test message to this email"
-                      value={emailTestRecipient}
-                      onChange={e => { setEmailTestRecipient(e.target.value); setTestResult(null); }}
-                      style={{ width: '100%' }}
-                    />
-                  </div>
-                </>
-              )}
-
-              {configModalProvider.id === 'telegram' && (
-                <>
-                  <div>
-                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '4px' }}>
-                      <label style={{ fontSize: '12px', fontWeight: 600, margin: 0 }}>Telegram Bot Token</label>
-                      <button
-                        type="button"
-                        className="btn btn-ghost"
-                        style={{ fontSize: '11px', padding: '2px 8px', color: 'hsl(var(--primary))' }}
-                        onClick={() => openExternalUrl('https://t.me/BotFather')}
-                      >
-                        <ExternalLink size={12} style={{ marginRight: '4px' }} />
-                        {t('connTelegramOpenBotFather')}
-                      </button>
-                    </div>
-                    <input
-                      type="password"
-                      className="input"
-                      required={!isConfigured}
-                      placeholder={isConfigured ? '•••••••••••••••• (leave blank to keep current)' : '123456789:ABCdefGhIJKlmNoPQRsTUVwxyZ'}
-                      value={telegramBotToken}
-                      onChange={e => { setTelegramBotToken(e.target.value); setTestResult(null); }}
-                      style={{ width: '100%' }}
-                    />
-                    <div style={{ fontSize: '11px', color: 'hsl(var(--muted-fg))', marginTop: '4px' }}>
-                      {t('connTelegramBotHelp')}
-                    </div>
-                  </div>
-                  <div>
-                    <label style={{ fontSize: '12px', fontWeight: 600, display: 'block', marginBottom: '4px' }}>Default Chat ID (Optional)</label>
-                    <input
-                      type="text"
-                      className="input"
-                      placeholder="e.g. 987654321"
-                      value={telegramDefaultChatId}
-                      onChange={e => { setTelegramDefaultChatId(e.target.value); setTestResult(null); }}
-                      style={{ width: '100%' }}
-                    />
-                    <div style={{ fontSize: '11px', color: 'hsl(var(--muted-fg))', marginTop: '4px' }}>
-                      Your Telegram user ID or group chat ID for direct alerts and approvals.
-                    </div>
-                  </div>
-                  <div>
-                    <label style={{ fontSize: '12px', fontWeight: 600, display: 'block', marginBottom: '4px' }}>Authorized Chat IDs (Optional)</label>
-                    <input
-                      type="text"
-                      className="input"
-                      placeholder="Comma-separated IDs (e.g. 987654321, 123456789)"
-                      value={telegramAllowedChats}
-                      onChange={e => { setTelegramAllowedChats(e.target.value); setTestResult(null); }}
-                      style={{ width: '100%' }}
-                    />
-                    <div style={{ fontSize: '11px', color: 'hsl(var(--muted-fg))', marginTop: '4px' }}>
-                      Restrict companion access to specific authorized Telegram accounts.
-                    </div>
-                  </div>
-                </>
-              )}
-
-              {configModalProvider.id === 'http' && (
-                <>
-                  <div>
-                    <label style={{ fontSize: '12px', fontWeight: 600, display: 'block', marginBottom: '4px' }}>Base URL (Optional)</label>
-                    <input
-                      type="url"
-                      className="input"
-                      placeholder="https://api.example.com"
-                      value={httpBaseUrl}
-                      onChange={e => { setHttpBaseUrl(e.target.value); setTestResult(null); }}
-                      style={{ width: '100%' }}
-                    />
-                    <div style={{ fontSize: '11px', color: 'hsl(var(--muted-fg))', marginTop: '4px' }}>
-                      Default base URL for relative endpoints.
-                    </div>
-                  </div>
-                  <div>
-                    <label style={{ fontSize: '12px', fontWeight: 600, display: 'block', marginBottom: '4px' }}>Authentication Type</label>
-                    <select
-                      className="input"
-                      value={httpAuthType}
-                      onChange={e => { setHttpAuthType(e.target.value); setTestResult(null); }}
-                      style={{ width: '100%' }}
-                    >
-                      <option value="none">No Auth (Public)</option>
-                      <option value="bearer">Bearer Token</option>
-                      <option value="api_key">API Key (X-API-Key header)</option>
-                      <option value="basic">Basic Auth (Username:Password or Base64)</option>
-                    </select>
-                  </div>
-                  {httpAuthType !== 'none' && (
-                    <div>
-                      <label style={{ fontSize: '12px', fontWeight: 600, display: 'block', marginBottom: '4px' }}>Token / API Key</label>
-                      <input
-                        type="password"
-                        className="input"
-                        placeholder={isConfigured ? '•••••••••••••••• (leave blank to keep current)' : 'Secret token, key, or credentials'}
-                        value={httpToken}
-                        onChange={e => { setHttpToken(e.target.value); setTestResult(null); }}
-                        style={{ width: '100%' }}
-                      />
-                    </div>
-                  )}
-                </>
-              )}
-
-              {configModalProvider.id === 'notion' && (
-                <>
-                  <div>
-                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '4px' }}>
-                      <label style={{ fontSize: '12px', fontWeight: 600, margin: 0 }}>Integration Token</label>
-                      <button
-                        type="button"
-                        className="btn btn-ghost"
-                        style={{ fontSize: '11px', padding: '2px 8px', color: 'hsl(var(--primary))' }}
-                        onClick={() => openExternalUrl('https://www.notion.so/my-integrations')}
-                      >
-                        <ExternalLink size={12} style={{ marginRight: '4px' }} />
-                        {t('connNotionOpenIntegrations')}
-                      </button>
-                    </div>
-                    <input
-                      type="password"
-                      className="input"
-                      required={!isConfigured}
-                      placeholder={isConfigured ? '•••••••••••••••• (leave blank to keep current)' : 'secret_xxxxxxxxxxxxxxxxxxxxxxxxxxxxx'}
-                      value={notionToken}
-                      onChange={e => { setNotionToken(e.target.value); setTestResult(null); }}
-                      style={{ width: '100%' }}
-                    />
-                    <div style={{ fontSize: '11px', color: 'hsl(var(--muted-fg))', marginTop: '4px' }}>
-                      {t('connNotionHelp')}
-                    </div>
-                  </div>
-                  <div>
-                    <label style={{ fontSize: '12px', fontWeight: 600, display: 'block', marginBottom: '4px' }}>Default Database ID (Optional)</label>
-                    <input
-                      type="text"
-                      className="input"
-                      placeholder="e.g. 1a2b3c4d5e6f7a8b9c0d1e2f3a4b5c6d"
-                      value={notionDbId}
-                      onChange={e => { setNotionDbId(e.target.value); setTestResult(null); }}
-                      style={{ width: '100%' }}
-                    />
-                    <div style={{ fontSize: '11px', color: 'hsl(var(--muted-fg))', marginTop: '4px' }}>
-                      UUID of the default Notion database to create or search records.
-                    </div>
-                  </div>
-                </>
-              )}
-
-              {configModalProvider.id === 'openapi' && (
-                <>
-                  <div>
-                    <label style={{ fontSize: '12px', fontWeight: 600, display: 'block', marginBottom: '4px' }}>Specification URL (Optional)</label>
-                    <input
-                      type="url"
-                      className="input"
-                      placeholder="https://api.example.com/openapi.json"
-                      value={openapiSpecUrl}
-                      onChange={e => { setOpenapiSpecUrl(e.target.value); setTestResult(null); }}
-                      style={{ width: '100%' }}
-                    />
-                    <div style={{ fontSize: '11px', color: 'hsl(var(--muted-fg))', marginTop: '4px' }}>
-                      Remote URL pointing to OpenAPI 3.x / Swagger JSON or YAML.
-                    </div>
-                  </div>
-                  <div>
-                    <label style={{ fontSize: '12px', fontWeight: 600, display: 'block', marginBottom: '4px' }}>Local File Path (Optional)</label>
-                    <input
-                      type="text"
-                      className="input"
-                      placeholder="/path/to/spec.json or docs/api.yaml"
-                      value={openapiSpecPath}
-                      onChange={e => { setOpenapiSpecPath(e.target.value); setTestResult(null); }}
-                      style={{ width: '100%' }}
-                    />
-                    <div style={{ fontSize: '11px', color: 'hsl(var(--muted-fg))', marginTop: '4px' }}>
-                      Absolute or workspace-relative path to local OpenAPI schema.
-                    </div>
-                  </div>
-                  <div>
-                    <label style={{ fontSize: '12px', fontWeight: 600, display: 'block', marginBottom: '4px' }}>API Server Base URL (Optional)</label>
-                    <input
-                      type="url"
-                      className="input"
-                      placeholder="https://api.example.com/v1"
-                      value={openapiBaseUrl}
-                      onChange={e => { setOpenapiBaseUrl(e.target.value); setTestResult(null); }}
-                      style={{ width: '100%' }}
-                    />
-                    <div style={{ fontSize: '11px', color: 'hsl(var(--muted-fg))', marginTop: '4px' }}>
-                      Overrides server URL defined in the OpenAPI specification.
-                    </div>
-                  </div>
-                  <div>
-                    <label style={{ fontSize: '12px', fontWeight: 600, display: 'block', marginBottom: '4px' }}>Authentication Type</label>
-                    <select
-                      className="input"
-                      value={openapiAuthType}
-                      onChange={e => { setOpenapiAuthType(e.target.value); setTestResult(null); }}
-                      style={{ width: '100%' }}
-                    >
-                      <option value="none">No Auth (Public)</option>
-                      <option value="bearer">Bearer Token</option>
-                      <option value="api_key">API Key (X-API-Key header)</option>
-                      <option value="basic">Basic Auth</option>
-                    </select>
-                  </div>
-                  {openapiAuthType !== 'none' && (
-                    <div>
-                      <label style={{ fontSize: '12px', fontWeight: 600, display: 'block', marginBottom: '4px' }}>Token / API Key</label>
-                      <input
-                        type="password"
-                        className="input"
-                        placeholder={isConfigured ? '•••••••••••••••• (leave blank to keep current)' : 'Secret token or key'}
-                        value={openapiToken}
-                        onChange={e => { setOpenapiToken(e.target.value); setTestResult(null); }}
-                        style={{ width: '100%' }}
-                      />
-                    </div>
-                  )}
-                </>
-              )}
-
-              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginTop: '14px', paddingTop: '14px', borderTop: '1px solid hsl(var(--border))' }}>
-                <button
-                  type="button"
-                  className="btn btn-secondary"
-                  disabled={testingCreds || savingCreds}
-                  onClick={handleTestCreds}
-                  style={{ display: 'flex', alignItems: 'center', gap: '6px', fontSize: '12px' }}
-                >
-                  <ShieldCheck size={14} />
-                  {testingCreds ? 'Verifying...' : 'Test Connection'}
-                </button>
-
-                <div style={{ display: 'flex', gap: '8px' }}>
-                  <button
-                    type="button"
-                    className="btn btn-ghost"
-                    onClick={() => setConfigModalProvider(null)}
-                    disabled={savingCreds}
-                  >
-                    Cancel
-                  </button>
-                  <button
-                    type="submit"
-                    className="btn btn-primary"
-                    disabled={savingCreds}
-                  >
-                    {savingCreds ? 'Saving...' : isConfigured ? 'Update & Save' : 'Save & Connect'}
-                  </button>
-                </div>
-              </div>
-            </form>
-          </div>
-        </div>
-      )}
-
-      {/* DEVELOPER OAUTH APP SETUP MODAL (FOR GITHUB, SLACK, NOTION) */}
-      {devSetupModalProvider && (
-        <div style={{
-          position: 'fixed',
-          inset: 0,
-          backgroundColor: 'rgba(0, 0, 0, 0.65)',
-          backdropFilter: 'blur(4px)',
-          display: 'flex',
-          alignItems: 'center',
-          justifyContent: 'center',
-          zIndex: 1000,
-        }}>
-          <div className="card" style={{ width: '560px', maxHeight: '90vh', overflowY: 'auto', padding: '26px', borderRadius: '14px' }}>
-            {/* Header */}
-            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '16px' }}>
-              <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
-                <div style={{
-                  width: '42px',
-                  height: '42px',
-                  borderRadius: '10px',
-                  backgroundColor: `${devSetupModalProvider.color}15`,
-                  display: 'flex',
-                  alignItems: 'center',
-                  justifyContent: 'center',
-                  color: devSetupModalProvider.color,
-                }}>
-                  <devSetupModalProvider.icon size={22} />
-                </div>
-                <div>
-                  <h3 style={{ margin: 0, fontSize: '18px', fontWeight: 600 }}>
-                    {devSetupModalProvider.id === 'github' ? t('connGithubModalTitle') :
-                     devSetupModalProvider.id === 'slack' ? t('connSlackModalTitle') :
-                     t('connNotionModalTitle')}
-                  </h3>
-                  <div style={{ fontSize: '12px', color: 'hsl(var(--muted-fg))' }}>
-                    {devSetupModalProvider.id === 'github' ? t('connGithubModalSubtitle') :
-                     devSetupModalProvider.id === 'slack' ? t('connSlackModalSubtitle') :
-                     t('connNotionModalSubtitle')}
-                  </div>
-                </div>
-              </div>
-              <button
-                type="button"
-                className="btn btn-ghost"
-                onClick={() => setDevSetupModalProvider(null)}
-                style={{ padding: '6px' }}
-              >
-                <X size={18} />
-              </button>
-            </div>
-
-            {/* Tabs: OAuth App vs Manual */}
-            <div style={{ display: 'flex', gap: '8px', borderBottom: '1px solid hsl(var(--border))', paddingBottom: '10px', marginBottom: '18px' }}>
-              <button
-                type="button"
-                onClick={() => setDevSetupTab('oauth')}
-                style={{
-                  padding: '6px 14px',
-                  borderRadius: '6px',
-                  fontSize: '13px',
-                  fontWeight: devSetupTab === 'oauth' ? 600 : 400,
-                  backgroundColor: devSetupTab === 'oauth' ? 'hsl(var(--primary)/0.12)' : 'transparent',
-                  color: devSetupTab === 'oauth' ? 'hsl(var(--primary))' : 'hsl(var(--muted-fg))',
-                  border: 'none',
-                  cursor: 'pointer',
-                }}
-              >
-                {devSetupModalProvider.id === 'github' ? t('connGithubTabOAuth') :
-                 devSetupModalProvider.id === 'slack' ? t('connSlackTabOAuth') :
-                 t('connNotionTabOAuth')}
-              </button>
-              <button
-                type="button"
-                onClick={() => setDevSetupTab('manual')}
-                style={{
-                  padding: '6px 14px',
-                  borderRadius: '6px',
-                  fontSize: '13px',
-                  fontWeight: devSetupTab === 'manual' ? 600 : 400,
-                  backgroundColor: devSetupTab === 'manual' ? 'hsl(var(--muted)/0.5)' : 'transparent',
-                  color: devSetupTab === 'manual' ? 'hsl(var(--fg))' : 'hsl(var(--muted-fg))',
-                  border: 'none',
-                  cursor: 'pointer',
-                }}
-              >
-                {devSetupModalProvider.id === 'github' ? t('connGithubTabManual') :
-                 devSetupModalProvider.id === 'slack' ? t('connSlackTabManual') :
-                 t('connNotionTabManual')}
-              </button>
-            </div>
-
-            {/* TAB 1: OAUTH APP SETUP */}
-            {devSetupTab === 'oauth' && (
-              <form onSubmit={handleSaveDevOAuthConfig} style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
-                {devSetupModalProvider.id === 'github' && (
-                  <>
-                    <div style={{
-                      backgroundColor: 'hsl(var(--muted)/0.25)',
-                      border: '1px solid hsl(var(--border))',
-                      borderRadius: '8px',
-                      padding: '12px 14px',
-                      display: 'flex',
-                      flexDirection: 'column',
-                      gap: '8px',
-                    }}>
-                      <div style={{ fontSize: '13px', fontWeight: 600, color: 'hsl(var(--fg))' }}>
-                        {t('connGithubStep1')}
-                      </div>
-                      <div>
-                        <button
-                          type="button"
-                          className="btn btn-secondary"
-                          onClick={() => openExternalUrl('https://github.com/settings/applications/new')}
-                          style={{ fontSize: '12px', display: 'flex', alignItems: 'center', gap: '6px' }}
-                        >
-                          <ExternalLink size={13} /> {t('connGithubOpenAppRegistration')}
-                        </button>
-                      </div>
-                    </div>
-
-                    <div style={{
-                      backgroundColor: 'hsl(var(--muted)/0.25)',
-                      border: '1px solid hsl(var(--border))',
-                      borderRadius: '8px',
-                      padding: '12px 14px',
-                      fontSize: '12px',
-                      display: 'flex',
-                      flexDirection: 'column',
-                      gap: '8px',
-                    }}>
-                      <div style={{ fontWeight: 600, color: 'hsl(var(--fg))' }}>
-                        {t('connGithubStep2')}
-                      </div>
-                      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                        <span style={{ color: 'hsl(var(--muted-fg))' }}>{t('connGithubAppName')}</span>
-                        <code style={{ fontSize: '12px', color: 'hsl(var(--fg))' }}>Aether Desktop</code>
-                      </div>
-                      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                        <span style={{ color: 'hsl(var(--muted-fg))' }}>{t('connGithubHomepage')}</span>
-                        <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
-                          <code style={{ fontSize: '11px' }}>http://127.0.0.1:8000</code>
-                          <button
-                            type="button"
-                            className="btn btn-ghost"
-                            onClick={() => copyToClipboard('http://127.0.0.1:8000', 'gh_hp')}
-                            style={{ padding: '2px 6px', fontSize: '11px' }}
+                      {isConnected ? (
+                        <>
+                          <Button
+                            variant="secondary"
+                            size="sm"
+                            onClick={() => setManageProvider(provider)}
+                            leftIcon={<Shield size={14} />}
                           >
-                            <Copy size={11} /> {copiedField === 'gh_hp' ? '✓' : ''}
-                          </button>
-                        </div>
-                      </div>
-                      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                        <span style={{ color: 'hsl(var(--muted-fg))' }}>{t('connGithubCallbackUrl')}</span>
-                        <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
-                          <code style={{ fontSize: '10px' }}>{oauthProviders.github?.redirect_uri || 'http://127.0.0.1:8000/api/connections/github/oauth/callback'}</code>
-                          <button
-                            type="button"
-                            className="btn btn-ghost"
-                            onClick={() => copyToClipboard(oauthProviders.github?.redirect_uri || 'http://127.0.0.1:8000/api/connections/github/oauth/callback', 'gh_cb')}
-                            style={{ padding: '2px 6px', fontSize: '11px' }}
+                            Gestisci
+                          </Button>
+                          <Button
+                            variant="ghost"
+                            size="sm"
+                            disabled={verifyingProvider === provider.id}
+                            onClick={() => handleVerifyConnection(provider.id)}
+                            leftIcon={
+                              verifyingProvider === provider.id ? (
+                                <LoadingSpinner size="sm" />
+                              ) : (
+                                <RefreshCw size={13} />
+                              )
+                            }
                           >
-                            <Copy size={11} /> {copiedField === 'gh_cb' ? '✓' : ''}
-                          </button>
-                        </div>
-                      </div>
-                    </div>
-                  </>
-                )}
-
-                {devSetupModalProvider.id === 'slack' && (
-                  <>
-                    <div style={{
-                      backgroundColor: 'hsl(var(--muted)/0.25)',
-                      border: '1px solid hsl(var(--border))',
-                      borderRadius: '8px',
-                      padding: '12px 14px',
-                      display: 'flex',
-                      flexDirection: 'column',
-                      gap: '8px',
-                    }}>
-                      <div style={{ fontSize: '13px', fontWeight: 600, color: 'hsl(var(--fg))' }}>
-                        {t('connSlackStep1')}
-                      </div>
-                      <div>
-                        <button
-                          type="button"
-                          className="btn btn-secondary"
-                          onClick={() => openExternalUrl('https://api.slack.com/apps/new')}
-                          style={{ fontSize: '12px', display: 'flex', alignItems: 'center', gap: '6px' }}
+                            Verifica
+                          </Button>
+                        </>
+                      ) : (
+                        <Button
+                          variant={needsDevSetup ? 'secondary' : 'primary'}
+                          size="sm"
+                          fullWidth
+                          disabled={isConnecting}
+                          onClick={() => handlePrimaryAction(provider, conn)}
+                          rightIcon={<ArrowRight size={14} />}
                         >
-                          <ExternalLink size={13} /> {t('connSlackCreateApp')}
-                        </button>
-                      </div>
+                          {isConnecting
+                            ? 'Connessione…'
+                            : provider.isOAuth
+                            ? (needsDevSetup ? 'Configura' : 'Collega')
+                            : 'Configura'}
+                        </Button>
+                      )}
                     </div>
+                  </Panel>
+                );
+              })}
+            </Grid>
+          )}
+        </Stack>
+      )}
 
-                    <div style={{
-                      backgroundColor: 'hsl(var(--muted)/0.25)',
-                      border: '1px solid hsl(var(--border))',
-                      borderRadius: '8px',
-                      padding: '12px 14px',
-                      fontSize: '12px',
-                      display: 'flex',
-                      flexDirection: 'column',
-                      gap: '8px',
-                    }}>
-                      <div style={{ fontWeight: 600, color: 'hsl(var(--fg))' }}>
-                        {t('connSlackStep2')}
-                      </div>
-                      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                        <code style={{ fontSize: '10px' }}>{oauthProviders.slack?.redirect_uri || 'http://127.0.0.1:8000/api/connections/slack/oauth/callback'}</code>
-                        <button
-                          type="button"
-                          className="btn btn-ghost"
-                          onClick={() => copyToClipboard(oauthProviders.slack?.redirect_uri || 'http://127.0.0.1:8000/api/connections/slack/oauth/callback', 'slack_cb')}
-                          style={{ padding: '2px 6px', fontSize: '11px' }}
-                        >
-                          <Copy size={11} /> {copiedField === 'slack_cb' ? '✓' : ''}
-                        </button>
-                      </div>
-                      <div style={{ color: 'hsl(var(--muted-fg))', marginTop: '4px' }}>
-                        {t('connSlackStep3')}
-                      </div>
-                    </div>
-                  </>
-                )}
+      {/* =========================================================================
+          TAB 2: CALENDARIO & AGENDA
+          ========================================================================= */}
+      {activeTab === 'calendar' && (
+        <Stack direction="column" gap="lg">
+          <Panel variant="default" style={{ padding: '16px 20px' }}>
+            <Stack direction="row" gap="md" align="center" justify="between" wrap>
+              <SegmentedControl
+                value={selectedScheduleSource}
+                onChange={(src) => setSelectedScheduleSource(src as any)}
+                options={[
+                  {
+                    value: 'local',
+                    label: 'Calendario Locale Aether',
+                    icon: <Calendar size={15} />,
+                  },
+                  {
+                    value: 'google',
+                    label: 'Google Calendar (Cloud)',
+                    icon: <Globe size={15} />,
+                  },
+                ]}
+              />
 
-                {devSetupModalProvider.id === 'notion' && (
-                  <>
-                    <div style={{
-                      backgroundColor: 'hsl(var(--muted)/0.25)',
-                      border: '1px solid hsl(var(--border))',
-                      borderRadius: '8px',
-                      padding: '12px 14px',
-                      display: 'flex',
-                      flexDirection: 'column',
-                      gap: '8px',
-                    }}>
-                      <div style={{ fontSize: '13px', fontWeight: 600, color: 'hsl(var(--fg))' }}>
-                        {t('connNotionStep1')}
-                      </div>
-                      <div>
-                        <button
-                          type="button"
-                          className="btn btn-secondary"
-                          onClick={() => openExternalUrl('https://www.notion.so/my-integrations')}
-                          style={{ fontSize: '12px', display: 'flex', alignItems: 'center', gap: '6px' }}
-                        >
-                          <ExternalLink size={13} /> {t('connNotionOpenPortal')}
-                        </button>
-                      </div>
-                    </div>
-
-                    <div style={{
-                      backgroundColor: 'hsl(var(--muted)/0.25)',
-                      border: '1px solid hsl(var(--border))',
-                      borderRadius: '8px',
-                      padding: '12px 14px',
-                      fontSize: '12px',
-                      display: 'flex',
-                      flexDirection: 'column',
-                      gap: '8px',
-                    }}>
-                      <div style={{ fontWeight: 600, color: 'hsl(var(--fg))' }}>
-                        {t('connNotionStep2')}
-                      </div>
-                      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                        <code style={{ fontSize: '10px' }}>{oauthProviders.notion?.redirect_uri || 'http://127.0.0.1:8000/api/connections/notion/oauth/callback'}</code>
-                        <button
-                          type="button"
-                          className="btn btn-ghost"
-                          onClick={() => copyToClipboard(oauthProviders.notion?.redirect_uri || 'http://127.0.0.1:8000/api/connections/notion/oauth/callback', 'notion_cb')}
-                          style={{ padding: '2px 6px', fontSize: '11px' }}
-                        >
-                          <Copy size={11} /> {copiedField === 'notion_cb' ? '✓' : ''}
-                        </button>
-                      </div>
-                    </div>
-                  </>
-                )}
-
-                {/* Input Fields for Client ID and Secret */}
-                <div>
-                  <label style={{ fontSize: '12px', fontWeight: 600, display: 'block', marginBottom: '4px' }}>
-                    Client ID *
-                  </label>
-                  <input
-                    type="text"
-                    className="input"
-                    required
-                    placeholder="e.g. 1234567890abcdef..."
-                    value={devClientId}
-                    onChange={e => setDevClientId(e.target.value)}
-                    style={{ width: '100%', fontSize: '13px' }}
-                  />
-                </div>
-
-                <div>
-                  <label style={{ fontSize: '12px', fontWeight: 600, display: 'block', marginBottom: '4px' }}>
-                    Client Secret *
-                  </label>
-                  <input
-                    type="password"
-                    className="input"
-                    required
-                    placeholder="••••••••••••••••••••••••••••••"
-                    value={devClientSecret}
-                    onChange={e => setDevClientSecret(e.target.value)}
-                    style={{ width: '100%', fontSize: '13px' }}
-                  />
-                </div>
-
-                {/* Footer Buttons */}
-                <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '8px', marginTop: '10px', paddingTop: '14px', borderTop: '1px solid hsl(var(--border))' }}>
-                  <button
-                    type="button"
-                    className="btn btn-ghost"
-                    onClick={() => setDevSetupModalProvider(null)}
-                    disabled={savingDevConfig}
+              <Stack direction="row" gap="sm">
+                {selectedScheduleSource === 'google' && (
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    onClick={handleOpenCalendarPicker}
+                    leftIcon={<Calendar size={14} />}
                   >
-                    {t('connGoogleCancel')}
-                  </button>
-                  <button
-                    type="submit"
-                    className="btn btn-primary"
-                    disabled={savingDevConfig || !devClientId.trim() || !devClientSecret.trim()}
-                    style={{ display: 'flex', alignItems: 'center', gap: '6px' }}
-                  >
-                    {savingDevConfig ? <RefreshCw size={13} className="animate-spin" /> : null}
-                    {savingDevConfig ? 'Salvataggio...' : t('connSaveOAuthConfig')}
-                  </button>
-                </div>
-              </form>
-            )}
+                    Seleziona calendario
+                  </Button>
+                )}
+                <Button
+                  variant="primary"
+                  size="sm"
+                  onClick={() => setIsEventModalOpen(true)}
+                  leftIcon={<Plus size={14} />}
+                >
+                  Nuovo appuntamento
+                </Button>
+              </Stack>
+            </Stack>
+          </Panel>
 
-            {/* TAB 2: MANUAL OPTION */}
-            {devSetupTab === 'manual' && (
-              <div style={{ display: 'flex', flexDirection: 'column', gap: '14px' }}>
-                <p style={{ fontSize: '13px', color: 'hsl(var(--muted-fg))', margin: 0, lineHeight: 1.5 }}>
-                  Puoi collegare questo servizio utilizzando credenziali manuali dirette anziché la configurazione OAuth.
-                </p>
-                <div style={{ display: 'flex', justifyContent: 'flex-end', marginTop: '10px' }}>
-                  <button
-                    type="button"
-                    className="btn btn-primary"
-                    onClick={() => {
-                      const p = devSetupModalProvider;
-                      const conn = connections.find(c => c.provider === p.id);
-                      setDevSetupModalProvider(null);
-                      openConfigModal(p, conn);
+          {/* Events List */}
+          {groupedEvents.length === 0 ? (
+            <EmptyState
+              icon={<Calendar size={28} />}
+              title="Nessun appuntamento in programma"
+              description={
+                selectedScheduleSource === 'google'
+                  ? 'Nessun evento in programma nei prossimi giorni. Assicurati che l\'integrazione sia attiva o sincronizza gli eventi.'
+                  : 'Il calendario locale è vuoto. Aggiungi il tuo primo impegno per iniziare.'
+              }
+              action={
+                <Button
+                  variant="primary"
+                  onClick={() => setIsEventModalOpen(true)}
+                  leftIcon={<Plus size={15} />}
+                >
+                  Aggiungi appuntamento
+                </Button>
+              }
+            />
+          ) : (
+            <Stack direction="column" gap="xl">
+              {groupedEvents.map((group) => (
+                <div key={group.dateKey}>
+                  {/* Day Header */}
+                  <div
+                    style={{
+                      display: 'flex',
+                      alignItems: 'center',
+                      justifyContent: 'space-between',
+                      marginBottom: '12px',
+                      paddingBottom: '8px',
+                      borderBottom: '1px solid hsl(var(--border) / 0.6)',
                     }}
                   >
-                    Apri configurazione manuale
-                  </button>
+                    <Stack direction="row" gap="sm" align="center">
+                      <Heading level={4} style={{ fontSize: '15px', margin: 0 }}>
+                        {group.label}
+                      </Heading>
+                      {group.isToday && (
+                        <span
+                          style={{
+                            fontSize: '11px',
+                            fontWeight: 600,
+                            padding: '2px 8px',
+                            borderRadius: '10px',
+                            backgroundColor: 'hsl(var(--primary) / 0.15)',
+                            color: 'hsl(var(--primary))',
+                            textTransform: 'uppercase',
+                            letterSpacing: '0.04em',
+                          }}
+                        >
+                          Oggi
+                        </span>
+                      )}
+                    </Stack>
+                    <Text size="xs" variant="muted">
+                      {group.events.length} {group.events.length === 1 ? 'evento' : 'eventi'}
+                    </Text>
+                  </div>
+
+                  {/* Day Events */}
+                  <Grid minItemWidth={300} gap="md">
+                    {group.events.map((evt) => {
+                      const timeStr = formatEventTime(evt);
+                      const isAllDay = timeStr === 'Tutto il giorno';
+
+                      return (
+                        <Panel key={evt.id} variant="default" style={{ padding: '16px' }}>
+                          <Stack direction="column" gap="sm">
+                            <Stack direction="row" align="center" justify="between" gap="sm">
+                              <Heading level={4} style={{ fontSize: '15px' }}>
+                                {evt.title}
+                              </Heading>
+                              <span
+                                style={{
+                                  fontSize: '12px',
+                                  fontWeight: 500,
+                                  padding: '3px 8px',
+                                  borderRadius: '6px',
+                                  backgroundColor: isAllDay
+                                    ? 'hsl(var(--primary) / 0.12)'
+                                    : 'hsl(var(--muted) / 0.5)',
+                                  color: isAllDay ? 'hsl(var(--primary))' : 'hsl(var(--fg))',
+                                  display: 'inline-flex',
+                                  alignItems: 'center',
+                                  gap: '5px',
+                                  flexShrink: 0,
+                                }}
+                              >
+                                <Clock size={12} />
+                                {timeStr}
+                              </span>
+                            </Stack>
+
+                            {evt.description && (
+                              <Text size="xs" variant="muted" style={{ lineHeight: '1.4' }}>
+                                {evt.description}
+                              </Text>
+                            )}
+
+                            {evt.location && (
+                              <Text
+                                size="xs"
+                                variant="muted"
+                                style={{ display: 'flex', alignItems: 'center', gap: '4px' }}
+                              >
+                                📍 {evt.location}
+                              </Text>
+                            )}
+                          </Stack>
+                        </Panel>
+                      );
+                    })}
+                  </Grid>
                 </div>
-              </div>
-            )}
-          </div>
-        </div>
+              ))}
+            </Stack>
+          )}
+        </Stack>
       )}
 
-      {/* TELEGRAM GUIDED ONBOARDING MODAL */}
-      {isTelegramModalOpen && (
-        <div style={{
-          position: 'fixed',
-          inset: 0,
-          backgroundColor: 'rgba(0, 0, 0, 0.65)',
-          backdropFilter: 'blur(4px)',
-          display: 'flex',
-          alignItems: 'center',
-          justifyContent: 'center',
-          zIndex: 1000,
-        }}>
-          <div className="card" style={{ width: '520px', maxHeight: '90vh', overflowY: 'auto', padding: '26px', borderRadius: '14px' }}>
-            <div style={{ display: 'flex', alignItems: 'center', gap: '12px', marginBottom: '16px' }}>
-              <div style={{
-                width: '42px',
-                height: '42px',
-                borderRadius: '10px',
-                backgroundColor: '#229ED915',
-                display: 'flex',
-                alignItems: 'center',
-                justifyContent: 'center',
-                color: '#229ED9',
-              }}>
-                <Send size={22} />
-              </div>
-              <div>
-                <h3 style={{ margin: 0, fontSize: '18px', fontWeight: 600 }}>{t('connTelegramModalTitle')}</h3>
-                <div style={{ fontSize: '12px', color: 'hsl(var(--muted-fg))' }}>
-                  {t('connTelegramModalSubtitle')}
-                </div>
-              </div>
-            </div>
+      {/* =========================================================================
+          TAB 3: STORICO OPERAZIONI & APPROVAZIONI
+          ========================================================================= */}
+      {activeTab === 'actions' && (
+        <Stack direction="column" gap="lg">
+          <Panel variant="default" style={{ padding: '14px 18px' }}>
+            <Stack direction="row" gap="md" align="center" justify="between" wrap>
+              <SegmentedControl
+                value={actionStatusFilter}
+                onChange={(f) => setActionStatusFilter(f)}
+                options={[
+                  { value: 'all', label: 'Tutte le azioni' },
+                  { value: 'pending', label: 'In attesa di approvazione' },
+                  { value: 'succeeded', label: 'Completate' },
+                  { value: 'failed', label: 'Fallite o respinte' },
+                ]}
+              />
+              <Text size="xs" variant="muted">
+                {filteredExecutions.length} operazioni registrate
+              </Text>
+            </Stack>
+          </Panel>
 
-            {testResult && (
-              <div style={{
-                padding: '10px 14px',
-                borderRadius: '8px',
-                marginBottom: '16px',
-                fontSize: '13px',
-                display: 'flex',
-                alignItems: 'center',
-                gap: '8px',
-                backgroundColor: testResult.valid ? '#10b98115' : '#ef444415',
-                color: testResult.valid ? '#10b981' : '#ef4444',
-                border: `1px solid ${testResult.valid ? '#10b98130' : '#ef444430'}`
-              }}>
-                {testResult.valid ? <CheckCircle2 size={16} /> : <AlertCircle size={16} />}
-                <span>{testResult.message}</span>
-              </div>
-            )}
+          {filteredExecutions.length === 0 ? (
+            <EmptyState
+              icon={<Clock size={28} />}
+              title="Nessuna operazione registrata"
+              description="Quando Aether eseguirà o richiederà l'approvazione di azioni esterne (email, appuntamenti, commit), compariranno qui."
+            />
+          ) : (
+            <Stack direction="column" gap="md">
+              {filteredExecutions.map((exec) => {
+                const isPending =
+                  exec.status === 'pending_approval' || exec.status === 'waiting_approval';
+                const isSuccess = exec.status === 'success' || exec.status === 'succeeded';
 
-            <form onSubmit={handleConnectTelegramGuided} style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
-              {/* Step 1 */}
-              <div style={{
-                backgroundColor: 'hsl(var(--muted)/0.25)',
-                border: '1px solid hsl(var(--border))',
-                borderRadius: '8px',
-                padding: '12px 14px',
-                display: 'flex',
-                flexDirection: 'column',
-                gap: '8px',
-              }}>
-                <div style={{ fontSize: '13px', fontWeight: 600, color: 'hsl(var(--fg))' }}>
-                  {t('connTelegramStep1Title')}
-                </div>
-                <div style={{ fontSize: '12px', color: 'hsl(var(--muted-fg))' }}>
-                  {t('connTelegramStep1Desc')}
-                </div>
-                <div>
-                  <button
-                    type="button"
-                    className="btn btn-secondary"
-                    onClick={() => openExternalUrl('https://t.me/BotFather')}
-                    style={{ fontSize: '12px', display: 'flex', alignItems: 'center', gap: '6px' }}
+                return (
+                  <Panel
+                    key={exec.id}
+                    variant="default"
+                    id={`exec-card-${exec.id}`}
+                    style={{
+                      borderLeft: isPending
+                        ? '3px solid hsl(var(--warning))'
+                        : isSuccess
+                        ? '3px solid hsl(var(--success))'
+                        : '3px solid hsl(var(--destructive))',
+                    }}
                   >
-                    <ExternalLink size={13} /> {t('connTelegramOpenBotFatherBtn')}
-                  </button>
-                </div>
-              </div>
+                    <Stack direction="row" gap="md" align="center" justify="between" wrap>
+                      <Stack direction="column" gap="xs">
+                        <Stack direction="row" gap="sm" align="center">
+                          <Heading level={4}>{exec.action_id}</Heading>
+                          <StatusBadge
+                            status={
+                              isPending
+                                ? 'setup_required'
+                                : isSuccess
+                                ? 'connected'
+                                : 'error'
+                            }
+                            label={
+                              isPending
+                                ? 'In attesa di approvazione'
+                                : isSuccess
+                                ? 'Completata con successo'
+                                : 'Non riuscita'
+                            }
+                          />
+                        </Stack>
+                        <Text size="xs" variant="muted">
+                          {new Date(exec.created_at).toLocaleString('it-IT')} — ID: {exec.id}
+                        </Text>
+                      </Stack>
 
-              {/* Step 2 */}
-              <div style={{
-                backgroundColor: 'hsl(var(--muted)/0.25)',
-                border: '1px solid hsl(var(--border))',
-                borderRadius: '8px',
-                padding: '12px 14px',
-                fontSize: '12px',
-                display: 'flex',
-                flexDirection: 'column',
-                gap: '4px',
-              }}>
-                <div style={{ fontWeight: 600, color: 'hsl(var(--fg))' }}>
-                  {t('connTelegramStep2Title')}
-                </div>
-                <div style={{ color: 'hsl(var(--muted-fg))', lineHeight: 1.4 }}>
-                  {t('connTelegramStep2Desc')}
-                </div>
-              </div>
+                      {isPending && (
+                        <Stack direction="row" gap="sm">
+                          <Button
+                            variant="primary"
+                            size="sm"
+                            loading={actionLoadingId === exec.id}
+                            onClick={() => handleApproveAction(exec.id)}
+                          >
+                            Approva ed esegui
+                          </Button>
+                          <Button
+                            variant="outline"
+                            size="sm"
+                            loading={actionLoadingId === exec.id}
+                            onClick={() => handleRejectAction(exec.id)}
+                          >
+                            Rifiuta
+                          </Button>
+                        </Stack>
+                      )}
+                    </Stack>
 
-              {/* Step 3 */}
-              <div>
-                <label style={{ fontSize: '12px', fontWeight: 600, display: 'block', marginBottom: '4px' }}>
-                  {t('connTelegramStep3Title')} *
-                </label>
-                <div style={{ fontSize: '11px', color: 'hsl(var(--muted-fg))', marginBottom: '6px' }}>
-                  {t('connTelegramStep3Desc')}
-                </div>
-                <input
-                  type="password"
-                  className="input"
-                  required
-                  placeholder={t('connTelegramTokenPlaceholder')}
-                  value={telegramBotToken}
-                  onChange={e => { setTelegramBotToken(e.target.value); setTestResult(null); }}
-                  style={{ width: '100%', fontSize: '13px' }}
-                />
-              </div>
-
-              {/* Advanced Chat IDs toggle */}
-              <details
-                open={telegramAdvOpen}
-                onToggle={e => setTelegramAdvOpen((e.target as HTMLDetailsElement).open)}
-                style={{ fontSize: '12px' }}
-              >
-                <summary style={{ cursor: 'pointer', color: 'hsl(var(--muted-fg))', padding: '4px 0' }}>
-                  {t('connTelegramAdvToggle')}
-                </summary>
-                <div style={{ display: 'flex', flexDirection: 'column', gap: '10px', marginTop: '10px' }}>
-                  <div>
-                    <label style={{ fontSize: '11px', fontWeight: 600, display: 'block', marginBottom: '2px' }}>
-                      Default Chat ID (facoltativo)
-                    </label>
-                    <input
-                      type="text"
-                      className="input"
-                      placeholder="e.g. 123456789"
-                      value={telegramDefaultChatId}
-                      onChange={e => setTelegramDefaultChatId(e.target.value)}
-                      style={{ width: '100%', fontSize: '12px' }}
-                    />
-                  </div>
-                  <div>
-                    <label style={{ fontSize: '11px', fontWeight: 600, display: 'block', marginBottom: '2px' }}>
-                      Authorized Chat IDs (separati da virgola)
-                    </label>
-                    <input
-                      type="text"
-                      className="input"
-                      placeholder="e.g. 123456789, 987654321"
-                      value={telegramAllowedChats}
-                      onChange={e => setTelegramAllowedChats(e.target.value)}
-                      style={{ width: '100%', fontSize: '12px' }}
-                    />
-                  </div>
-                  <div style={{ fontSize: '11px', color: 'hsl(var(--muted-fg))' }}>
-                    {t('connTelegramChatIdHelp')}
-                  </div>
-                </div>
-              </details>
-
-              <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '8px', marginTop: '10px', paddingTop: '14px', borderTop: '1px solid hsl(var(--border))' }}>
-                <button
-                  type="button"
-                  className="btn btn-ghost"
-                  onClick={() => setIsTelegramModalOpen(false)}
-                  disabled={verifyingTelegram}
-                >
-                  {t('connGoogleCancel')}
-                </button>
-                <button
-                  type="submit"
-                  className="btn btn-primary"
-                  disabled={verifyingTelegram || !telegramBotToken.trim()}
-                  style={{ display: 'flex', alignItems: 'center', gap: '6px', backgroundColor: '#229ED9', borderColor: '#229ED9', color: '#fff' }}
-                >
-                  {verifyingTelegram ? <RefreshCw size={13} className="animate-spin" /> : null}
-                  {verifyingTelegram ? t('connTelegramVerifying') : t('connTelegramVerifyAndConnect')}
-                </button>
-              </div>
-            </form>
-          </div>
-        </div>
+                    {exec.error_message && (
+                      <div style={{ marginTop: '12px' }}>
+                        <AlertBanner variant="error" title="Dettaglio errore">
+                          {exec.error_message}
+                        </AlertBanner>
+                      </div>
+                    )}
+                  </Panel>
+                );
+              })}
+            </Stack>
+          )}
+        </Stack>
       )}
 
-      {/* GOOGLE CALENDAR OAUTH MODAL */}
-      {isGoogleModalOpen && (
-        <div style={{
-          position: 'fixed',
-          inset: 0,
-          backgroundColor: 'rgba(0, 0, 0, 0.65)',
-          backdropFilter: 'blur(4px)',
-          display: 'flex',
-          alignItems: 'center',
-          justifyContent: 'center',
-          zIndex: 1000,
-        }}>
-          <div className="card" style={{ width: '500px', maxHeight: '90vh', overflowY: 'auto', padding: '26px', borderRadius: '14px' }}>
-            <div style={{ display: 'flex', alignItems: 'center', gap: '12px', marginBottom: '16px' }}>
-              <div style={{
-                width: '42px',
-                height: '42px',
-                borderRadius: '10px',
-                backgroundColor: '#4285F415',
-                display: 'flex',
-                alignItems: 'center',
-                justifyContent: 'center',
-                color: '#4285F4',
-              }}>
-                <Calendar size={22} />
-              </div>
-              <div>
-                <h3 style={{ margin: 0, fontSize: '18px', fontWeight: 600 }}>{t('connGoogleModalTitle')}</h3>
-                <div style={{ fontSize: '12px', color: 'hsl(var(--muted-fg))' }}>
-                  {t('connGoogleModalSubtitle')}
-                </div>
-              </div>
-            </div>
+      {/* =========================================================================
+          MODALE 1: GOOGLE CALENDAR CONNECT (USER-FRIENDLY & TRUTHFUL PKCE SETUP)
+          ========================================================================= */}
+      {(() => {
+        const googleOAuthInfo = oauthProviders['google_calendar'];
+        const googleConn = connections.find((c) => c.provider === 'google_calendar');
+        const hasClientId = Boolean(googleOAuthInfo?.has_client_id || (googleConn && googleConn.auth_metadata?.client_id));
+        const hasClientSecret = Boolean(googleOAuthInfo?.has_client_secret || (googleConn && googleConn.auth_metadata?.client_secret));
+        const lastError = googleConn?.last_verification_error || '';
+        const isMissingSecretError = lastError.toLowerCase().includes('client_secret');
+        const isFullyConfigured = hasClientId && hasClientSecret && !isMissingSecretError;
+        const canSubmit = hasClientId || Boolean(googleClientId.trim());
 
-            <p style={{ fontSize: '13px', color: 'hsl(var(--muted-fg))', lineHeight: 1.5, margin: '0 0 18px' }}>
-              {t('connGoogleDirectNote')}
-            </p>
+        return (
+          <Modal
+            isOpen={isGoogleModalOpen}
+            onClose={() => setIsGoogleModalOpen(false)}
+            size="md"
+            title="Collega Google Calendar"
+            description="Autorizza Aether ad accedere ai tuoi calendari per coordinare la tua agenda in locale."
+            footer={
+              <AetherFormActions align="between">
+                <Button variant="ghost" onClick={() => setIsGoogleModalOpen(false)}>
+                  Annulla
+                </Button>
+                <Button
+                  variant="primary"
+                  size="md"
+                  disabled={!canSubmit}
+                  loading={googleAuthPending}
+                  onClick={handleStartGoogleOAuth}
+                  leftIcon={<Globe size={16} />}
+                >
+                  {googleAuthPending
+                    ? 'In attesa di autorizzazione…'
+                    : isFullyConfigured
+                    ? 'Autorizza con Google'
+                    : 'Salva e Autorizza con Google'}
+                </Button>
+              </AetherFormActions>
+            }
+          >
+            <Stack direction="column" gap="lg">
+              {isMissingSecretError && (
+                <AlertBanner variant="error" title="Client Secret richiesto da Google">
+                  Google ha rifiutato l'autorizzazione precedente perché per questo Client ID (tipo 'Applicazione web') è obbligatorio il <strong>Client Secret</strong>.
+                  Inserisci il Client Secret (es. <code>GOCSPX-...</code>) generato su Google Cloud Console e premi <strong>Salva e Autorizza</strong>.
+                </AlertBanner>
+              )}
 
-            {/* Primary 1-Click Guided Authorization Action */}
-            <button
-              type="button"
-              className="btn btn-primary"
-              onClick={() => handleStartGoogleOAuth()}
-              disabled={googleAuthPending}
-              style={{
-                display: 'flex',
-                alignItems: 'center',
-                justifyContent: 'center',
-                gap: '8px',
-                padding: '12px 20px',
-                fontSize: '14px',
-                fontWeight: 600,
-                backgroundColor: '#4285F4',
-                borderColor: '#4285F4',
-                color: '#fff',
-                width: '100%',
-                borderRadius: '8px',
-                boxShadow: '0 2px 8px rgba(66, 133, 244, 0.25)'
-              }}
-            >
-              {googleAuthPending ? (
+              {!isFullyConfigured ? (
                 <>
-                  <RefreshCw size={16} className="animate-spin" />
-                  <span>{t('connGoogleVerifyingBtn')}</span>
+                  {!isMissingSecretError && (
+                    <AlertBanner variant="info" title="Configurazione Credenziali Google Cloud">
+                      Aether si connette direttamente alle API di Google Calendar dal tuo computer. Per autorizzare l'accesso, inserisci il tuo <strong>Client ID</strong> e il <strong>Client Secret</strong> (se la tua app su Google Cloud è di tipo 'Applicazione web').
+                    </AlertBanner>
+                  )}
+
+                  <Panel variant="default" style={{ padding: '16px' }}>
+                    <Text size="sm" weight="semibold" style={{ marginBottom: '8px' }}>
+                      Come ottenere le credenziali su Google Cloud (gratuito e personale):
+                    </Text>
+                    <ol style={{ fontSize: '13px', color: 'hsl(var(--fg))', margin: 0, paddingLeft: '20px', lineHeight: '1.6' }}>
+                      <li>
+                        Apri la <a href="https://console.cloud.google.com/apis/credentials" target="_blank" rel="noopener noreferrer" style={{ color: 'hsl(var(--primary))', textDecoration: 'underline' }}>Google Cloud Console &rarr; Credenziali</a> (verifica che <em>Google Calendar API</em> sia abilitata nella libreria API).
+                      </li>
+                      <li>
+                        Clicca su <strong>Crea credenziali</strong> &rarr; <strong>ID client OAuth</strong>.
+                      </li>
+                      <li>
+                        Seleziona come tipo di applicazione <strong>Applicazione web</strong> (oppure <strong>Applicazione desktop</strong>).
+                      </li>
+                      <li>
+                        Se hai scelto <em>Applicazione web</em>, aggiungi come URI di reindirizzamento autorizzato: <code>http://127.0.0.1:8000/api/connections/google_calendar/oauth/callback</code>.
+                      </li>
+                      <li>
+                        Copia l'<strong>ID client</strong> e il <strong>Client Secret</strong> generati e incollali qui sotto.
+                      </li>
+                    </ol>
+                  </Panel>
+
+                  <AetherForm onSubmit={handleStartGoogleOAuth}>
+                    <AetherField label="Google Client ID" required helperText="Identificativo OAuth (termina con .apps.googleusercontent.com)">
+                      <AetherInput
+                        placeholder="es. 123456789-abcdef.apps.googleusercontent.com"
+                        value={googleClientId}
+                        onChange={(e) => setGoogleClientId(e.target.value)}
+                        autoFocus={!googleClientId}
+                      />
+                    </AetherField>
+
+                    <AetherField
+                      label={isMissingSecretError ? "Google Client Secret (Richiesto da Google)" : "Google Client Secret"}
+                      helperText="Obbligatorio per Applicazioni Web (es. GOCSPX-...). Opzionale solo per Applicazioni Desktop con PKCE."
+                    >
+                      <AetherPasswordInput
+                        placeholder="es. GOCSPX-..."
+                        value={googleClientSecret}
+                        onChange={(e) => setGoogleClientSecret(e.target.value)}
+                        autoFocus={Boolean(isMissingSecretError)}
+                      />
+                    </AetherField>
+                  </AetherForm>
                 </>
               ) : (
                 <>
-                  <Globe size={16} />
-                  <span>{t('connGoogleAuthorizeBtn')}</span>
-                </>
-              )}
-            </button>
+                  <AlertBanner variant="info" title="Autorizzazione Sicura e Trasparente">
+                    Il flusso di autorizzazione aprirà il tuo browser di sistema ufficiale. Nessuna password personale viene mai condivisa con Aether e i tuoi token restano memorizzati in modo cifrato esclusivamente sul tuo dispositivo.
+                  </AlertBanner>
 
-            {/* Pending Feedback Banner */}
-            {googleAuthPending && (
-              <div style={{
-                padding: '12px 14px',
-                borderRadius: '8px',
-                backgroundColor: '#4285F415',
-                border: '1px solid #4285F430',
-                fontSize: '12px',
-                color: 'hsl(var(--fg))',
-                marginTop: '14px',
-                display: 'flex',
-                flexDirection: 'column',
-                gap: '6px'
-              }}>
-                <div style={{ fontWeight: 500, lineHeight: 1.4 }}>
-                  {t('connGooglePendingMsg')}
-                </div>
-                {lastGoogleAuthUrl && (
-                  <button
-                    type="button"
-                    className="btn btn-ghost"
-                    style={{
-                      padding: 0,
-                      fontSize: '11px',
-                      color: '#4285F4',
-                      textDecoration: 'underline',
-                      justifyContent: 'flex-start',
-                      height: 'auto'
-                    }}
-                    onClick={() => openExternalUrl(lastGoogleAuthUrl)}
-                  >
-                    {t('connGoogleOpenBrowserFallback')}
-                  </button>
-                )}
-              </div>
-            )}
+                  <Panel variant="default" style={{ padding: '14px' }}>
+                    <Stack direction="row" align="center" justify="between">
+                      <div>
+                        <Text size="sm" weight="medium">
+                          Client ID e Client Secret
+                        </Text>
+                        <Text size="xs" variant="muted">
+                          ID: {googleOAuthInfo?.client_id_preview || (googleClientId ? `${googleClientId.slice(0, 8)}...` : 'Configurato')} • Secret: {hasClientSecret ? 'Configurato' : 'Non configurato'}
+                        </Text>
+                      </div>
+                      <Button
+                        variant="ghost"
+                        size="sm"
+                        onClick={() => setGoogleAdvOpen(!googleAdvOpen)}
+                      >
+                        {googleAdvOpen ? 'Chiudi' : 'Modifica credenziali'}
+                      </Button>
+                    </Stack>
 
-            {/* Collapsible Advanced Developer Settings */}
-            <details style={{ marginTop: '18px', fontSize: '12px' }}>
-              <summary style={{ cursor: 'pointer', color: 'hsl(var(--muted-fg))', fontWeight: 600, padding: '4px 0' }}>
-                {t('connGoogleAdvToggle')}
-              </summary>
-              <div style={{ display: 'flex', flexDirection: 'column', gap: '12px', marginTop: '10px' }}>
-                <div>
-                  <label style={{ fontSize: '12px', fontWeight: 600, display: 'block', marginBottom: '4px' }}>
-                    {t('connGoogleClientId')}
-                  </label>
-                  <input
-                    type="text"
-                    className="input"
-                    placeholder="Leave blank to use default desktop client"
-                    value={googleClientId}
-                    onChange={e => setGoogleClientId(e.target.value)}
-                    style={{ width: '100%', fontSize: '13px' }}
-                  />
-                </div>
+                    {googleAdvOpen && (
+                      <div style={{ marginTop: '16px', paddingTop: '14px', borderTop: '1px solid hsl(var(--border))' }}>
+                        <AetherForm onSubmit={handleStartGoogleOAuth}>
+                          <AetherField label="Google Client ID" required helperText="Identificativo OAuth (termina con .apps.googleusercontent.com)">
+                            <AetherInput
+                              placeholder="es. 123456789.apps.googleusercontent.com"
+                              value={googleClientId}
+                              onChange={(e) => setGoogleClientId(e.target.value)}
+                            />
+                          </AetherField>
 
-                <div>
-                  <label style={{ fontSize: '12px', fontWeight: 600, display: 'block', marginBottom: '4px' }}>
-                    {t('connGoogleClientSecret')}
-                  </label>
-                  <input
-                    type="password"
-                    className="input"
-                    placeholder="Optional for desktop PKCE flows"
-                    value={googleClientSecret}
-                    onChange={e => setGoogleClientSecret(e.target.value)}
-                    style={{ width: '100%', fontSize: '13px' }}
-                  />
-                </div>
-
-                <div style={{
-                  backgroundColor: 'hsl(var(--muted)/0.2)',
-                  border: '1px solid hsl(var(--border))',
-                  borderRadius: '8px',
-                  padding: '10px 14px',
-                  fontSize: '11px',
-                  color: 'hsl(var(--muted-fg))',
-                  lineHeight: 1.4,
-                }}>
-                  <strong>{t('connGoogleRedirectUri')}:</strong><br />
-                  <code style={{ fontSize: '10px', color: 'hsl(var(--fg))' }}>
-                    http://127.0.0.1:8000/api/connections/google_calendar/oauth/callback
-                  </code>
-                </div>
-              </div>
-            </details>
-
-            {/* Collapsible Manual Authorization Code Fallback */}
-            <details style={{ marginTop: '10px', fontSize: '12px' }}>
-              <summary style={{ cursor: 'pointer', color: 'hsl(var(--muted-fg))', padding: '4px 0' }}>
-                {t('connGoogleManualFallback')}
-              </summary>
-              <div style={{ marginTop: '10px' }}>
-                <p style={{ fontSize: '11px', color: 'hsl(var(--muted-fg))', margin: '0 0 10px' }}>
-                  {t('connGoogleManualDesc')}
-                </p>
-                <form onSubmit={handleManualExchangeCode} style={{ display: 'flex', gap: '8px' }}>
-                  <input
-                    type="text"
-                    className="input"
-                    placeholder="4/0A..."
-                    value={googleManualCode}
-                    onChange={e => setGoogleManualCode(e.target.value)}
-                    style={{ flex: 1, fontSize: '12px' }}
-                  />
-                  <button
-                    type="submit"
-                    className="btn btn-secondary"
-                    disabled={googleAuthPending || !googleManualCode.trim()}
-                    style={{ fontSize: '12px' }}
-                  >
-                    {t('connGoogleSubmitCode')}
-                  </button>
-                </form>
-              </div>
-            </details>
-
-            <div style={{ display: 'flex', justifyContent: 'flex-end', marginTop: '20px', paddingTop: '14px', borderTop: '1px solid hsl(var(--border))' }}>
-              <button
-                type="button"
-                className="btn btn-ghost"
-                onClick={() => setIsGoogleModalOpen(false)}
-                disabled={googleAuthPending}
-              >
-                {t('connGoogleCancel')}
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
-
-      {/* GOOGLE CALENDAR SELECTOR MODAL */}
-      {isCalendarPickerOpen && (
-        <div style={{
-          position: 'fixed',
-          inset: 0,
-          backgroundColor: 'rgba(0, 0, 0, 0.65)',
-          backdropFilter: 'blur(4px)',
-          display: 'flex',
-          alignItems: 'center',
-          justifyContent: 'center',
-          zIndex: 1000,
-        }}>
-          <div className="card" style={{ width: '440px', maxHeight: '80vh', overflowY: 'auto', padding: '24px', borderRadius: '12px' }}>
-            <h3 style={{ margin: '0 0 8px', fontSize: '18px', fontWeight: 600 }}>Select Active Google Calendar</h3>
-            <p style={{ fontSize: '13px', color: 'hsl(var(--muted-fg))', margin: '0 0 16px' }}>
-              Choose which Google Calendar Aether should read and schedule events into:
-            </p>
-
-            <div style={{ display: 'flex', flexDirection: 'column', gap: '8px', marginBottom: '20px' }}>
-              {googleCalendars.map(cal => (
-                <div
-                  key={cal.id}
-                  style={{
-                    padding: '12px 14px',
-                    borderRadius: '8px',
-                    border: '1px solid hsl(var(--border))',
-                    display: 'flex',
-                    alignItems: 'center',
-                    justifyContent: 'space-between',
-                  }}
-                >
-                  <div>
-                    <div style={{ fontWeight: 600, fontSize: '14px' }}>
-                      {cal.summary} {cal.primary && <span style={{ fontSize: '10px', backgroundColor: '#4285F420', color: '#4285F4', padding: '2px 6px', borderRadius: '4px', marginLeft: '6px' }}>Primary</span>}
-                    </div>
-                    {cal.description && (
-                      <div style={{ fontSize: '11px', color: 'hsl(var(--muted-fg))', marginTop: '2px' }}>
-                        {cal.description}
+                          <AetherField label="Google Client Secret" helperText="Obbligatorio per Applicazioni Web (es. GOCSPX-...)">
+                            <AetherPasswordInput
+                              placeholder="es. GOCSPX-..."
+                              value={googleClientSecret}
+                              onChange={(e) => setGoogleClientSecret(e.target.value)}
+                            />
+                          </AetherField>
+                        </AetherForm>
                       </div>
                     )}
-                  </div>
-                  <button
-                    className="btn btn-primary"
-                    onClick={() => handleSelectCalendar(cal.id, cal.summary)}
-                    style={{ fontSize: '11px', padding: '4px 10px' }}
-                  >
-                    Select
-                  </button>
-                </div>
-              ))}
-            </div>
+                  </Panel>
 
-            <div style={{ display: 'flex', justifyContent: 'flex-end' }}>
-              <button
-                type="button"
-                className="btn btn-ghost"
-                onClick={() => setIsCalendarPickerOpen(false)}
+                  {googleState && (
+                    <Panel variant="default" style={{ padding: '12px' }}>
+                      <AetherForm onSubmit={handleManualExchangeCode}>
+                        <AetherField label="Codice autorizzazione da incollare (se il redirect automatico è bloccato)">
+                          <AetherInput
+                            placeholder="Incolla qui il codice di autorizzazione restituito dal browser"
+                            value={googleManualCode}
+                            onChange={(e) => setGoogleManualCode(e.target.value)}
+                          />
+                        </AetherField>
+                        <Button
+                          variant="secondary"
+                          size="sm"
+                          style={{ marginTop: '8px' }}
+                          onClick={handleManualExchangeCode}
+                          loading={googleAuthPending}
+                        >
+                          Scambia codice manuale
+                        </Button>
+                      </AetherForm>
+                    </Panel>
+                  )}
+                </>
+              )}
+            </Stack>
+          </Modal>
+        );
+      })()}
+
+      {/* =========================================================================
+          MODALE 2: DEVELOPER APP SETUP MODAL (GITHUB, SLACK, NOTION)
+          ========================================================================= */}
+      <Modal
+        isOpen={Boolean(devSetupModalProvider)}
+        onClose={() => setDevSetupModalProvider(null)}
+        size="md"
+        title={`Collega ${devSetupModalProvider?.name || 'Servizio'}`}
+        description="Autorizza il servizio per consentire ad Aether di operare in sicurezza."
+        footer={
+          <AetherFormActions>
+            <Button variant="ghost" onClick={() => setDevSetupModalProvider(null)}>
+              Annulla
+            </Button>
+            <Button
+              variant="primary"
+              loading={savingDevConfig}
+              onClick={handleSaveDevOAuthConfig}
+            >
+              Salva e autorizza nel browser
+            </Button>
+          </AetherFormActions>
+        }
+      >
+        <AetherForm onSubmit={handleSaveDevOAuthConfig}>
+          <AlertBanner variant="info" title="Configurazione Applicazione">
+            Per garantire privacy e controllo totale, puoi registrare una OAuth App o inserire credenziali dedicate.
+          </AlertBanner>
+
+          {devSetupModalProvider && oauthProviders[devSetupModalProvider.id] && (
+            <Panel variant="default" style={{ padding: '12px 14px' }}>
+              <Text size="xs" variant="muted" style={{ marginBottom: '6px' }}>
+                Redirect URI per la tua App:
+              </Text>
+              <Stack direction="row" gap="sm" align="center">
+                <AetherInput
+                  readOnly
+                  value={oauthProviders[devSetupModalProvider.id].redirect_uri}
+                />
+                <IconButton
+                  icon={copiedField === 'redirect' ? <Check size={16} /> : <Copy size={16} />}
+                  ariaLabel="Copia Redirect URI"
+                  onClick={() =>
+                    copyToClipboard(
+                      oauthProviders[devSetupModalProvider.id].redirect_uri,
+                      'redirect'
+                    )
+                  }
+                />
+              </Stack>
+            </Panel>
+          )}
+
+          <AetherField label="Client ID" required>
+            <AetherInput
+              placeholder="Inserisci il Client ID fornito dal servizio"
+              value={devClientId}
+              onChange={(e) => setDevClientId(e.target.value)}
+            />
+          </AetherField>
+
+          <AetherField label="Client Secret" required>
+            <AetherPasswordInput
+              placeholder="Inserisci il Client Secret fornito dal servizio"
+              value={devClientSecret}
+              onChange={(e) => setDevClientSecret(e.target.value)}
+            />
+          </AetherField>
+        </AetherForm>
+      </Modal>
+
+      {/* =========================================================================
+          MODALE 3: TELEGRAM COMPANION GUIDED MODAL
+          ========================================================================= */}
+      <Modal
+        isOpen={isTelegramModalOpen}
+        onClose={() => setIsTelegramModalOpen(false)}
+        size="md"
+        title="Collega Telegram Companion"
+        description="Ricevi notifiche push e approva attività di Aether direttamente dal tuo smartphone."
+        footer={
+          <AetherFormActions>
+            <Button variant="ghost" onClick={() => setIsTelegramModalOpen(false)}>
+              Annulla
+            </Button>
+            <Button
+              variant="primary"
+              loading={verifyingTelegram}
+              onClick={handleConnectTelegramGuided}
+              leftIcon={<Send size={15} />}
+            >
+              Verifica e collega bot
+            </Button>
+          </AetherFormActions>
+        }
+      >
+        <AetherForm onSubmit={handleConnectTelegramGuided}>
+          <Panel variant="default" style={{ padding: '16px' }}>
+            <Heading level={4} style={{ marginBottom: '8px' }}>
+              Come ottenere il token del bot in 3 passi:
+            </Heading>
+            <Stack direction="column" gap="xs">
+              <Text size="sm">
+                1. Apri Telegram e cerca l'account ufficiale <strong>@BotFather</strong>
+              </Text>
+              <Text size="sm">
+                2. Invia il comando <code>/newbot</code> e segui le istruzioni per dargli un nome
+              </Text>
+              <Text size="sm">
+                3. Copia la chiave <strong>API Token</strong> generata e incollala nel campo qui sotto
+              </Text>
+            </Stack>
+          </Panel>
+
+          <AetherField label="Bot Token di Telegram" required>
+            <AetherPasswordInput
+              placeholder="es. 123456789:ABCdefGhIJKlmNoPQRsTUVwxyZ"
+              value={telegramBotToken}
+              onChange={(e) => setTelegramBotToken(e.target.value)}
+            />
+          </AetherField>
+
+          {testResult && (
+            <AlertBanner
+              variant={testResult.valid ? 'success' : 'error'}
+              title={testResult.valid ? 'Verifica riuscita' : 'Verifica non riuscita'}
+            >
+              {testResult.message}
+            </AlertBanner>
+          )}
+
+          <Panel variant="default" style={{ padding: '12px 14px' }}>
+            <Stack direction="row" align="center" justify="between">
+              <div>
+                <Text size="sm" weight="medium">
+                  Impostazioni di sicurezza avanzate
+                </Text>
+                <Text size="xs" variant="muted">
+                  Limita i comandi solo al tuo specifico Chat ID Telegram
+                </Text>
+              </div>
+              <Switch checked={telegramAdvOpen} onChange={setTelegramAdvOpen} />
+            </Stack>
+
+            {telegramAdvOpen && (
+              <div style={{ marginTop: '14px', paddingTop: '12px', borderTop: '1px solid hsl(var(--border))' }}>
+                <AetherField label="Chat ID predefinito (opzionale)">
+                  <AetherInput
+                    placeholder="es. 987654321"
+                    value={telegramDefaultChatId}
+                    onChange={(e) => setTelegramDefaultChatId(e.target.value)}
+                  />
+                </AetherField>
+              </div>
+            )}
+          </Panel>
+        </AetherForm>
+      </Modal>
+
+      {/* =========================================================================
+          MODALE 4: CONFIGURAZIONE GENERICA CREDENZIALI (EMAIL, HTTP, OPENAPI)
+          ========================================================================= */}
+      <Modal
+        isOpen={Boolean(configModalProvider)}
+        onClose={() => setConfigModalProvider(null)}
+        size="md"
+        title={`Configura ${configModalProvider?.name || 'Servizio'}`}
+        description="Inserisci le informazioni di connessione per abilitare il servizio."
+        footer={
+          <AetherFormActions align="between">
+            <Button
+              variant="outline"
+              size="sm"
+              loading={testingCreds}
+              onClick={handleTestCreds}
+            >
+              Testa connessione
+            </Button>
+            <Stack direction="row" gap="sm">
+              <Button variant="ghost" onClick={() => setConfigModalProvider(null)}>
+                Annulla
+              </Button>
+              <Button
+                variant="primary"
+                loading={savingCreds}
+                onClick={handleSaveAndConnect}
               >
-                Cancel
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
-      </div>
-    </div>
+                Salva e attiva
+              </Button>
+            </Stack>
+          </AetherFormActions>
+        }
+      >
+        <AetherForm onSubmit={handleSaveAndConnect}>
+          <AetherField label="Nome account di riferimento">
+            <AetherInput
+              value={credAccountName}
+              onChange={(e) => setCredAccountName(e.target.value)}
+            />
+          </AetherField>
+
+          {configModalProvider?.id === 'email' && (
+            <Stack direction="column" gap="md">
+              <AetherField label="Server SMTP" required>
+                <AetherInput
+                  placeholder="smtp.gmail.com"
+                  value={emailHost}
+                  onChange={(e) => setEmailHost(e.target.value)}
+                />
+              </AetherField>
+
+              <Grid cols={2} gap="md">
+                <AetherField label="Porta" required>
+                  <AetherInput
+                    placeholder="587"
+                    value={emailPort}
+                    onChange={(e) => setEmailPort(e.target.value)}
+                  />
+                </AetherField>
+                <AetherField label="Indirizzo mittente">
+                  <AetherInput
+                    placeholder="nome@dominio.it"
+                    value={emailSenderAddr}
+                    onChange={(e) => setEmailSenderAddr(e.target.value)}
+                  />
+                </AetherField>
+              </Grid>
+
+              <AetherField label="Nome utente / Email login" required>
+                <AetherInput
+                  value={emailUser}
+                  onChange={(e) => setEmailUser(e.target.value)}
+                />
+              </AetherField>
+
+              <AetherField label="Password o App Password" required>
+                <AetherPasswordInput
+                  value={emailPass}
+                  onChange={(e) => setEmailPass(e.target.value)}
+                />
+              </AetherField>
+            </Stack>
+          )}
+
+          {configModalProvider?.id === 'http' && (
+            <Stack direction="column" gap="md">
+              <AetherField label="URL di base dell'endpoint" required>
+                <AetherInput
+                  placeholder="https://api.esempio.it/v1"
+                  value={httpBaseUrl}
+                  onChange={(e) => setHttpBaseUrl(e.target.value)}
+                />
+              </AetherField>
+
+              <AetherField label="Tipo di autenticazione">
+                <AetherSelect
+                  value={httpAuthType}
+                  onChange={(e) => setHttpAuthType(e.target.value)}
+                  options={[
+                    { value: 'none', label: 'Nessuna autenticazione' },
+                    { value: 'bearer', label: 'Bearer Token' },
+                    { value: 'api_key', label: 'Header API Key (X-Api-Key)' },
+                  ]}
+                />
+              </AetherField>
+
+              {httpAuthType !== 'none' && (
+                <AetherField label="Token o Chiave segreta" required>
+                  <AetherPasswordInput
+                    value={httpToken}
+                    onChange={(e) => setHttpToken(e.target.value)}
+                  />
+                </AetherField>
+              )}
+            </Stack>
+          )}
+
+          {configModalProvider?.id === 'openapi' && (
+            <Stack direction="column" gap="md">
+              <AetherField label="URL specifica OpenAPI (JSON/YAML)">
+                <AetherInput
+                  placeholder="https://api.servizio.it/openapi.json"
+                  value={openapiSpecUrl}
+                  onChange={(e) => setOpenapiSpecUrl(e.target.value)}
+                />
+              </AetherField>
+
+              <AetherField label="Oppure percorso file locale">
+                <AetherInput
+                  placeholder="/Users/nome/progetti/spec.yaml"
+                  value={openapiSpecPath}
+                  onChange={(e) => setOpenapiSpecPath(e.target.value)}
+                />
+              </AetherField>
+            </Stack>
+          )}
+
+          {testResult && (
+            <AlertBanner
+              variant={testResult.valid ? 'success' : 'error'}
+              title={testResult.valid ? 'Test superato' : 'Test fallito'}
+            >
+              {testResult.message}
+            </AlertBanner>
+          )}
+        </AetherForm>
+      </Modal>
+
+      {/* =========================================================================
+          MODALE 5: NUOVO APPUNTAMENTO CALENDARIO
+          ========================================================================= */}
+      <Modal
+        isOpen={isEventModalOpen}
+        onClose={() => setIsEventModalOpen(false)}
+        size="md"
+        title="Crea nuovo appuntamento"
+        description={
+          selectedScheduleSource === 'google'
+            ? 'L\'evento verrà sincronizzato direttamente con il tuo account Google.'
+            : 'L\'evento verrà memorizzato nel database locale del tuo spazio di lavoro.'
+        }
+        footer={
+          <AetherFormActions>
+            <Button variant="ghost" onClick={() => setIsEventModalOpen(false)}>
+              Annulla
+            </Button>
+            <Button
+              variant="primary"
+              loading={creatingEvent}
+              onClick={handleCreateEvent}
+            >
+              Crea evento
+            </Button>
+          </AetherFormActions>
+        }
+      >
+        <AetherForm onSubmit={handleCreateEvent}>
+          <AetherField label="Titolo dell'appuntamento" required>
+            <AetherInput
+              placeholder="es. Allineamento settimanale di progetto"
+              value={newTitle}
+              onChange={(e) => setNewTitle(e.target.value)}
+            />
+          </AetherField>
+
+          <AetherField label="Data e ora di inizio" required>
+            <AetherInput
+              type="datetime-local"
+              value={newStartTime}
+              onChange={(e) => setNewStartTime(e.target.value)}
+            />
+          </AetherField>
+
+          <AetherField label="Luogo o Link riunione (opzionale)">
+            <AetherInput
+              placeholder="es. Google Meet / Ufficio Milano"
+              value={newLocation}
+              onChange={(e) => setNewLocation(e.target.value)}
+            />
+          </AetherField>
+        </AetherForm>
+      </Modal>
+
+      {/* =========================================================================
+          MODALE 6: SELETTORE CALENDARIO GOOGLE ATTIVO
+          ========================================================================= */}
+      <Modal
+        isOpen={isCalendarPickerOpen}
+        onClose={() => setIsCalendarPickerOpen(false)}
+        size="md"
+        title="Seleziona Calendario Google"
+        description="Scegli quale dei tuoi calendari Google utilizzare per la sincronizzazione delle attività."
+      >
+        <Stack direction="column" gap="sm">
+          {googleCalendars.map((cal) => (
+            <Panel
+              key={cal.id}
+              variant="default"
+              className="ds-panel--interactive"
+              onClick={() => handleSelectCalendar(cal.id, cal.summary)}
+            >
+              <Stack direction="row" justify="between" align="center">
+                <div>
+                  <Text weight="semibold">{cal.summary}</Text>
+                  {cal.description && (
+                    <Text size="xs" variant="muted">
+                      {cal.description}
+                    </Text>
+                  )}
+                </div>
+                {cal.primary && (
+                  <StatusBadge status="connected" label="Principale" />
+                )}
+              </Stack>
+            </Panel>
+          ))}
+        </Stack>
+      </Modal>
+
+      {/* =========================================================================
+          DRAWER: GESTISCI SERVIZIO COLLEGATO
+          ========================================================================= */}
+      <Drawer
+        isOpen={Boolean(manageProvider)}
+        onClose={() => setManageProvider(null)}
+        title={manageProvider?.name}
+        description="Dettagli e gestione dell'integrazione attiva."
+        footer={
+          <AetherFormActions align="between">
+            <Button
+              variant="destructive"
+              size="sm"
+              onClick={() => {
+                if (manageProvider) {
+                  setDisconnectTarget({ id: manageProvider.id, name: manageProvider.name });
+                }
+              }}
+              leftIcon={<Trash2 size={14} />}
+            >
+              Scollega servizio
+            </Button>
+            <Button variant="secondary" size="sm" onClick={() => setManageProvider(null)}>
+              Chiudi
+            </Button>
+          </AetherFormActions>
+        }
+      >
+        {manageProvider && (() => {
+          const conn = connections.find((c) => c.provider === manageProvider.id);
+
+          return (
+            <Stack direction="column" gap="lg">
+              {/* Header card with status */}
+              <Panel variant="default" style={{ padding: '16px' }}>
+                <Stack direction="row" justify="between" align="center">
+                  <Stack gap="none">
+                    <Text size="xs" variant="muted">Stato operativo</Text>
+                    <Heading level={4}>{conn?.account_name || manageProvider.name}</Heading>
+                  </Stack>
+                  <StatusBadge status={conn?.status || 'NOT_CONFIGURED'} />
+                </Stack>
+              </Panel>
+
+              {/* Capabilities checklist */}
+              <div>
+                <Heading level={5} style={{ marginBottom: '8px' }}>
+                  Capacità concesse ad Aether:
+                </Heading>
+                <Stack direction="column" gap="xs">
+                  {manageProvider.capabilitiesList.map((cap, i) => (
+                    <div
+                      key={i}
+                      style={{
+                        display: 'flex',
+                        alignItems: 'center',
+                        gap: '8px',
+                        fontSize: '13px',
+                        color: 'hsl(var(--fg))',
+                      }}
+                    >
+                      <CheckCircle2 size={15} color="hsl(var(--success))" />
+                      <span>{cap}</span>
+                    </div>
+                  ))}
+                </Stack>
+              </div>
+
+              {/* Live probe action */}
+              <Panel variant="default" style={{ padding: '14px' }}>
+                <Stack direction="row" justify="between" align="center">
+                  <div>
+                    <Text size="sm" weight="medium">Verifica integrità</Text>
+                    <Text size="xs" variant="muted">
+                      Invia un ping reale per validare la raggiungibilità del servizio
+                    </Text>
+                  </div>
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    loading={verifyingProvider === manageProvider.id}
+                    onClick={() => handleVerifyConnection(manageProvider.id)}
+                  >
+                    Verifica ora
+                  </Button>
+                </Stack>
+              </Panel>
+
+              {/* Advanced info toggle */}
+              <Panel variant="default" style={{ padding: '12px 14px' }}>
+                <Stack direction="row" justify="between" align="center">
+                  <Text size="xs" variant="muted">Dettagli tecnici avanzati</Text>
+                  <Switch checked={showTechDetails} onChange={setShowTechDetails} />
+                </Stack>
+
+                {showTechDetails && conn && (
+                  <div style={{ marginTop: '12px', paddingTop: '10px', borderTop: '1px solid hsl(var(--border))' }}>
+                    <Text size="xs" mono style={{ wordBreak: 'break-all' }}>
+                      ID Interno: {conn.id}
+                      <br />
+                      Ultima sincronizzazione: {conn.last_synced_at || 'Mai'}
+                      <br />
+                      Ultima verifica: {conn.last_verified_at || 'Mai'}
+                    </Text>
+                  </div>
+                )}
+              </Panel>
+            </Stack>
+          );
+        })()}
+      </Drawer>
+
+      {/* =========================================================================
+          MODALE: CONFERMA DISCONNESSIONE
+          ========================================================================= */}
+      <Modal
+        isOpen={Boolean(disconnectTarget)}
+        onClose={() => setDisconnectTarget(null)}
+        size="sm"
+        title="Scollegare il servizio?"
+        description={`Sei sicuro di voler scollegare ${disconnectTarget?.name}? Aether non potrà più coordinare o interagire con questo servizio finché non verrà ricollegato.`}
+        footer={
+          <AetherFormActions>
+            <Button variant="ghost" onClick={() => setDisconnectTarget(null)}>
+              Annulla
+            </Button>
+            <Button
+              variant="destructive"
+              loading={disconnecting}
+              onClick={confirmDisconnect}
+            >
+              Scollega definitivamente
+            </Button>
+          </AetherFormActions>
+        }
+      >
+        <AlertBanner variant="warning" title="Attenzione">
+          Eventuali credenziali e token salvati verranno rimossi in sicurezza dal SecretStore locale.
+        </AlertBanner>
+      </Modal>
+    </PageContainer>
   );
 }

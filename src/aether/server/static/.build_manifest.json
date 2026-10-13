@@ -1,13 +1,13 @@
 {
   "manifest_version": "1.0",
-  "generated_at": "2026-10-07T15:23:45.053436+00:00",
+  "generated_at": "2026-10-13T13:24:40.203448+00:00",
   "source": "/Users/matteo/Matteo/Lavoro/Progetti Personali/Aether/aether/ui/dist",
   "target": "/Users/matteo/Matteo/Lavoro/Progetti Personali/Aether/aether/src/aether/server/static",
   "file_count": 14,
-  "total_bytes": 5316964,
+  "total_bytes": 5409672,
   "files": {
     "icon.png": "658495e9568c6f0258ab16b69755d7bba43cc0766c7748bf6e05f0b23cacdb2f",
-    "index.html": "ddb577e3d370d41584c19325de928e09b1ab56d4461ad65f63dfd24fa440c5e4",
+    "index.html": "2eea26ecd0fba29440a901ffc5767c007f4c4622b10522e7714939b0624dbfd1",
     ".DS_Store": "6d38a193af8e29d89ca26434a7bfec7ed5c315000f6928a3616ce271b3a3a685",
     "logo.png": "658495e9568c6f0258ab16b69755d7bba43cc0766c7748bf6e05f0b23cacdb2f",
     "icons.svg": "b45fa506195cfcdef406ba9f0c77b36ddc1a7c224040926ec70abc2fdea7b93a",
@@ -18,7 +18,7 @@
     "brand/logo_bianco.svg": "69c365adb03b0be08b407d48a2641ea6a05ae2bc87a61fdc04e678e1f3bd4ae7",
     "brand/logo_nero.svg": "57f24ea0a4fb899d494e9666a0d916103fcf9258ef77d80183c00e0341057285",
     "brand/favicon.svg": "5e49bf20d68aa517195aa596b7444eb0db060da2ade6598ad523182ebde42eac",
-    "assets/index-BkImqyXq.css": "b128f12e21597fa8c076e1aa63fc20d3ea5da10714c6402b0e4ae139dae78523",
-    "assets/index-DkHL594s.js": "ce49e764112dbc4e4666500429189d040e08a04b544fa8ebcbe1087a917560a0"
+    "assets/index-DnFy6kuN.css": "c80f305e7f8d910796e4d88db562924b425e756f65b1a7d12575fc0341ca10d4",
+    "assets/index-CqeKf2RK.js": "d092fc5c566a9993548afe55360128f178f8a8530353cffe5c3ca122e27f5b90"
   }
 }

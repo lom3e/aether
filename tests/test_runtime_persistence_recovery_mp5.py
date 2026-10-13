@@ -99,7 +99,7 @@ def test_action_idempotency_ledger_prevents_duplicate_execution():
         # 1. Create and accept a proposal with a step
         p_store.save_intent_request(IntentRequest(
             id="intent-idem-1",
-            workspace_id=ws.name,
+            workspace_id=ws.id,
             raw_input="Idempotency test intent",
             source_surface="test",
         ))
@@ -113,7 +113,7 @@ def test_action_idempotency_ledger_prevents_duplicate_execution():
         prop = MissionProposal(
             id="prop-idem-1",
             intent_id="intent-idem-1",
-            workspace_id=ws.name,
+            workspace_id=ws.id,
             title="Idempotency Test",
             objective="Ensure step only executes once",
             why="Testing idempotency ledger",
@@ -133,7 +133,7 @@ def test_action_idempotency_ledger_prevents_duplicate_execution():
         # Validate authority succeeds
         validated = ExecutionBoundary.validate_authority(
             authority=auth,
-            workspace_id=ws.name,
+            workspace_id=ws.id,
             store=p_store,
             action_or_boundary="files.read_document",
             step_id="step-unique-1",
@@ -155,7 +155,7 @@ def test_action_idempotency_ledger_prevents_duplicate_execution():
         with pytest.raises(UnauthorizedExecutionError) as exc_info:
             ExecutionBoundary.validate_authority(
                 authority=auth,
-                workspace_id=ws.name,
+                workspace_id=ws.id,
                 store=p_store,
                 action_or_boundary="files.read_document",
                 step_id="step-unique-1",
@@ -175,28 +175,28 @@ def test_crash_recovery_cleans_interrupted_executions():
         running_exec = ActionExecution(
             id="ax-running",
             action_id="files.create_document",
-            workspace_id=ws.name,
+            workspace_id=ws.id,
             status=ActionExecutionStatus.RUNNING,
             input_data={"path": "report.txt"},
         )
         queued_exec = ActionExecution(
             id="ax-queued",
             action_id="files.create_document",
-            workspace_id=ws.name,
+            workspace_id=ws.id,
             status=ActionExecutionStatus.QUEUED,
             input_data={"path": "queued.txt"},
         )
         approved_exec = ActionExecution(
             id="ax-approved",
             action_id="files.create_document",
-            workspace_id=ws.name,
+            workspace_id=ws.id,
             status=ActionExecutionStatus.APPROVED,
             input_data={"path": "approved.txt"},
         )
         pending_approval_exec = ActionExecution(
             id="ax-waiting",
             action_id="email.send",
-            workspace_id=ws.name,
+            workspace_id=ws.id,
             status=ActionExecutionStatus.WAITING_APPROVAL,
             input_data={"to": "user@example.com"},
         )

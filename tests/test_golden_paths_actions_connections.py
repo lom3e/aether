@@ -102,7 +102,7 @@ def make_http_response(status_code: int = 200, json_data: Any = None, raw_bytes:
 
 def test_golden_path_a_github_read(test_stack):
     stack = test_stack
-    ws_id = stack["workspace"].name
+    ws_id = stack["workspace"].id
 
     # 1. Configure GitHub connection
     stack["conn_svc"].connect(
@@ -167,7 +167,7 @@ def test_golden_path_a_github_read(test_stack):
 
 def test_golden_path_b_github_create_issue_approval_flow(test_stack, accepted_authority_factory):
     stack = test_stack
-    ws_id = stack["workspace"].name
+    ws_id = stack["workspace"].id
 
     stack["conn_svc"].connect(
         workspace_id=ws_id,
@@ -235,7 +235,7 @@ def test_golden_path_b_github_create_issue_approval_flow(test_stack, accepted_au
 
 def test_golden_path_c_email_smtp_approval_flow(test_stack):
     stack = test_stack
-    ws_id = stack["workspace"].name
+    ws_id = stack["workspace"].id
 
     stack["conn_svc"].connect(
         workspace_id=ws_id,
@@ -310,7 +310,7 @@ def test_golden_path_c_email_smtp_approval_flow(test_stack):
 
 def test_golden_path_d_slack_message_approval_flow(test_stack):
     stack = test_stack
-    ws_id = stack["workspace"].name
+    ws_id = stack["workspace"].id
 
     stack["conn_svc"].connect(
         workspace_id=ws_id,
@@ -375,7 +375,7 @@ def test_golden_path_d_slack_message_approval_flow(test_stack):
 
 def test_golden_path_e_openapi_tool_generation_and_execution(test_stack, accepted_authority_factory):
     stack = test_stack
-    ws_id = stack["workspace"].name
+    ws_id = stack["workspace"].id
 
     # Sample OpenAPI 3.0 specification for an Inventory microservice
     sample_spec = {
@@ -503,7 +503,7 @@ def test_golden_path_e_openapi_tool_generation_and_execution(test_stack, accepte
 
 def test_truthful_failure_unconfigured_connectors(test_stack, accepted_authority_factory):
     stack = test_stack
-    ws_id = stack["workspace"].name
+    ws_id = stack["workspace"].id
 
     # 1. GitHub action with unconfigured connection
     exec_gh = stack["action_exec"].execute(

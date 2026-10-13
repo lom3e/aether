@@ -24,7 +24,7 @@ class TelegramBridge:
         """
         Dispatches an incoming Telegram update (webhook or poll).
         """
-        conn = workspace.connections.get_connection(workspace.name, "telegram")
+        conn = workspace.connections.get_connection(workspace.id, "telegram")
         if not conn or not conn.auth_metadata.get("bot_token"):
             return {"status": "ignored", "reason": "Telegram not configured in workspace"}
 
@@ -118,7 +118,7 @@ class TelegramBridge:
                 return {"status": "welcome_sent"}
 
             if text.startswith("/status") or text.startswith("/overview"):
-                ov = workspace.personal.get_overview(workspace.name)
+                ov = workspace.personal.get_overview(workspace.id)
                 pending_cnt = len(ov.get("pending_approvals", []))
                 active_m = len(ov.get("active_works", []))
                 tasks_cnt = len(ov.get("background_tasks", []))
@@ -135,7 +135,7 @@ class TelegramBridge:
                 return {"status": "status_sent"}
 
             if text.startswith("/missions"):
-                ov = workspace.personal.get_overview(workspace.name)
+                ov = workspace.personal.get_overview(workspace.id)
                 active = ov.get("active_works", [])
                 if not active:
                     connector.send_message(chat_id=chat_id, text="🎯 Nessuna missione attualmente in corso.")
@@ -149,7 +149,7 @@ class TelegramBridge:
                 return {"status": "missions_sent"}
 
             if text.startswith("/deliverables"):
-                delivs = workspace.personal.list_deliverables(workspace.name, limit=5)
+                delivs = workspace.personal.list_deliverables(workspace.id, limit=5)
                 if not delivs:
                     connector.send_message(chat_id=chat_id, text="📁 Nessun deliverable recente trovato nel workspace.")
                 else:
@@ -164,7 +164,7 @@ class TelegramBridge:
 
             # Process prompt through PersonalAgentService
             reply = workspace.personal.process_prompt(
-                workspace_id=workspace.name,
+                workspace_id=workspace.id,
                 prompt=text,
             )
 

@@ -98,6 +98,15 @@ class MissionRuntime:
 
 
     @property
+    def _ws_key(self) -> str:
+        """Canonical workspace key (immutable id); tolerant of lightweight workspace stand-ins."""
+        for attr in ("id", "name"):
+            val = getattr(self.workspace, attr, None)
+            if isinstance(val, str) and val:
+                return val
+        return "default"
+
+    @property
     def instance_id(self) -> str:
         return self._instance_id
 
@@ -202,6 +211,14 @@ class MissionRuntime:
                 store=p_store,
                 action_or_boundary=f"mission.start:{mission_id}",
             )
+
+            # Bind the consent that authorised this work to the mission it started (audit: consent -> mission).
+            try:
+                bind = getattr(p_store, "bind_consent_mission", None)
+                if callable(bind) and effective_auth is not None:
+                    bind(effective_auth.proposal_id, effective_auth.proposal_version, mission_id)
+            except Exception as bind_exc:
+                logger.debug("Consent/mission binding skipped: %s", bind_exc)
 
             active = self.store.get_active_execution(mission_id)
             if active and active.status == ExecutionStatus.RUNNING and active.lease_owner:
@@ -509,7 +526,7 @@ class MissionRuntime:
                                 from aether.memory.ingestion import MemoryIngestionService
                                 MemoryIngestionService.ingest_verified_deliverable(
                                     memory_store=self.workspace.memory,
-                                    workspace_id=self.workspace.name,
+                                    workspace_id=self._ws_key,
                                     mission_id=mission_id,
                                     execution_id=active.id,
                                     deliverable=d,
@@ -524,7 +541,7 @@ class MissionRuntime:
                         from aether.memory.ingestion import MemoryIngestionService
                         MemoryIngestionService.ingest_approved_decision(
                             memory_store=self.workspace.memory,
-                            workspace_id=self.workspace.name,
+                            workspace_id=self._ws_key,
                             mission_id=mission_id,
                             execution_id=active.id,
                             approval_record={
@@ -579,7 +596,7 @@ class MissionRuntime:
                     from aether.memory.ingestion import MemoryIngestionService
                     MemoryIngestionService.ingest_approved_decision(
                         memory_store=self.workspace.memory,
-                        workspace_id=self.workspace.name,
+                        workspace_id=self._ws_key,
                         mission_id=mission_id,
                         execution_id=active.id,
                         approval_record={
@@ -940,7 +957,14 @@ class MissionRuntime:
                     f"Please complete this stage diligently and generate necessary deliverables."
                 )
 
-                target_agent = getattr(tmpl_m, "assigned_agent", None)
+                # The stage's own plan (kind, agent, acceptance criteria) comes from the planner via mission metadata.
+                plan_entry = ((mission.metadata or {}).get("milestone_plan") or {}).get(tmpl_m.id, {})
+                if plan_entry.get("acceptance"):
+                    task_instruction += "\n\nACCEPTANCE CRITERIA (your output will be checked against these):\n" + "\n".join(
+                        f"- {c}" for c in plan_entry["acceptance"])
+                if plan_entry.get("produces_file"):
+                    task_instruction += f"\n\nSave the result as the file '{plan_entry['produces_file']}' in the workspace."
+                target_agent = plan_entry.get("agent") or getattr(tmpl_m, "assigned_agent", None)
                 if not target_agent and team:
                     desc_lower = tmpl_m.description.lower()
                     if "research" in desc_lower or "analyst" in desc_lower:
@@ -955,8 +979,31 @@ class MissionRuntime:
                                 break
 
                 created_files.clear()
-                ws_id = getattr(self.workspace, "name", None) or "default"
+                ws_id = self._ws_key
+                # Every stage gets the same bounded, provenance-tagged workspace context (memory, knowledge, lessons,
+                # this mission's earlier results); agents are told it is already there so memory is not injected twice.
+                step_meta: dict[str, Any] = {}
+                try:
+                    from aether.context import ContextAssembler
+                    shared = ContextAssembler(self.workspace, mission_store=self.store).assemble(
+                        f"{tmpl_m.title}. {tmpl_m.description}", purpose="step", workspace_id=self._ws_key, mission_id=mid,
+                    )
+                    if shared.rendered:
+                        step_meta = {"aether_context": shared.rendered, "aether_context_has_intelligence": True,
+                                     "context_trace": shared.trace()}
+                except Exception as ctx_exc:
+                    logger.warning("Step context assembly failed (%s); continuing without it.", type(ctx_exc).__name__)
+                # Register the team's agents with the runtime BEFORE choosing the dispatch mode, otherwise a stage
+                # assigned to a named agent is wrongly routed through the generic coordinator.
+                if _has_usable_runtime(self.workspace) and team and hasattr(team, "agents") and callable(getattr(team, "agents", None)):
+                    for _a in team.agents():
+                        if _a.name not in self.workspace.runtime._agents:
+                            try:
+                                self.workspace.runtime.register_agent(_a)
+                            except Exception:
+                                pass
                 task_step = Task(
+                    metadata=step_meta,
                     instruction=task_instruction,
                     agent_name=target_agent or "unknown",
                     workspace_id=ws_id,
@@ -1035,14 +1082,23 @@ class MissionRuntime:
 
                 self._harvest_deliverables(mid, exec_id, tmpl_m.id, created_files)
 
-                if result and result.success:
+                if result and result.success and not (
+                    not str(getattr(result, "output", "") or "").strip()
+                    and not (getattr(result, "deliverables", None) or getattr(result, "artifacts", None) or created_files)
+                    and not hasattr(getattr(result, "output", ""), "_mock_name")
+                ):
                     raw_out = getattr(result, "output", "")
                     if hasattr(raw_out, "_mock_name"):
                         out_text = str(raw_out)
-                    elif raw_out:
+                    elif raw_out and str(raw_out).strip():
                         out_text = str(raw_out)
+                    elif getattr(result, "deliverables", None) or getattr(result, "artifacts", None) or created_files:
+                        out_text = "(no text output; the stage produced files)"
                     else:
-                        out_text = "(no output produced)"
+                        # "Succeeded" with nothing to show is not a completed stage.
+                        result = ExecutionResult(success=False, error="The stage reported success but produced no output and no files.")
+                        raw_out = ""
+                        out_text = ""
                     now_done = datetime.now(timezone.utc).isoformat()
                     self.store.update_execution_milestone(
                         exec_id,
@@ -1137,7 +1193,20 @@ class MissionRuntime:
                     self._handle_interrupted(exec_id, mid)
                     return
 
-                eval_result: QualityGateEvaluation = await self.evaluator.evaluate(
+                gate_evidence: dict[str, Any] = {}
+                try:
+                    runs = getattr(self.workspace, "coding_runs", None)
+                    if runs is not None:
+                        gate_evidence["coding_runs"] = [
+                            {"id": r.id, "status": r.status.value, "provider_id": r.provider_id,
+                             "model": (r.metadata or {}).get("model"),
+                             "verification_passed": (r.result.verification_passed if r.result else None),
+                             "test_run": (r.metadata or {}).get("test_run")}
+                            for r in runs.list_runs(mission_id=mid, limit=20)
+                        ]
+                except Exception as ev_exc:
+                    logger.debug("No coding evidence for mission %s: %s", mid, ev_exc)
+                eval_args: dict[str, Any] = dict(
                     mission_title=mission.title,
                     mission_objective=mission.objective,
                     deliverables=exec_deliverables,
@@ -1145,6 +1214,22 @@ class MissionRuntime:
                     team=team,
                     workspace=self.workspace,
                 )
+                required_ev = list((mission.metadata or {}).get("required_evidence") or [])
+                accepted = self._evaluator_parameters(self.evaluator)
+                if accepted is None or "evidence" in accepted:
+                    eval_args["evidence"] = gate_evidence
+                if accepted is None or "required_evidence" in accepted:
+                    eval_args["required_evidence"] = required_ev or None
+                if required_ev and accepted is not None and "required_evidence" not in accepted:
+                    # A legacy evaluator cannot enforce technical evidence: never let it pass such a mission silently.
+                    eval_result = QualityGateEvaluation(
+                        passed=False, score=0, rules={},
+                        feedback=f"The quality gate evaluator {type(self.evaluator).__name__} cannot enforce the required "
+                                 f"evidence {required_ev}; the mission cannot be verified.",
+                        redlines=["Use an evaluator that supports required_evidence."], method="unsupported_evaluator",
+                    )
+                else:
+                    eval_result: QualityGateEvaluation = await self.evaluator.evaluate(**eval_args)
 
                 if eval_result.passed:
                     now_verified = datetime.now(timezone.utc).isoformat()
@@ -1156,6 +1241,9 @@ class MissionRuntime:
                             "reviewer_agent": eval_result.reviewer_agent,
                             "rules": {k: v.to_dict() for k, v in eval_result.rules.items()},
                             "verified_at": now_verified,
+                            "verification_method": eval_result.method,
+                            "semantically_verified": eval_result.semantically_verified,
+                            "not_checked": list(eval_result.not_checked),
                         })
                         self.store.add_deliverable(mid, d)
 
@@ -1166,17 +1254,25 @@ class MissionRuntime:
                             for d in exec_deliverables:
                                 MemoryIngestionService.ingest_verified_deliverable(
                                     memory_store=self.workspace.memory,
-                                    workspace_id=self.workspace.name,
+                                    workspace_id=self._ws_key,
                                     mission_id=mid,
                                     execution_id=exec_id,
                                     deliverable=d,
                                     eval_result=eval_result,
                                     knowledge_graph_store=getattr(self.workspace, "knowledge_graph", None),
                                 )
+                            MemoryIngestionService.ingest_mission_outcome(
+                                memory_store=self.workspace.memory, workspace_id=self._ws_key, mission_id=mid,
+                                execution_id=exec_id, title=mission.title, objective=mission.objective,
+                                stage_outputs=completed_context, eval_result=eval_result, deliverables=exec_deliverables,
+                                evidence={"coding_runs": [r.get("id") for r in gate_evidence.get("coding_runs", [])]}
+                                if gate_evidence.get("coding_runs") else None,
+                                knowledge_graph_store=getattr(self.workspace, "knowledge_graph", None),
+                            )
                             if rework_attempts > 0 or eval_result.feedback:
                                 MemoryIngestionService.ingest_quality_gate_lesson(
                                     memory_store=self.workspace.memory,
-                                    workspace_id=self.workspace.name,
+                                    workspace_id=self._ws_key,
                                     mission_id=mid,
                                     execution_id=exec_id,
                                     eval_result=eval_result,
@@ -1190,7 +1286,7 @@ class MissionRuntime:
                     if hasattr(self.workspace, "learning") and self.workspace.learning:
                         try:
                             self.workspace.learning.record_quality_gate_pass(
-                                workspace_id=self.workspace.name,
+                                workspace_id=self._ws_key,
                                 mission_id=mid,
                                 execution_id=exec_id,
                                 eval_result=eval_result,
@@ -1232,7 +1328,7 @@ class MissionRuntime:
                     if hasattr(self.workspace, "learning") and self.workspace.learning:
                         try:
                             self.workspace.learning.record_quality_gate_failure(
-                                workspace_id=self.workspace.name,
+                                workspace_id=self._ws_key,
                                 mission_id=mid,
                                 execution_id=exec_id,
                                 eval_result=eval_result,
@@ -1306,7 +1402,7 @@ class MissionRuntime:
                         rework_task = Task(
                             instruction=rework_instruction,
                             agent_name="Workforce Lead",
-                            workspace_id=getattr(self.workspace, "name", None) or "default",
+                            workspace_id=self._ws_key,
                             session_id=mid,
                             mission_id=mid,
                             parent_id=exec_id,
@@ -1513,6 +1609,21 @@ class MissionRuntime:
                 handle.heartbeat_task.cancel()
             self.store.release_execution_lease(exec_id, handle.owner_token)
             self._active_executions.pop(exec_id, None)
+
+    @staticmethod
+    def _evaluator_parameters(evaluator: Any) -> set[str] | None:
+        """
+        Parameter names ``evaluator.evaluate`` declares, read from its signature (never by catching TypeError, which
+        could hide a real bug inside the evaluator). ``None`` means "accepts anything" (``**kwargs`` or not inspectable).
+        """
+        import inspect
+        try:
+            params = inspect.signature(evaluator.evaluate).parameters
+        except (TypeError, ValueError):
+            return None
+        if any(p.kind is inspect.Parameter.VAR_KEYWORD for p in params.values()):
+            return None
+        return set(params)
 
     def _handle_interrupted(self, exec_id: str, mid: str) -> None:
         now = datetime.now(timezone.utc).isoformat()

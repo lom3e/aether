@@ -36,7 +36,7 @@ export function AgentBuilder({
   );
   const [provider, setProvider] = useState(initialData?.provider || '');
   const [model, setModel] = useState<string | null>(initialData?.model || null);
-  const [teamProvider, setTeamProvider] = useState('ollama');
+  const [teamProvider, setTeamProvider] = useState('');     // '' = the workspace has no provider chosen
   const [teamDefaultModel, setTeamDefaultModel] = useState('qwen3.5:9b');
   const [delegatesList, setDelegatesList] = useState<string[]>(initialData?.delegates_to || []);
   const [selectedSkills, setSelectedSkills] = useState<string[]>(initialData?.skills || []);
@@ -558,11 +558,12 @@ export function AgentBuilder({
                       value={provider}
                       onChange={e => setProvider(e.target.value)}
                     >
-                      <option value="">{t('inheritFromTeam') || 'Eredita dal Team'} ({teamProvider})</option>
+                      <option value="">{t('inheritFromTeam') || 'Eredita dal Team'} ({teamProvider || 'non configurato'})</option>
                       <option value="ollama">Ollama (Locale)</option>
                       <option value="openai">OpenAI</option>
                       <option value="anthropic">Anthropic</option>
                       <option value="gemini">Google Gemini</option>
+                      <option value="groq">Groq</option>
                     </select>
                   </div>
 

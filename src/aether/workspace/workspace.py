@@ -125,6 +125,43 @@ class Workspace:
         """Return the unique identifier or slug of the workspace."""
         return self.config.get("workspace", {}).get("id") or self.name or self.root.name
 
+    def canonical_id(self, value: str | None = None) -> str:
+        """
+        Maps whatever a caller supplied to THE canonical key (``self.id``). Empty input and the legacy aliases
+        of this workspace (display name, folder name) map to the id; any other value is another workspace's key
+        and is returned untouched so callers can refuse it explicitly.
+        """
+        v = (value or "").strip()
+        if not v or v == self.id or v == "default" or v in (self.name, self.root.name):
+            return self.id
+        return v
+
+    def ensure_identity(self) -> str:
+        """Freezes an explicit immutable id in aether.yaml if the workspace never had one."""
+        from aether.workspace.identity import ensure_identity
+        return ensure_identity(self)
+
+    @classmethod
+    def resolve_unique(cls, key: str | Path | None) -> "Workspace | None":
+        """Like ``get`` but never guesses: an ambiguous alias (several workspaces share a name) resolves to None."""
+        k = str(key or "").strip()
+        if not k:
+            return None
+        by_exact = cls._active_workspaces.get(k)
+        if by_exact is not None:
+            return by_exact
+        distinct = {id(w): w for w in cls._active_workspaces.values()}.values()
+        matches = []
+        for w in distinct:
+            try:
+                if w.id == k:
+                    return w
+                if w.name == k or w.root.name == k:
+                    matches.append(w)
+            except Exception:
+                continue
+        return matches[0] if len(matches) == 1 else None
+
     @property
     def name(self) -> str:
         """Return the display name of the workspace."""
@@ -234,7 +271,7 @@ class Workspace:
         def _factory():
             from aether.memory.store import WorkforceMemoryStore
             Path(self.memory_db_path).parent.mkdir(parents=True, exist_ok=True)
-            return WorkforceMemoryStore(self.memory_db_path, default_workspace_id=self.name)
+            return WorkforceMemoryStore(self.memory_db_path, default_workspace_id=self.id)
         return self._get_or_create("memory", _factory)
 
     @property
@@ -250,7 +287,7 @@ class Workspace:
         def _factory():
             from aether.knowledge.graph.store import KnowledgeGraphStore
             Path(self.knowledge_graph_db_path).parent.mkdir(parents=True, exist_ok=True)
-            return KnowledgeGraphStore(self.knowledge_graph_db_path, default_workspace_id=self.name)
+            return KnowledgeGraphStore(self.knowledge_graph_db_path, default_workspace_id=self.id)
         return self._get_or_create("knowledge_graph", _factory)
 
     @property
@@ -596,9 +633,31 @@ class Workspace:
             return UnifiedIntelligenceService(
                 workforce_memory_store=self.memory,
                 knowledge_graph_store=self.knowledge_graph,
-                default_workspace_id=self.name,
+                default_workspace_id=self.id,
             )
         return self._get_or_create("intelligence", _factory)
+
+    @property
+    def coding_runs_db_path(self) -> str:
+        """Path to the durable coding-runs database."""
+        if self.data_dir.exists() or self.config_path.exists():
+            return str(self.data_dir / "coding_runs.db")
+        return str(self.legacy_aether_dir / "coding_runs.db")
+
+    @property
+    def coding_runs(self):
+        """Durable coding-run store (state, events, baselines) keyed by the canonical workspace id."""
+        def _factory():
+            from aether.coding.runs import CodingRunStore
+            from aether.missions.coding_outcomes import register_coding_finalizer
+            register_coding_finalizer()
+            return CodingRunStore(self.coding_runs_db_path, self.id)
+        return self._get_or_create("coding_runs", _factory)
+
+    def migrate_identity(self, dry_run: bool = False):
+        """Moves rows keyed by a legacy alias (name/folder) to the canonical id. See workspace.identity."""
+        from aether.workspace.identity import migrate_workspace_identity
+        return migrate_workspace_identity(self, dry_run=dry_run)
 
     @property
     def personal_db_path(self) -> str:
@@ -652,6 +711,13 @@ class Workspace:
         def _factory():
             from aether.personal.service import PersonalAgentService
             from aether.personal.events import get_personal_event_hub
+            prov = getattr(self, "_provider", None)
+            if prov is None:
+                try:
+                    from aether.providers.resolution import resolve_provider
+                    prov = resolve_provider(workspace=self)
+                except Exception:
+                    prov = None
             return PersonalAgentService(
                 store=self.personal_store,
                 action_executor=self.actions,
@@ -662,6 +728,7 @@ class Workspace:
                 notification_service=self.notifications,
                 event_hub=get_personal_event_hub(),
                 workspace=self,
+                provider=prov,
             )
         return self._get_or_create("personal", _factory)
 
@@ -929,8 +996,10 @@ class Workspace:
             conversation_db_path=self.conversations_db_path,
             project_id=project_id,
             workspace_name=self.name,
+            workspace_id=self.id,
             workforce_memory_store=self.memory,
             knowledge_graph_store=self.knowledge_graph,
+            secret_store=getattr(self, "secret_store", None),
         )
 
     def set_default_team(self, team_name: str) -> None:

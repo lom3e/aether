@@ -314,7 +314,7 @@ def test_personal_task_manager_lifecycle(temp_dir):
 
 def test_multi_turn_context_entity_resolution(workspace):
     personal_service = workspace.personal
-    ws_id = workspace.name
+    ws_id = workspace.id
 
     # Turn 1: User asks for CarShine market analysis
     msg1 = personal_service.process_prompt(
@@ -347,7 +347,7 @@ def test_multi_turn_context_entity_resolution(workspace):
 async def test_rest_api_notifications_and_tasks(workspace):
     req = make_request()
     req.app.state.workspace = workspace
-    ws_id = workspace.name
+    ws_id = workspace.id
 
     # 1. Unread count initially 0
     res_count = await get_unread_notification_count_route(req, workspace_id=ws_id)

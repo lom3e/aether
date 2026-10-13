@@ -155,7 +155,9 @@ class ExternalAgentAdapter(Agent):
         Executes a task by dispatching it over the configured external protocol.
         """
         effective_auth = authority or getattr(task, "authority", None) or (getattr(context, "authority", None) if context else None)
-        ws_id = getattr(task, "workspace_id", None) or getattr(effective_auth, "workspace_id", None) or "default"
+        ws_id = getattr(task, "workspace_id", None)
+        if not ws_id or ws_id == "default":  # unspecified: the execution happens in the workspace the authority was issued for
+            ws_id = getattr(effective_auth, "workspace_id", None) or "default"
 
         from aether.core.execution import ExecutionBoundary
         ws = getattr(self, "workspace", None)
@@ -169,6 +171,7 @@ class ExternalAgentAdapter(Agent):
             workspace_id=ws_id,
             store=p_store,
             action_or_boundary=f"agent.external:{self.name}",
+            canonicalize=getattr(ws, "canonical_id", None),
         )
 
         self.lifecycle.start()

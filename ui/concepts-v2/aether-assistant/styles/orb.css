@@ -1,0 +1,144 @@
+/* ==========================================================================
+   AETHER ORB V4 — DOMINANT LIVING 3D POINT SPHERE STYLES
+   Commanding Scale • Protected Visual Stage • Seamless Responsiveness
+   ========================================================================== */
+
+.orb-stage-container {
+  position: relative;
+  width: 100%;
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  padding-bottom: 96px;
+  transform: translateY(-16px);
+  pointer-events: none;
+  transition: transform 750ms var(--spring-smooth);
+}
+
+/* When Field or Decisions emerge, Orb shifts smoothly upwards with fluid scale */
+.stage-with-field .orb-stage-container,
+.stage-with-approval .orb-stage-container,
+.stage-with-result .orb-stage-container {
+  transform: translateY(-164px) scale(0.64);
+}
+
+.stage-with-field .orb-state-meta,
+.stage-with-approval .orb-state-meta,
+.stage-with-result .orb-state-meta {
+  opacity: 0;
+  pointer-events: none;
+}
+
+/* Expanded Viewport for Dominant Presence */
+.orb-viewport {
+  position: relative;
+  width: 640px;
+  height: 640px;
+  max-width: 92vw;
+  max-height: 92vw;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  pointer-events: auto;
+  cursor: pointer;
+  transition: transform var(--duration-fast) ease;
+}
+
+#orb-canvas {
+  width: 640px;
+  height: 640px;
+  max-width: 100%;
+  max-height: 100%;
+  display: block;
+  z-index: 5;
+}
+
+/* Minimalist presence meta below the Orb (hidden to prevent dialogue collision, top header already shows status) */
+.orb-state-meta {
+  display: none !important;
+}
+
+.orb-state-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 5px 14px;
+  background: rgba(255, 255, 255, 0.04);
+  border: var(--border-glass);
+  border-radius: var(--radius-pill);
+  font-size: 11px;
+  font-weight: 500;
+  letter-spacing: 0.02em;
+  color: var(--text-secondary);
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
+  transition: all var(--duration-normal) var(--spring-smooth);
+}
+
+.orb-state-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--aether-violet);
+  box-shadow: 0 0 8px var(--aether-violet);
+  transition: all var(--duration-fast) ease;
+}
+
+.orb-presence-text {
+  font-size: 12px;
+  font-weight: 400;
+  color: var(--text-muted);
+  letter-spacing: 0.01em;
+}
+
+/* Responsive adjustments for mobile and tablets */
+@media (max-width: 768px) {
+  .orb-stage-container {
+    padding-bottom: 30px;
+  }
+
+  .orb-viewport {
+    width: 420px;
+    height: 420px;
+  }
+
+  #orb-canvas {
+    width: 420px;
+    height: 420px;
+  }
+
+  .stage-with-field .orb-stage-container,
+  .stage-with-approval .orb-stage-container,
+  .stage-with-result .orb-stage-container {
+    transform: translateY(-90px) scale(0.68);
+  }
+}
+
+@media (max-width: 480px) {
+  .orb-stage-container {
+    padding-bottom: 48px;
+    transform: translateY(-8px);
+  }
+
+  .orb-viewport {
+    width: 320px;
+    height: 320px;
+  }
+
+  #orb-canvas {
+    width: 320px;
+    height: 320px;
+  }
+
+  .orb-state-meta {
+    margin-top: -24px;
+  }
+
+  .stage-with-field .orb-stage-container,
+  .stage-with-approval .orb-stage-container,
+  .stage-with-result .orb-stage-container {
+    transform: translateY(-80px) scale(0.60);
+  }
+}

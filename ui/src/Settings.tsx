@@ -19,8 +19,8 @@ export function Settings({ onWorkspaceSwitched }: SettingsProps) {
   const [activeTab, setActiveTab] = useState<'workspace' | 'providers' | 'general' | 'storage' | 'shortcuts' | 'advanced'>('workspace');
 
   // Provider Settings State
-  const [provider, setProvider] = useState('ollama');
-  const [model, setModel] = useState('qwen3.5:9b');
+  const [provider, setProvider] = useState('');      // '' = nothing chosen yet (never an assumed provider)
+  const [model, setModel] = useState('');
   const [applyToAllAgents, setApplyToAllAgents] = useState(false);
   const [timeout, setTimeoutVal] = useState<number>(120);
   const [apiKey, setApiKey] = useState('');
@@ -68,8 +68,8 @@ export function Settings({ onWorkspaceSwitched }: SettingsProps) {
     fetch(apiUrl('/api/settings/provider'))
       .then(res => res.json())
       .then(data => {
-        setProvider(data.provider || 'ollama');
-        setModel(data.model || 'qwen3.5:9b');
+        setProvider(data.provider || '');
+        setModel(data.model || '');
         setTimeoutVal(data.timeout || (data.provider === 'ollama' ? 120 : 30));
         setStatus(data.configured || {});
       })
@@ -85,6 +85,10 @@ export function Settings({ onWorkspaceSwitched }: SettingsProps) {
   }, [provider]);
 
   const handleSaveProvider = async () => {
+    if (!provider || !model.trim()) {
+      showToast('Choose a provider and a model before saving.', 'error');
+      return;
+    }
     setSaving(true);
     try {
       const res = await fetch(apiUrl('/api/settings/provider'), {
@@ -115,6 +119,10 @@ export function Settings({ onWorkspaceSwitched }: SettingsProps) {
   };
 
   const handleTestProvider = async () => {
+    if (!provider || !model.trim()) {
+      showToast('Choose a provider and a model before testing.', 'error');
+      return;
+    }
     setTesting(true);
     try {
       const res = await fetch(apiUrl('/api/settings/provider/test'), {
@@ -527,27 +535,27 @@ export function Settings({ onWorkspaceSwitched }: SettingsProps) {
                   className="form-select"
                   value={provider}
                   onChange={e => {
-                    const p = e.target.value;
-                    setProvider(p);
-                    if (p === 'ollama') setModel('qwen3.5:9b');
-                    else if (p === 'openai') setModel('gpt-4o');
-                    else if (p === 'anthropic') setModel('claude-3-5-sonnet-20241022');
-                    else if (p === 'gemini') setModel('gemini-2.0-flash');
+                    // The model belongs to the provider: a new provider starts with NO model, the user picks one.
+                    setProvider(e.target.value);
+                    setModel('');
                   }}
                 >
-                  <option value="ollama">Ollama (Local Default)</option>
+                  <option value="">— Choose a provider —</option>
+                  <option value="ollama">Ollama (Local)</option>
                   <option value="openai">OpenAI</option>
                   <option value="anthropic">Anthropic</option>
                   <option value="gemini">Google Gemini</option>
+                  <option value="groq">Groq</option>
                 </select>
               </div>
 
               <div>
                 <ModelSelector
                   provider={provider}
+                  apiKey={apiKey}
                   value={model}
                   teamDefaultModel={model}
-                  onChange={newModel => setModel(newModel || 'qwen3.5:9b')}
+                  onChange={newModel => setModel(newModel || '')}
                   isTeamLevel={true}
                   label={t('model')}
                 />
@@ -562,7 +570,9 @@ export function Settings({ onWorkspaceSwitched }: SettingsProps) {
                   style={{ cursor: 'pointer', width: '16px', height: '16px' }}
                 />
                 <label htmlFor="settings-apply-all-checkbox" style={{ fontSize: '13px', cursor: 'pointer', color: 'hsl(var(--muted-fg))', userSelect: 'none' }}>
-                  {t('applyToAllAgents') || 'Applica al Team e a tutti gli agenti'} ({t('applyToAllAgentsDesc') || 'Rimuovi tutti gli override individuali'})
+                  {language === 'it'
+                    ? "Applica al Team e a tutti gli agenti (Rimuovi tutti gli override individuali e unifica l'intera workforce con questo modello.)"
+                    : "Apply to Team and all agents (Remove all individual agent overrides and unify the entire workforce with this model.)"}
                 </label>
               </div>
 
@@ -578,13 +588,19 @@ export function Settings({ onWorkspaceSwitched }: SettingsProps) {
                 />
               </div>
 
-              {provider !== 'ollama' && (
+              {provider && provider !== 'ollama' && (
                 <div>
                   <label className="form-label">{t('apiKey')}</label>
                   <input
                     type="password"
                     className="form-input"
-                    placeholder={status[provider] ? '•••••••••••••••• (Configured)' : `Enter ${provider.toUpperCase()} API Key`}
+                    placeholder={
+                      status[provider]
+                        ? '•••••••••••••••• (Configured)'
+                        : provider === 'groq'
+                        ? 'Enter GROQ API Key (gsk_...)'
+                        : `Enter ${provider.toUpperCase()} API Key`
+                    }
                     value={apiKey}
                     onChange={e => setApiKey(e.target.value)}
                   />
@@ -595,7 +611,7 @@ export function Settings({ onWorkspaceSwitched }: SettingsProps) {
                 <button
                   className="btn btn-primary"
                   onClick={handleSaveProvider}
-                  disabled={saving}
+                  disabled={saving || !provider || !model.trim()}
                 >
                   {saving ? t('saving') : t('saveSettings')}
                 </button>

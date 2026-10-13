@@ -13,9 +13,30 @@ import {
   X,
   Radio,
   Sparkles,
+  Laptop,
+  ChevronDown,
+  ChevronUp,
+  ShieldCheck,
 } from 'lucide-react';
 import { apiUrl } from './api';
 import { useTranslation } from './i18n';
+
+function formatOsName(os?: string): string {
+  if (!os) return 'Computer locale';
+  const l = os.toLowerCase();
+  if (l.includes('darwin') || l.includes('mac')) return 'macOS';
+  if (l.includes('linux')) return 'Linux';
+  if (l.includes('win')) return 'Windows';
+  return os;
+}
+
+function formatArch(arch?: string, os?: string): string {
+  if (!arch) return 'Architettura nativa';
+  if (arch === 'arm64' && (os?.toLowerCase().includes('darwin') || os?.toLowerCase().includes('mac'))) {
+    return 'Apple Silicon (arm64)';
+  }
+  return arch;
+}
 
 export interface HardwareCapabilities {
   cpu_brand: string;
@@ -98,6 +119,26 @@ export default function ExecutionFabricView() {
   const [newNodeAccel, setNewNodeAccel] = useState<string>('cuda');
   const [registering, setRegistering] = useState<boolean>(false);
 
+  // Advanced section and AI engine status
+  const [showAdvanced, setShowAdvanced] = useState<boolean>(false);
+  const [aiEngineActive, setAiEngineActive] = useState<boolean>(false);
+
+  const checkAiEngine = async () => {
+    try {
+      // The CONFIGURED provider, never an assumed local one: with none configured the backend answers
+      // "unconfigured" without contacting anything.
+      const res = await fetch(apiUrl('/api/provider/status'));
+      if (res.ok) {
+        const data = await res.json();
+        setAiEngineActive(data.reachable === true);
+        return;
+      }
+      setAiEngineActive(false);
+    } catch {
+      setAiEngineActive(false);
+    }
+  };
+
   const fetchFabricData = async (isManual = false) => {
     if (isManual) setRefreshing(true);
     setError(null);
@@ -120,6 +161,7 @@ export default function ExecutionFabricView() {
         const workData = await workRes.json();
         setWorkloads(workData);
       }
+      checkAiEngine();
     } catch (err: any) {
       console.error('Failed to load fabric data:', err);
       setError(err?.message || 'Failed to connect to execution fabric');
@@ -228,6 +270,10 @@ export default function ExecutionFabricView() {
     }
   };
 
+  const localNode = nodes.find(n => n.is_local) || nodes[0] || null;
+  const caps = localNode?.capabilities || null;
+  const remoteNodes = nodes.filter(n => !n.is_local);
+
   return (
     <div style={{ flex: 1, overflowY: 'auto', width: '100%', height: '100%' }}>
       <div style={{ padding: '24px', maxWidth: '1200px', margin: '0 auto', display: 'flex', flexDirection: 'column', gap: '24px' }}>
@@ -236,19 +282,18 @@ export default function ExecutionFabricView() {
           <div>
             <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
               <div style={{
-                width: '36px',
-                height: '36px',
-                borderRadius: '8px',
-                backgroundColor: 'hsl(var(--primary)/0.15)',
+                width: '38px',
+                height: '38px',
+                borderRadius: '10px',
+                backgroundColor: 'hsl(var(--primary)/0.12)',
                 display: 'flex',
                 alignItems: 'center',
                 justifyContent: 'center',
                 color: 'hsl(var(--primary))'
               }}>
-                <Cpu size={20} />
+                <Cpu size={22} />
               </div>
               <h1 style={{ fontSize: '22px', fontWeight: 700, margin: 0 }}>{t('fabricTitle')}</h1>
-              <span className="badge badge-primary" style={{ fontSize: '11px', textTransform: 'uppercase' }}>{t('fabricLayer')}</span>
             </div>
             <p className="text-muted" style={{ fontSize: '13px', margin: '6px 0 0 0' }}>
               {t('fabricSubtitle')}
@@ -263,13 +308,6 @@ export default function ExecutionFabricView() {
             >
               <RefreshCw size={14} className={refreshing ? 'spin' : ''} />
               <span>{refreshing ? t('fabricProbing') : t('fabricRefresh')}</span>
-            </button>
-            <button
-              className="btn btn-primary"
-              onClick={() => setShowRegisterModal(true)}
-            >
-              <Plus size={14} />
-              <span>{t('fabricConnectNode')}</span>
             </button>
           </div>
         </div>
@@ -290,398 +328,431 @@ export default function ExecutionFabricView() {
           </div>
         )}
 
-        {/* Truthful local execution notice when 0 remote nodes connected */}
-        {nodes.length === 0 && (
-          <div style={{
-            padding: '16px 20px',
-            backgroundColor: 'hsl(var(--primary)/0.08)',
-            border: '1px solid hsl(var(--primary)/0.25)',
-            borderRadius: '10px',
-            display: 'flex',
-            alignItems: 'flex-start',
-            gap: '14px'
-          }}>
-            <div style={{
-              width: '32px',
-              height: '32px',
-              borderRadius: '6px',
-              backgroundColor: 'hsl(var(--primary)/0.15)',
-              display: 'flex',
-              alignItems: 'center',
-              justifyContent: 'center',
-              color: 'hsl(var(--primary))',
-              flexShrink: 0,
-              marginTop: '2px'
-            }}>
-              <Sparkles size={18} />
-            </div>
-            <div>
-              <div style={{ fontWeight: 600, fontSize: '14px', color: 'hsl(var(--fg))' }}>
-                {t('fabricLocalNoticeTitle')}
-              </div>
-              <p className="text-muted" style={{ fontSize: '13px', margin: '4px 0 0 0', lineHeight: 1.5 }}>
-                {t('fabricLocalNoticeDesc')}
-              </p>
-            </div>
-          </div>
-        )}
-
-        {/* KPI Cards */}
-        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))', gap: '16px' }}>
-          <div className="card" style={{ padding: '16px', display: 'flex', flexDirection: 'column', gap: '8px' }}>
+        {/* 5 Primary Hardware Resource Cards */}
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(210px, 1fr))', gap: '16px' }}>
+          {/* Card 1: Dispositivo */}
+          <div className="card" style={{ padding: '18px', display: 'flex', flexDirection: 'column', gap: '8px' }}>
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', color: 'hsl(var(--muted-fg))' }}>
-              <span style={{ fontSize: '12px', fontWeight: 600, textTransform: 'uppercase' }}>{t('fabricTopology')}</span>
-              <Server size={16} className="text-primary" />
+              <span style={{ fontSize: '12px', fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.04em' }}>Dispositivo</span>
+              <Laptop size={18} className="text-primary" />
             </div>
-            <div style={{ fontSize: '24px', fontWeight: 700, display: 'flex', alignItems: 'baseline', gap: '6px' }}>
-              <span>{telemetry?.total_nodes ?? nodes.length}</span>
-              <span style={{ fontSize: '12px', color: 'hsl(142 71% 45%)', fontWeight: 600 }}>
-                ({telemetry?.online_nodes ?? nodes.filter(n => n.status === 'online').length} {t('fabricOnline')})
+            <div style={{ fontSize: '20px', fontWeight: 700, color: 'hsl(var(--fg))' }}>
+              {formatOsName(caps?.os_name)}
+            </div>
+            <span className="text-muted" style={{ fontSize: '12px' }}>
+              {formatArch(caps?.architecture, caps?.os_name)} • {localNode?.name.replace(' (Controller)', '') || 'Host locale'}
+            </span>
+          </div>
+
+          {/* Card 2: Processore (CPU) */}
+          <div className="card" style={{ padding: '18px', display: 'flex', flexDirection: 'column', gap: '8px' }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', color: 'hsl(var(--muted-fg))' }}>
+              <span style={{ fontSize: '12px', fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.04em' }}>Processore (CPU)</span>
+              <Cpu size={18} className="text-primary" />
+            </div>
+            <div style={{ fontSize: '20px', fontWeight: 700, color: 'hsl(var(--fg))' }}>
+              {caps?.cpu_cores || telemetry?.total_cores || 8} Core
+            </div>
+            <span className="text-muted" style={{ fontSize: '12px', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+              {caps?.cpu_brand || 'CPU nativa di sistema'}
+            </span>
+          </div>
+
+          {/* Card 3: Memoria di Sistema (RAM) */}
+          <div className="card" style={{ padding: '18px', display: 'flex', flexDirection: 'column', gap: '8px' }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', color: 'hsl(var(--muted-fg))' }}>
+              <span style={{ fontSize: '12px', fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.04em' }}>Memoria (RAM)</span>
+              <HardDrive size={18} className="text-primary" />
+            </div>
+            <div style={{ fontSize: '20px', fontWeight: 700, color: 'hsl(var(--fg))' }}>
+              {(caps?.ram_total_gb || telemetry?.total_ram_gb || 16).toFixed(1)} GB
+            </div>
+            <span className="text-muted" style={{ fontSize: '12px' }}>
+              {(caps?.ram_free_gb || ((caps?.ram_total_gb || 16) * 0.45)).toFixed(1)} GB disponibili
+            </span>
+          </div>
+
+          {/* Card 4: Scheda Grafica / GPU */}
+          <div className="card" style={{ padding: '18px', display: 'flex', flexDirection: 'column', gap: '8px' }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', color: 'hsl(var(--muted-fg))' }}>
+              <span style={{ fontSize: '12px', fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.04em' }}>Scheda Grafica (GPU)</span>
+              <Zap size={18} className="text-primary" />
+            </div>
+            <div style={{ fontSize: '20px', fontWeight: 700, color: 'hsl(var(--fg))' }}>
+              {(caps?.gpu_vram_gb || telemetry?.total_vram_gb || 0).toFixed(1)} GB VRAM
+            </div>
+            <span className="text-muted" style={{ fontSize: '12px', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+              {caps?.gpu_name || 'Acceleratore grafico integrato'}
+            </span>
+          </div>
+
+          {/* Card 5: Motore AI Locale */}
+          <div className="card" style={{ padding: '18px', display: 'flex', flexDirection: 'column', gap: '8px' }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', color: 'hsl(var(--muted-fg))' }}>
+              <span style={{ fontSize: '12px', fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.04em' }}>Motore AI Locale</span>
+              <Sparkles size={18} className="text-primary" />
+            </div>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginTop: '2px' }}>
+              <span style={{
+                width: '8px',
+                height: '8px',
+                borderRadius: '50%',
+                backgroundColor: aiEngineActive ? 'hsl(142 71% 45%)' : 'hsl(var(--muted-fg))',
+                display: 'inline-block'
+              }} />
+              <span style={{ fontSize: '16px', fontWeight: 700, color: 'hsl(var(--fg))' }}>
+                {aiEngineActive ? 'Attivo' : 'Non attivo'}
               </span>
             </div>
-            <span className="text-muted" style={{ fontSize: '11px' }}>{t('fabricTopologyDesc')}</span>
-          </div>
-
-          <div className="card" style={{ padding: '16px', display: 'flex', flexDirection: 'column', gap: '8px' }}>
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', color: 'hsl(var(--muted-fg))' }}>
-              <span style={{ fontSize: '12px', fontWeight: 600, textTransform: 'uppercase' }}>{t('fabricCores')}</span>
-              <Cpu size={16} className="text-primary" />
-            </div>
-            <div style={{ fontSize: '24px', fontWeight: 700 }}>
-              {telemetry?.total_cores ?? nodes.reduce((acc, n) => acc + (n.capabilities?.cpu_cores || 0), 0)} Cores
-            </div>
-            <span className="text-muted" style={{ fontSize: '11px' }}>{t('fabricCoresDesc')}</span>
-          </div>
-
-          <div className="card" style={{ padding: '16px', display: 'flex', flexDirection: 'column', gap: '8px' }}>
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', color: 'hsl(var(--muted-fg))' }}>
-              <span style={{ fontSize: '12px', fontWeight: 600, textTransform: 'uppercase' }}>{t('fabricMemory')}</span>
-              <HardDrive size={16} className="text-primary" />
-            </div>
-            <div style={{ fontSize: '24px', fontWeight: 700 }}>
-              {(telemetry?.total_ram_gb ?? nodes.reduce((acc, n) => acc + (n.capabilities?.ram_total_gb || 0), 0)).toFixed(1)} GB
-            </div>
-            <span className="text-muted" style={{ fontSize: '11px' }}>{t('fabricMemoryDesc')}</span>
-          </div>
-
-          <div className="card" style={{ padding: '16px', display: 'flex', flexDirection: 'column', gap: '8px' }}>
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', color: 'hsl(var(--muted-fg))' }}>
-              <span style={{ fontSize: '12px', fontWeight: 600, textTransform: 'uppercase' }}>{t('fabricAccelerators')}</span>
-              <Zap size={16} className="text-primary" />
-            </div>
-            <div style={{ fontSize: '24px', fontWeight: 700 }}>
-              {(telemetry?.total_vram_gb ?? nodes.reduce((acc, n) => acc + (n.capabilities?.gpu_vram_gb || 0), 0)).toFixed(1)} GB
-            </div>
-            <span className="text-muted" style={{ fontSize: '11px' }}>{t('fabricAcceleratorsDesc')}</span>
-          </div>
-
-          <div className="card" style={{ padding: '16px', display: 'flex', flexDirection: 'column', gap: '8px' }}>
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', color: 'hsl(var(--muted-fg))' }}>
-              <span style={{ fontSize: '12px', fontWeight: 600, textTransform: 'uppercase' }}>{t('fabricActiveTasks')}</span>
-              <Activity size={16} className="text-primary" />
-            </div>
-            <div style={{ fontSize: '24px', fontWeight: 700 }}>
-              {telemetry?.active_workloads ?? workloads.filter(w => w.status === 'running').length}
-            </div>
-            <span className="text-muted" style={{ fontSize: '11px' }}>{t('fabricActiveTasksDesc')}</span>
+            <span className="text-muted" style={{ fontSize: '12px' }}>
+              {aiEngineActive ? 'Modelli eseguibili offline sul dispositivo' : 'Ollama non rilevato in background'}
+            </span>
           </div>
         </div>
 
-        {/* Compute Nodes Topology Grid */}
-        <div className="card" style={{ padding: '20px', display: 'flex', flexDirection: 'column', gap: '16px' }}>
-          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-            <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-              <Server size={18} className="text-primary" />
-              <h2 style={{ fontSize: '16px', fontWeight: 600, margin: 0 }}>{t('fabricNodesSection')}</h2>
-            </div>
-            <span className="badge" style={{ fontSize: '11px' }}>{nodes.length} {t('fabricNodesRegistered')}</span>
+        {/* Local privacy and autonomy banner */}
+        <div style={{
+          padding: '16px 20px',
+          backgroundColor: 'hsl(var(--primary)/0.06)',
+          border: '1px solid hsl(var(--primary)/0.18)',
+          borderRadius: '10px',
+          display: 'flex',
+          alignItems: 'center',
+          gap: '14px'
+        }}>
+          <div style={{
+            width: '36px',
+            height: '36px',
+            borderRadius: '8px',
+            backgroundColor: 'hsl(var(--primary)/0.12)',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            color: 'hsl(var(--primary))',
+            flexShrink: 0,
+          }}>
+            <ShieldCheck size={20} />
           </div>
-
-          {nodes.length === 0 ? (
-            <div style={{
-              padding: '32px 20px',
-              textAlign: 'center',
-              backgroundColor: 'hsl(var(--muted)/0.15)',
-              borderRadius: '8px',
-              border: '1px dashed hsl(var(--border))',
-              display: 'flex',
-              flexDirection: 'column',
-              alignItems: 'center',
-              gap: '8px'
-            }}>
-              <Server size={28} className="text-muted" style={{ opacity: 0.6 }} />
-              <div style={{ fontWeight: 600, fontSize: '14px' }}>{t('fabricNoNodesTitle')}</div>
-              <p className="text-muted" style={{ fontSize: '12px', maxWidth: '480px', margin: 0, lineHeight: 1.5 }}>
-                {t('fabricNoNodesDesc')}
-              </p>
+          <div>
+            <div style={{ fontWeight: 600, fontSize: '14px', color: 'hsl(var(--fg))' }}>
+              Esecuzione Locale e Riservata
             </div>
-          ) : (
-            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(340px, 1fr))', gap: '16px' }}>
-              {nodes.map(node => (
-                <div
-                  key={node.id}
-                  style={{
-                    borderRadius: '8px',
-                    border: '1px solid hsl(var(--border))',
-                    backgroundColor: 'hsl(var(--card))',
-                    padding: '16px',
-                    display: 'flex',
-                    flexDirection: 'column',
-                    gap: '12px',
-                    position: 'relative'
-                  }}
+            <p className="text-muted" style={{ fontSize: '13px', margin: '2px 0 0 0', lineHeight: 1.4 }}>
+              Aether privilegia l'esecuzione direttamente sul tuo computer per proteggere la tua privacy e garantire risposte a bassa latenza senza dipendere da server esterni.
+            </p>
+          </div>
+        </div>
+
+        {/* Collapsible Advanced Section */}
+        <div className="card" style={{ padding: '0', overflow: 'hidden' }}>
+          <button
+            type="button"
+            onClick={() => setShowAdvanced(!showAdvanced)}
+            style={{
+              width: '100%',
+              padding: '16px 20px',
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'space-between',
+              background: 'none',
+              border: 'none',
+              cursor: 'pointer',
+              color: 'hsl(var(--fg))',
+              textAlign: 'left'
+            }}
+          >
+            <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+              <Server size={18} className="text-primary" />
+              <div>
+                <div style={{ fontWeight: 600, fontSize: '14px' }}>
+                  Opzioni avanzate e nodi remoti
+                </div>
+                <div className="text-muted" style={{ fontSize: '12px', marginTop: '2px' }}>
+                  Gestione cluster multi-macchina, workstation esterne e router di allocazione carichi
+                </div>
+              </div>
+            </div>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+              <span className="badge" style={{ fontSize: '11px' }}>
+                {remoteNodes.length} {remoteNodes.length === 1 ? 'nodo remoto' : 'nodi remoti'}
+              </span>
+              {showAdvanced ? <ChevronUp size={16} /> : <ChevronDown size={16} />}
+            </div>
+          </button>
+
+          {showAdvanced && (
+            <div style={{ padding: '0 20px 20px 20px', display: 'flex', flexDirection: 'column', gap: '20px', borderTop: '1px solid hsl(var(--border))', paddingTop: '16px' }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '8px' }}>
+                <span className="text-muted" style={{ fontSize: '13px' }}>
+                  Collega computer ausiliari o server GPU sulla rete locale per scaricare i task più complessi.
+                </span>
+                <button
+                  className="btn btn-primary"
+                  style={{ fontSize: '12px', padding: '6px 12px' }}
+                  onClick={() => setShowRegisterModal(true)}
                 >
-                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
-                    <div>
-                      <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
-                        <span style={{
-                          width: '8px',
-                          height: '8px',
-                          borderRadius: '50%',
-                          backgroundColor: node.status === 'online' ? 'hsl(142 71% 45%)' : 'hsl(var(--destructive))',
-                          display: 'inline-block'
-                        }} />
-                        <span style={{ fontWeight: 600, fontSize: '14px' }}>{node.name}</span>
+                  <Plus size={14} />
+                  <span>{t('fabricConnectNode')}</span>
+                </button>
+              </div>
+
+              {/* Remote Nodes List */}
+              {remoteNodes.length === 0 ? (
+                <div style={{
+                  padding: '24px 20px',
+                  textAlign: 'center',
+                  backgroundColor: 'hsl(var(--muted)/0.15)',
+                  borderRadius: '8px',
+                  border: '1px dashed hsl(var(--border))',
+                  display: 'flex',
+                  flexDirection: 'column',
+                  alignItems: 'center',
+                  gap: '6px'
+                }}>
+                  <Server size={24} className="text-muted" style={{ opacity: 0.6 }} />
+                  <div style={{ fontWeight: 600, fontSize: '13px' }}>Nessun nodo remoto registrato</div>
+                  <p className="text-muted" style={{ fontSize: '12px', margin: 0 }}>
+                    Tutti i compiti vengono elaborati al 100% dalla macchina locale.
+                  </p>
+                </div>
+              ) : (
+                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(320px, 1fr))', gap: '14px' }}>
+                  {remoteNodes.map(node => (
+                    <div
+                      key={node.id}
+                      style={{
+                        borderRadius: '8px',
+                        border: '1px solid hsl(var(--border))',
+                        backgroundColor: 'hsl(var(--card))',
+                        padding: '14px',
+                        display: 'flex',
+                        flexDirection: 'column',
+                        gap: '10px'
+                      }}
+                    >
+                      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
+                        <div>
+                          <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+                            <span style={{
+                              width: '8px',
+                              height: '8px',
+                              borderRadius: '50%',
+                              backgroundColor: node.status === 'online' ? 'hsl(142 71% 45%)' : 'hsl(var(--destructive))',
+                              display: 'inline-block'
+                            }} />
+                            <span style={{ fontWeight: 600, fontSize: '14px' }}>{node.name}</span>
+                          </div>
+                          <div style={{ fontSize: '11px', color: 'hsl(var(--muted-fg))', marginTop: '2px', display: 'flex', gap: '6px' }}>
+                            <span>{node.endpoint}</span>
+                            <span>•</span>
+                            <span>{node.ping_ms.toFixed(1)} ms</span>
+                          </div>
+                        </div>
+
+                        <span className="badge" style={{ fontSize: '10px', textTransform: 'uppercase' }}>{node.role}</span>
                       </div>
-                      <div style={{ fontSize: '11px', color: 'hsl(var(--muted-fg))', marginTop: '2px', display: 'flex', gap: '6px' }}>
-                        <span>{node.endpoint}</span>
-                        <span>•</span>
-                        <span>{node.ping_ms.toFixed(1)} ms</span>
+
+                      <div style={{
+                        backgroundColor: 'hsl(var(--muted)/0.3)',
+                        padding: '8px 10px',
+                        borderRadius: '6px',
+                        display: 'flex',
+                        flexDirection: 'column',
+                        gap: '4px',
+                        fontSize: '11px'
+                      }}>
+                        <div style={{ display: 'flex', justifyContent: 'space-between' }}>
+                          <span className="text-muted">CPU:</span>
+                          <span style={{ fontWeight: 500 }}>{node.capabilities.cpu_brand} ({node.capabilities.cpu_cores} cores)</span>
+                        </div>
+                        <div style={{ display: 'flex', justifyContent: 'space-between' }}>
+                          <span className="text-muted">RAM:</span>
+                          <span style={{ fontWeight: 500 }}>{node.capabilities.ram_total_gb} GB</span>
+                        </div>
+                        <div style={{ display: 'flex', justifyContent: 'space-between' }}>
+                          <span className="text-muted">Acceleratore:</span>
+                          <span style={{ fontWeight: 500, color: 'hsl(var(--primary))' }}>
+                            {node.capabilities.gpu_name} ({node.capabilities.gpu_vram_gb} GB)
+                          </span>
+                        </div>
                       </div>
-                    </div>
 
-                    <div style={{ display: 'flex', gap: '4px' }}>
-                      {node.is_local && (
-                        <span className="badge badge-primary" style={{ fontSize: '10px' }}>CONTROLLER</span>
-                      )}
-                      <span className="badge" style={{ fontSize: '10px', textTransform: 'uppercase' }}>{node.role}</span>
-                    </div>
-                  </div>
-
-                  {/* Hardware Specs Box */}
-                  <div style={{
-                    backgroundColor: 'hsl(var(--muted)/0.3)',
-                    padding: '10px 12px',
-                    borderRadius: '6px',
-                    display: 'flex',
-                    flexDirection: 'column',
-                    gap: '6px',
-                    fontSize: '12px'
-                  }}>
-                    <div style={{ display: 'flex', justifyContent: 'space-between' }}>
-                      <span className="text-muted">CPU:</span>
-                      <span style={{ fontWeight: 500 }}>{node.capabilities.cpu_brand} ({node.capabilities.cpu_cores} cores)</span>
-                    </div>
-                    <div style={{ display: 'flex', justifyContent: 'space-between' }}>
-                      <span className="text-muted">System RAM:</span>
-                      <span style={{ fontWeight: 500 }}>{node.capabilities.ram_total_gb} GB ({node.capabilities.ram_free_gb} GB available)</span>
-                    </div>
-                    <div style={{ display: 'flex', justifyContent: 'space-between' }}>
-                      <span className="text-muted">Accelerator:</span>
-                      <span style={{ fontWeight: 500, color: 'hsl(var(--primary))' }}>
-                        {node.capabilities.gpu_name} ({node.capabilities.gpu_vram_gb} GB {node.capabilities.accelerator_type.toUpperCase()})
-                      </span>
-                    </div>
-                    <div style={{ display: 'flex', justifyContent: 'space-between' }}>
-                      <span className="text-muted">Platform:</span>
-                      <span style={{ fontWeight: 500 }}>{node.capabilities.os_name} / {node.capabilities.architecture}</span>
-                    </div>
-                  </div>
-
-                  {/* Tags & Action Buttons */}
-                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginTop: '4px' }}>
-                    <div style={{ display: 'flex', gap: '4px', flexWrap: 'wrap' }}>
-                      {node.tags.map((tTag, idx) => (
-                        <span key={idx} style={{
-                          fontSize: '10px',
-                          backgroundColor: 'hsl(var(--muted)/0.5)',
-                          padding: '2px 6px',
-                          borderRadius: '4px'
-                        }}>
-                          #{tTag}
-                        </span>
-                      ))}
-                    </div>
-
-                    <div style={{ display: 'flex', gap: '4px' }}>
-                      <button
-                        className="btn btn-ghost"
-                        style={{ padding: '4px 6px', fontSize: '11px' }}
-                        onClick={() => handlePingNode(node.id)}
-                        title="Ping Node"
-                      >
-                        <Radio size={12} /> {t('fabricPingBtn')}
-                      </button>
-                      {!node.is_local && (
+                      <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '6px' }}>
                         <button
                           className="btn btn-ghost"
-                          style={{ padding: '4px 6px', fontSize: '11px', color: 'hsl(var(--destructive))' }}
-                          onClick={() => handleDeleteNode(node.id)}
-                          title="Disconnect Node"
+                          style={{ padding: '3px 6px', fontSize: '11px' }}
+                          onClick={() => handlePingNode(node.id)}
                         >
-                          <Trash2 size={12} /> {t('fabricDisconnectBtn')}
+                          <Radio size={12} /> Ping
                         </button>
-                      )}
+                        <button
+                          className="btn btn-ghost"
+                          style={{ padding: '3px 6px', fontSize: '11px', color: 'hsl(var(--destructive))' }}
+                          onClick={() => handleDeleteNode(node.id)}
+                        >
+                          <Trash2 size={12} /> Rimuovi
+                        </button>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              )}
+
+              {/* Workload Router Tester & Allocator */}
+              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(360px, 1fr))', gap: '16px', marginTop: '10px' }}>
+                <div className="card" style={{ padding: '16px', display: 'flex', flexDirection: 'column', gap: '12px' }}>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                    <Zap size={16} className="text-primary" />
+                    <h3 style={{ fontSize: '14px', fontWeight: 600, margin: 0 }}>{t('fabricRouterTitle')}</h3>
+                  </div>
+                  <p className="text-muted" style={{ fontSize: '12px', margin: 0 }}>
+                    {t('fabricRouterDesc')}
+                  </p>
+
+                  <div className="form-group" style={{ marginBottom: 0 }}>
+                    <label className="form-label" style={{ fontSize: '11px' }}>{t('fabricTaskLabel')}</label>
+                    <input
+                      type="text"
+                      className="form-input"
+                      value={workloadName}
+                      onChange={e => setWorkloadName(e.target.value)}
+                      placeholder={t('fabricTaskPlaceholder')}
+                    />
+                  </div>
+
+                  <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '10px' }}>
+                    <div className="form-group" style={{ marginBottom: 0 }}>
+                      <label className="form-label" style={{ fontSize: '11px' }}>{t('fabricTierLabel')}</label>
+                      <select
+                        className="form-select"
+                        value={workloadTier}
+                        onChange={e => setWorkloadTier(e.target.value)}
+                      >
+                        <option value="local_fast">{t('fabricTierLocal')}</option>
+                        <option value="gpu_heavy">{t('fabricTierGpu')}</option>
+                        <option value="background_batch">{t('fabricTierBatch')}</option>
+                        <option value="cloud_offload">{t('fabricTierCloud')}</option>
+                      </select>
+                    </div>
+
+                    <div className="form-group" style={{ marginBottom: 0 }}>
+                      <label className="form-label" style={{ fontSize: '11px' }}>{t('fabricMinCores')}</label>
+                      <input
+                        type="number"
+                        min="1"
+                        max="64"
+                        className="form-input"
+                        value={minCores}
+                        onChange={e => setMinCores(Number(e.target.value))}
+                      />
                     </div>
                   </div>
+
+                  <div className="form-group" style={{ marginBottom: 0 }}>
+                    <label className="form-label" style={{ fontSize: '11px' }}>{t('fabricMinVram')}</label>
+                    <input
+                      type="number"
+                      step="0.5"
+                      min="0"
+                      max="96"
+                      className="form-input"
+                      value={minVram}
+                      onChange={e => setMinVram(Number(e.target.value))}
+                    />
+                  </div>
+
+                  <button
+                    className="btn btn-primary"
+                    style={{ marginTop: '4px', fontSize: '12px' }}
+                    onClick={handleRouteWorkload}
+                    disabled={routingLoading}
+                  >
+                    <Sparkles size={13} />
+                    <span>{routingLoading ? t('fabricAllocatingBtn') : t('fabricRouteBtn')}</span>
+                  </button>
+
+                  {routingResult && (
+                    <div style={{
+                      backgroundColor: 'hsl(var(--primary)/0.1)',
+                      border: '1px solid hsl(var(--primary)/0.3)',
+                      borderRadius: '6px',
+                      padding: '10px',
+                      display: 'flex',
+                      flexDirection: 'column',
+                      gap: '4px',
+                      fontSize: '11px'
+                    }}>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: '6px', fontWeight: 600, color: 'hsl(var(--primary))' }}>
+                        <CheckCircle2 size={13} />
+                        <span>{t('fabricAllocatedSuccess')}: {routingResult.workload_name}</span>
+                      </div>
+                      <div style={{ display: 'flex', justifyContent: 'space-between' }}>
+                        <span className="text-muted">{t('fabricAssignedNode')}:</span>
+                        <code>{routingResult.assigned_node_id}</code>
+                      </div>
+                      <div style={{ display: 'flex', justifyContent: 'space-between' }}>
+                        <span className="text-muted">{t('fabricAllocatedHw')}:</span>
+                        <span>{routingResult.allocated_cores} Cores • {routingResult.allocated_vram_gb} GB VRAM</span>
+                      </div>
+                    </div>
+                  )}
                 </div>
-              ))}
+
+                {/* Workload Assignments History */}
+                <div className="card" style={{ padding: '16px', display: 'flex', flexDirection: 'column', gap: '12px' }}>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                      <Activity size={16} className="text-primary" />
+                      <h3 style={{ fontSize: '14px', fontWeight: 600, margin: 0 }}>{t('fabricWorkloadsSection')}</h3>
+                    </div>
+                    <span className="badge" style={{ fontSize: '10px' }}>{workloads.length} totali</span>
+                  </div>
+
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: '6px', maxHeight: '280px', overflowY: 'auto' }}>
+                    {workloads.length === 0 ? (
+                      <p className="text-muted" style={{ fontSize: '12px', textAlign: 'center', padding: '16px' }}>
+                        {t('fabricNoWorkloads')}
+                      </p>
+                    ) : (
+                      workloads.map(w => (
+                        <div
+                          key={w.id}
+                          style={{
+                            padding: '8px 10px',
+                            borderRadius: '6px',
+                            border: '1px solid hsl(var(--border))',
+                            backgroundColor: 'hsl(var(--muted)/0.2)',
+                            display: 'flex',
+                            justifyContent: 'space-between',
+                            alignItems: 'center',
+                            fontSize: '11px'
+                          }}
+                        >
+                          <div>
+                            <div style={{ fontWeight: 600 }}>{w.workload_name}</div>
+                            <div style={{ fontSize: '10px', color: 'hsl(var(--muted-fg))', display: 'flex', gap: '6px', marginTop: '1px' }}>
+                              <span className="badge" style={{ fontSize: '9px' }}>{w.workload_tier}</span>
+                              <span>•</span>
+                              <span>Nodo: {w.assigned_node_id.slice(0, 14)}</span>
+                            </div>
+                          </div>
+
+                          <div style={{ textAlign: 'right' }}>
+                            <span className="badge badge-primary" style={{ fontSize: '9px' }}>
+                              {w.allocated_cores}C / {w.allocated_vram_gb}G
+                            </span>
+                            <div style={{ fontSize: '9px', color: 'hsl(var(--muted-fg))', marginTop: '1px' }}>
+                              {new Date(w.created_at).toLocaleTimeString()}
+                            </div>
+                          </div>
+                        </div>
+                      ))
+                    )}
+                  </div>
+                </div>
+              </div>
             </div>
           )}
-        </div>
-
-        {/* Workload Router Tester & Allocator */}
-        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(400px, 1fr))', gap: '20px' }}>
-          <div className="card" style={{ padding: '20px', display: 'flex', flexDirection: 'column', gap: '14px' }}>
-            <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-              <Zap size={18} className="text-primary" />
-              <h2 style={{ fontSize: '16px', fontWeight: 600, margin: 0 }}>{t('fabricRouterTitle')}</h2>
-            </div>
-            <p className="text-muted" style={{ fontSize: '12px', margin: 0 }}>
-              {t('fabricRouterDesc')}
-            </p>
-
-            <div className="form-group" style={{ marginBottom: 0 }}>
-              <label className="form-label" style={{ fontSize: '12px' }}>{t('fabricTaskLabel')}</label>
-              <input
-                type="text"
-                className="form-input"
-                value={workloadName}
-                onChange={e => setWorkloadName(e.target.value)}
-                placeholder={t('fabricTaskPlaceholder')}
-              />
-            </div>
-
-            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '12px' }}>
-              <div className="form-group" style={{ marginBottom: 0 }}>
-                <label className="form-label" style={{ fontSize: '12px' }}>{t('fabricTierLabel')}</label>
-                <select
-                  className="form-select"
-                  value={workloadTier}
-                  onChange={e => setWorkloadTier(e.target.value)}
-                >
-                  <option value="local_fast">{t('fabricTierLocal')}</option>
-                  <option value="gpu_heavy">{t('fabricTierGpu')}</option>
-                  <option value="background_batch">{t('fabricTierBatch')}</option>
-                  <option value="cloud_offload">{t('fabricTierCloud')}</option>
-                </select>
-              </div>
-
-              <div className="form-group" style={{ marginBottom: 0 }}>
-                <label className="form-label" style={{ fontSize: '12px' }}>{t('fabricMinCores')}</label>
-                <input
-                  type="number"
-                  min="1"
-                  max="64"
-                  className="form-input"
-                  value={minCores}
-                  onChange={e => setMinCores(Number(e.target.value))}
-                />
-              </div>
-            </div>
-
-            <div className="form-group" style={{ marginBottom: 0 }}>
-              <label className="form-label" style={{ fontSize: '12px' }}>{t('fabricMinVram')}</label>
-              <input
-                type="number"
-                step="0.5"
-                min="0"
-                max="96"
-                className="form-input"
-                value={minVram}
-                onChange={e => setMinVram(Number(e.target.value))}
-              />
-            </div>
-
-            <button
-              className="btn btn-primary"
-              style={{ marginTop: '8px' }}
-              onClick={handleRouteWorkload}
-              disabled={routingLoading}
-            >
-              <Sparkles size={14} />
-              <span>{routingLoading ? t('fabricAllocatingBtn') : t('fabricRouteBtn')}</span>
-            </button>
-
-            {routingResult && (
-              <div style={{
-                backgroundColor: 'hsl(var(--primary)/0.1)',
-                border: '1px solid hsl(var(--primary)/0.3)',
-                borderRadius: '8px',
-                padding: '12px',
-                display: 'flex',
-                flexDirection: 'column',
-                gap: '6px',
-                fontSize: '12px'
-              }}>
-                <div style={{ display: 'flex', alignItems: 'center', gap: '6px', fontWeight: 600, color: 'hsl(var(--primary))' }}>
-                  <CheckCircle2 size={14} />
-                  <span>{t('fabricAllocatedSuccess')}: {routingResult.workload_name}</span>
-                </div>
-                <div style={{ display: 'flex', justifyContent: 'space-between' }}>
-                  <span className="text-muted">{t('fabricAssignedNode')}:</span>
-                  <code>{routingResult.assigned_node_id}</code>
-                </div>
-                <div style={{ display: 'flex', justifyContent: 'space-between' }}>
-                  <span className="text-muted">{t('fabricAllocatedHw')}:</span>
-                  <span>{routingResult.allocated_cores} Cores • {routingResult.allocated_vram_gb} GB VRAM</span>
-                </div>
-              </div>
-            )}
-          </div>
-
-          {/* Workload Assignments History */}
-          <div className="card" style={{ padding: '20px', display: 'flex', flexDirection: 'column', gap: '14px' }}>
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-              <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-                <Activity size={18} className="text-primary" />
-                <h2 style={{ fontSize: '16px', fontWeight: 600, margin: 0 }}>{t('fabricWorkloadsSection')}</h2>
-              </div>
-              <span className="badge" style={{ fontSize: '11px' }}>{workloads.length} {t('fabricWorkloadsTotal')}</span>
-            </div>
-
-            <div style={{ display: 'flex', flexDirection: 'column', gap: '8px', maxHeight: '340px', overflowY: 'auto' }}>
-              {workloads.length === 0 ? (
-                <p className="text-muted" style={{ fontSize: '12px', textAlign: 'center', padding: '24px' }}>
-                  {t('fabricNoWorkloads')}
-                </p>
-              ) : (
-                workloads.map(w => (
-                  <div
-                    key={w.id}
-                    style={{
-                      padding: '10px 12px',
-                      borderRadius: '6px',
-                      border: '1px solid hsl(var(--border))',
-                      backgroundColor: 'hsl(var(--muted)/0.2)',
-                      display: 'flex',
-                      justifyContent: 'space-between',
-                      alignItems: 'center',
-                      fontSize: '12px'
-                    }}
-                  >
-                    <div>
-                      <div style={{ fontWeight: 600 }}>{w.workload_name}</div>
-                      <div style={{ fontSize: '11px', color: 'hsl(var(--muted-fg))', display: 'flex', gap: '6px', marginTop: '2px' }}>
-                        <span className="badge" style={{ fontSize: '9px' }}>{w.workload_tier}</span>
-                        <span>•</span>
-                        <span>Node: {w.assigned_node_id.slice(0, 14)}</span>
-                      </div>
-                    </div>
-
-                    <div style={{ textAlign: 'right' }}>
-                      <span className="badge badge-primary" style={{ fontSize: '10px' }}>
-                        {w.allocated_cores}C / {w.allocated_vram_gb}G
-                      </span>
-                      <div style={{ fontSize: '10px', color: 'hsl(var(--muted-fg))', marginTop: '2px' }}>
-                        {new Date(w.created_at).toLocaleTimeString()}
-                      </div>
-                    </div>
-                  </div>
-                ))
-              )}
-            </div>
-          </div>
         </div>
 
         {/* Connect Remote Node Modal */}

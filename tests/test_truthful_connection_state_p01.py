@@ -288,13 +288,13 @@ def test_7_action_executor_truthful_gate_and_operation_auditing(temp_dirs, accep
     )
 
     # 1. Unconfigured -> Fails cleanly with RuntimeError
-    exec1 = executor.execute("slack.send_message", "ws-test", {"channel": "#general", "text": "Hi"}, auto_approve=True, authority=auth)
+    exec1 = executor.execute("slack.send_message", ws.id, {"channel": "#general", "text": "Hi"}, auto_approve=True, authority=auth)
     assert exec1.status == ActionExecutionStatus.FAILED
     assert "not configured" in exec1.error_message.lower()
 
     # 2. Configured and valid connector run -> succeeds and records operation
     conn_svc.connect(
-        workspace_id="ws-test",
+        workspace_id=ws.id,
         provider="slack",
         account_name="Slack Team",
         auth_metadata={"webhook_url": "https://hooks.slack.com/services/T00/B00/XXXX"},
@@ -309,11 +309,11 @@ def test_7_action_executor_truthful_gate_and_operation_auditing(temp_dirs, accep
 
     with patch("urllib.request.urlopen", return_value=mock_resp):
         _, auth2 = accepted_authority_factory(ws, title="Slack Send 2")
-        exec2 = executor.execute("slack.send_message", "ws-test", {"channel": "#general", "text": "Hi"}, auto_approve=True, authority=auth2)
+        exec2 = executor.execute("slack.send_message", ws.id, {"channel": "#general", "text": "Hi"}, auto_approve=True, authority=auth2)
         assert exec2.status == ActionExecutionStatus.SUCCESS
 
         # Assert connection is now marked VERIFIED with last_successful_operation
-        conn_after = conn_svc.get_connection("ws-test", "slack")
+        conn_after = conn_svc.get_connection(ws.id, "slack")
         assert conn_after is not None
         assert conn_after.status == ConnectionStatus.VERIFIED
         assert conn_after.verification_method == "operation"

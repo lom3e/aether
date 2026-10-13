@@ -8,7 +8,7 @@ import logging
 from typing import Any
 
 from aether.actions.models import ActionPermissionLevel
-from aether.policy.models import AutopilotTier, WorkspacePolicy
+from aether.policy.models import AutopilotTier, PolicyDecision, PolicyOutcome, WorkspacePolicy
 from aether.policy.store import PolicyStore
 
 logger = logging.getLogger(__name__)
@@ -67,49 +67,88 @@ class PolicyService:
         estimated_cost: float = 0.0,
     ) -> tuple[bool, str]:
         """
-        Evaluates whether an action can execute automatically without human prompt.
-        Returns:
-            (can_auto_execute: bool, reason: str)
+        Backwards-compatible tuple form of :meth:`evaluate_action_decision`.
+        Returns (can_auto_execute, reason). Callers that must tell a hard denial apart from
+        "needs approval" must use ``evaluate_action_decision`` and its ``code``/``outcome``.
         """
+        decision = self.evaluate_action_decision(
+            workspace_id=workspace_id,
+            action_id=action_id,
+            permission_level=permission_level,
+            requires_confirmation=requires_confirmation,
+            auto_approve_requested=auto_approve_requested,
+            estimated_cost=estimated_cost,
+        )
+        return decision.can_auto_execute, decision.reason
+
+    def evaluate_action_decision(
+        self,
+        workspace_id: str,
+        action_id: str,
+        permission_level: ActionPermissionLevel,
+        requires_confirmation: bool,
+        auto_approve_requested: bool,
+        estimated_cost: float = 0.0,
+    ) -> PolicyDecision:
+        """Evaluates an action against the workspace policy and returns a typed decision."""
         policy = self.get_policy(workspace_id)
 
-        # 1. Prohibited Actions Check
         if action_id in policy.prohibited_actions:
-            return False, f"Action '{action_id}' is strictly prohibited by workspace policy."
+            return PolicyDecision(
+                PolicyOutcome.DENY, "ACTION_PROHIBITED",
+                f"Action '{action_id}' is strictly prohibited by workspace policy.",
+            )
 
-        # 2. Monthly Spending Cap Check
         if estimated_cost > 0 and (policy.current_monthly_spend + estimated_cost > policy.monthly_spending_cap):
-            return (
-                False,
+            return PolicyDecision(
+                PolicyOutcome.DENY, "SPENDING_CAP_EXCEEDED",
                 f"Action exceeds monthly spending cap ({policy.monthly_spending_cap:.2f} EUR). "
                 f"Current spend: {policy.current_monthly_spend:.2f} EUR.",
             )
 
-        # 3. Autopilot Tier Evaluation
         tier = policy.autopilot_tier
 
         if tier == AutopilotTier.TIER_0_MANUAL:
-            return False, "Autopilot Tier 0 (Manual): all actions require explicit operator confirmation."
+            return PolicyDecision(
+                PolicyOutcome.NEEDS_APPROVAL, "TIER_MANUAL",
+                "Autopilot Tier 0 (Manual): all actions require explicit operator confirmation.",
+            )
 
         if tier == AutopilotTier.TIER_1_ASSISTED:
             if permission_level != ActionPermissionLevel.READ_ONLY:
-                return False, f"Autopilot Tier 1 (Assisted): mutation actions ({permission_level.value}) require confirmation."
-            return True, "Auto-approved read-only query under Tier 1 (Assisted)."
+                return PolicyDecision(
+                    PolicyOutcome.NEEDS_APPROVAL, "TIER_ASSISTED_MUTATION",
+                    f"Autopilot Tier 1 (Assisted): mutation actions ({permission_level.value}) require confirmation.",
+                )
+            return PolicyDecision(PolicyOutcome.ALLOW, "AUTO_READ_ONLY", "Auto-approved read-only query under Tier 1 (Assisted).")
 
         if tier == AutopilotTier.TIER_2_SUPERVISED:
-            # Sensitive mutations always require confirmation
             if permission_level == ActionPermissionLevel.SENSITIVE_MUTATION:
-                return False, "Autopilot Tier 2: sensitive state mutations require human clearance."
-            # External mutations requiring confirmation
+                return PolicyDecision(
+                    PolicyOutcome.NEEDS_APPROVAL, "SENSITIVE_REQUIRES_HUMAN",
+                    "Autopilot Tier 2: sensitive state mutations require human clearance.",
+                )
             if permission_level == ActionPermissionLevel.EXTERNAL_MUTATION and requires_confirmation:
-                return False, "Autopilot Tier 2 (Supervised): external mutations require operator confirmation."
+                return PolicyDecision(
+                    PolicyOutcome.NEEDS_APPROVAL, "TIER_SUPERVISED_EXTERNAL",
+                    "Autopilot Tier 2 (Supervised): external mutations require operator confirmation.",
+                )
             if requires_confirmation and not auto_approve_requested:
-                return False, "Action requires safety confirmation under Supervised tier."
-            return True, "Approved under Tier 2 (Supervised)."
+                return PolicyDecision(
+                    PolicyOutcome.NEEDS_APPROVAL, "CONFIRMATION_REQUIRED",
+                    "Action requires safety confirmation under Supervised tier.",
+                )
+            return PolicyDecision(PolicyOutcome.ALLOW, "AUTO_SUPERVISED", "Approved under Tier 2 (Supervised).")
 
         if tier == AutopilotTier.TIER_3_AUTONOMOUS:
             if permission_level == ActionPermissionLevel.SENSITIVE_MUTATION:
-                return False, "Sensitive mutations cannot be bypassed even in Tier 3 (Autonomous)."
-            return True, "Auto-approved under Tier 3 (Autonomous) within budget limits."
+                return PolicyDecision(
+                    PolicyOutcome.NEEDS_APPROVAL, "SENSITIVE_REQUIRES_HUMAN",
+                    "Sensitive mutations cannot be bypassed even in Tier 3 (Autonomous).",
+                )
+            return PolicyDecision(
+                PolicyOutcome.ALLOW, "AUTO_AUTONOMOUS",
+                "Auto-approved under Tier 3 (Autonomous) within budget limits.",
+            )
 
-        return False, "Action held for confirmation by default policy."
+        return PolicyDecision(PolicyOutcome.NEEDS_APPROVAL, "DEFAULT_HOLD", "Action held for confirmation by default policy.")

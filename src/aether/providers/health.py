@@ -146,7 +146,7 @@ class ProviderHealthChecker:
         if provider == "ollama":
             return self._check_ollama(model, base_url, timeout)
 
-        if provider in ("openai", "anthropic", "gemini"):
+        if provider in ("openai", "anthropic", "gemini", "groq"):
             return self._check_cloud_provider(provider, model, api_key, base_url, timeout)
 
         return ProviderHealthStatus(
@@ -259,10 +259,22 @@ class ProviderHealthChecker:
                     },
                 )
             elif provider == "gemini":
-                endpoint = f"https://generativelanguage.googleapis.com/v1beta/models?key={effective_key.strip()}"
+                endpoint = "https://generativelanguage.googleapis.com/v1beta/models"
                 req = urllib.request.Request(
                     endpoint,
-                    headers={"User-Agent": "Aether-HealthCheck"},
+                    headers={
+                        "x-goog-api-key": effective_key.strip(),
+                        "User-Agent": "Aether-HealthCheck",
+                    },
+                )
+            elif provider == "groq":
+                endpoint = (base_url or "https://api.groq.com/openai/v1").rstrip("/") + "/models"
+                req = urllib.request.Request(
+                    endpoint,
+                    headers={
+                        "Authorization": f"Bearer {effective_key.strip()}",
+                        "User-Agent": "Aether-HealthCheck",
+                    },
                 )
             else:
                 return ProviderHealthStatus(
@@ -274,8 +286,25 @@ class ProviderHealthChecker:
                 )
 
             with urllib.request.urlopen(req, timeout=timeout) as resp:
-                _ = resp.read()
+                body = resp.read()
                 latency_ms = (time.perf_counter() - start) * 1000.0
+
+            if provider == "groq" and model:
+                # "Reachable with a valid key" is not "usable": the configured model must exist for this account.
+                try:
+                    import json as _json
+                    ids = [m.get("id") for m in _json.loads(body).get("data", []) if isinstance(m, dict)]
+                except Exception:
+                    ids = []
+                if ids and model not in ids:
+                    return ProviderHealthStatus(
+                        provider=provider,
+                        model=model,
+                        status="error",
+                        reachable=True,
+                        latency_ms=latency_ms,
+                        error=f"Groq is reachable and the key is valid, but model '{model}' is not available for this account.",
+                    )
 
             return ProviderHealthStatus(
                 provider=provider,

@@ -1,4 +1,5 @@
 import os
+import re
 import asyncio
 from contextlib import asynccontextmanager
 from pathlib import Path
@@ -53,6 +54,29 @@ app.add_middleware(
 )
 
 
+_SENSITIVE_PATH_PATTERNS = (
+    re.compile(r"^/api/personal/coding/interact/?$"),
+    re.compile(r"^/api/actions/execute/?$"),
+    re.compile(r"^/api/actions/executions/[^/]+/(approve|reject)/?$"),
+    re.compile(r"^/api/approvals/[^/]+/(approve|reject)/?$"),
+    re.compile(r"^/api/personal/proposals/[^/]+/(accept|revoke)/?$"),
+    re.compile(r"^/api/personal/coding/runs/[^/]+/(tests|release)/?$"),
+)
+_LOOPBACK_HOSTS = {"127.0.0.1", "::1", "localhost", "testclient"}
+
+
+def _is_sensitive_path(path: str) -> bool:
+    return any(p.match(path) for p in _SENSITIVE_PATH_PATTERNS)
+
+
+def _insecure_local_dev_allowed(request: Request) -> bool:
+    """Explicit opt-in (env flag) AND a loopback peer: the only unauthenticated mode for sensitive routes."""
+    if os.environ.get("AETHER_INSECURE_LOCAL_DEV") != "1":
+        return False
+    host = request.client.host if request.client else None
+    return host in _LOOPBACK_HOSTS
+
+
 @app.middleware("http")
 async def session_token_middleware(request: Request, call_next):
     # Allow CORS preflight requests without authentication
@@ -60,6 +84,15 @@ async def session_token_middleware(request: Request, call_next):
         return await call_next(request)
 
     session_token = getattr(request.app.state, "session_token", None) or os.environ.get("AETHER_SESSION_TOKEN")
+    if not session_token and _is_sensitive_path(request.url.path) and not _insecure_local_dev_allowed(request):
+        # Fail closed: approvals and interactions with coding agents never run unauthenticated by default.
+        return JSONResponse(
+            status_code=401,
+            content={
+                "detail": "Unauthorized: no session token is configured. Set AETHER_SESSION_TOKEN, or for local "
+                          "development only set AETHER_INSECURE_LOCAL_DEV=1 and call from a loopback address."
+            },
+        )
     if session_token:
         path = request.url.path
         exempt_paths = {
@@ -103,9 +136,11 @@ async def session_token_middleware(request: Request, call_next):
 # Inizializza Workspace e lo inietta nell'app state
 async def startup_event():
     configured_root = os.environ.get("AETHER_WORKSPACE")
+    workspace_source = "AETHER_WORKSPACE" if configured_root else None
     if not configured_root:
         if (Path.cwd() / "aether.yaml").exists():
             configured_root = str(Path.cwd())
+            workspace_source = "current directory"
         else:
             global_cfg = get_global_config_path()
             if global_cfg.exists():
@@ -116,6 +151,7 @@ async def startup_event():
                         last_active = cfg_data.get("active_workspace")
                         if last_active and Path(last_active).exists() and (Path(last_active) / "aether.yaml").exists():
                             configured_root = last_active
+                            workspace_source = "last active workspace"
                 except Exception:
                     pass
 
@@ -124,6 +160,7 @@ async def startup_event():
                 workspaces = WorkspaceRegistry.list_workspaces()
                 if workspaces:
                     configured_root = workspaces[0]["path"]
+                    workspace_source = "first registered workspace"
 
     if not configured_root:
         app.state.workspace = None
@@ -134,6 +171,8 @@ async def startup_event():
 
     ws_root = Path(configured_root).expanduser().resolve()
     app.state.workspace_root = ws_root
+    app.state.workspace_source = workspace_source
+    print(f"Aether workspace: {ws_root}  (selected by: {workspace_source})")
 
     try:
         ws = Workspace(ws_root)
@@ -145,6 +184,22 @@ async def startup_event():
             return
 
         app.state.workspace = ws
+        # Canonical identity: freeze an immutable id and move rows still keyed by a legacy alias (backed up, journaled).
+        app.state.identity_migration = None
+        try:
+            ws.ensure_identity()
+            report = ws.migrate_identity()
+            app.state.identity_migration = report.to_dict()
+            if report.status not in ("noop",):
+                print(f"Workspace identity migration: {report.status} ({report.total_moved} row(s) moved, {report.total_conflicts} conflict(s)).")
+        except Exception as exc:
+            print(f"Warning: workspace identity migration skipped: {exc}")
+        # Re-attach durable coding runs (waiting ones resume; interrupted ones are failed explicitly).
+        try:
+            from aether.coding.orchestrator import get_coding_orchestrator
+            get_coding_orchestrator().bind_run_store(ws.coding_runs)
+        except Exception as exc:
+            print(f"Warning: could not recover coding runs: {exc}")
         try:
             team = ws.load_team()
             app.state.team = team

@@ -61,7 +61,7 @@ async def test_phase_a_runtime_persistence_privacy_and_multirun(tmp_path: Path, 
     ws.runtime = None
     ws.missions = store
     ws.personal_store = p_store
-    ws.name = "default"
+    ws.id = "default"
     ws.conversations = MagicMock()
     ws.conversations_db_path = str(db_file)
     ws.root = tmp_path

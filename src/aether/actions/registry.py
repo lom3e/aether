@@ -597,6 +597,192 @@ class ActionRegistry:
             )
         )
 
+        # External Autonomous Coding Agent Actions
+        self.register(
+            ActionDefinition(
+                id="coding.delegate",
+                name="Delegate Coding Task",
+                description="Delegates a development, coding, or refactoring task to an autonomous external coding agent (Google Antigravity, Claude Code, OpenAI Codex).",
+                tier=ActionTier.ACT,
+                permission_level=ActionPermissionLevel.EXTERNAL_MUTATION,
+                requires_confirmation=True,
+                provider="coding",
+                input_schema={
+                    "type": "object",
+                    "properties": {
+                        "instruction": {"type": "string"},
+                        "project_path": {"type": "string"},
+                        "provider_id": {"type": "string", "enum": ["antigravity", "claude_code", "codex"]},
+                        "context_files": {"type": "array", "items": {"type": "string"}},
+                        "context_data": {"type": "object"},
+                        "model": {"type": "string"},
+                        "timeout_seconds": {"type": "number"},
+                    },
+                    "required": ["instruction"],
+                },
+                output_schema={
+                    "type": "object",
+                    "properties": {
+                        "success": {"type": "boolean"},
+                        "status": {"type": "string"},
+                        "provider_id": {"type": "string"},
+                        "execution_id": {"type": "string"},
+                        "external_task_id": {"type": "string"},
+                        "summary": {"type": "string"},
+                        "diff": {"type": "string"},
+                        "modified_files": {"type": "array"},
+                    },
+                },
+            )
+        )
+        self.register(
+            ActionDefinition(
+                id="coding.interact",
+                name="Interact with Coding Agent",
+                description="Sends an approval, decision, or follow-up response to a running or waiting external coding agent task.",
+                tier=ActionTier.ACT,
+                permission_level=ActionPermissionLevel.EXTERNAL_MUTATION,
+                requires_confirmation=False,
+                provider="coding",
+                input_schema={
+                    "type": "object",
+                    "properties": {
+                        "execution_id": {"type": "string"},
+                        "message": {"type": "string"},
+                    },
+                    "required": ["execution_id", "message"],
+                },
+                output_schema={
+                    "type": "object",
+                    "properties": {
+                        "success": {"type": "boolean"},
+                        "status": {"type": "string"},
+                    },
+                },
+            )
+        )
+        self.register(
+            ActionDefinition(
+                id="coding.status",
+                name="Get Coding Task Status",
+                description="Checks the execution status of an ongoing or completed coding task.",
+                tier=ActionTier.ANSWER,
+                permission_level=ActionPermissionLevel.READ_ONLY,
+                requires_confirmation=False,
+                provider="coding",
+                input_schema={
+                    "type": "object",
+                    "properties": {
+                        "execution_id": {"type": "string"},
+                    },
+                    "required": ["execution_id"],
+                },
+                output_schema={
+                    "type": "object",
+                    "properties": {
+                        "status": {"type": "string"},
+                        "external_task_id": {"type": "string"},
+                    },
+                },
+            )
+        )
+        self.register(
+            ActionDefinition(
+                id="coding.results",
+                name="Collect Coding Results",
+                description="Collects verifiable git diff, modified files, and summary for a coding task execution.",
+                tier=ActionTier.ANSWER,
+                permission_level=ActionPermissionLevel.READ_ONLY,
+                requires_confirmation=False,
+                provider="coding",
+                input_schema={
+                    "type": "object",
+                    "properties": {
+                        "execution_id": {"type": "string"},
+                    },
+                    "required": ["execution_id"],
+                },
+                output_schema={
+                    "type": "object",
+                    "properties": {
+                        "diff": {"type": "string"},
+                        "modified_files": {"type": "array"},
+                        "summary": {"type": "string"},
+                    },
+                },
+            )
+        )
+        self.register(
+            ActionDefinition(
+                id="coding.run_tests",
+                name="Run Project Tests",
+                description="Executes the project's tests (pytest/unittest) inside the coding run's own project directory. "
+                            "This runs code written by an agent, so it always needs explicit human approval.",
+                tier=ActionTier.ACT,
+                permission_level=ActionPermissionLevel.SENSITIVE_MUTATION,
+                requires_confirmation=True,
+                provider="coding",
+                input_schema={
+                    "type": "object",
+                    "properties": {
+                        "execution_id": {"type": "string"},
+                        "runner": {"type": "string", "enum": ["auto", "pytest", "unittest"]},
+                        "timeout_seconds": {"type": "number"},
+                    },
+                    "required": ["execution_id"],
+                },
+                output_schema={"type": "object", "properties": {"passed": {"type": "boolean"}, "exit_code": {"type": "integer"}}},
+            )
+        )
+        self.register(
+            ActionDefinition(
+                id="coding.release_project",
+                name="Release Coding Project Lock",
+                description="Confirms a previous coding run's remote session is stopped so its project can accept new tasks.",
+                tier=ActionTier.ACT,
+                permission_level=ActionPermissionLevel.SENSITIVE_MUTATION,
+                requires_confirmation=True,
+                provider="coding",
+                input_schema={
+                    "type": "object",
+                    "properties": {"execution_id": {"type": "string"}, "reason": {"type": "string"}},
+                    "required": ["execution_id", "reason"],
+                },
+                output_schema={"type": "object", "properties": {"released": {"type": "boolean"}}},
+            )
+        )
+        self.register(
+            ActionDefinition(
+                id="coding.list_runs",
+                name="List Coding Runs",
+                description="Lists durable coding runs (state, provider, model, project) of this workspace, optionally for one mission.",
+                tier=ActionTier.ANSWER,
+                permission_level=ActionPermissionLevel.READ_ONLY,
+                requires_confirmation=False,
+                provider="coding",
+                input_schema={"type": "object", "properties": {"mission_id": {"type": "string"}, "limit": {"type": "integer"}}},
+                output_schema={"type": "object", "properties": {"runs": {"type": "array"}}},
+            )
+        )
+        self.register(
+            ActionDefinition(
+                id="coding.list_providers",
+                name="List Coding Agent Providers",
+                description="Lists available external autonomous coding agent providers and their readiness status.",
+                tier=ActionTier.ANSWER,
+                permission_level=ActionPermissionLevel.READ_ONLY,
+                requires_confirmation=False,
+                provider="coding",
+                input_schema={"type": "object"},
+                output_schema={
+                    "type": "object",
+                    "properties": {
+                        "providers": {"type": "array"},
+                    },
+                },
+            )
+        )
+
         # Telegram Actions
         self.register(
             ActionDefinition(

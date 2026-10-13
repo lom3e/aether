@@ -112,14 +112,16 @@ class TeamLoader:
         # ------------------------------------------------------------------
         name = team_section.get("name", "aether-team")
         knowledge_path = team_section.get("knowledge") or team_section.get("knowledge_path")
-        raw_default_provider = team_section.get("provider", "openai")
+        # A team that does not declare a provider has NOT chosen one (files written before this contract and
+        # serialized from an implicit "openai" simply lack the key: they stay unset, nothing is assumed).
+        raw_default_provider = team_section.get("provider")
         if isinstance(raw_default_provider, dict):
-            default_provider = raw_default_provider.get("name", "openai")
+            default_provider = raw_default_provider.get("name")
             default_model = raw_default_provider.get("model", team_section.get("model"))
         else:
             default_provider = raw_default_provider
             default_model = team_section.get("model")
-        if not isinstance(default_provider, str) or not default_provider.strip():
+        if default_provider is not None and (not isinstance(default_provider, str) or not default_provider.strip()):
             raise ValueError("team.provider must be a non-empty string")
 
         team_icon = team_section.get("icon")
@@ -269,8 +271,8 @@ class TeamLoader:
             data["team"]["color"] = config.color
         if config.knowledge_path:
             data["team"]["knowledge"] = config.knowledge_path
-        if config.default_provider != "openai":
-            data["team"]["provider"] = config.default_provider
+        if config.default_provider:
+            data["team"]["provider"] = config.default_provider      # always written when chosen, even "openai"
         if config.default_model:
             data["team"]["model"] = config.default_model
         if config.metadata:

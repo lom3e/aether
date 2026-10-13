@@ -40,7 +40,7 @@ OAUTH_SPECS: dict[str, dict[str, Any]] = {
             "https://www.googleapis.com/auth/calendar.events",
             "https://www.googleapis.com/auth/calendar.readonly",
         ],
-        "default_client_id": "aether-desktop-client.apps.googleusercontent.com",
+        "default_client_id": None,
         "env_client_id": ["GOOGLE_CLIENT_ID", "AETHER_GOOGLE_CLIENT_ID"],
         "env_client_secret": ["GOOGLE_CLIENT_SECRET", "AETHER_GOOGLE_CLIENT_SECRET"],
         "setup_url": "https://console.cloud.google.com/apis/credentials",
@@ -249,8 +249,18 @@ class OAuthManager:
 
         existing = store.get_connection_by_provider(workspace_id, provider)
         auth_meta = dict(existing.auth_metadata or {}) if existing else {}
-        auth_meta["client_id"] = client_id.strip()
-        auth_meta["client_secret"] = client_secret.strip()
+
+        cid_clean = (client_id or "").strip()
+        if cid_clean:
+            auth_meta["client_id"] = cid_clean
+        elif not existing:
+            auth_meta["client_id"] = ""
+
+        csec_clean = (client_secret or "").strip()
+        if csec_clean and not csec_clean.startswith("••"):
+            auth_meta["client_secret"] = csec_clean
+        elif not existing:
+            auth_meta["client_secret"] = csec_clean
 
         status = existing.status if existing else ConnectionStatus.NOT_CONFIGURED
         conn = Connection(
@@ -269,8 +279,8 @@ class OAuthManager:
         return {
             "success": True,
             "provider": provider,
-            "client_id": client_id.strip(),
-            "has_client_secret": bool(client_secret.strip()),
+            "client_id": auth_meta.get("client_id", ""),
+            "has_client_secret": bool(str(auth_meta.get("client_secret") or "").strip()),
         }
 
     @classmethod

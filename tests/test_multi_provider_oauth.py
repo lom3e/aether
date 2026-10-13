@@ -43,9 +43,11 @@ def test_oauth_providers_initial_status(temp_store):
     assert "slack" in status
     assert "notion" in status
 
-    # Google Calendar is ready out of the box via PKCE
-    assert status["google_calendar"]["ready_for_user_connect"] is True
-    assert status["google_calendar"]["requires_developer_setup"] is False
+    # Google Calendar requires client ID setup (public client PKCE)
+    assert status["google_calendar"]["supports_oauth"] is True
+    assert status["google_calendar"]["ready_for_user_connect"] is False
+    assert status["google_calendar"]["requires_developer_setup"] is True
+    assert status["google_calendar"]["has_client_id"] is False
 
     # GitHub, Slack, Notion require initial developer setup by default if no env vars are set
     assert status["github"]["supports_oauth"] is True
@@ -60,6 +62,45 @@ def test_oauth_providers_initial_status(temp_store):
     assert status["notion"]["supports_oauth"] is True
     assert status["notion"]["ready_for_user_connect"] is False
     assert status["notion"]["requires_developer_setup"] is True
+
+
+def test_google_calendar_developer_config_enables_user_connect(temp_store):
+    # Google Calendar requires client_id, secret is optional (PKCE public client)
+    res = OAuthManager.save_developer_config(
+        provider="google_calendar",
+        workspace_id="test-ws",
+        client_id="123456789.apps.googleusercontent.com",
+        client_secret="",
+        store=temp_store,
+    )
+    assert res["success"] is True
+
+    # Now Google Calendar is ready for 1-click user connect
+    status = OAuthManager.get_provider_status("google_calendar", "test-ws", store=temp_store)
+    assert status["ready_for_user_connect"] is True
+    assert status["requires_developer_setup"] is False
+    assert status["has_client_id"] is True
+    assert status["has_client_secret"] is False
+
+    # create_auth_flow succeeds with PKCE
+    auth_url, state, r_uri = OAuthManager.create_auth_flow("google_calendar", "test-ws", store=temp_store)
+    assert "accounts.google.com/o/oauth2/v2/auth" in auth_url
+    assert "client_id=123456789.apps.googleusercontent.com" in auth_url
+    assert "code_challenge=" in auth_url
+    assert "code_challenge_method=S256" in auth_url
+
+
+def test_create_auth_flow_google_calendar_requires_client_id(temp_store):
+    with pytest.raises(ValueError, match="OAuth Client ID is required for Google Calendar"):
+        OAuthManager.create_auth_flow("google_calendar", "test-ws", store=temp_store)
+
+
+def test_google_calendar_env_var_enables_user_connect(temp_store, monkeypatch):
+    monkeypatch.setenv("GOOGLE_CLIENT_ID", "env-client-id.apps.googleusercontent.com")
+    status = OAuthManager.get_provider_status("google_calendar", "test-ws", store=temp_store)
+    assert status["ready_for_user_connect"] is True
+    assert status["requires_developer_setup"] is False
+    assert status["has_client_id"] is True
 
 
 def test_save_developer_config_enables_user_connect(temp_store):

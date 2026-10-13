@@ -26,6 +26,7 @@ from aether.actions.store import ActionStore
 from aether.activity.models import ActivityCategory, ActivityStatus
 from aether.activity.service import ActivityService
 from aether.connections.models import ConnectionStatus
+from aether.policy.models import PolicyDecision, PolicyOutcome
 
 logger = logging.getLogger(__name__)
 
@@ -109,6 +110,16 @@ class ActionExecutor:
             return ws.personal_store
         return None
 
+    def _canonical_workspace_id(self, workspace_id: str) -> str:
+        canon = getattr(self.workspace, "canonical_id", None)
+        if callable(canon):
+            try:
+                value = canon(workspace_id)
+                return value if isinstance(value, str) and value else workspace_id
+            except Exception:
+                return workspace_id
+        return workspace_id
+
     def _get_workspace(self, workspace_id: str | None = None) -> Any:
         """Resolves workspace from injected self.workspace or active registry without silent fake fallback."""
         if self.workspace is not None:
@@ -145,12 +156,19 @@ class ActionExecutor:
         if not definition:
             raise ValueError(f"Action '{action_id}' not found in registry")
 
+        # One canonical key per workspace: aliases (display name, folder, "default") map to the immutable id.
+        workspace_id = self._canonical_workspace_id(workspace_id)
+
+        # Consent is a structured argument of this call, never a field smuggled inside the action data.
+        input_data = {k: v for k, v in (input_data or {}).items() if k != "auto_approve"}
+
         # Macro-pass 1.2: Enforce execution authority boundary
         # UNKNOWN permission level always fails closed
         if definition.permission_level == ActionPermissionLevel.UNKNOWN:
             raise UnauthorizedExecutionError(f"Action '{action_id}' has unknown permission level and cannot execute.")
 
         is_read_only = definition.permission_level == ActionPermissionLevel.READ_ONLY
+        authorised_paths: list[str] = []
 
         # HARD BOUNDARY: All non-read-only actions require persistently validated authority
         # This check must occur BEFORE any queueing, approval path, or execution.
@@ -166,17 +184,23 @@ class ActionExecutor:
             # Persistent validation against proposal store
             p_store = self._resolve_personal_store(workspace_id)
             from aether.core.execution import ExecutionBoundary
-            ExecutionBoundary.validate_authority(
+            if action_id in self._CODING_INTERACTION_ACTIONS:
+                self._assert_coding_run_owned(workspace_id, input_data.get("execution_id"), authority)
+            proposal_obj = ExecutionBoundary.validate_authority(
                 authority=authority,
                 workspace_id=workspace_id,
                 store=p_store,
                 action_or_boundary=action_id,
                 input_data=input_data,
                 step_id=authority.step_id if authority else None,
+                canonicalize=getattr(self.workspace, "canonical_id", None),
             )
+            authorised_paths = self._allowed_paths_from(proposal_obj)
 
         # Persist authority context into execution metadata for later revalidation (approve path)
         exec_meta = dict(metadata or {})
+        if not is_read_only and authorised_paths:
+            exec_meta["allowed_paths"] = authorised_paths
         if authority is not None:
             exec_meta["authority"] = authority.to_dict()
             exec_meta["proposal_id"] = authority.proposal_id
@@ -201,35 +225,22 @@ class ActionExecutor:
             )
         )
 
-        if hasattr(self.safety_policy, "policy_service") and self.safety_policy.policy_service:
-            can_eval, reason = self.safety_policy.policy_service.evaluate_action(
-                workspace_id=workspace_id,
-                action_id=definition.id,
-                permission_level=definition.permission_level,
-                requires_confirmation=definition.requires_confirmation,
-                auto_approve_requested=auto_approve,
-            )
-            if "prohibited" in reason.lower() or "spending cap" in reason.lower():
-                execution.status = ActionExecutionStatus.FAILED
-                execution.error_message = reason
-                self.store.save_execution(execution)
-                if self.activity_service:
-                    self.activity_service.log(
-                        workspace_id=workspace_id,
-                        title=f"Action Blocked: {definition.name}",
-                        description=reason,
-                        category=ActivityCategory.ACTION,
-                        status=ActivityStatus.FAILED,
-                        link_view="home",
-                        link_id=execution.id,
-                        metadata={"action_id": action_id, "execution_id": execution.id, "reason": reason},
-                    )
+        decision = self._policy_decision(workspace_id, definition, auto_approve)
+        if decision is not None and not decision.is_denied:
+            decision = self._parent_denial(workspace_id, definition) or decision
+        if decision is not None:
+            if decision.is_denied:
+                # Hard refusal, identified by a stable typed code: no authority or flag can override it.
+                self._fail_by_policy(execution, definition, decision)
                 return execution
-            can_auto_run = can_eval
+            can_auto_run = decision.can_auto_execute and (not requires_gate or bool(auto_approve))
         else:
-            can_auto_run = not requires_gate or self.safety_policy.can_auto_approve(definition, auto_approve, workspace_id=workspace_id)
+            if not requires_gate:
+                can_auto_run = True
+            else:
+                can_auto_run = bool(auto_approve and self.safety_policy.can_auto_approve(definition, auto_approve, workspace_id=workspace_id))
 
-        if requires_gate and not can_auto_run:
+        if not can_auto_run:
             execution.status = ActionExecutionStatus.WAITING_APPROVAL
             execution.metadata["requires_approval"] = True
             self.store.save_execution(execution)
@@ -249,13 +260,299 @@ class ActionExecutor:
         if auto_approve or (requires_gate and can_auto_run):
             execution.metadata["auto_approved"] = True
             if not execution.approved_by:
-                execution.approved_by = "safety_policy"
+                execution.approved_by = "authority" if authority is not None else "safety_policy"
 
         # Direct execution
         execution.status = ActionExecutionStatus.RUNNING
         self.store.save_execution(execution)
 
         return self._dispatch_and_run(definition, execution)
+
+    _CODING_INTERACTION_ACTIONS = ("coding.interact", "coding.send_message", "coding.run_tests", "coding.release_project")
+
+    def _policy_decision(
+        self,
+        workspace_id: str,
+        definition: ActionDefinition,
+        auto_approve_requested: bool,
+    ) -> PolicyDecision | None:
+        """
+        Returns the typed policy verdict, or None when no policy service is configured.
+        Services that only expose the legacy ``(bool, reason)`` form cannot express a hard denial,
+        so a non-allow answer is treated as NEEDS_APPROVAL; the reason text is never parsed.
+        """
+        svc = getattr(self.safety_policy, "policy_service", None)
+        if not svc:
+            return None
+        kwargs = dict(
+            workspace_id=workspace_id,
+            action_id=definition.id,
+            permission_level=definition.permission_level,
+            requires_confirmation=definition.requires_confirmation,
+            auto_approve_requested=auto_approve_requested,
+        )
+        typed = getattr(svc, "evaluate_action_decision", None)
+        if callable(typed):
+            decision = typed(**kwargs)
+            if isinstance(decision, PolicyDecision):
+                return decision
+        can_auto, reason = svc.evaluate_action(**kwargs)
+        if can_auto:
+            return PolicyDecision(PolicyOutcome.ALLOW, "LEGACY_ALLOW", str(reason))
+        return PolicyDecision(PolicyOutcome.NEEDS_APPROVAL, "LEGACY_HOLD", str(reason))
+
+    def _parent_denial(self, workspace_id: str, definition: ActionDefinition) -> PolicyDecision | None:
+        """Replying to a coding run is only allowed while delegating coding itself is not denied."""
+        if definition.id not in self._CODING_INTERACTION_ACTIONS:
+            return None
+        parent = self.registry.get("coding.delegate")
+        decision = self._policy_decision(workspace_id, parent, False) if parent else None
+        return decision if decision is not None and decision.is_denied else None
+
+    def get_coding_run_record(self, workspace_id: str, coding_execution_id: str) -> ActionExecution | None:
+        """Public accessor: the coding.delegate record that owns a run, inside ``workspace_id`` only."""
+        return self._find_coding_run_record(workspace_id, coding_execution_id)
+
+    @staticmethod
+    def _allowed_paths_from(proposal: Any) -> list[str]:
+        out: list[str] = []
+        for c in getattr(proposal, "constraints", None) or []:
+            c_clean = str(c).strip()
+            if c_clean.lower().startswith("allow_path:"):
+                val = c_clean[len("allow_path:"):].strip()
+                if val:
+                    out.append(val)
+        return out
+
+    def _fail_by_policy(self, execution: ActionExecution, definition: ActionDefinition, decision: PolicyDecision) -> None:
+        execution.status = ActionExecutionStatus.FAILED
+        execution.error_message = decision.reason
+        execution.completed_at = datetime.now(timezone.utc).isoformat()
+        execution.metadata["policy_outcome"] = decision.outcome.value
+        execution.metadata["policy_code"] = decision.code
+        self.store.save_execution(execution)
+        if self.activity_service:
+            self.activity_service.log(
+                workspace_id=execution.workspace_id,
+                title=f"Action Blocked: {definition.name}",
+                description=decision.reason,
+                category=ActivityCategory.ACTION,
+                status=ActivityStatus.FAILED,
+                link_view="home",
+                link_id=execution.id,
+                metadata={"action_id": definition.id, "execution_id": execution.id,
+                          "reason": decision.reason, "policy_code": decision.code},
+            )
+
+    def _find_coding_run_record(self, workspace_id: str, coding_execution_id: str | None) -> ActionExecution | None:
+        """Finds the persisted coding.delegate record that owns a coding run, within this workspace only."""
+        if not self.store or not hasattr(self.store, "list_executions"):
+            return None
+        records = self.store.list_executions(workspace_id, limit=500)
+        coding = [r for r in records if r.action_id == "coding.delegate"]
+        if not coding_execution_id:
+            return coding[0] if coding else None  # newest first
+        for rec in coding:
+            out = rec.output_data or {}
+            if rec.metadata.get("coding_execution_id") == coding_execution_id or out.get("execution_id") == coding_execution_id:
+                return rec
+        return None
+
+    def _create_coding_mission(self, ws: Any, ws_id: str, inp: dict[str, Any], execution: Any, project: Path) -> str | None:
+        """
+        A delegated coding run is a mission: implementation + authorised test verification, with the evidence the
+        quality gate must see (verified run, passing tests) recorded up front. Best effort: never blocks the run.
+        """
+        try:
+            instruction = str(inp.get("instruction", "")).strip() or "Coding task"
+            mission = ws.missions.create_mission(
+                title=f"Coding: {instruction[:70]}", objective=instruction, workspace_id=ws_id,
+                status="running",
+                metadata={
+                    "kind": "coding", "proposal_id": execution.metadata.get("proposal_id"),
+                    "project_path": str(project), "required_evidence": ["coding_run_verified", "tests_passed"],
+                    "action_execution_id": execution.id,
+                },
+                milestones=[
+                    {"title": "Implementazione (agente di coding)", "description": instruction, "order_idx": 0},
+                    {"title": "Verifica con test autorizzati", "description": "Esecuzione dei test approvata dall'utente", "order_idx": 1},
+                ],
+            )
+            execution.metadata["mission_id"] = mission.id
+            return mission.id
+        except Exception as exc:
+            logger.warning("Could not create coding mission: %s", exc)
+            return None
+
+    def _close_undispatched_coding_mission(self, ws: Any, ws_id: str, mission_id: str, exc: Exception) -> None:
+        """Marks a mission created for a coding dispatch that never produced a run as failed, keeping the reason."""
+        try:
+            from aether.missions.models import ExecutionStatus as MExec, MilestoneStatus, MissionStatus
+            store = ws.missions
+            mission = store.get_mission(mission_id)
+            if mission is None:
+                return
+            reason = f"Coding dispatch failed before any run started: {type(exc).__name__}: {exc}"
+            meta = dict(mission.metadata or {})
+            meta["dispatch_error"] = {"type": type(exc).__name__, "message": str(exc)[:500]}
+            run_exec = store.create_execution(mission_id=mission_id, team_name=None, status=MExec.FAILED)
+            store.update_execution(run_exec.id, status=MExec.FAILED, error_message=reason)
+            store.update_mission(mission_id, status=MissionStatus.FAILED, active_execution_id=run_exec.id, metadata=meta)
+            for ms in mission.milestones:
+                # get_mission() overlays the active execution's own rows on the template rows: update both.
+                store.update_milestone(ms.id, status=MilestoneStatus.SKIPPED)
+                store.update_execution_milestone(run_exec.id, ms.id, status=MilestoneStatus.SKIPPED.value)
+            try:
+                from aether.personal.events import get_personal_event_hub
+                get_personal_event_hub().publish(ws_id, "coding_run_update", {
+                    "workspace_id": ws_id, "mission_id": mission_id, "run_id": None, "event": "dispatch_failed",
+                    "status": "failed", "error": reason[:300]})
+            except Exception:
+                pass
+        except Exception as close_exc:
+            logger.warning("Could not close mission %s after dispatch failure: %s", mission_id, close_exc)
+
+    def _assert_coding_run_owned(
+        self, workspace_id: str, coding_execution_id: str | None, authority: ExecutionAuthority | None
+    ) -> Any:
+        """A coding run can only be addressed from its own workspace and under the proposal that started it."""
+        if not coding_execution_id:
+            raise UnauthorizedExecutionError("A coding execution_id is required for this interaction.")
+        run = None
+        try:
+            run = self._coding_run_store(workspace_id).get_run(coding_execution_id)
+        except Exception:
+            run = None
+        rec = self._find_coding_run_record(workspace_id, coding_execution_id)
+        if run is None and rec is None:
+            raise UnauthorizedExecutionError(
+                f"Coding run '{coding_execution_id}' does not belong to workspace '{workspace_id}'."
+            )
+        owner = (run.task.proposal_id if run is not None else None) or ((rec.metadata.get("authority") or {}).get("proposal_id") if rec else None)
+        if authority is None or not owner or owner != authority.proposal_id:
+            raise UnauthorizedExecutionError(
+                f"Authority is not bound to the proposal that started coding run '{coding_execution_id}'."
+            )
+        return rec or run
+
+    def _coding_run_store(self, ws_id: str):
+        """Durable coding-run store of this workspace (next to the workspace data, or the action store)."""
+        from aether.coding.runs import CodingRunStore
+        cache = self.__dict__.setdefault("_coding_run_stores", {})
+        if ws_id not in cache:
+            path = None
+            canonical = ws_id
+            try:
+                ws = self._get_workspace(ws_id)
+                path = getattr(ws, "coding_runs_db_path", None)
+                if hasattr(ws, "canonical_id"):
+                    canonical = ws.canonical_id(ws_id)
+            except Exception:
+                path = None
+            if not path:
+                path = Path(self.store.db_path).parent / "coding_runs.db"
+            cache[ws_id] = CodingRunStore(path, canonical)
+        return cache[ws_id]
+
+    def _import_legacy_coding_run(self, orchestrator: Any, ws_id: str, exec_id: str | None) -> None:
+        """
+        Compatibility adapter for runs started before the durable run store existed (or whose provider bypassed
+        it): rebuilds the run from the persisted ``coding.delegate`` action record and saves it in the store, so
+        from then on it is recovered like any other run.
+        """
+        if not exec_id or orchestrator._find(exec_id) is not None:
+            return
+        rec = self._find_coding_run_record(ws_id, exec_id)
+        if rec is None:
+            return
+        try:
+            from aether.coding.models import CodingExecutionStatus, CodingResult, CodingTask, CodingTaskExecution
+            out = rec.output_data or {}
+            inp = rec.input_data or {}
+            status_str = out.get("status") or ("completed" if rec.status.value == "succeeded" else "failed")
+            status = CodingExecutionStatus(status_str) if status_str in CodingExecutionStatus._value2member_map_ else CodingExecutionStatus.FAILED
+            task = CodingTask(
+                instruction=inp.get("instruction") or out.get("summary") or "",
+                project_path=inp.get("project_path") or (out.get("metadata") or {}).get("project_path") or "",
+                context_files=list(inp.get("context_files") or []),
+                provider_id=out.get("provider_id") or inp.get("provider_id") or "antigravity",
+                workspace_id=ws_id, proposal_id=(rec.metadata.get("authority") or {}).get("proposal_id"),
+            )
+            run = CodingTaskExecution(
+                id=out.get("execution_id") or exec_id, task=task, provider_id=task.provider_id, status=status,
+                external_task_id=out.get("external_task_id"), started_at=rec.created_at, completed_at=rec.completed_at,
+            )
+            run.metadata["imported_from_action"] = rec.id
+            if out.get("result"):
+                run.result = CodingResult.from_dict(out["result"])
+            orchestrator.register_execution(run)
+            self._coding_run_store(ws_id).save_run(run)
+        except Exception as exc:
+            logger.warning("Could not import legacy coding run %s: %s", exec_id, exc)
+
+    def _scoped_coding_execution_id(self, workspace_id: str, requested: str | None) -> str:
+        """Resolves a coding run id strictly inside the caller's workspace; 'latest' means latest of THIS workspace."""
+        store = self._coding_run_store(workspace_id)
+        if requested:
+            if store.get_run(requested) is not None:
+                return requested
+            rec = self._find_coding_run_record(workspace_id, requested)
+            if rec is not None:
+                return rec.metadata.get("coding_execution_id") or (rec.output_data or {}).get("execution_id") or requested
+            raise ValueError(f"Coding run '{requested}' not found in workspace '{workspace_id}'.")
+        runs = store.list_runs(limit=1)
+        if runs:
+            return runs[0].id
+        rec = self._find_coding_run_record(workspace_id, None)
+        if rec is not None:
+            return rec.metadata.get("coding_execution_id") or (rec.output_data or {}).get("execution_id") or rec.id
+        raise ValueError(f"No coding run found in workspace '{workspace_id}'.")
+
+    def _workspace_roots(self, ws_id: str) -> list[Path]:
+        """Directories a coding task may target without an explicit allow_path: the workspace's own roots."""
+        roots: list[Path] = []
+        try:
+            ws = self._get_workspace(ws_id)
+        except Exception:
+            ws = None
+        for attr in ("root", "project_path"):
+            val = getattr(ws, attr, None) if ws is not None else None
+            if val:
+                roots.append(Path(val).resolve())
+        if self.project_path:
+            roots.append(Path(self.project_path).resolve())
+        return roots
+
+    @staticmethod
+    def _assert_coding_path_allowed(p_dir: Path, allowed_paths: list[str], workspace_roots: list[Path] | None = None) -> None:
+        """
+        Positive filesystem perimeter for delegated coding. The target must lie inside a path the accepted proposal
+        explicitly authorises, or inside the workspace's own root/project. Anything else is refused, and so are the
+        user's home itself, its ancestors, system directories and the Aether installation (unless explicitly allowed).
+        """
+        def _inside(child: Path, parent: Path) -> bool:
+            return child == parent or parent in child.parents
+
+        forbidden_roots = {"/", "/System", "/usr", "/bin", "/sbin", "/etc", "/var", "/Library", "/private", "/private/var", "/tmp", "/private/tmp"}
+        if str(p_dir) in forbidden_roots:
+            raise ValueError(f"Cannot delegate coding task to system root directory: {p_dir}")
+        home = Path.home().resolve()
+        if p_dir == home or p_dir in home.parents:
+            raise ValueError(f"Cannot delegate coding task to the home directory or one of its ancestors: {p_dir}")
+
+        explicit = [Path(a).resolve() for a in allowed_paths if a]
+        roots = list(workspace_roots or [])
+        if not any(_inside(p_dir, r) for r in explicit + roots):
+            raise UnauthorizedExecutionError(
+                f"Project path '{p_dir}' is not inside an authorised path or the workspace; "
+                f"the accepted proposal must name it (allow_path) or it must belong to the workspace."
+            )
+        aether_root = Path(__file__).resolve().parents[3]
+        if (aether_root / "pyproject.toml").exists() and (_inside(p_dir, aether_root) or _inside(aether_root, p_dir)):
+            if not any(_inside(p_dir, a) for a in explicit):
+                raise ValueError(
+                    "Delegating coding to the Aether installation itself requires an explicit allow_path in the accepted proposal."
+                )
 
     def approve(self, execution_id: str, approver: str = "user") -> ActionExecution:
         """Approves a pending execution and runs it. Idempotent if already approved/completed."""
@@ -294,17 +591,35 @@ class ActionExecutor:
                 from aether.core.execution import ExecutionAuthority, ExecutionBoundary
                 authority_obj = ExecutionAuthority.from_dict(auth_data)
                 p_store = self._resolve_personal_store(execution.workspace_id)
-                ExecutionBoundary.validate_authority(
+                proposal_obj = ExecutionBoundary.validate_authority(
                     authority=authority_obj,
                     workspace_id=execution.workspace_id,
                     store=p_store,
                     action_or_boundary=execution.action_id,
                     input_data=execution.input_data,
                     step_id=authority_obj.step_id if authority_obj else None,
+                    canonicalize=getattr(self.workspace, "canonical_id", None),
                 )
+                approved_paths = self._allowed_paths_from(proposal_obj)
+                if approved_paths:
+                    execution.metadata["allowed_paths"] = approved_paths
+
+            # Policy is re-evaluated at approval time: a denial added while the action waited
+            # (or any hard refusal) wins over the human click. Approval only satisfies NEEDS_APPROVAL.
+            decision = self._policy_decision(execution.workspace_id, definition, False)
+            if decision is not None and not decision.is_denied:
+                decision = self._parent_denial(execution.workspace_id, definition) or decision
+            if decision is not None and decision.is_denied:
+                self._fail_by_policy(execution, definition, decision)
+                return execution
 
             execution.transition_to(ActionExecutionStatus.APPROVED)
             execution.approved_by = approver
+            if execution.action_id == "coding.delegate":
+                from aether.personal.service import generate_executive_mandate
+                raw_instr = execution.input_data.get("instruction", "")
+                if raw_instr:
+                    execution.input_data["instruction"] = generate_executive_mandate(raw_instr)
             self.store.save_execution(execution)
 
         return self._dispatch_and_run(definition, execution)
@@ -415,12 +730,23 @@ class ActionExecutor:
                     if execution.metadata.get("auto_approved")
                     else f"Completed: {definition.name}"
                 )
+                act_desc = f"Successfully executed '{definition.name}'."
+                act_status = ActivityStatus.COMPLETED
+                if definition.id == "coding.delegate" and isinstance(result, dict):
+                    if result.get("run_terminal") is False:
+                        # Accepted, not done: the run is still going or waiting for the user.
+                        act_title = f"Started: {definition.name}"
+                        act_desc = (f"Coding run accepted (state: {result.get('status')}); it has not finished "
+                                    f"and nothing is verified yet.")
+                        act_status = ActivityStatus.IN_PROGRESS
+                    elif result.get("verified") is False:
+                        act_desc = f"Coding run ended without passing independent verification (state: {result.get('status')})."
                 self.activity_service.log(
                     workspace_id=execution.workspace_id,
                     title=act_title,
-                    description=f"Successfully executed '{definition.name}'.",
+                    description=act_desc,
                     category=ActivityCategory.ACTION,
-                    status=ActivityStatus.COMPLETED,
+                    status=act_status,
                     link_view="home",
                     link_id=execution.id,
                     metadata={"action_id": definition.id, "execution_id": execution.id, "provider": definition.provider},
@@ -573,6 +899,32 @@ class ActionExecutor:
         elif action_id == "calendar.list_events":
             if not self.connection_service:
                 return {"events": []}
+
+            # If Google Calendar is configured with credentials, attempt Google Calendar query (including across all calendars)
+            gconn = self.connection_service.get_connection(ws_id, "google_calendar")
+            has_credentials = bool(gconn and (gconn.auth_metadata.get("access_token") or gconn.auth_metadata.get("refresh_token")))
+            if gconn and gconn.status != ConnectionStatus.DISCONNECTED and has_credentials:
+                try:
+                    gconnector = self.connection_service.get_google_calendar_connector(ws_id)
+                    cal_id = inp.get("calendar_id")
+                    events = gconnector.list_events(
+                        calendar_id=cal_id,
+                        limit=int(inp.get("limit", 50)),
+                        time_min=inp.get("time_min"),
+                        time_max=inp.get("time_max"),
+                        query=inp.get("query"),
+                    )
+                    if hasattr(self.connection_service, "record_operation_success"):
+                        self.connection_service.record_operation_success(ws_id, "google_calendar", action_id)
+                    return {"events": events, "provider": "google_calendar"}
+                except Exception as g_err:
+                    logger.warning("Google Calendar query encountered error: %s.", g_err)
+                    if not gconn.auth_metadata.get("refresh_token"):
+                        raise RuntimeError(f"L'autorizzazione di Google Calendar è scaduta: {gconn.last_verification_error or g_err}") from g_err
+
+            if gconn and gconn.status == ConnectionStatus.VERIFICATION_FAILED and not has_credentials:
+                raise RuntimeError(f"L'autorizzazione di Google Calendar è scaduta: {gconn.last_verification_error or 'Riconnetti il calendario.'}")
+
             conn = self.connection_service.get_connection(ws_id, "calendar")
             if conn and conn.status == ConnectionStatus.DISCONNECTED:
                 raise RuntimeError("Calendar connection is disconnected in this workspace.")
@@ -580,7 +932,7 @@ class ActionExecutor:
             events = connector.list_events(limit=int(inp.get("limit", 50)))
             if hasattr(self.connection_service, "record_operation_success"):
                 self.connection_service.record_operation_success(ws_id, "calendar", action_id)
-            return {"events": events}
+            return {"events": events, "provider": "calendar"}
 
         # 5b. Google Calendar actions (Macro-pass P0.2)
         elif action_id.startswith("google_calendar."):
@@ -591,7 +943,7 @@ class ActionExecutor:
                 raise RuntimeError("Google Calendar is not configured in this workspace.")
             if conn.status == ConnectionStatus.DISCONNECTED:
                 raise RuntimeError("Google Calendar connection is disconnected in this workspace.")
-            if conn.status == ConnectionStatus.VERIFICATION_FAILED:
+            if conn.status == ConnectionStatus.VERIFICATION_FAILED and not conn.auth_metadata.get("refresh_token"):
                 raise RuntimeError(f"Google Calendar authorization is invalid: {conn.last_verification_error}")
 
             connector = self.connection_service.get_google_calendar_connector(ws_id)
@@ -605,8 +957,16 @@ class ActionExecutor:
                         location=inp.get("location", ""),
                         calendar_id=inp.get("calendar_id"),
                     )
-                elif action_id == "google_calendar.list_events":
-                    res = {"events": connector.list_events(calendar_id=inp.get("calendar_id"), limit=int(inp.get("limit", 50)))}
+                elif action_id in ("google_calendar.list_events", "google_calendar.list_all_events"):
+                    res = {
+                        "events": connector.list_events(
+                            calendar_id=inp.get("calendar_id"),
+                            limit=int(inp.get("limit", 50)),
+                            time_min=inp.get("time_min"),
+                            time_max=inp.get("time_max"),
+                            query=inp.get("query"),
+                        )
+                    }
                 elif action_id == "google_calendar.get_event":
                     res = connector.get_event(event_id=inp.get("event_id", ""), calendar_id=inp.get("calendar_id"))
                 elif action_id == "google_calendar.update_event":
@@ -858,6 +1218,189 @@ class ActionExecutor:
                 "deliverables": res.deliverables,
                 "metadata": res.metadata,
             }
+
+        # 11b. External autonomous coding agent orchestration
+        elif action_id.startswith("coding."):
+            from aether.coding.orchestrator import get_coding_orchestrator
+            from aether.coding.models import CodingTask
+
+            orchestrator = get_coding_orchestrator()
+            run_store = self._coding_run_store(ws_id)
+            orchestrator.bind_run_store(run_store)
+
+            if action_id == "coding.list_runs":
+                runs = run_store.list_runs(mission_id=inp.get("mission_id"), limit=int(inp.get("limit", 50)))
+                return {"runs": [
+                    {"id": r.id, "status": r.status.value, "provider_id": r.provider_id,
+                     "model": (r.metadata or {}).get("model") or r.task.model, "mission_id": r.task.mission_id,
+                     "proposal_id": r.task.proposal_id, "project_path": r.task.project_path,
+                     "external_task_id": r.external_task_id, "started_at": r.started_at, "completed_at": r.completed_at,
+                     "modified_files": (r.result.modified_files if r.result else []),
+                     "remote_session_may_continue": bool((r.metadata or {}).get("remote_session_may_continue")),
+                     } for r in runs]}
+
+            elif action_id == "coding.run_tests":
+                exec_id = self._scoped_coding_execution_id(ws_id, inp.get("execution_id"))
+                self._import_legacy_coding_run(orchestrator, ws_id, exec_id)
+                found = orchestrator._find(exec_id)
+                if not found:
+                    raise ValueError(f"Coding run '{exec_id}' not found.")
+                provider, run = found
+                if run.status.value in ("running", "queued"):
+                    raise ValueError("Tests cannot run while the coding agent is still working on the project.")
+                self._assert_coding_path_allowed(
+                    Path(run.task.project_path).resolve(), execution.metadata.get("allowed_paths") or [], self._workspace_roots(ws_id)
+                )
+                from aether.coding.runs import run_authorised_tests
+                outcome = run_authorised_tests(run, runner=inp.get("runner") or "auto",
+                                               timeout_seconds=float(inp.get("timeout_seconds", 120.0)))
+                run.result = provider.collect_results(run.id, raw_output=run.result.raw_output if run.result else None)
+                provider._emit(run, "tests_run", exit_code=outcome["exit_code"], passed=outcome["passed"], runner=outcome["runner"])
+                execution.metadata["coding_execution_id"] = run.id
+                return {"success": True, "execution_id": run.id, "status": run.status.value,
+                        "verification_passed": run.result.verification_passed, **outcome}
+
+            elif action_id == "coding.release_project":
+                exec_id = self._scoped_coding_execution_id(ws_id, inp.get("execution_id"))
+                if not run_store.mark_released(exec_id, str(inp.get("reason") or "released by user")):
+                    raise ValueError(f"Coding run '{exec_id}' not found.")
+                execution.metadata["coding_execution_id"] = exec_id
+                return {"success": True, "released": True, "execution_id": exec_id}
+
+            if action_id == "coding.list_providers":
+                ws = None
+                try:
+                    ws = self._get_workspace(ws_id)
+                except Exception:
+                    pass
+                providers = orchestrator.list_providers(workspace=ws)
+                pref_id = orchestrator.get_preferred_provider_id(workspace=ws)
+                return {"providers": providers, "preferred_provider_id": pref_id}
+
+            elif action_id == "coding.status":
+                exec_id = self._scoped_coding_execution_id(ws_id, inp.get("execution_id"))
+                self._import_legacy_coding_run(orchestrator, ws_id, exec_id)
+                st = orchestrator.get_status(exec_id)
+                return {
+                    "status": st.status.value,
+                    "provider_id": st.provider_id,
+                    "external_task_id": st.external_task_id,
+                    "execution_id": st.id,
+                    "instruction": st.task.instruction,
+                    "project_path": st.task.project_path,
+                }
+
+            elif action_id == "coding.results":
+                exec_id = self._scoped_coding_execution_id(ws_id, inp.get("execution_id"))
+                self._import_legacy_coding_run(orchestrator, ws_id, exec_id)
+                results = orchestrator.collect_results(exec_id)
+                return results.to_dict()
+
+            elif action_id == "coding.delegate":
+                ws = None
+                try:
+                    ws = self._get_workspace(ws_id)
+                except Exception:
+                    pass
+
+                proj_path = inp.get("project_path")
+                if not proj_path and ws and getattr(ws, "root", None):
+                    proj_path = str(ws.root)
+                if not proj_path and self.project_path:
+                    proj_path = str(self.project_path)
+                if not proj_path:
+                    raise ValueError(
+                        "project_path is required for coding delegation: Aether never falls back to the process working directory."
+                    )
+
+                p_dir = Path(proj_path).resolve()
+                if not p_dir.exists() or not p_dir.is_dir():
+                    raise ValueError(f"Project directory does not exist or is not a directory: {proj_path}")
+                self._assert_coding_path_allowed(p_dir, execution.metadata.get("allowed_paths") or [], self._workspace_roots(ws_id))
+
+                coding_mission_id = inp.get("mission_id") or execution.metadata.get("mission_id")
+                created_mission_id = None
+                if not coding_mission_id and ws is not None:
+                    coding_mission_id = created_mission_id = self._create_coding_mission(ws, ws_id, inp, execution, p_dir)
+                task = CodingTask(
+                    instruction=inp.get("instruction", ""),
+                    project_path=proj_path,
+                    context_files=list(inp.get("context_files") or []),
+                    context_data=dict(inp.get("context_data") or {}),
+                    provider_id=inp.get("provider_id"),
+                    model=inp.get("model"),
+                    timeout_seconds=float(inp.get("timeout_seconds", 300.0)),
+                    workspace_id=ws_id,
+                    mission_id=coding_mission_id,
+                    proposal_id=execution.metadata.get("proposal_id"),
+                )
+
+                try:
+                    coding_exec = orchestrator.delegate_task(task, preferred_provider_id=inp.get("provider_id"), workspace=ws)
+                except Exception as dispatch_exc:
+                    # No run ever started (project busy, provider unavailable, ...): the mission we just created must
+                    # not stay "running". The failure is recorded on it, then the original error keeps propagating.
+                    if created_mission_id and ws is not None:
+                        self._close_undispatched_coding_mission(ws, ws_id, created_mission_id, dispatch_exc)
+                    raise
+                # Persist the link between this action record and the coding run even if the run fails,
+                # so later interaction/status calls can be authorised against the right proposal/workspace.
+                execution.metadata["coding_execution_id"] = coding_exec.id
+                execution.metadata["coding_provider_id"] = coding_exec.provider_id
+                res_dict = coding_exec.result.to_dict() if coding_exec.result else {}
+                waiting = coding_exec.status.value in ("waiting_for_interaction", "waiting_for_approval")
+
+                run_state = coding_exec.status.value
+                verified = bool(coding_exec.result and coding_exec.result.verification_passed is True and run_state == "completed")
+                run_terminal = run_state in ("completed", "failed", "timed_out", "cancelled", "requires_rework")
+                execution.metadata["coding_run_state"] = run_state
+                return {
+                    # "success" keeps its historical meaning for the action record: the request was accepted and the run
+                    # did not fail. It does NOT say the work is done: use run_terminal / verified / deliverable_ready.
+                    "success": True if waiting else (coding_exec.result.success if coding_exec.result else (run_state == "completed")),
+                    "run_terminal": run_terminal,
+                    "awaiting": ("interaction" if run_state == "waiting_for_interaction"
+                                 else "approval" if run_state == "waiting_for_approval" else None),
+                    "verified": verified,
+                    "deliverable_ready": verified,
+                    "status": coding_exec.status.value,
+                    "provider_id": coding_exec.provider_id,
+                    "execution_id": coding_exec.id,
+                    "external_task_id": coding_exec.external_task_id,
+                    "summary": coding_exec.result.summary if coding_exec.result else "",
+                    "diff": coding_exec.result.diff if coding_exec.result else "",
+                    "modified_files": coding_exec.result.modified_files if coding_exec.result else [],
+                    "test_output": coding_exec.result.test_output if coding_exec.result else None,
+                    "test_passed": coding_exec.result.test_passed if coding_exec.result else None,
+                    "interaction_prompt": coding_exec.interaction_prompt,
+                    "interaction_options": coding_exec.interaction_options,
+                    "error": coding_exec.error,
+                    "result": res_dict,
+                }
+
+            elif action_id in ("coding.send_message", "coding.interact"):
+                exec_id = self._scoped_coding_execution_id(ws_id, inp.get("execution_id"))
+                self._import_legacy_coding_run(orchestrator, ws_id, exec_id)
+                msg_text = inp.get("message") or inp.get("decision") or ""
+                coding_exec = orchestrator.send_message(exec_id, msg_text)
+                res_dict = coding_exec.result.to_dict() if coding_exec.result else {}
+                return {
+                    # The reply was delivered; the action fails only if the run ended failed/timed out/cancelled.
+                    "success": coding_exec.status.value not in ("failed", "timed_out", "cancelled"),
+                    "status": coding_exec.status.value,
+                    "provider_id": coding_exec.provider_id,
+                    "execution_id": coding_exec.id,
+                    "external_task_id": coding_exec.external_task_id,
+                    "summary": coding_exec.result.summary if coding_exec.result else "",
+                    "diff": coding_exec.result.diff if coding_exec.result else "",
+                    "modified_files": coding_exec.result.modified_files if coding_exec.result else [],
+                    "test_output": coding_exec.result.test_output if coding_exec.result else None,
+                    "test_passed": coding_exec.result.test_passed if coding_exec.result else None,
+                    "interaction_prompt": coding_exec.interaction_prompt,
+                    "interaction_options": coding_exec.interaction_options,
+                    "error": coding_exec.error,
+                    "result": res_dict,
+                }
 
         # 12. Knowledge Base actions
         elif action_id == "knowledge.search":

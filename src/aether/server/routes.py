@@ -94,7 +94,28 @@ async def system_open_browser(payload: OpenBrowserPayload):
     return {"status": "opened", "url": target_url}
 
 
-_VALID_PROVIDERS = {"openai", "anthropic", "gemini", "ollama", "mock"}
+def _ws_key(ws: Any, value: str | None = None) -> str:
+    """The canonical workspace key for a request: empty input and this workspace's legacy aliases map to ``ws.id``."""
+    if ws is None:
+        return (value or "").strip() or "default"
+    canon = getattr(ws, "canonical_id", None)
+    if callable(canon):
+        try:
+            result = canon(value)
+            if isinstance(result, str) and result:
+                return result
+        except Exception:
+            pass
+    supplied = (value or "").strip()
+    if supplied:
+        return supplied
+    for cand in (getattr(ws, "id", None), getattr(ws, "name", None)):
+        if isinstance(cand, str) and cand:
+            return cand
+    return "default"
+
+
+_VALID_PROVIDERS = {"openai", "anthropic", "gemini", "ollama", "groq", "mock"}
 _VALID_KNOWLEDGE_EXTENSIONS = {".txt", ".md", ".markdown", ".csv", ".pdf", ".rst", ".py", ".yaml", ".yml", ".json", ".docx"}
 _MAX_UPLOAD_BYTES = 25 * 1024 * 1024
 _NAME_PATTERN = re.compile(r"^[^/\\\x00-\x1f\x7f]+$")
@@ -780,8 +801,8 @@ async def init_workspace(request: Request, data: WorkspaceInitRequest):
             team_config = applier.apply_preset(
                 preset_id=preset_to_apply,
                 workspace=ws,
-                provider=data.provider or "ollama",
-                model=data.model or "qwen3.5:9b",
+                provider=data.provider or None,
+                model=data.model or None,
                 seed_knowledge=True,
                 set_as_default=True,
             )
@@ -791,11 +812,10 @@ async def init_workspace(request: Request, data: WorkspaceInitRequest):
             # Fallback to default team if preset not found
             default_team_path = ws.teams_dir / "default.yaml"
             if not default_team_path.exists():
+                chosen = (f"  provider: {data.provider}\n" + (f"  model: {data.model}\n" if data.model else "")) if data.provider else ""
                 default_team_yaml = f"""team:
   name: default
-  provider: {data.provider or 'ollama'}
-  model: {data.model or 'qwen3.5:9b'}
-
+{chosen}
 agents:
   - name: manager
     role: "AI Workforce Coordinator"
@@ -834,11 +854,14 @@ async def get_provider_settings(request: Request):
     has_openai = bool((s_store and s_store.has_secret("provider_api_key:openai")) or os.environ.get("OPENAI_API_KEY"))
     has_anthropic = bool((s_store and s_store.has_secret("provider_api_key:anthropic")) or os.environ.get("ANTHROPIC_API_KEY"))
     has_gemini = bool((s_store and s_store.has_secret("provider_api_key:gemini")) or os.environ.get("GEMINI_API_KEY"))
+    has_groq = bool((s_store and s_store.has_secret("provider_api_key:groq")) or os.environ.get("GROQ_API_KEY"))
 
     # Read default provider from team if exists
     team = request.app.state.team
-    provider = team.config.default_provider if team else "openai"
-    model = team.config.default_model if team else "gpt-4o"
+    ws_cfg_section = (getattr(request.app.state.workspace, "config", {}) or {}).get("workspace", {}) \
+        if getattr(request.app.state, "workspace", None) else {}
+    provider = (team.config.default_provider if team else None) or ws_cfg_section.get("default_provider") or ""
+    model = (team.config.default_model if team else None) or ws_cfg_section.get("default_model") or ""
 
     # Determine active timeout
     current_timeout = None
@@ -859,6 +882,7 @@ async def get_provider_settings(request: Request):
             "openai": has_openai,
             "anthropic": has_anthropic,
             "gemini": has_gemini,
+            "groq": has_groq,
             "ollama": True  # local
         }
     }
@@ -874,8 +898,17 @@ async def get_provider_status(
     ws = getattr(request.app.state, "workspace", None)
     team = getattr(request.app.state, "team", None)
 
-    effective_provider = provider or (team.config.default_provider if team else "ollama")
-    effective_model = model or (team.config.default_model if team else "qwen3.5:9b")
+    effective_provider = provider or (team.config.default_provider if team else None) \
+        or (getattr(ws, "config", {}) or {}).get("workspace", {}).get("default_provider")
+    effective_model = model or (team.config.default_model if team else None) \
+        or (getattr(ws, "config", {}) or {}).get("workspace", {}).get("default_model") or ""
+    if not effective_provider:
+        # Nothing selects a provider: say so, and do not contact any service (in particular not a local Ollama).
+        from aether.providers.health import ProviderHealthStatus
+        return ProviderHealthStatus(
+            provider="", model="", status="unconfigured", reachable=False,
+            error="No AI provider is configured for this workspace. Choose one in Settings.",
+        ).to_dict()
 
     api_key: str | None = None
     s_store = getattr(ws, "secret_store", None)
@@ -899,42 +932,127 @@ _CURATED_PROVIDER_MODELS: dict[str, list[str]] = {
     "openai": ["gpt-4o", "gpt-4o-mini", "o3-mini", "gpt-4-turbo"],
     "anthropic": ["claude-3-5-sonnet-20241022", "claude-3-5-haiku-20241022", "claude-3-opus-20240229"],
     "gemini": ["gemini-2.0-flash", "gemini-1.5-pro", "gemini-1.5-flash"],
+    "groq": ["llama-3.3-70b-versatile", "llama-3.1-8b-instant", "mixtral-8x7b-32768", "gemma2-9b-it"],
 }
 
-@router.get("/settings/provider/models")
-async def get_provider_models(request: Request, provider: str):
+def _provider_error_detail(exc: Exception, api_key: str | None = None) -> str:
+    from aether.providers.groq_provider import redact
+    return redact(str(exc), api_key)
+
+
+async def _provider_models(request: Request, provider: str, api_key: str | None):
+    """
+    Model listing with an explicit provenance marker:
+      source="live"                      the provider's own API answered with this list
+      source="curated_no_credentials"    no key available: a fixed starter list, NOT verified against the account
+      source="curated_unreachable"       a local provider could not be reached: starter list, NOT live
+    A failure with a configured key is an error (401/429/502), never a silent switch to a curated list.
+    """
     if provider not in _VALID_PROVIDERS:
         raise HTTPException(status_code=422, detail=f"Unsupported provider '{provider}'.")
 
     curated = _CURATED_PROVIDER_MODELS.get(provider, [])
     from aether.providers.manager import ProviderManager
     from aether.providers.types import ProviderConfig
+    from aether.providers.errors import (
+        AuthenticationError, ProviderConnectionError, ProviderError, RateLimitError,
+    )
 
-    manager = ProviderManager()
+    effective_key = api_key
+    ws = getattr(request.app.state, "workspace", None)
+    if not effective_key:
+        s_store = getattr(ws, "secret_store", None) if ws else None
+        if not s_store:
+            try:
+                from aether.core.secrets import get_secret_store
+                s_store = get_secret_store()
+            except Exception:
+                s_store = None
+        if s_store:
+            effective_key = s_store.get_secret(f"provider_api_key:{provider.lower()}")
+        if not effective_key:
+            effective_key = os.environ.get(f"{provider.upper()}_API_KEY")
+
+    def _payload(models: list[str], source: str, **extra: Any) -> dict[str, Any]:
+        return {"models": models, "default": models[0] if models else "", "source": source,
+                "live": source == "live", **extra}
+
+    if not effective_key and provider in ("openai", "anthropic", "gemini", "groq"):
+        return _payload(curated, "curated_no_credentials")
+
     try:
-        provider_instance = manager.get(provider, config=ProviderConfig(timeout=5.0))
-        models = await provider_instance.aget_available_models()
-        if models:
-            return {"models": models, "default": models[0]}
-        return {"models": curated, "default": curated[0] if curated else ""}
-    except Exception:
-        return {"models": curated, "default": curated[0] if curated else ""}
+        instance = ProviderManager().get(provider, config=ProviderConfig(api_key=effective_key, timeout=10.0))
+        if hasattr(instance, "list_models"):
+            listing = await asyncio.to_thread(instance.list_models)
+            models = listing.models
+        else:
+            models = await instance.aget_available_models()
+        return _payload(list(models), "live")
+    except AuthenticationError as ae:
+        raise HTTPException(status_code=401, detail=f"Authentication failed for {provider}: {_provider_error_detail(ae, effective_key)}")
+    except RateLimitError as rle:
+        raise HTTPException(status_code=429, detail=f"Rate limit exceeded for {provider}: {_provider_error_detail(rle, effective_key)}")
+    except ProviderConnectionError as ce:
+        if not effective_key:  # local provider (ollama) not running: say so, and mark the list as not live
+            return _payload(curated, "curated_unreachable", error=_provider_error_detail(ce))
+        raise HTTPException(status_code=502, detail=f"Connection failed for {provider}: {_provider_error_detail(ce, effective_key)}")
+    except ProviderError as pe:
+        raise HTTPException(status_code=502, detail=f"Provider error for {provider}: {_provider_error_detail(pe, effective_key)}")
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.debug("Failed to fetch live models for %s: %s", provider, type(e).__name__)
+        if effective_key:
+            raise HTTPException(status_code=502, detail=f"Failed to retrieve models for {provider}: {_provider_error_detail(e, effective_key)}")
+        return _payload(curated, "curated_unreachable", error=_provider_error_detail(e))
+
+
+@router.get("/settings/provider/models")
+async def get_provider_models(request: Request, provider: str):
+    """
+    Lists models using credentials already stored in the workspace SecretStore (or the environment).
+    API keys are NEVER accepted in the URL: they would end up in logs and browser history. To test a key that is
+    not saved yet, POST it to this same path.
+    """
+    if any(k.lower() in ("api_key", "apikey", "key", "token") for k in request.query_params.keys()):
+        raise HTTPException(
+            status_code=400,
+            detail="API keys must not be sent in the URL. Use POST /api/settings/provider/models with a JSON body.",
+        )
+    return await _provider_models(request, provider, None)
+
+
+class ProviderModelsPayload(BaseModel):
+    provider: str
+    api_key: str | None = None
+
+
+@router.post("/settings/provider/models")
+async def fetch_provider_models(request: Request, data: ProviderModelsPayload):
+    return await _provider_models(request, data.provider, data.api_key)
 
 @router.post("/settings/provider")
 async def save_provider_settings(request: Request, data: ProviderSettings):
-    ws, team = _runtime(request)
+    ws = getattr(request.app.state, "workspace", None)
+    team = getattr(request.app.state, "team", None)
+    if ws is None:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="Workspace is not initialized. Complete onboarding first.",
+        )
     _validate_provider(data)
 
     # Save API key securely in SecretStore if provided
-    if data.api_key:
-        s_store = getattr(ws, "secret_store", None)
-        if s_store:
-            s_store.store_secret(
-                secret_ref=f"provider_api_key:{data.provider.lower()}",
-                value=data.api_key.strip(),
-                entity_type="provider",
-                entity_id=data.provider.lower(),
-            )
+    s_store = getattr(ws, "secret_store", None)
+    if data.api_key and s_store:
+        s_store.store_secret(
+            secret_ref=f"provider_api_key:{data.provider.lower()}",
+            value=data.api_key.strip(),
+            entity_type="provider",
+            entity_id=data.provider.lower(),
+        )
+    if team and s_store:
+        team.secret_store = s_store
 
     # Update Team default provider
     if team:
@@ -960,6 +1078,66 @@ async def save_provider_settings(request: Request, data: ProviderSettings):
         # Reload team in state so all agents are immediately re-instantiated with the new provider & model
         request.app.state.team = ws.load_team(_active_team_key(request, ws))
 
+        # Propagate to entire workforce across all teams and workspace when requested
+        if data.apply_to_all_agents:
+            import yaml
+            if hasattr(ws, "config") and isinstance(ws.config, dict):
+                config = dict(ws.config)
+                workspace_section = dict(config.get("workspace") or {})
+                workspace_section["default_provider"] = data.provider
+                workspace_section["default_model"] = data.model
+                config["workspace"] = workspace_section
+                if hasattr(ws, "config_path") and ws.config_path:
+                    try:
+                        tmp_path = ws.config_path.with_suffix(".tmp")
+                        with tmp_path.open("w", encoding="utf-8") as handle:
+                            yaml.safe_dump(config, handle, sort_keys=False)
+                        tmp_path.replace(ws.config_path)
+                        ws._config_cache = config
+                    except Exception as we:
+                        logger.debug(f"Failed to save workspace config: {we}")
+
+            teams_dir = getattr(ws, "teams_dir", None) or (ws.root / "teams" if hasattr(ws, "root") and ws.root else None)
+            if teams_dir and teams_dir.is_dir():
+                for t_file in teams_dir.glob("*.yaml"):
+                    try:
+                        other_cfg = TeamLoader.from_yaml(t_file)
+                        other_cfg.default_provider = data.provider
+                        other_cfg.default_model = data.model
+                        for a in other_cfg.agents:
+                            a.provider = None
+                            a.model = None
+                        TeamLoader.to_yaml(other_cfg, t_file)
+                    except Exception as te:
+                        logger.debug(f"Failed to propagate provider to team {t_file}: {te}")
+
+            if hasattr(ws, "legacy_team_yaml") and ws.legacy_team_yaml and ws.legacy_team_yaml.exists():
+                try:
+                    legacy_cfg = TeamLoader.from_yaml(ws.legacy_team_yaml)
+                    legacy_cfg.default_provider = data.provider
+                    legacy_cfg.default_model = data.model
+                    for a in legacy_cfg.agents:
+                        a.provider = None
+                        a.model = None
+                    TeamLoader.to_yaml(legacy_cfg, ws.legacy_team_yaml)
+                except Exception:
+                    pass
+
+    else:
+        # A workspace without any team can still have its provider chosen: it is recorded as the workspace default,
+        # which is where the resolver looks when no team says otherwise.
+        import yaml
+        config = dict(getattr(ws, "config", {}) or {})
+        workspace_section = dict(config.get("workspace") or {})
+        workspace_section["default_provider"] = data.provider
+        workspace_section["default_model"] = data.model
+        config["workspace"] = workspace_section
+        tmp_path = ws.config_path.with_suffix(".tmp")
+        with tmp_path.open("w", encoding="utf-8") as handle:
+            yaml.safe_dump(config, handle, sort_keys=False)
+        tmp_path.replace(ws.config_path)
+        ws._config_cache = config
+
     return {"status": "ok"}
 
 @router.post("/settings/provider/test")
@@ -974,8 +1152,16 @@ async def test_provider_settings(request: Request, data: ProviderSettings):
         if not effective_key:
             ws = getattr(request.app.state, "workspace", None)
             s_store = getattr(ws, "secret_store", None) if ws else None
+            if not s_store:
+                try:
+                    from aether.core.secrets import get_secret_store
+                    s_store = get_secret_store()
+                except Exception:
+                    s_store = None
             if s_store:
                 effective_key = s_store.get_secret(f"provider_api_key:{data.provider.lower()}")
+            if not effective_key:
+                effective_key = os.environ.get(f"{data.provider.upper()}_API_KEY")
 
         provider = ProviderManager().get(
             data.provider, config=ProviderConfig(model=data.model, api_key=effective_key, timeout=10.0)
@@ -1687,8 +1873,8 @@ class CreateWorkspacePayload(BaseModel):
     name: str = Field(min_length=1, max_length=120)
     description: str = Field(default="", max_length=500)
     preset_id: str | None = Field(default="starter-workforce")
-    provider: str | None = Field(default="ollama")
-    model: str | None = Field(default="qwen3.5:9b")
+    provider: str | None = Field(default=None)     # no provider is ever assumed: unset = unconfigured
+    model: str | None = Field(default=None)
     api_key: str | None = None
     target_dir: str | None = None
 
@@ -1719,8 +1905,8 @@ async def create_new_workspace(request: Request, data: CreateWorkspacePayload):
             name=data.name,
             description=data.description,
             preset_id=data.preset_id or "starter-workforce",
-            provider=data.provider or "ollama",
-            model=data.model or "qwen3.5:9b",
+            provider=data.provider or None,
+            model=data.model or None,
             api_key=data.api_key,
             target_dir=data.target_dir,
         )
@@ -2988,11 +3174,14 @@ async def apply_architect_workforce(request: Request, data: ApplyArchitectWorkfo
         raise HTTPException(status_code=409, detail="Team already exists with this name.")
 
     # Determine default provider & model
-    prov_name = data.default_provider or "ollama"
-    model_name = data.default_model or "llama3"
+    ws_defaults = (getattr(ws, "config", {}) or {}).get("workspace", {}) if ws else {}
+    prov_name = data.default_provider or ws_defaults.get("default_provider")
+    model_name = data.default_model or ws_defaults.get("default_model")
     if current_team and hasattr(current_team, "config"):
-        prov_name = data.default_provider or getattr(current_team.config, "default_provider", "ollama") or "ollama"
-        model_name = data.default_model or getattr(current_team.config, "default_model", "llama3") or "llama3"
+        prov_name = data.default_provider or getattr(current_team.config, "default_provider", None) or prov_name
+        model_name = data.default_model or getattr(current_team.config, "default_model", None) or model_name
+    if not prov_name:
+        raise HTTPException(status_code=422, detail="No provider specified and the workspace has no default provider: choose one explicitly.")
 
     from aether.team.config import TeamConfig, AgentConfig, Relationship, SUPPORTED_AGENT_ICONS, SUPPORTED_AGENT_COLORS
 
@@ -3232,7 +3421,7 @@ async def create_mission(request: Request, data: CreateMissionPayload):
         mission = ws.missions.create_mission(
             title=data.title,
             objective=data.objective,
-            workspace_id=data.workspace_id or ws.name,
+            workspace_id=_ws_key(ws, data.workspace_id),
             team_name=team_name,
             project_id=data.project_id,
             conversation_id=data.conversation_id,
@@ -4089,7 +4278,7 @@ async def dry_run_adhoc_mission_route(request: Request, payload: dict[str, Any])
     milestones = [Milestone.from_dict(m) if isinstance(m, dict) else m for m in raw_milestones]
     mission = Mission(
         id=payload.get("id") or "msn-adhoc-dryrun",
-        workspace_id=getattr(ws, "id", None) or ws.name,
+        workspace_id=ws.id,
         title=payload.get("title", "Ad-hoc Mission"),
         objective=payload.get("objective", ""),
         milestones=milestones,
@@ -4441,7 +4630,7 @@ async def list_memories_route(
     include_archived = (status == "archived" or status == "all")
 
     memories = store.list_memories(
-        workspace_id=ws.name,
+        workspace_id=ws.id,
         team_name=team,
         agent_name=agent,
         mission_id=mission,
@@ -4464,7 +4653,7 @@ async def get_memory_route(request: Request, memory_id: str):
     ws = getattr(request.app.state, "workspace", None)
     if not ws:
         raise HTTPException(status_code=503, detail="Workspace not initialized.")
-    mem = ws.memory.get_memory(memory_id, workspace_id=ws.name)
+    mem = ws.memory.get_memory(memory_id, workspace_id=ws.id)
     if not mem:
         raise HTTPException(status_code=404, detail="Memory record not found.")
     return mem.to_dict()
@@ -4500,7 +4689,7 @@ async def create_memory_route(request: Request, payload: MemoryCreatePayload):
     )
 
     mem = WorkforceMemory.create(
-        workspace_id=ws.name,
+        workspace_id=ws.id,
         category=cat,
         summary=clean_summary,
         content=clean_content,
@@ -4538,7 +4727,7 @@ async def update_memory_route(request: Request, memory_id: str, payload: MemoryU
             category=payload.category,
             tags=payload.tags,
             confidence=payload.confidence,
-            workspace_id=ws.name,
+            workspace_id=ws.id,
         )
         return updated.to_dict()
     except KeyError:
@@ -4551,7 +4740,7 @@ async def archive_memory_route(request: Request, memory_id: str, archived: bool 
     if not ws:
         raise HTTPException(status_code=503, detail="Workspace not initialized.")
     try:
-        updated = ws.memory.archive_memory(memory_id, archived=archived, workspace_id=ws.name)
+        updated = ws.memory.archive_memory(memory_id, archived=archived, workspace_id=ws.id)
         return updated.to_dict()
     except KeyError:
         raise HTTPException(status_code=404, detail="Memory record not found.")
@@ -4562,7 +4751,7 @@ async def delete_memory_route(request: Request, memory_id: str, hard: bool = Fal
     ws = getattr(request.app.state, "workspace", None)
     if not ws:
         raise HTTPException(status_code=503, detail="Workspace not initialized.")
-    deleted = ws.memory.delete_memory(memory_id, hard=hard, workspace_id=ws.name)
+    deleted = ws.memory.delete_memory(memory_id, hard=hard, workspace_id=ws.id)
     if not deleted:
         raise HTTPException(status_code=404, detail="Memory record not found.")
     return {"deleted": True, "id": memory_id}
@@ -4575,7 +4764,7 @@ async def retrieve_memories_route(request: Request, payload: MemoryRetrievePaylo
         raise HTTPException(status_code=503, detail="Workspace not initialized.")
     categories = payload.categories or ([payload.category] if payload.category else None)
     scored_results = ws.memory.search_memories(
-        workspace_id=ws.name,
+        workspace_id=ws.id,
         query=payload.query,
         team_name=payload.team_name,
         agent_name=payload.agent_name,
@@ -4629,7 +4818,7 @@ async def list_knowledge_nodes_route(
     query_str = (search or q or "").strip() or None
 
     nodes = ws.knowledge_graph.list_nodes(
-        workspace_id=ws.name,
+        workspace_id=ws.id,
         node_type=node_type,
         node_types=type_list,
         query=query_str,
@@ -4639,12 +4828,12 @@ async def list_knowledge_nodes_route(
     )
     if not nodes and hasattr(ws, "memory") and ws.memory:
         try:
-            existing_mems = ws.memory.list_memories(ws.name, limit=100)
+            existing_mems = ws.memory.list_memories(ws.id, limit=100)
             if existing_mems:
                 from aether.knowledge.graph.builder import KnowledgeGraphBuilder
                 KnowledgeGraphBuilder.compile_all_memories(existing_mems, ws.knowledge_graph)
                 nodes = ws.knowledge_graph.list_nodes(
-                    workspace_id=ws.name,
+                    workspace_id=ws.id,
                     node_type=node_type,
                     node_types=type_list,
                     query=query_str,
@@ -4663,7 +4852,7 @@ async def get_knowledge_node_route(request: Request, node_id: str):
     if not ws:
         raise HTTPException(status_code=503, detail="Workspace not initialized.")
 
-    node = ws.knowledge_graph.get_node(node_id, workspace_id=ws.name)
+    node = ws.knowledge_graph.get_node(node_id, workspace_id=ws.id)
     if not node:
         raise HTTPException(status_code=404, detail="Knowledge node not found.")
     return node.to_dict()
@@ -4681,14 +4870,14 @@ async def get_knowledge_node_neighbors_route(
     if not ws:
         raise HTTPException(status_code=503, detail="Workspace not initialized.")
 
-    node = ws.knowledge_graph.get_node(node_id, workspace_id=ws.name)
+    node = ws.knowledge_graph.get_node(node_id, workspace_id=ws.id)
     if not node:
         raise HTTPException(status_code=404, detail="Knowledge node not found.")
 
     rel_list = [r.strip() for r in relations.split(",") if r.strip()] if relations else None
     neighbors = ws.knowledge_graph.get_neighbors(
         node_id=node_id,
-        workspace_id=ws.name,
+        workspace_id=ws.id,
         direction=direction,
         relation_types=rel_list,
         limit=limit,
@@ -4714,14 +4903,14 @@ async def get_knowledge_node_subgraph_route(
     if not ws:
         raise HTTPException(status_code=503, detail="Workspace not initialized.")
 
-    node = ws.knowledge_graph.get_node(node_id, workspace_id=ws.name)
+    node = ws.knowledge_graph.get_node(node_id, workspace_id=ws.id)
     if not node:
         raise HTTPException(status_code=404, detail="Knowledge node not found.")
 
     rel_list = [r.strip() for r in relations.split(",") if r.strip()] if relations else None
     subgraph = ws.knowledge_graph.get_subgraph(
         seed_node_ids=node_id,
-        workspace_id=ws.name,
+        workspace_id=ws.id,
         max_depth=max_depth,
         max_nodes=max_nodes,
         relation_types=rel_list,
@@ -4745,7 +4934,7 @@ async def list_knowledge_edges_route(
 
     rel_list = [r.strip() for r in relations.split(",") if r.strip()] if relations else None
     edges = ws.knowledge_graph.list_edges(
-        workspace_id=ws.name,
+        workspace_id=ws.id,
         source_node_id=source_node_id,
         target_node_id=target_node_id,
         relation_type=relation_type,
@@ -4763,7 +4952,7 @@ async def search_knowledge_nodes_route(request: Request, payload: KnowledgeSearc
         raise HTTPException(status_code=503, detail="Workspace not initialized.")
 
     scored = ws.knowledge_graph.search_nodes(
-        workspace_id=ws.name,
+        workspace_id=ws.id,
         query=payload.query,
         node_types=payload.node_types,
         limit=payload.limit,
@@ -4785,7 +4974,7 @@ async def get_multi_seed_subgraph_route(request: Request, payload: KnowledgeSubg
 
     subgraph = ws.knowledge_graph.get_subgraph(
         seed_node_ids=payload.seed_node_ids,
-        workspace_id=ws.name,
+        workspace_id=ws.id,
         max_depth=payload.max_depth,
         max_nodes=payload.max_nodes,
         relation_types=payload.relation_types,
@@ -4819,9 +5008,7 @@ async def retrieve_unified_intelligence_route(
     if not ws:
         raise HTTPException(status_code=503, detail="Workspace not initialized.")
 
-    ws_id = (payload.workspace_id or ws.name).strip()
-    if ws_id == "default" and ws.name != "default":
-        ws_id = ws.name
+    ws_id = _ws_key(ws, payload.workspace_id)
     from aether.intelligence.service import UnifiedIntelligenceService
 
     # Auto-compile existing memories into graph if graph is currently empty
@@ -4892,7 +5079,7 @@ async def list_learning_events_route(
     ws = getattr(request.app.state, "workspace", None)
     if not ws:
         return []
-    ws_id = (workspace_id or ws.name).strip()
+    ws_id = _ws_key(ws, workspace_id)
     events = ws.learning_store.list_events(
         workspace_id=ws_id,
         event_type=event_type,
@@ -4914,7 +5101,7 @@ async def get_learning_event_route(
     ws = getattr(request.app.state, "workspace", None)
     if not ws:
         raise HTTPException(status_code=503, detail="Workspace not initialized.")
-    ws_id = (workspace_id or ws.name).strip()
+    ws_id = _ws_key(ws, workspace_id)
     event = ws.learning_store.get_event(event_id, workspace_id=ws_id)
     if not event:
         raise HTTPException(status_code=404, detail=f"LearningEvent '{event_id}' not found.")
@@ -4935,7 +5122,7 @@ async def list_corrections_route(
     ws = getattr(request.app.state, "workspace", None)
     if not ws:
         return []
-    ws_id = (workspace_id or ws.name).strip()
+    ws_id = _ws_key(ws, workspace_id)
     corrs = ws.learning_store.list_corrections(
         workspace_id=ws_id,
         status=status,
@@ -4956,7 +5143,7 @@ async def create_correction_route(
     ws = getattr(request.app.state, "workspace", None)
     if not ws:
         raise HTTPException(status_code=503, detail="Workspace not initialized.")
-    ws_id = (payload.workspace_id or ws.name).strip()
+    ws_id = _ws_key(ws, payload.workspace_id)
 
     from aether.learning.models import Correction, LearningScope, LearningVerificationStatus
     import uuid
@@ -4987,7 +5174,7 @@ async def verify_correction_route(
     ws = getattr(request.app.state, "workspace", None)
     if not ws:
         raise HTTPException(status_code=503, detail="Workspace not initialized.")
-    ws_id = (workspace_id or ws.name).strip()
+    ws_id = _ws_key(ws, workspace_id)
 
     try:
         lesson = ws.learning.verify_correction(correction_id, workspace_id=ws_id)
@@ -5005,7 +5192,7 @@ async def reject_correction_route(
     ws = getattr(request.app.state, "workspace", None)
     if not ws:
         raise HTTPException(status_code=503, detail="Workspace not initialized.")
-    ws_id = (workspace_id or ws.name).strip()
+    ws_id = _ws_key(ws, workspace_id)
 
     try:
         corr = ws.learning.reject_correction(correction_id, workspace_id=ws_id)
@@ -5028,7 +5215,7 @@ async def list_lessons_route(
     ws = getattr(request.app.state, "workspace", None)
     if not ws:
         return []
-    ws_id = (workspace_id or ws.name).strip()
+    ws_id = _ws_key(ws, workspace_id)
     lessons = ws.learning_store.list_lessons(
         workspace_id=ws_id,
         scope=scope,
@@ -5050,7 +5237,7 @@ async def get_lesson_route(
     ws = getattr(request.app.state, "workspace", None)
     if not ws:
         raise HTTPException(status_code=503, detail="Workspace not initialized.")
-    ws_id = (workspace_id or ws.name).strip()
+    ws_id = _ws_key(ws, workspace_id)
     lesson = ws.learning_store.get_lesson(lesson_id, workspace_id=ws_id)
     if not lesson:
         raise HTTPException(status_code=404, detail=f"DistilledLesson '{lesson_id}' not found.")
@@ -5065,7 +5252,7 @@ async def distill_lesson_route(
     ws = getattr(request.app.state, "workspace", None)
     if not ws:
         raise HTTPException(status_code=503, detail="Workspace not initialized.")
-    ws_id = (payload.workspace_id or ws.name).strip()
+    ws_id = _ws_key(ws, payload.workspace_id)
 
     try:
         lesson = ws.learning.verify_correction(payload.correction_id, workspace_id=ws_id)
@@ -5082,7 +5269,7 @@ async def get_learning_insights_route(
     ws = getattr(request.app.state, "workspace", None)
     if not ws:
         raise HTTPException(status_code=503, detail="Workspace not initialized.")
-    ws_id = (workspace_id or ws.name).strip()
+    ws_id = _ws_key(ws, workspace_id)
     return ws.learning.get_insights(ws_id)
 
 
@@ -5104,7 +5291,7 @@ async def get_workspace_policy_route(
     ws = getattr(request.app.state, "workspace", None)
     if not ws:
         raise HTTPException(status_code=503, detail="Workspace not initialized.")
-    ws_id = (workspace_id or ws.name).strip()
+    ws_id = _ws_key(ws, workspace_id)
     return ws.policy.get_policy(ws_id).to_dict()
 
 
@@ -5116,7 +5303,7 @@ async def update_workspace_policy_route(
     ws = getattr(request.app.state, "workspace", None)
     if not ws:
         raise HTTPException(status_code=503, detail="Workspace not initialized.")
-    ws_id = (payload.workspace_id or ws.name).strip()
+    ws_id = _ws_key(ws, payload.workspace_id)
     updates = payload.model_dump(exclude_unset=True) if hasattr(payload, "model_dump") else payload.dict(exclude_unset=True)
     updates.pop("workspace_id", None)
     updated = ws.policy.update_policy(ws_id, updates)
@@ -5162,7 +5349,7 @@ async def list_workflows_route(
     ws = getattr(request.app.state, "workspace", None)
     if not ws:
         raise HTTPException(status_code=503, detail="Workspace not initialized.")
-    ws_id = (workspace_id or ws.name).strip()
+    ws_id = _ws_key(ws, workspace_id)
     workflows = ws.workflows.list_workflows(ws_id)
     return [w.to_dict() for w in workflows]
 
@@ -5176,7 +5363,7 @@ async def create_workflow_route(
     ws = getattr(request.app.state, "workspace", None)
     if not ws:
         raise HTTPException(status_code=503, detail="Workspace not initialized.")
-    ws_id = (payload.workspace_id or ws.name).strip()
+    ws_id = _ws_key(ws, payload.workspace_id)
 
     wf_dict = payload.model_dump() if hasattr(payload, "model_dump") else payload.dict()
     wf_dict["workspace_id"] = ws_id
@@ -5194,7 +5381,7 @@ async def get_workflow_route(
     ws = getattr(request.app.state, "workspace", None)
     if not ws:
         raise HTTPException(status_code=503, detail="Workspace not initialized.")
-    ws_id = (workspace_id or ws.name).strip()
+    ws_id = _ws_key(ws, workspace_id)
     wf = ws.workflows.get_workflow(workflow_id, workspace_id=ws_id)
     if not wf:
         raise HTTPException(status_code=404, detail=f"Workflow '{workflow_id}' not found.")
@@ -5210,7 +5397,7 @@ async def delete_workflow_route(
     ws = getattr(request.app.state, "workspace", None)
     if not ws:
         raise HTTPException(status_code=503, detail="Workspace not initialized.")
-    ws_id = (workspace_id or ws.name).strip()
+    ws_id = _ws_key(ws, workspace_id)
     success = ws.workflows.delete_workflow(workflow_id, workspace_id=ws_id)
     if not success:
         raise HTTPException(status_code=404, detail=f"Workflow '{workflow_id}' not found.")
@@ -5227,7 +5414,7 @@ async def compile_workflow_route(
     ws = getattr(request.app.state, "workspace", None)
     if not ws:
         raise HTTPException(status_code=503, detail="Workspace not initialized.")
-    ws_id = (payload.workspace_id or ws.name).strip()
+    ws_id = _ws_key(ws, payload.workspace_id)
     wf = ws.workflows.get_workflow(workflow_id, workspace_id=ws_id)
     if not wf:
         raise HTTPException(status_code=404, detail=f"Workflow '{workflow_id}' not found.")
@@ -5255,7 +5442,7 @@ async def run_workflow_route(
     ws = getattr(request.app.state, "workspace", None)
     if not ws:
         raise HTTPException(status_code=503, detail="Workspace not initialized.")
-    ws_id = (payload.workspace_id or ws.name).strip()
+    ws_id = _ws_key(ws, payload.workspace_id)
     wf = ws.workflows.get_workflow(workflow_id, workspace_id=ws_id)
     if not wf:
         raise HTTPException(status_code=404, detail=f"Workflow '{workflow_id}' not found.")
@@ -5292,7 +5479,7 @@ async def list_marketplace_packages_route(
     ws = getattr(request.app.state, "workspace", None)
     if not ws:
         raise HTTPException(status_code=503, detail="Workspace not initialized.")
-    ws_id = (workspace_id or ws.name).strip()
+    ws_id = _ws_key(ws, workspace_id)
     packages = ws.ecosystem.list_packages(
         pkg_type=type,
         category=category,
@@ -5314,7 +5501,7 @@ async def get_marketplace_package_route(
     if not pkg:
         raise HTTPException(status_code=404, detail=f"Package '{package_id}' not found.")
     pkg_dict = pkg.to_dict()
-    pkg_dict["is_installed"] = ws.ecosystem.is_installed(package_id, ws.name)
+    pkg_dict["is_installed"] = ws.ecosystem.is_installed(package_id, ws.id)
     return pkg_dict
 
 
@@ -5397,8 +5584,11 @@ async def repurpose_content_route(request: Request, payload: RepurposePayload):
     team = getattr(request.app.state, "team", None)
     effective_provider = (team.config.default_provider if team and hasattr(team, "config") and team.config else None)
     if not effective_provider:
-        effective_provider = getattr(ws, "config", {}).get("workspace", {}).get("default_provider", "ollama") if ws else "ollama"
-    effective_model = (team.config.default_model if team and hasattr(team, "config") and team.config else None) or "qwen3.5:9b"
+        effective_provider = getattr(ws, "config", {}).get("workspace", {}).get("default_provider") if ws else None
+    if not effective_provider:
+        raise HTTPException(status_code=503, detail="Provider unavailable: no AI provider is configured for this workspace.")
+    effective_model = (team.config.default_model if team and hasattr(team, "config") and team.config else None) \
+        or getattr(ws, "config", {}).get("workspace", {}).get("default_model") or ""
 
     api_key: str | None = None
     s_store = getattr(ws, "secret_store", None)
@@ -6081,6 +6271,7 @@ class PersonalChatPayload(BaseModel):
     session_id: str | None = None
     workspace_id: str | None = None
     authority: dict[str, Any] | None = None
+    provider_id: str | None = None
 
 
 class IntentRequestPayload(BaseModel):
@@ -6148,8 +6339,8 @@ class GenericOAuthStartPayload(BaseModel):
 
 class DeveloperOAuthConfigPayload(BaseModel):
     workspace_id: str | None = None
-    client_id: str
-    client_secret: str
+    client_id: str | None = None
+    client_secret: str | None = None
 
 
 class GoogleOAuthStartPayload(BaseModel):
@@ -6191,7 +6382,7 @@ async def personal_chat_route(request: Request, payload: PersonalChatPayload):
     ws = getattr(request.app.state, "workspace", None)
     if not ws:
         raise HTTPException(status_code=503, detail="Workspace not initialized.")
-    ws_id = (payload.workspace_id or ws.name).strip()
+    ws_id = _ws_key(ws, payload.workspace_id)
 
     auth_obj = None
     if payload.authority:
@@ -6201,13 +6392,19 @@ async def personal_chat_route(request: Request, payload: PersonalChatPayload):
         elif isinstance(payload.authority, dict):
             auth_obj = ExecutionAuthority.from_dict(payload.authority)
 
-    msg = await asyncio.to_thread(
-        ws.personal.process_prompt,
-        workspace_id=ws_id,
-        prompt=payload.prompt,
-        session_id=payload.session_id,
-        authority=auth_obj,
-    )
+    from aether.personal.service import MissionCreationError
+    try:
+        msg = await asyncio.to_thread(
+            ws.personal.process_prompt,
+            workspace_id=ws_id,
+            prompt=payload.prompt,
+            session_id=payload.session_id,
+            authority=auth_obj,
+            provider_id=payload.provider_id,
+        )
+    except MissionCreationError as exc:
+        # Honest and explicit: the request was understood but nothing was started because no mission could be recorded.
+        raise HTTPException(status_code=500, detail=f"Delegation not started: {exc}")
     return msg.to_dict()
 
 
@@ -6229,18 +6426,18 @@ async def create_personal_intent_route(request: Request, payload: IntentRequestP
     if not payload.raw_input or not payload.raw_input.strip():
         raise HTTPException(status_code=422, detail="raw_input cannot be empty.")
 
-    requested_ws = (payload.workspace_id or ws.name).strip()
-    if requested_ws != ws.name:
+    requested_ws = _ws_key(ws, payload.workspace_id)
+    if requested_ws != ws.id:
         raise HTTPException(
             status_code=403,
-            detail=f"Workspace access forbidden: requested workspace '{requested_ws}' does not match active workspace '{ws.name}'.",
+            detail=f"Workspace access forbidden: requested workspace '{requested_ws}' does not match active workspace '{ws.id}'.",
         )
 
     try:
         intent, context_pack, proposal, validation_result = await asyncio.to_thread(
             ws.personal.create_intent_and_proposal,
             raw_input=payload.raw_input,
-            workspace_id=ws.name,
+            workspace_id=ws.id,
             session_id=payload.session_id,
             source_surface=payload.source_surface,
         )
@@ -6264,7 +6461,7 @@ async def get_proposal_route(request: Request, proposal_id: str):
     proposal = ws.personal_store.get_proposal(proposal_id)
     if not proposal:
         raise HTTPException(status_code=404, detail=f"Proposal '{proposal_id}' not found.")
-    if proposal.workspace_id != ws.name:
+    if ws.canonical_id(proposal.workspace_id) != ws.id:
         raise HTTPException(
             status_code=403,
             detail=f"Forbidden: Proposal '{proposal_id}' belongs to another workspace.",
@@ -6291,14 +6488,17 @@ async def accept_proposal_route(
     if not ws:
         raise HTTPException(status_code=503, detail="Workspace not initialized.")
     expected_ver = payload.expected_version if payload else None
-    actor = payload.actor if payload else "user"
+    claimed = (payload.actor if payload else "user") or "user"
+    # A client can label itself but can never claim to be the policy engine: autonomous consent is internal only.
+    actor = "user" if claimed == "user" else f"user:{claimed}"
     from aether.core.execution import UnauthorizedExecutionError
     try:
         accepted_proposal, authority = ws.personal.accept_proposal(
             proposal_id=proposal_id,
-            workspace_id=ws.name,
+            workspace_id=ws.id,
             expected_version=expected_ver,
             actor=actor,
+            channel="api",
         )
         return {
             "status": "accepted",
@@ -6311,18 +6511,46 @@ async def accept_proposal_route(
         raise HTTPException(status_code=500, detail=str(exc))
 
 
+class RevokeProposalPayload(BaseModel):
+    reason: str = "revoked by user"
+    actor: str = "user"
+
+
+@router.post("/personal/proposals/{proposal_id}/revoke")
+async def revoke_proposal_route(request: Request, proposal_id: str, payload: RevokeProposalPayload | None = None):
+    """Withdraws consent: every authority derived from the proposal stops working immediately."""
+    ws = getattr(request.app.state, "workspace", None)
+    if not ws:
+        raise HTTPException(status_code=503, detail="Workspace not initialized.")
+    body = payload or RevokeProposalPayload()
+    try:
+        revoked = ws.personal.revoke_proposal(proposal_id, ws.id, actor=f"user:{body.actor}", reason=body.reason)
+        return {"status": "revoked", "proposal": revoked.to_dict()}
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+
+
+@router.get("/personal/consents")
+async def list_consents_route(request: Request, limit: int = 50):
+    """Audit trail: who authorised what, when, through which channel, for which proposal version."""
+    ws = getattr(request.app.state, "workspace", None)
+    if not ws:
+        return []
+    return [c.to_dict() for c in ws.personal_store.list_consents(ws.id, limit=limit)]
+
+
 @router.get("/personal/proposals")
 async def list_proposals_route(request: Request, workspace_id: str | None = None, limit: int = 20):
     """Lists addressable mission proposals for the active workspace."""
     ws = getattr(request.app.state, "workspace", None)
     if not ws:
         return []
-    if workspace_id is not None and workspace_id.strip() and workspace_id.strip() != ws.name:
+    if workspace_id is not None and workspace_id.strip() and ws.canonical_id(workspace_id) != ws.id:
         raise HTTPException(
             status_code=403,
             detail=f"Forbidden: Cannot list proposals for another workspace '{workspace_id}'.",
         )
-    proposals = ws.personal_store.list_proposals(workspace_id=ws.name, limit=limit)
+    proposals = ws.personal_store.list_proposals(workspace_id=ws.id, limit=limit)
     return [p.to_dict() for p in proposals]
 
 
@@ -6331,7 +6559,7 @@ async def list_personal_sessions_route(request: Request, workspace_id: str | Non
     ws = getattr(request.app.state, "workspace", None)
     if not ws:
         return []
-    ws_id = (workspace_id or ws.name).strip()
+    ws_id = _ws_key(ws, workspace_id)
     sessions = ws.personal_store.list_sessions(workspace_id=ws_id, limit=limit)
     return [s.to_dict() for s in sessions]
 
@@ -6347,6 +6575,209 @@ async def get_personal_session_route(request: Request, session_id: str):
     return session.to_dict()
 
 
+class UpdateSessionPayload(BaseModel):
+    title: str
+
+
+@router.patch("/personal/sessions/{session_id}")
+async def update_personal_session_route(request: Request, session_id: str, payload: UpdateSessionPayload):
+    ws = getattr(request.app.state, "workspace", None)
+    if not ws:
+        raise HTTPException(status_code=503, detail="Workspace not initialized.")
+    success = ws.personal_store.update_session_title(session_id, payload.title, ws.id)
+    if not success:
+        raise HTTPException(status_code=404, detail="Session not found or title invalid.")
+    session = ws.personal_store.get_session(session_id)
+    return session.to_dict() if session else {"status": "updated"}
+
+
+@router.delete("/personal/sessions/{session_id}")
+async def delete_personal_session_route(request: Request, session_id: str):
+    ws = getattr(request.app.state, "workspace", None)
+    if not ws:
+        raise HTTPException(status_code=503, detail="Workspace not initialized.")
+    deleted = ws.personal_store.delete_session(session_id, ws.id)
+    if not deleted:
+        raise HTTPException(status_code=404, detail="Session not found.")
+    return {"status": "deleted", "session_id": session_id}
+
+
+class CodingInteractPayload(BaseModel):
+    execution_id: str
+    message: str
+    workspace_id: str | None = None
+
+
+def _coding_followup_authority(executor: Any, ws_id: str, run_id: str, label: str):
+    """
+    Authority for acting on an EXISTING coding run: derived from the proposal that started it, re-validated
+    by the executor against the persisted, still-ACCEPTED, unrevoked proposal and its consent. One ledger step
+    per call so repeated replies/test runs are not mistaken for replays.
+    """
+    import dataclasses
+    import uuid as _uuid
+    from aether.core.execution import ExecutionAuthority, UnauthorizedExecutionError
+
+    record = executor.get_coding_run_record(ws_id, run_id)
+    persisted = (record.metadata or {}).get("authority") if record is not None else None
+    if not persisted:
+        run = None
+        try:
+            run = executor._coding_run_store(ws_id).get_run(run_id)
+        except Exception:
+            run = None
+        if run is None and record is None:
+            raise HTTPException(status_code=404, detail="Coding run not found in this workspace.")
+        raise HTTPException(status_code=403, detail="This coding run has no execution authority; action refused.")
+    try:
+        base = ExecutionAuthority.from_dict(persisted)
+    except UnauthorizedExecutionError as exc:
+        raise HTTPException(status_code=403, detail=str(exc))
+    return dataclasses.replace(base, step_id=f"{label}:{run_id}:{_uuid.uuid4().hex[:8]}", args_digest=None)
+
+
+@router.post("/personal/coding/interact")
+async def coding_interact_route(request: Request, payload: CodingInteractPayload):
+    """
+    Sends the user's answer/decision to a waiting coding run.
+
+    This is a sensitive mutation, so it goes through the canonical ActionExecutor like every other one:
+    the run must belong to this workspace, the authority is derived from the proposal that started the run
+    (and re-validated against the persisted, still-ACCEPTED proposal), the workspace policy is evaluated
+    (hard denials win), and the call itself is the user's explicit approval of this specific reply.
+    """
+    import asyncio
+    from aether.actions.models import ActionExecutionStatus
+    from aether.core.execution import UnauthorizedExecutionError
+
+    ws = getattr(request.app.state, "workspace", None)
+    if not ws:
+        raise HTTPException(status_code=503, detail="Workspace not initialized.")
+    message = (payload.message or "").strip()
+    if not message:
+        raise HTTPException(status_code=422, detail="A non-empty message is required.")
+    ws_id = _ws_key(ws, payload.workspace_id)
+    executor = ws.actions
+    authority = _coding_followup_authority(executor, ws_id, payload.execution_id, "coding.interact")
+
+    def _run():
+        execution = executor.execute(
+            action_id="coding.interact",
+            workspace_id=ws_id,
+            input_data={"execution_id": payload.execution_id, "message": message},
+            auto_approve=False,
+            authority=authority,
+        )
+        if execution.status == ActionExecutionStatus.WAITING_APPROVAL:
+            # Policy asked for a human decision; this authenticated request is that decision.
+            execution = executor.approve(execution.id, approver="session_user")
+        return execution
+
+    try:
+        execution = await asyncio.to_thread(_run)
+    except UnauthorizedExecutionError as exc:
+        raise HTTPException(status_code=403, detail=str(exc))
+    except (ValueError, KeyError) as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+
+    if execution.status == ActionExecutionStatus.FAILED:
+        code = (execution.metadata or {}).get("policy_code")
+        raise HTTPException(
+            status_code=403 if code else 400,
+            detail={"error": execution.error_message or "Interaction failed.", "policy_code": code},
+        )
+    return {
+        "status": "sent",
+        "action_execution_id": execution.id,
+        "execution": execution.output_data or {},
+    }
+
+
+class CodingRunTestsPayload(BaseModel):
+    runner: str = "auto"
+    timeout_seconds: float = 120.0
+
+
+class CodingRunReleasePayload(BaseModel):
+    reason: str
+
+
+@router.get("/personal/coding/runs")
+async def list_coding_runs_route(request: Request, mission_id: str | None = None, limit: int = 50):
+    ws = getattr(request.app.state, "workspace", None)
+    if not ws:
+        return []
+    return [r.to_dict() for r in ws.coding_runs.list_runs(mission_id=mission_id, limit=limit)]
+
+
+@router.get("/personal/coding/runs/{run_id}")
+async def get_coding_run_route(request: Request, run_id: str):
+    ws = getattr(request.app.state, "workspace", None)
+    if not ws:
+        raise HTTPException(status_code=503, detail="Workspace not initialized.")
+    run = ws.coding_runs.get_run(run_id)
+    if run is None:
+        raise HTTPException(status_code=404, detail="Coding run not found in this workspace.")
+    return {"run": run.to_dict(), "events": ws.coding_runs.list_events(run_id=run_id)}
+
+
+@router.post("/personal/coding/runs/{run_id}/tests")
+async def request_coding_run_tests_route(request: Request, run_id: str, payload: CodingRunTestsPayload | None = None):
+    """
+    Queues an explicit, authorised execution of the project's tests. It runs agent-written code, so the action is a
+    sensitive mutation: this call only QUEUES it; a human approves it through the canonical approvals endpoint.
+    """
+    import asyncio
+    from aether.core.execution import UnauthorizedExecutionError
+
+    ws = getattr(request.app.state, "workspace", None)
+    if not ws:
+        raise HTTPException(status_code=503, detail="Workspace not initialized.")
+    body = payload or CodingRunTestsPayload()
+    executor = ws.actions
+    authority = _coding_followup_authority(executor, ws.id, run_id, "coding.run_tests")
+    try:
+        execution = await asyncio.to_thread(
+            executor.execute, "coding.run_tests", ws.id,
+            {"execution_id": run_id, "runner": body.runner, "timeout_seconds": body.timeout_seconds},
+            False, None, authority,
+        )
+    except UnauthorizedExecutionError as exc:
+        raise HTTPException(status_code=403, detail=str(exc))
+    except (ValueError, KeyError) as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+    if execution.status.value == "failed":
+        raise HTTPException(status_code=403, detail=execution.error_message or "Test run refused by policy.")
+    return {"status": execution.status.value, "action_execution_id": execution.id,
+            "approval_required": execution.status.value == "waiting_approval"}
+
+
+@router.post("/personal/coding/runs/{run_id}/release")
+async def release_coding_run_project_route(request: Request, run_id: str, payload: CodingRunReleasePayload):
+    """Queues the human confirmation that a previous run's remote session is stopped (unlocks the project)."""
+    import asyncio
+    from aether.core.execution import UnauthorizedExecutionError
+
+    ws = getattr(request.app.state, "workspace", None)
+    if not ws:
+        raise HTTPException(status_code=503, detail="Workspace not initialized.")
+    if not (payload.reason or "").strip():
+        raise HTTPException(status_code=422, detail="A reason is required to release a project lock.")
+    executor = ws.actions
+    authority = _coding_followup_authority(executor, ws.id, run_id, "coding.release_project")
+    try:
+        execution = await asyncio.to_thread(
+            executor.execute, "coding.release_project", ws.id, {"execution_id": run_id, "reason": payload.reason},
+            False, None, authority,
+        )
+    except UnauthorizedExecutionError as exc:
+        raise HTTPException(status_code=403, detail=str(exc))
+    except (ValueError, KeyError) as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+    return {"status": execution.status.value, "action_execution_id": execution.id,
+            "approval_required": execution.status.value == "waiting_approval"}
+
+
 @router.get("/personal/overview")
 async def get_personal_overview_route(request: Request, workspace_id: str | None = None):
     ws = getattr(request.app.state, "workspace", None)
@@ -6358,7 +6789,7 @@ async def get_personal_overview_route(request: Request, workspace_id: str | None
             "active_works": [],
             "recent_works": [],
         }
-    ws_id = (workspace_id or ws.name).strip()
+    ws_id = _ws_key(ws, workspace_id)
     return ws.personal.get_overview(workspace_id=ws_id)
 
 
@@ -6395,7 +6826,7 @@ async def list_companion_deliverables_route(
     ws = getattr(request.app.state, "workspace", None)
     if not ws:
         return []
-    ws_id = (workspace_id or ws.name).strip()
+    ws_id = _ws_key(ws, workspace_id)
     return ws.personal.list_deliverables(workspace_id=ws_id, limit=limit)
 
 
@@ -6406,7 +6837,7 @@ async def companion_drop_route(request: Request, payload: CompanionDropPayload):
     ws = getattr(request.app.state, "workspace", None)
     if not ws:
         raise HTTPException(status_code=503, detail="Workspace not initialized.")
-    ws_id = (payload.workspace_id or ws.name).strip()
+    ws_id = _ws_key(ws, payload.workspace_id)
 
     raw_bytes = b""
     if payload.content_base64:
@@ -6432,7 +6863,7 @@ async def execute_companion_quick_action_route(request: Request, payload: Compan
     ws = getattr(request.app.state, "workspace", None)
     if not ws:
         raise HTTPException(status_code=503, detail="Workspace not initialized.")
-    ws_id = (payload.workspace_id or ws.name).strip()
+    ws_id = _ws_key(ws, payload.workspace_id)
     return ws.personal.execute_quick_action(
         workspace_id=ws_id,
         quick_action_id=payload.action_id,
@@ -6458,7 +6889,7 @@ async def execute_action_route(request: Request, payload: ExecuteActionPayload):
     ws = getattr(request.app.state, "workspace", None)
     if not ws:
         raise HTTPException(status_code=503, detail="Workspace not initialized.")
-    ws_id = (payload.workspace_id or ws.name).strip()
+    ws_id = _ws_key(ws, payload.workspace_id)
     
     # Check if this requires execution authority
     definition = ws.actions.registry.get(payload.action_id)
@@ -6489,6 +6920,7 @@ async def execute_action_route(request: Request, payload: ExecuteActionPayload):
                 workspace_id=ws_id,
                 store=p_store,
                 action_or_boundary=payload.action_id,
+                canonicalize=getattr(ws, "canonical_id", None),
             )
         except Exception as auth_err:
             raise HTTPException(status_code=403, detail=f"Execution authority validation failed: {auth_err}")
@@ -6524,7 +6956,7 @@ async def list_action_executions_route(
     ws = getattr(request.app.state, "workspace", None)
     if not ws:
         return []
-    ws_id = (workspace_id or ws.name).strip()
+    ws_id = _ws_key(ws, workspace_id)
     executions = ws.action_store.list_executions(
         workspace_id=ws_id,
         status=status,
@@ -6553,7 +6985,7 @@ def _mark_approval_notification_done(ws: Any, *target_ids: str) -> None:
         return
     try:
         store = notif_svc.store
-        ws_name = getattr(ws, "name", "default")
+        ws_name = getattr(ws, "id", None) or getattr(ws, "name", "default")
         unread_list = store.list(ws_name, unread_only=True, limit=100)
         target_set = {str(t).strip() for t in target_ids if t and str(t).strip()}
         for notif in unread_list:
@@ -7041,7 +7473,7 @@ async def list_connections_route(request: Request, workspace_id: str | None = No
     ws = getattr(request.app.state, "workspace", None)
     if not ws:
         return []
-    ws_id = (workspace_id or ws.name).strip()
+    ws_id = _ws_key(ws, workspace_id)
     conns = ws.connections.list_connections(workspace_id=ws_id)
     return [c.to_dict(mask_secrets=True) for c in conns]
 
@@ -7051,7 +7483,7 @@ async def connect_service_route(request: Request, payload: ConnectPayload):
     ws = getattr(request.app.state, "workspace", None)
     if not ws:
         raise HTTPException(status_code=503, detail="Workspace not initialized.")
-    ws_id = (payload.workspace_id or ws.name).strip()
+    ws_id = _ws_key(ws, payload.workspace_id)
     existing = ws.connections.get_connection(ws_id, payload.provider)
     auth_meta = dict(payload.auth_metadata or {})
     if existing and existing.auth_metadata:
@@ -7080,7 +7512,7 @@ async def verify_connection_route(
     ws = getattr(request.app.state, "workspace", None)
     if not ws:
         raise HTTPException(status_code=503, detail="Workspace not initialized.")
-    ws_id = ((payload.workspace_id if payload else None) or ws.name).strip()
+    ws_id = _ws_key(ws, payload.workspace_id if payload else None)
 
     meta = payload.auth_metadata if (payload and payload.auth_metadata) else None
     live_check = payload.live_check if payload is not None else True
@@ -7105,7 +7537,7 @@ async def disconnect_service_route(request: Request, provider: str, workspace_id
     ws = getattr(request.app.state, "workspace", None)
     if not ws:
         raise HTTPException(status_code=503, detail="Workspace not initialized.")
-    ws_id = (workspace_id or ws.name).strip()
+    ws_id = _ws_key(ws, workspace_id)
     ws.connections.disconnect(workspace_id=ws_id, provider=provider)
     return {"status": "disconnected", "provider": provider}
 
@@ -7142,7 +7574,7 @@ async def list_calendar_events_route(request: Request, workspace_id: str | None 
     ws = getattr(request.app.state, "workspace", None)
     if not ws:
         return []
-    ws_id = (workspace_id or ws.name).strip()
+    ws_id = _ws_key(ws, workspace_id)
     connector = ws.connections.get_calendar_connector(workspace_id=ws_id)
     return connector.list_events(limit=limit)
 
@@ -7152,7 +7584,7 @@ async def create_calendar_event_route(request: Request, payload: CreateCalendarE
     ws = getattr(request.app.state, "workspace", None)
     if not ws:
         raise HTTPException(status_code=503, detail="Workspace not initialized.")
-    ws_id = (payload.workspace_id or ws.name).strip()
+    ws_id = _ws_key(ws, payload.workspace_id)
     connector = ws.connections.get_calendar_connector(workspace_id=ws_id)
     event = connector.create_event(
         title=payload.title,
@@ -7171,7 +7603,7 @@ async def create_calendar_event_route(request: Request, payload: CreateCalendarE
 @router.get("/connections/oauth/providers")
 async def list_oauth_providers_route(request: Request, workspace_id: str | None = None):
     ws = getattr(request.app.state, "workspace", None)
-    ws_id = ((workspace_id or (ws.name if ws else "default"))).strip()
+    ws_id = _ws_key(ws, workspace_id)
     base = str(request.base_url).rstrip("/")
     from aether.connections.oauth import OAuthManager
     store = ws.connections.store if ws and hasattr(ws, "connections") else None
@@ -7187,7 +7619,7 @@ async def save_developer_oauth_config_route(
     ws = getattr(request.app.state, "workspace", None)
     if not ws:
         raise HTTPException(status_code=503, detail="Workspace not initialized.")
-    ws_id = ((payload.workspace_id or ws.name)).strip()
+    ws_id = _ws_key(ws, payload.workspace_id)
     from aether.connections.oauth import OAuthManager
     if provider not in OAuthManager.get_supported_providers():
         raise HTTPException(status_code=400, detail=f"Provider '{provider}' does not support OAuth configuration.")
@@ -7210,7 +7642,7 @@ async def start_provider_oauth_route(
     ws = getattr(request.app.state, "workspace", None)
     if not ws:
         raise HTTPException(status_code=503, detail="Workspace not initialized.")
-    ws_id = ((payload.workspace_id if payload else None) or ws.name).strip()
+    ws_id = _ws_key(ws, payload.workspace_id if payload else None)
 
     from aether.connections.oauth import OAuthManager
     if provider not in OAuthManager.get_supported_providers():
@@ -7329,7 +7761,12 @@ async def generic_oauth_callback_route(
 </html>"""
         return HTMLResponse(content=html, status_code=400)
 
-    ws_id = state_data.workspace_id or (ws.name if ws else "default")
+    ws_id = _ws_key(ws, state_data.workspace_id)
+
+    if prov == "google_calendar" and not state_data.client_secret and ws and getattr(ws, "connections", None) and ws.connections.store:
+        conn = ws.connections.store.get_connection_by_provider(ws_id, "google_calendar")
+        if conn and conn.auth_metadata and conn.auth_metadata.get("client_secret"):
+            state_data.client_secret = str(conn.auth_metadata["client_secret"]).strip()
 
     try:
         tokens = OAuthManager.exchange_code(prov, code, state_data)
@@ -7338,13 +7775,24 @@ async def generic_oauth_callback_route(
         logger.error("Token exchange failed during %s callback: %s", prov_display, err_msg)
         if ws:
             ws.connections.record_operation_failure(ws_id, prov, "oauth_exchange", err_msg, is_auth_error=True)
+        is_missing_secret = "client_secret" in err_msg.lower()
+        hint = (
+            f"<p style='font-size: 13px; color: #f59e0b; margin-top: 16px; line-height: 1.5;'>"
+            f"<strong>Suggerimento:</strong> {prov_display} richiede il Client Secret per completare l'autenticazione. "
+            f"Inserisci il Client Secret in Aether &rarr; Connessioni e riprova."
+            f"</p>"
+            if is_missing_secret
+            else ""
+        )
         html = f"""<!DOCTYPE html>
 <html>
 <head><title>Aether — Token Exchange Failed</title></head>
 <body style="font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; background: #090d16; color: #f8fafc; padding: 48px; text-align: center;">
-  <div style="max-width: 440px; margin: 0 auto; background: #131b2e; border: 1px solid #ef444450; border-radius: 12px; padding: 32px;">
+  <div style="max-width: 480px; margin: 0 auto; background: #131b2e; border: 1px solid #ef444450; border-radius: 12px; padding: 32px;">
     <h2 style="color: #ef4444; margin-top: 0;">Authorization Failed</h2>
-    <p style="font-size: 14px; color: #cbd5e1;">{err_msg}</p>
+    <p style="font-size: 14px; color: #cbd5e1; line-height: 1.5;">{err_msg}</p>
+    {hint}
+    <p style="font-size: 12px; color: #64748b; margin-top: 24px;">Puoi chiudere questa finestra e riprovare da Aether.</p>
   </div>
   <script>
     if (window.opener) {{
@@ -7465,7 +7913,7 @@ async def exchange_generic_oauth_route(provider: str, request: Request, payload:
     ws = getattr(request.app.state, "workspace", None)
     if not ws:
         raise HTTPException(status_code=503, detail="Workspace not initialized.")
-    ws_id = (payload.workspace_id or ws.name).strip()
+    ws_id = _ws_key(ws, payload.workspace_id)
 
     from aether.connections.oauth import OAuthManager
     from aether.connections.models import Connection, ConnectionStatus
@@ -7497,6 +7945,11 @@ async def exchange_generic_oauth_route(provider: str, request: Request, payload:
 
     if payload.redirect_uri:
         state_data.redirect_uri = payload.redirect_uri
+
+    if prov == "google_calendar" and not state_data.client_secret and ws and getattr(ws, "connections", None) and ws.connections.store:
+        conn = ws.connections.store.get_connection_by_provider(ws_id, "google_calendar")
+        if conn and conn.auth_metadata and conn.auth_metadata.get("client_secret"):
+            state_data.client_secret = str(conn.auth_metadata["client_secret"]).strip()
 
     tokens = OAuthManager.exchange_code(prov, payload.code, state_data)
 
@@ -7562,7 +8015,7 @@ async def start_google_oauth_route(request: Request, payload: GoogleOAuthStartPa
     ws = getattr(request.app.state, "workspace", None)
     if not ws:
         raise HTTPException(status_code=503, detail="Workspace not initialized.")
-    ws_id = ((payload.workspace_id if payload else None) or ws.name).strip()
+    ws_id = _ws_key(ws, payload.workspace_id if payload else None)
 
     from aether.connections.google_calendar import GoogleOAuthManager
     redirect_uri = payload.redirect_uri if payload and payload.redirect_uri else None
@@ -7573,6 +8026,8 @@ async def start_google_oauth_route(request: Request, payload: GoogleOAuthStartPa
     client_id = payload.client_id if payload else None
     client_secret = payload.client_secret if payload else None
 
+    from aether.connections.base import ConnectorConfigurationError
+
     existing = ws.connections.get_connection(ws_id, "google_calendar")
     if existing and existing.auth_metadata:
         if not client_id and existing.auth_metadata.get("client_id"):
@@ -7580,12 +8035,28 @@ async def start_google_oauth_route(request: Request, payload: GoogleOAuthStartPa
         if not client_secret and existing.auth_metadata.get("client_secret"):
             client_secret = existing.auth_metadata["client_secret"]
 
-    auth_url, state = GoogleOAuthManager.create_auth_flow(
-        workspace_id=ws_id,
-        client_id=client_id,
-        client_secret=client_secret,
-        redirect_uri=redirect_uri,
-    )
+    if ws and hasattr(ws, "connections") and ws.connections.store:
+        from aether.connections.oauth import OAuthManager
+        if (payload and (payload.client_id or payload.client_secret)) or client_id or client_secret:
+            OAuthManager.save_developer_config(
+                provider="google_calendar",
+                workspace_id=ws_id,
+                client_id=client_id or "",
+                client_secret=client_secret or "",
+                store=ws.connections.store,
+            )
+
+    try:
+        auth_url, state = GoogleOAuthManager.create_auth_flow(
+            workspace_id=ws_id,
+            client_id=client_id,
+            client_secret=client_secret,
+            redirect_uri=redirect_uri,
+            store=ws.connections.store,
+        )
+    except (ConnectorConfigurationError, ValueError) as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+
     return {"auth_url": auth_url, "state": state, "redirect_uri": redirect_uri}
 
 
@@ -7650,7 +8121,12 @@ async def google_oauth_callback_route(
 </html>"""
         return HTMLResponse(content=html, status_code=400)
 
-    ws_id = state_data.workspace_id or (ws.name if ws else "default")
+    ws_id = _ws_key(ws, state_data.workspace_id)
+
+    if not state_data.client_secret and ws and getattr(ws, "connections", None) and ws.connections.store:
+        conn = ws.connections.store.get_connection_by_provider(ws_id, "google_calendar")
+        if conn and conn.auth_metadata and conn.auth_metadata.get("client_secret"):
+            state_data.client_secret = str(conn.auth_metadata["client_secret"]).strip()
 
     try:
         tokens = GoogleOAuthManager.exchange_code(code, state_data)
@@ -7659,13 +8135,25 @@ async def google_oauth_callback_route(
         logger.error("Token exchange failed during Google callback: %s", err_msg)
         if ws:
             ws.connections.record_operation_failure(ws_id, "google_calendar", "oauth_exchange", err_msg, is_auth_error=True)
+        is_missing_secret = "client_secret" in err_msg.lower()
+        hint = (
+            "<p style='font-size: 13px; color: #f59e0b; margin-top: 16px; line-height: 1.5;'>"
+            "<strong>Suggerimento:</strong> Il tuo Client ID Google è configurato come 'Applicazione web' e richiede il "
+            "<strong>Client Secret</strong> (es. <code>GOCSPX-...</code>). "
+            "Torna in Aether &rarr; Connessioni &rarr; Google Calendar e inserisci il Client Secret generato su Google Cloud Console."
+            "</p>"
+            if is_missing_secret
+            else ""
+        )
         html = f"""<!DOCTYPE html>
 <html>
 <head><title>Aether — Token Exchange Failed</title></head>
 <body style="font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; background: #090d16; color: #f8fafc; padding: 48px; text-align: center;">
-  <div style="max-width: 440px; margin: 0 auto; background: #131b2e; border: 1px solid #ef444450; border-radius: 12px; padding: 32px;">
+  <div style="max-width: 480px; margin: 0 auto; background: #131b2e; border: 1px solid #ef444450; border-radius: 12px; padding: 32px;">
     <h2 style="color: #ef4444; margin-top: 0;">Authorization Failed</h2>
-    <p style="font-size: 14px; color: #cbd5e1;">{err_msg}</p>
+    <p style="font-size: 14px; color: #cbd5e1; line-height: 1.5;">{err_msg}</p>
+    {hint}
+    <p style="font-size: 12px; color: #64748b; margin-top: 24px;">Puoi chiudere questa finestra e riprovare da Aether.</p>
   </div>
   <script>
     if (window.opener) {{
@@ -7766,7 +8254,7 @@ async def exchange_google_oauth_route(request: Request, payload: GoogleOAuthExch
     ws = getattr(request.app.state, "workspace", None)
     if not ws:
         raise HTTPException(status_code=503, detail="Workspace not initialized.")
-    ws_id = (payload.workspace_id or ws.name).strip()
+    ws_id = _ws_key(ws, payload.workspace_id)
 
     from aether.connections.google_calendar import GoogleOAuthManager, GoogleCalendarConnector
     from aether.connections.models import Connection, ConnectionStatus
@@ -7778,6 +8266,11 @@ async def exchange_google_oauth_route(request: Request, payload: GoogleOAuthExch
 
     if payload.redirect_uri:
         state_data.redirect_uri = payload.redirect_uri
+
+    if not state_data.client_secret and ws and getattr(ws, "connections", None) and ws.connections.store:
+        conn = ws.connections.store.get_connection_by_provider(ws_id, "google_calendar")
+        if conn and conn.auth_metadata and conn.auth_metadata.get("client_secret"):
+            state_data.client_secret = str(conn.auth_metadata["client_secret"]).strip()
 
     tokens = GoogleOAuthManager.exchange_code(payload.code, state_data)
 
@@ -7820,7 +8313,7 @@ async def list_google_calendars_route(request: Request, workspace_id: str | None
     ws = getattr(request.app.state, "workspace", None)
     if not ws:
         raise HTTPException(status_code=503, detail="Workspace not initialized.")
-    ws_id = (workspace_id or ws.name).strip()
+    ws_id = _ws_key(ws, workspace_id)
     connector = ws.connections.get_google_calendar_connector(workspace_id=ws_id)
     calendars = connector.list_calendars()
     return {"calendars": calendars}
@@ -7832,7 +8325,7 @@ async def select_google_calendar_route(request: Request, payload: GoogleSelectCa
     ws = getattr(request.app.state, "workspace", None)
     if not ws:
         raise HTTPException(status_code=503, detail="Workspace not initialized.")
-    ws_id = (payload.workspace_id or ws.name).strip()
+    ws_id = _ws_key(ws, payload.workspace_id)
     conn = ws.connections.get_connection(ws_id, "google_calendar")
     if not conn:
         raise HTTPException(status_code=404, detail="Google Calendar connection not found.")
@@ -7851,14 +8344,21 @@ async def list_google_calendar_events_route(
     workspace_id: str | None = None,
     calendar_id: str | None = None,
     limit: int = 50,
+    time_min: str | None = None,
+    time_max: str | None = None,
 ):
     """Queries events from the active Google Calendar."""
     ws = getattr(request.app.state, "workspace", None)
     if not ws:
         return []
-    ws_id = (workspace_id or ws.name).strip()
+    ws_id = _ws_key(ws, workspace_id)
     connector = ws.connections.get_google_calendar_connector(workspace_id=ws_id)
-    return connector.list_events(calendar_id=calendar_id, limit=limit)
+    return connector.list_events(
+        calendar_id=calendar_id,
+        limit=limit,
+        time_min=time_min,
+        time_max=time_max,
+    )
 
 
 @router.post("/connections/google_calendar/events")
@@ -7867,7 +8367,7 @@ async def create_google_calendar_event_route(request: Request, payload: CreateGo
     ws = getattr(request.app.state, "workspace", None)
     if not ws:
         raise HTTPException(status_code=503, detail="Workspace not initialized.")
-    ws_id = (payload.workspace_id or ws.name).strip()
+    ws_id = _ws_key(ws, payload.workspace_id)
     connector = ws.connections.get_google_calendar_connector(workspace_id=ws_id)
     event = connector.create_event(
         title=payload.title,
@@ -7901,7 +8401,7 @@ async def telegram_webhook_route(request: Request):
 
     # Verify Telegram Webhook Secret Token using constant-time comparison
     import hmac
-    conn = ws.connections.get_connection(ws.name, "telegram") if hasattr(ws, "connections") else None
+    conn = ws.connections.get_connection(ws.id, "telegram") if hasattr(ws, "connections") else None
     configured_secret = None
     if conn and conn.auth_metadata:
         configured_secret = conn.auth_metadata.get("webhook_secret")
@@ -7936,7 +8436,7 @@ async def telegram_status_route(request: Request, workspace_id: str | None = Non
     ws = getattr(request.app.state, "workspace", None)
     if not ws:
         raise HTTPException(status_code=503, detail="Workspace not initialized.")
-    ws_id = (workspace_id or ws.name).strip()
+    ws_id = _ws_key(ws, workspace_id)
     if not conn or not conn.is_configured:
         return {"configured": False, "status": "disconnected"}
 
@@ -7960,7 +8460,7 @@ async def telegram_send_route(request: Request, payload: TelegramSendPayload):
     ws = getattr(request.app.state, "workspace", None)
     if not ws:
         raise HTTPException(status_code=503, detail="Workspace not initialized.")
-    connector = ws.connections.get_telegram_connector(ws.name)
+    connector = ws.connections.get_telegram_connector(ws.id)
     try:
         result = connector.send_message(
             chat_id=payload.chat_id,
@@ -7988,7 +8488,7 @@ async def list_activity_route(
     ws = getattr(request.app.state, "workspace", None)
     if not ws:
         return []
-    ws_id = (workspace_id or ws.name).strip()
+    ws_id = _ws_key(ws, workspace_id)
     events = ws.activity.list(
         workspace_id=ws_id,
         category=category,
@@ -8018,7 +8518,7 @@ async def list_notifications_route(
     ws = getattr(request.app.state, "workspace", None)
     if not ws:
         return []
-    ws_id = (workspace_id or ws.name).strip()
+    ws_id = _ws_key(ws, workspace_id)
     notifications = ws.notifications.list_notifications(
         workspace_id=ws_id,
         unread_only=unread_only,
@@ -8033,7 +8533,7 @@ async def get_unread_notification_count_route(request: Request, workspace_id: st
     ws = getattr(request.app.state, "workspace", None)
     if not ws:
         return {"unread_count": 0}
-    ws_id = (workspace_id or ws.name).strip()
+    ws_id = _ws_key(ws, workspace_id)
     count = ws.notifications.get_unread_count(ws_id)
     return {"unread_count": count}
 
@@ -8043,7 +8543,7 @@ async def mark_notification_read_route(request: Request, notification_id: str, w
     ws = getattr(request.app.state, "workspace", None)
     if not ws:
         raise HTTPException(status_code=503, detail="Workspace not initialized.")
-    ws_id = (workspace_id or ws.name).strip()
+    ws_id = _ws_key(ws, workspace_id)
     success = ws.notifications.mark_as_read(ws_id, notification_id)
     return {"status": "ok" if success else "not_found", "id": notification_id}
 
@@ -8053,7 +8553,7 @@ async def mark_all_notifications_read_route(request: Request, workspace_id: str 
     ws = getattr(request.app.state, "workspace", None)
     if not ws:
         raise HTTPException(status_code=503, detail="Workspace not initialized.")
-    ws_id = (workspace_id or ws.name).strip()
+    ws_id = _ws_key(ws, workspace_id)
     count = ws.notifications.mark_all_read(ws_id)
     return {"status": "ok", "marked_count": count}
 
@@ -8063,7 +8563,7 @@ async def dismiss_notification_route(request: Request, notification_id: str, wor
     ws = getattr(request.app.state, "workspace", None)
     if not ws:
         raise HTTPException(status_code=503, detail="Workspace not initialized.")
-    ws_id = (workspace_id or ws.name).strip()
+    ws_id = _ws_key(ws, workspace_id)
     success = ws.notifications.dismiss(ws_id, notification_id)
     return {"status": "ok" if success else "not_found", "id": notification_id}
 
@@ -8073,7 +8573,7 @@ async def get_notification_summary_route(request: Request, workspace_id: str | N
     ws = getattr(request.app.state, "workspace", None)
     if not ws:
         return {"unread_count": 0, "total_count": 0, "pending_approvals_count": 0, "high_priority_count": 0}
-    ws_id = (workspace_id or getattr(ws, "id", None) or ws.name).strip()
+    ws_id = _ws_key(ws, workspace_id)
     return ws.notifications.get_summary(ws_id)
 
 
@@ -8086,7 +8586,7 @@ async def list_notification_channels_route(request: Request, workspace_id: str |
     ws = getattr(request.app.state, "workspace", None)
     if not ws:
         return []
-    ws_id = (workspace_id or getattr(ws, "id", None) or ws.name).strip()
+    ws_id = _ws_key(ws, workspace_id)
     channels = ws.notifications.get_channels(ws_id)
     return [c.to_dict() for c in channels]
 
@@ -8097,7 +8597,7 @@ async def configure_notification_channel_route(request: Request):
     if not ws:
         raise HTTPException(status_code=503, detail="Workspace not initialized.")
     body = await request.json()
-    ws_id = (body.get("workspace_id") or getattr(ws, "id", None) or ws.name).strip()
+    ws_id = _ws_key(ws, body.get("workspace_id"))
     channel_type = body.get("channel_type")
     if not channel_type:
         raise HTTPException(status_code=400, detail="channel_type is required.")
@@ -8116,7 +8616,7 @@ async def dispatch_test_notification_channel_route(request: Request, channel_typ
     ws = getattr(request.app.state, "workspace", None)
     if not ws:
         raise HTTPException(status_code=503, detail="Workspace not initialized.")
-    ws_id = (workspace_id or getattr(ws, "id", None) or ws.name).strip()
+    ws_id = _ws_key(ws, workspace_id)
     receipt = ws.notifications.test_channel(ws_id, channel_type)
     return receipt.to_dict()
 
@@ -8127,7 +8627,7 @@ async def list_notification_rules_route(request: Request, workspace_id: str | No
     ws = getattr(request.app.state, "workspace", None)
     if not ws:
         return []
-    ws_id = (workspace_id or getattr(ws, "id", None) or ws.name).strip()
+    ws_id = _ws_key(ws, workspace_id)
     rules = ws.notifications.get_rules(ws_id)
     return [r.to_dict() for r in rules]
 
@@ -8138,7 +8638,7 @@ async def configure_notification_rule_route(request: Request):
     if not ws:
         raise HTTPException(status_code=503, detail="Workspace not initialized.")
     body = await request.json()
-    ws_id = (body.get("workspace_id") or getattr(ws, "id", None) or ws.name).strip()
+    ws_id = _ws_key(ws, body.get("workspace_id"))
     name = body.get("name")
     if not name:
         raise HTTPException(status_code=400, detail="Rule name is required.")
@@ -8161,7 +8661,7 @@ async def delete_notification_rule_route(request: Request, rule_id: str, workspa
     ws = getattr(request.app.state, "workspace", None)
     if not ws:
         raise HTTPException(status_code=503, detail="Workspace not initialized.")
-    ws_id = (workspace_id or getattr(ws, "id", None) or ws.name).strip()
+    ws_id = _ws_key(ws, workspace_id)
     deleted = ws.notifications.delete_rule(ws_id, rule_id)
     return {"status": "ok" if deleted else "not_found", "rule_id": rule_id}
 
@@ -8171,7 +8671,7 @@ async def list_notification_deliveries_route(request: Request, workspace_id: str
     ws = getattr(request.app.state, "workspace", None)
     if not ws:
         return []
-    ws_id = (workspace_id or getattr(ws, "id", None) or ws.name).strip()
+    ws_id = _ws_key(ws, workspace_id)
     receipts = ws.notifications.get_delivery_history(ws_id, limit=limit)
     return [r.to_dict() for r in receipts]
 
@@ -8182,7 +8682,7 @@ async def dispatch_notification_briefing_route(request: Request):
     if not ws:
         raise HTTPException(status_code=503, detail="Workspace not initialized.")
     body = await request.json()
-    ws_id = (body.get("workspace_id") or getattr(ws, "id", None) or ws.name).strip()
+    ws_id = _ws_key(ws, body.get("workspace_id"))
     title = body.get("title") or "Executive Briefing"
     summary = body.get("summary") or "Automated workspace status update."
     briefing = ws.notifications.dispatch_briefing(
@@ -8202,7 +8702,7 @@ async def list_notification_briefings_route(request: Request, workspace_id: str 
     ws = getattr(request.app.state, "workspace", None)
     if not ws:
         return []
-    ws_id = (workspace_id or getattr(ws, "id", None) or ws.name).strip()
+    ws_id = _ws_key(ws, workspace_id)
     briefings = ws.notifications.list_briefings(ws_id, limit=limit)
     return [b.to_dict() for b in briefings]
 
@@ -8213,7 +8713,7 @@ async def dispatch_custom_notification_route(request: Request):
     if not ws:
         raise HTTPException(status_code=503, detail="Workspace not initialized.")
     body = await request.json()
-    ws_id = (body.get("workspace_id") or getattr(ws, "id", None) or ws.name).strip()
+    ws_id = _ws_key(ws, body.get("workspace_id"))
     notif = ws.notifications.notify(
         workspace_id=ws_id,
         type=body.get("type", "insight"),
@@ -8242,7 +8742,7 @@ async def update_notification_receipt_route(request: Request, notification_id: s
     if not ws:
         raise HTTPException(status_code=503, detail="Workspace not initialized.")
     body = await request.json()
-    ws_id = (body.get("workspace_id") or getattr(ws, "id", None) or ws.name).strip()
+    ws_id = _ws_key(ws, body.get("workspace_id"))
     channel_type = body.get("channel_type", "desktop")
     status = body.get("status", "displayed")
     detail = body.get("detail")
@@ -8274,7 +8774,7 @@ async def list_personal_tasks_route(
     ws = getattr(request.app.state, "workspace", None)
     if not ws:
         return []
-    ws_id = (workspace_id or ws.name).strip()
+    ws_id = _ws_key(ws, workspace_id)
     tasks = ws.personal_store.list_tasks(
         workspace_id=ws_id,
         session_id=session_id,
@@ -8304,7 +8804,7 @@ async def personal_events_sse(request: Request, workspace_id: str | None = None)
     ws = getattr(request.app.state, "workspace", None)
     if not ws:
         raise HTTPException(status_code=503, detail="Workspace not initialized.")
-    ws_id = (workspace_id or ws.name).strip()
+    ws_id = _ws_key(ws, workspace_id)
     from aether.personal.events import get_personal_event_hub
     hub = getattr(ws.personal, "event_hub", None) or get_personal_event_hub()
     return StreamingResponse(
@@ -8421,7 +8921,7 @@ async def invoke_external_agent(request: Request, payload: ExternalAgentInvokePa
         )
 
     ws = getattr(request.app.state, "workspace", None)
-    ws_id = getattr(ws, "name", None) or "default"
+    ws_id = _ws_key(ws)
     from aether.core.execution import ExecutionAuthority, ExecutionBoundary, UnauthorizedExecutionError
     try:
         auth_obj = ExecutionAuthority.from_dict(payload.authority)
@@ -8552,7 +9052,7 @@ async def call_mcp_tool(request: Request, payload: MCPCallPayload):
     from aether.core.execution import ExecutionBoundary, ExecutionAuthority, UnauthorizedExecutionError
 
     ws = getattr(request.app.state, "workspace", None)
-    ws_id = payload.workspace_id or (getattr(ws, "name", None) or getattr(ws, "id", None) or "default")
+    ws_id = _ws_key(ws, payload.workspace_id)
 
     if not payload.authority:
         raise HTTPException(
@@ -8639,7 +9139,7 @@ async def list_fabric_nodes(request: Request, workspace_id: str | None = None):
     ws = getattr(request.app.state, "workspace", None)
     if not ws:
         raise HTTPException(status_code=503, detail="Workspace not initialized.")
-    ws_id = (workspace_id or getattr(ws, "id", None) or ws.name).strip()
+    ws_id = _ws_key(ws, workspace_id)
     nodes = ws.fabric_engine.list_nodes(ws_id)
     return [n.to_dict() for n in nodes]
 
@@ -8650,7 +9150,7 @@ async def register_fabric_node(request: Request, payload: RegisterFabricNodePayl
     ws = getattr(request.app.state, "workspace", None)
     if not ws:
         raise HTTPException(status_code=503, detail="Workspace not initialized.")
-    ws_id = (workspace_id or getattr(ws, "id", None) or ws.name).strip()
+    ws_id = _ws_key(ws, workspace_id)
     node = ws.fabric_engine.register_remote_node(
         workspace_id=ws_id,
         name=payload.name,
@@ -8668,7 +9168,7 @@ async def get_fabric_node(request: Request, node_id: str, workspace_id: str | No
     ws = getattr(request.app.state, "workspace", None)
     if not ws:
         raise HTTPException(status_code=503, detail="Workspace not initialized.")
-    ws_id = (workspace_id or getattr(ws, "id", None) or ws.name).strip()
+    ws_id = _ws_key(ws, workspace_id)
     node = ws.fabric_engine.get_node(ws_id, node_id)
     if not node:
         raise HTTPException(status_code=404, detail="Compute node not found.")
@@ -8681,7 +9181,7 @@ async def delete_fabric_node(request: Request, node_id: str, workspace_id: str |
     ws = getattr(request.app.state, "workspace", None)
     if not ws:
         raise HTTPException(status_code=503, detail="Workspace not initialized.")
-    ws_id = (workspace_id or getattr(ws, "id", None) or ws.name).strip()
+    ws_id = _ws_key(ws, workspace_id)
     success = ws.fabric_engine.delete_node(ws_id, node_id)
     if not success:
         raise HTTPException(status_code=400, detail="Cannot delete node (may be local controller or does not exist).")
@@ -8699,7 +9199,7 @@ async def fabric_node_heartbeat(
     ws = getattr(request.app.state, "workspace", None)
     if not ws:
         raise HTTPException(status_code=503, detail="Workspace not initialized.")
-    ws_id = (workspace_id or getattr(ws, "id", None) or ws.name).strip()
+    ws_id = _ws_key(ws, workspace_id)
     success = ws.fabric_engine.heartbeat_node(ws_id, node_id, ping_ms=payload.ping_ms)
     return {"status": "ok" if success else "failed", "node_id": node_id}
 
@@ -8710,7 +9210,7 @@ async def get_fabric_telemetry(request: Request, workspace_id: str | None = None
     ws = getattr(request.app.state, "workspace", None)
     if not ws:
         raise HTTPException(status_code=503, detail="Workspace not initialized.")
-    ws_id = (workspace_id or getattr(ws, "id", None) or ws.name).strip()
+    ws_id = _ws_key(ws, workspace_id)
     snapshot = ws.fabric_engine.get_telemetry_snapshot(ws_id)
     return snapshot.to_dict()
 
@@ -8725,7 +9225,7 @@ async def route_fabric_workload(
     ws = getattr(request.app.state, "workspace", None)
     if not ws:
         raise HTTPException(status_code=503, detail="Workspace not initialized.")
-    ws_id = (workspace_id or getattr(ws, "id", None) or ws.name).strip()
+    ws_id = _ws_key(ws, workspace_id)
     assignment = ws.fabric_engine.route_workload(
         workspace_id=ws_id,
         workload_name=payload.workload_name,
@@ -8746,7 +9246,7 @@ async def list_fabric_workloads(
     ws = getattr(request.app.state, "workspace", None)
     if not ws:
         raise HTTPException(status_code=503, detail="Workspace not initialized.")
-    ws_id = (workspace_id or getattr(ws, "id", None) or ws.name).strip()
+    ws_id = _ws_key(ws, workspace_id)
     assignments = ws.fabric_engine.list_workload_assignments(ws_id, limit=limit)
     return [a.to_dict() for a in assignments]
 
@@ -8779,7 +9279,7 @@ async def execute_autonomous_goal_route(
     ws = getattr(request.app.state, "workspace", None)
     if not ws:
         raise HTTPException(status_code=503, detail="Workspace not initialized.")
-    ws_id = (payload.workspace_id or getattr(ws, "id", None) or ws.name).strip()
+    ws_id = _ws_key(ws, payload.workspace_id)
 
     if not payload.authority:
         raise HTTPException(
@@ -8824,7 +9324,7 @@ async def list_autonomous_goals_route(
     ws = getattr(request.app.state, "workspace", None)
     if not ws:
         raise HTTPException(status_code=503, detail="Workspace not initialized.")
-    ws_id = (workspace_id or getattr(ws, "id", None) or ws.name).strip()
+    ws_id = _ws_key(ws, workspace_id)
     store = getattr(ws, "autonomy_store", None)
     if not store:
         return []
@@ -8869,3 +9369,142 @@ async def approve_autonomous_goal_route(
     except ValueError as ve:
         raise HTTPException(status_code=404, detail=str(ve))
 
+
+# ---------------------------------------------------------------------------
+# Coding Agent Provider Manager Endpoints
+# ---------------------------------------------------------------------------
+
+class CodingPreferencesPayload(BaseModel):
+    preferred_provider_id: str
+
+
+@router.get("/coding/providers")
+async def list_coding_providers_route(request: Request):
+    """Lists status, readiness, capabilities, and diagnostics for all external coding providers."""
+    ws = getattr(request.app.state, "workspace", None)
+    from aether.coding.orchestrator import get_coding_orchestrator
+    orch = get_coding_orchestrator()
+    providers = orch.list_providers_status(ws)
+    preferred_id = orch.get_preferred_provider_id(ws)
+    return {
+        "providers": [p.to_dict() for p in providers],
+        "preferred_provider_id": preferred_id,
+    }
+
+
+@router.post("/coding/preferences")
+async def set_coding_preferences_route(request: Request, payload: CodingPreferencesPayload):
+    """Sets and durably persists the user's preferred external coding agent."""
+    ws = getattr(request.app.state, "workspace", None)
+    from aether.coding.orchestrator import get_coding_orchestrator
+    orch = get_coding_orchestrator()
+    try:
+        orch.set_preferred_provider_id(payload.preferred_provider_id, ws)
+    except ValueError as ve:
+        raise HTTPException(status_code=400, detail=str(ve))
+    providers = orch.list_providers_status(ws)
+    preferred_id = orch.get_preferred_provider_id(ws)
+    return {
+        "success": True,
+        "preferred_provider_id": preferred_id,
+        "providers": [p.to_dict() for p in providers],
+    }
+
+
+class CodingInstallPayload(BaseModel):
+    confirmed: bool = False
+
+
+@router.post("/coding/providers/{provider_id}/diagnose")
+async def diagnose_coding_provider_route(request: Request, provider_id: str):
+    """Triggers an immediate asynchronous diagnostic check for a provider."""
+    from aether.coding.orchestrator import get_coding_orchestrator
+    orch = get_coding_orchestrator()
+    provider = orch.get_provider(provider_id)
+    if not provider:
+        raise HTTPException(status_code=404, detail=f"Provider '{provider_id}' non trovato.")
+    try:
+        op = orch.start_diagnose(provider_id)
+        return {
+            "success": True,
+            "operation": op.to_dict(),
+        }
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=str(exc))
+
+
+@router.post("/coding/providers/{provider_id}/install")
+async def install_coding_provider_route(request: Request, provider_id: str, payload: CodingInstallPayload):
+    """Triggers background installation for a provider. Requires explicit confirmation."""
+    from aether.coding.orchestrator import get_coding_orchestrator
+    orch = get_coding_orchestrator()
+    provider = orch.get_provider(provider_id)
+    if not provider:
+        raise HTTPException(status_code=404, detail=f"Provider '{provider_id}' non trovato.")
+    if not payload.confirmed:
+        raise HTTPException(
+            status_code=400,
+            detail=f"L'installazione di '{provider.name}' richiede conferma esplicita ('confirmed': true).",
+        )
+    try:
+        op = orch.start_install(provider_id, confirmed=True)
+        instructions = provider.get_installation_instructions() if hasattr(provider, "get_installation_instructions") else []
+        return {
+            "success": True,
+            "operation": op.to_dict(),
+            "instructions": instructions,
+        }
+    except RuntimeError as re:
+        raise HTTPException(status_code=409, detail=str(re))
+    except ValueError as ve:
+        raise HTTPException(status_code=400, detail=str(ve))
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=str(exc))
+
+
+@router.post("/coding/providers/{provider_id}/authenticate")
+async def authenticate_coding_provider_route(request: Request, provider_id: str):
+    """Initiates authentication verification or setup for a provider."""
+    from aether.coding.orchestrator import get_coding_orchestrator
+    orch = get_coding_orchestrator()
+    provider = orch.get_provider(provider_id)
+    if not provider:
+        raise HTTPException(status_code=404, detail=f"Provider '{provider_id}' non trovato.")
+    try:
+        op = orch.start_authenticate(provider_id)
+        instructions = provider.get_authentication_instructions() if hasattr(provider, "get_authentication_instructions") else []
+        return {
+            "success": True,
+            "operation": op.to_dict(),
+            "instructions": instructions,
+        }
+    except RuntimeError as re:
+        raise HTTPException(status_code=409, detail=str(re))
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=str(exc))
+
+
+@router.get("/coding/setup-operations/{operation_id}")
+async def get_setup_operation_route(request: Request, operation_id: str):
+    """Retrieves current progress, status, and sanitized logs for a setup operation."""
+    from aether.coding.orchestrator import get_coding_orchestrator
+    orch = get_coding_orchestrator()
+    op = orch.get_setup_operation(operation_id)
+    if not op:
+        raise HTTPException(status_code=404, detail=f"Operazione '{operation_id}' non trovata.")
+    return {
+        "operation": op.to_dict(),
+    }
+
+
+@router.post("/coding/setup-operations/{operation_id}/cancel")
+async def cancel_setup_operation_route(request: Request, operation_id: str):
+    """Requests cooperative cancellation of a running setup operation."""
+    from aether.coding.orchestrator import get_coding_orchestrator
+    orch = get_coding_orchestrator()
+    cancelled = orch.cancel_setup_operation(operation_id)
+    op = orch.get_setup_operation(operation_id)
+    return {
+        "success": cancelled,
+        "operation": op.to_dict() if op else None,
+    }

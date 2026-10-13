@@ -1,0 +1,193 @@
+/* ==========================================================================
+   CONVERSATION — ASSISTANT-FIRST DIALOGUE DOCK
+   Clean • Concise • Contextual • Not a Generic Chat Clone
+   ========================================================================== */
+
+.conversation-overlay {
+  position: absolute;
+  bottom: 24px;
+  left: 50%;
+  transform: translateX(-50%);
+  width: 92%;
+  max-width: 680px;
+  z-index: 30;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  transition: all var(--duration-normal) var(--spring-smooth);
+}
+
+/* When Field, Approval or Result is active, conversation dock recedes gracefully */
+.stage-with-field .conversation-overlay,
+.stage-with-approval .conversation-overlay,
+.stage-with-result .conversation-overlay {
+  opacity: 0;
+  pointer-events: none;
+  transform: translateX(-50%) translateY(16px);
+}
+
+/* Assistant Dialogue Toast / Stream */
+.dialogue-stream {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  pointer-events: none;
+}
+
+.dialogue-entry {
+  pointer-events: auto;
+  align-self: center;
+  max-width: 90%;
+  padding: 10px 18px;
+  border-radius: var(--radius-lg);
+  font-size: 13px;
+  line-height: 1.5;
+  box-shadow: 0 10px 28px rgba(0, 0, 0, 0.4);
+  animation: slideUpFade 260ms var(--spring-smooth) forwards;
+  backdrop-filter: blur(20px);
+  -webkit-backdrop-filter: blur(20px);
+}
+
+.dialogue-entry.from-user {
+  align-self: flex-end;
+  background: rgba(35, 39, 58, 0.75);
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  color: var(--text-primary);
+  border-bottom-right-radius: var(--radius-xs);
+}
+
+.dialogue-entry.from-aether {
+  align-self: flex-start;
+  background: rgba(22, 25, 36, 0.85);
+  border: 1px solid rgba(140, 92, 246, 0.25);
+  color: #fff;
+  border-bottom-left-radius: var(--radius-xs);
+  box-shadow: 0 12px 30px rgba(0, 0, 0, 0.5), 0 0 20px rgba(140, 92, 246, 0.1);
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.dialogue-aether-sparkle {
+  color: var(--aether-violet-light);
+  flex-shrink: 0;
+}
+
+/* Prompt Input Dock */
+.input-dock {
+  position: relative;
+  background: rgba(18, 20, 28, 0.85);
+  backdrop-filter: blur(32px);
+  -webkit-backdrop-filter: blur(32px);
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  border-radius: var(--radius-pill);
+  box-shadow: 0 16px 40px -8px rgba(0, 0, 0, 0.7), 0 0 25px rgba(140, 92, 246, 0.08);
+  padding: 6px 8px 6px 18px;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  transition: all var(--duration-normal) var(--spring-smooth);
+}
+
+.input-dock:focus-within {
+  background: rgba(24, 27, 40, 0.95);
+  border-color: rgba(140, 92, 246, 0.45);
+  box-shadow: 0 20px 48px -6px rgba(0, 0, 0, 0.85), 0 0 35px rgba(140, 92, 246, 0.22);
+}
+
+.prompt-input {
+  flex: 1;
+  background: transparent;
+  border: none;
+  outline: none;
+  color: var(--text-primary);
+  font-size: 14px;
+  font-family: inherit;
+  padding: 6px 0;
+}
+
+.prompt-input::placeholder {
+  color: var(--text-muted);
+}
+
+.input-actions {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.voice-mic-btn {
+  width: 36px;
+  height: 36px;
+  border-radius: 50%;
+  background: rgba(255, 255, 255, 0.05);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  color: var(--text-secondary);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  transition: all var(--duration-fast) ease;
+}
+
+.voice-mic-btn:hover {
+  background: rgba(255, 255, 255, 0.1);
+  color: var(--text-primary);
+  border-color: rgba(255, 255, 255, 0.2);
+}
+
+.voice-mic-btn.active-listening {
+  background: rgba(56, 189, 248, 0.2);
+  border-color: rgba(56, 189, 248, 0.5);
+  color: #38bdf8;
+  box-shadow: 0 0 14px rgba(56, 189, 248, 0.4);
+  animation: softPulse 1.4s infinite ease-in-out;
+}
+
+.send-prompt-btn {
+  width: 36px;
+  height: 36px;
+  border-radius: 50%;
+  background: var(--aether-violet);
+  border: 1px solid rgba(255, 255, 255, 0.2);
+  color: #fff;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  transition: all var(--duration-fast) var(--spring-smooth);
+}
+
+.send-prompt-btn:hover {
+  background: #7c3aed;
+  transform: scale(1.05);
+  box-shadow: 0 0 16px rgba(140, 92, 246, 0.5);
+}
+
+/* Prompt Suggestion Chips (Underneath or Above Input Dock) */
+.prompt-chips-row {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.prompt-chip {
+  background: rgba(255, 255, 255, 0.035);
+  border: 1px solid rgba(255, 255, 255, 0.07);
+  color: var(--text-secondary);
+  font-size: 11px;
+  padding: 5px 12px;
+  border-radius: var(--radius-pill);
+  cursor: pointer;
+  transition: all var(--duration-fast) ease;
+  white-space: nowrap;
+}
+
+.prompt-chip:hover {
+  background: rgba(140, 92, 246, 0.12);
+  border-color: rgba(140, 92, 246, 0.3);
+  color: var(--aether-violet-light);
+  transform: translateY(-1px);
+}

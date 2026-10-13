@@ -59,6 +59,7 @@ class ProviderResponse:
     usage: dict[str, int] = field(default_factory=dict)
     finish_reason: str = "stop"
     message: Message | None = None
+    provider: str = ""  # which provider actually produced this response (traceability)
 
 
 @dataclass

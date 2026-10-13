@@ -1,0 +1,286 @@
+/* ==========================================================================
+   MANUAL MODE — CONTEXTUAL DRAWER & COMMAND PALETTE
+   Unobtrusive • Fast • Accessible When Needed • Not Dominating the Screen
+   ========================================================================== */
+
+/* Drawer Backdrop */
+.manual-backdrop {
+  position: fixed;
+  inset: 0;
+  background: rgba(4, 5, 8, 0.75);
+  backdrop-filter: blur(8px);
+  -webkit-backdrop-filter: blur(8px);
+  z-index: 50;
+  opacity: 0;
+  visibility: hidden;
+  transition: all var(--duration-normal) ease;
+}
+
+.manual-backdrop.drawer-open {
+  opacity: 1;
+  visibility: visible;
+}
+
+/* Sliding Drawer Surface */
+.manual-drawer {
+  position: fixed;
+  top: 0;
+  right: 0;
+  bottom: 0;
+  width: 420px;
+  max-width: 90vw;
+  background: rgba(14, 16, 25, 0.94);
+  backdrop-filter: blur(36px);
+  -webkit-backdrop-filter: blur(36px);
+  border-left: 1px solid rgba(255, 255, 255, 0.1);
+  box-shadow: -20px 0 60px rgba(0, 0, 0, 0.8), 0 0 30px rgba(140, 92, 246, 0.06);
+  z-index: 55;
+  display: flex;
+  flex-direction: column;
+  transform: translateX(100%);
+  transition: transform var(--duration-slow) var(--spring-smooth);
+}
+
+.manual-backdrop.drawer-open .manual-drawer {
+  transform: translateX(0);
+}
+
+.manual-drawer-header {
+  padding: 22px 24px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.06);
+}
+
+.manual-drawer-title h2 {
+  font-size: 16px;
+  font-weight: 600;
+  color: var(--text-primary);
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.manual-drawer-title p {
+  font-size: 12px;
+  color: var(--text-muted);
+  margin-top: 2px;
+}
+
+.drawer-close-btn {
+  width: 32px;
+  height: 32px;
+  border-radius: 50%;
+  background: rgba(255, 255, 255, 0.05);
+  border: var(--border-ultra-thin);
+  color: var(--text-secondary);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  transition: all var(--duration-fast) ease;
+}
+
+.drawer-close-btn:hover {
+  background: rgba(255, 255, 255, 0.1);
+  color: #fff;
+}
+
+/* Drawer Content Sections */
+.manual-drawer-content {
+  flex: 1;
+  overflow-y: auto;
+  padding: 20px 24px;
+  display: flex;
+  flex-direction: column;
+  gap: 24px;
+}
+
+.manual-section-group {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.manual-group-label {
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--text-muted);
+  font-weight: 600;
+}
+
+.manual-nav-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 8px;
+}
+
+.manual-nav-card {
+  padding: 12px 14px;
+  background: rgba(255, 255, 255, 0.025);
+  border: 1px solid rgba(255, 255, 255, 0.05);
+  border-radius: var(--radius-sm);
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  cursor: pointer;
+  transition: all var(--duration-fast) var(--spring-smooth);
+}
+
+.manual-nav-card:hover {
+  background: rgba(255, 255, 255, 0.06);
+  border-color: rgba(140, 92, 246, 0.3);
+  transform: translateY(-2px);
+}
+
+.manual-card-icon {
+  width: 26px;
+  height: 26px;
+  border-radius: var(--radius-xs);
+  background: rgba(140, 92, 246, 0.15);
+  color: var(--aether-violet-light);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.manual-card-icon svg {
+  width: 14px;
+  height: 14px;
+}
+
+.manual-card-title {
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--text-primary);
+}
+
+.manual-card-badge {
+  font-size: 10px;
+  color: var(--text-muted);
+}
+
+/* Recent Items in Drawer */
+.manual-items-list {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.manual-item-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 10px 12px;
+  background: rgba(255, 255, 255, 0.02);
+  border: 1px solid rgba(255, 255, 255, 0.04);
+  border-radius: var(--radius-xs);
+  cursor: pointer;
+  transition: all var(--duration-fast) ease;
+}
+
+.manual-item-row:hover {
+  background: rgba(255, 255, 255, 0.05);
+  border-color: rgba(255, 255, 255, 0.1);
+}
+
+.manual-item-name {
+  font-size: 12px;
+  color: var(--text-primary);
+  font-weight: 450;
+}
+
+.manual-item-meta {
+  font-size: 11px;
+  color: var(--text-muted);
+}
+
+/* --------------------------------------------------------------------------
+   COMMAND PALETTE (⌘K)
+   -------------------------------------------------------------------------- */
+.command-palette-backdrop {
+  position: fixed;
+  inset: 0;
+  background: rgba(4, 5, 8, 0.8);
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
+  z-index: 60;
+  display: flex;
+  align-items: flex-start;
+  justify-content: center;
+  padding-top: 14vh;
+  opacity: 0;
+  visibility: hidden;
+  transition: all var(--duration-normal) ease;
+}
+
+.command-palette-backdrop.palette-open {
+  opacity: 1;
+  visibility: visible;
+}
+
+.command-palette-card {
+  width: 90%;
+  max-width: 580px;
+  background: rgba(18, 20, 29, 0.95);
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  box-shadow: 0 24px 60px rgba(0, 0, 0, 0.85), 0 0 40px rgba(140, 92, 246, 0.12);
+  border-radius: var(--radius-xl);
+  overflow: hidden;
+  transform: translateY(-10px) scale(0.97);
+  transition: all var(--duration-normal) var(--spring-smooth);
+}
+
+.command-palette-backdrop.palette-open .command-palette-card {
+  transform: translateY(0) scale(1);
+}
+
+.palette-input-box {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 16px 20px;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+}
+
+.palette-input-box svg {
+  color: var(--text-muted);
+}
+
+.palette-input {
+  flex: 1;
+  background: transparent;
+  border: none;
+  outline: none;
+  font-size: 15px;
+  color: #fff;
+  font-family: inherit;
+}
+
+.palette-results-list {
+  max-height: 320px;
+  overflow-y: auto;
+  padding: 10px;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.palette-item {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 10px 14px;
+  border-radius: var(--radius-sm);
+  color: var(--text-secondary);
+  font-size: 13px;
+  cursor: pointer;
+  transition: all var(--duration-fast) ease;
+}
+
+.palette-item:hover, .palette-item.active {
+  background: rgba(140, 92, 246, 0.15);
+  color: #fff;
+}

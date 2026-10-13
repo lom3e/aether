@@ -40,6 +40,11 @@ class PersonalStore:
         self._conns_lock = threading.Lock()
         self._all_conns: set[sqlite3.Connection] = set()
         self._init_db()
+        try:
+            self.backfill_legacy_consents()
+        except Exception as exc:  # never block opening the store
+            import logging
+            logging.getLogger(__name__).warning("Legacy consent backfill skipped: %s", exc)
 
     def _get_connection(self) -> sqlite3.Connection:
         if not hasattr(self._local, "conn") or self._local.conn is None:
@@ -221,7 +226,63 @@ class PersonalStore:
                 );
                 """
             )
-            cursor.execute("CREATE INDEX IF NOT EXISTS idx_pes_prop ON proposal_executed_steps(proposal_id);")
+            cursor.execute(
+                """
+                CREATE TABLE IF NOT EXISTS proposal_consents (
+                    id TEXT PRIMARY KEY,
+                    workspace_id TEXT NOT NULL,
+                    proposal_id TEXT NOT NULL,
+                    proposal_version INTEGER NOT NULL,
+                    mission_id TEXT,
+                    actor TEXT NOT NULL,
+                    actor_kind TEXT NOT NULL,
+                    channel TEXT NOT NULL,
+                    granted_at TEXT NOT NULL,
+                    scope_json TEXT NOT NULL DEFAULT '{}',
+                    content_digest TEXT NOT NULL,
+                    policy_code TEXT,
+                    revoked_at TEXT,
+                    revoke_reason TEXT,
+                    UNIQUE (proposal_id, proposal_version)
+                );
+                """
+            )
+            cursor.execute("CREATE INDEX IF NOT EXISTS idx_consent_ws ON proposal_consents(workspace_id, granted_at);")
+            cursor.execute(
+                """
+                CREATE TABLE IF NOT EXISTS personal_settings (
+                    key TEXT PRIMARY KEY,
+                    value TEXT NOT NULL,
+                    updated_at TEXT NOT NULL
+                );
+                """
+            )
+
+    def get_setting(self, key: str, default: Any = None) -> Any:
+        """Retrieves a persistent setting value by key."""
+        conn = self._get_connection()
+        cursor = conn.cursor()
+        cursor.execute("SELECT value FROM personal_settings WHERE key = ?", (key,))
+        row = cursor.fetchone()
+        if not row:
+            return default
+        try:
+            return json.loads(row[0])
+        except Exception:
+            return row[0]
+
+    def set_setting(self, key: str, value: Any) -> None:
+        """Saves or updates a persistent setting."""
+        val_str = json.dumps(value) if not isinstance(value, str) else value
+        now_iso = datetime.now(timezone.utc).isoformat()
+        with self._transaction() as cursor:
+            cursor.execute(
+                """
+                INSERT OR REPLACE INTO personal_settings (key, value, updated_at)
+                VALUES (?, ?, ?)
+                """,
+                (key, val_str, now_iso),
+            )
 
     def save_session(self, session: PersonalSession) -> PersonalSession:
         """Saves or updates session metadata."""
@@ -285,16 +346,48 @@ class PersonalStore:
             for r in rows
         ]
 
+    def update_session_title(self, session_id: str, title: str, workspace_id: str) -> bool:
+        """Updates the title of a personal session within a specific workspace."""
+        clean_title = title.strip()[:100]
+        if not clean_title:
+            return False
+        with self._transaction() as cursor:
+            cursor.execute(
+                "UPDATE personal_sessions SET title = ?, updated_at = ? WHERE id = ? AND workspace_id = ?",
+                (clean_title, datetime.now(timezone.utc).isoformat(), session_id, workspace_id),
+            )
+            return cursor.rowcount > 0
+
+    def delete_session(self, session_id: str, workspace_id: str) -> bool:
+        """Deletes a personal session and all its messages within a specific workspace."""
+        with self._transaction() as cursor:
+            cursor.execute(
+                "DELETE FROM personal_messages WHERE session_id = ? AND workspace_id = ?",
+                (session_id, workspace_id),
+            )
+            cursor.execute(
+                "DELETE FROM personal_sessions WHERE id = ? AND workspace_id = ?",
+                (session_id, workspace_id),
+            )
+            return cursor.rowcount > 0
+
     def add_message(self, message: PersonalMessage) -> PersonalMessage:
         """Adds a message to a session."""
-        if not self.get_session(message.session_id):
+        existing_session = self.get_session(message.session_id)
+        if not existing_session:
+            snippet = (message.content or "").strip().split("\n")[0][:45].strip()
+            title = snippet if snippet else f"Session {message.session_id[:8]}"
             self.save_session(
                 PersonalSession(
                     id=message.session_id,
                     workspace_id=message.workspace_id,
-                    title=f"Session {message.session_id[:8]}",
+                    title=title,
                 )
             )
+        elif existing_session.title.startswith("Session ") and message.role == "user":
+            snippet = (message.content or "").strip().split("\n")[0][:45].strip()
+            if snippet:
+                self.update_session_title(message.session_id, snippet, message.workspace_id)
         with self._transaction() as cursor:
             cursor.execute(
                 """
@@ -723,6 +816,10 @@ class PersonalStore:
             )
         except sqlite3.IntegrityError as exc:
             raise ValueError(f"Proposal integrity violation (duplicate ID or intent_id/version): {exc}")
+        if str(getattr(proposal.status, "value", proposal.status)) == "accepted":
+            # A proposal stored ALREADY accepted (import/restore) did not pass accept_proposal: its consent is
+            # recorded as an explicit legacy/import record, never as a human decision.
+            self.backfill_legacy_consents()
         return proposal
 
 
@@ -765,6 +862,93 @@ class PersonalStore:
             "created_at": row["created_at"],
             "updated_at": row["updated_at"],
         })
+
+    # ------------------------------------------------------------------
+    # Consent records (who authorised what, when, for which proposal version)
+    # ------------------------------------------------------------------
+    def record_consent(self, consent: Any) -> Any:
+        """Stores a consent once per (proposal, version); a second call returns the existing record unchanged."""
+        import json as _json
+        with self._transaction() as cursor:
+            cursor.execute(
+                """
+                INSERT OR IGNORE INTO proposal_consents (id, workspace_id, proposal_id, proposal_version, mission_id,
+                    actor, actor_kind, channel, granted_at, scope_json, content_digest, policy_code)
+                VALUES (?,?,?,?,?,?,?,?,?,?,?,?)
+                """,
+                (consent.id, consent.workspace_id, consent.proposal_id, consent.proposal_version, consent.mission_id,
+                 consent.actor, consent.actor_kind, consent.channel, consent.granted_at,
+                 _json.dumps(consent.scope, sort_keys=True), consent.content_digest, consent.policy_code),
+            )
+        return self.get_consent(consent.proposal_id, consent.proposal_version)
+
+    def _row_to_consent(self, row: Any) -> Any:
+        import json as _json
+        from aether.planning.consent import ConsentRecord
+        return ConsentRecord(
+            id=row["id"], workspace_id=row["workspace_id"], proposal_id=row["proposal_id"],
+            proposal_version=row["proposal_version"], actor=row["actor"], actor_kind=row["actor_kind"],
+            channel=row["channel"], content_digest=row["content_digest"], scope=_json.loads(row["scope_json"] or "{}"),
+            policy_code=row["policy_code"], mission_id=row["mission_id"], granted_at=row["granted_at"],
+            revoked_at=row["revoked_at"], revoke_reason=row["revoke_reason"],
+        )
+
+    def get_consent(self, proposal_id: str, proposal_version: int) -> Any | None:
+        row = self._get_connection().execute(
+            "SELECT * FROM proposal_consents WHERE proposal_id = ? AND proposal_version = ?",
+            (proposal_id, proposal_version),
+        ).fetchone()
+        return self._row_to_consent(row) if row else None
+
+    def list_consents(self, workspace_id: str, limit: int = 50) -> list[Any]:
+        rows = self._get_connection().execute(
+            "SELECT * FROM proposal_consents WHERE workspace_id = ? ORDER BY granted_at DESC LIMIT ?",
+            (workspace_id, max(1, limit)),
+        ).fetchall()
+        return [self._row_to_consent(r) for r in rows]
+
+    def revoke_consent(self, proposal_id: str, proposal_version: int, reason: str) -> bool:
+        from datetime import datetime, timezone
+        with self._transaction() as cursor:
+            cursor.execute(
+                "UPDATE proposal_consents SET revoked_at = ?, revoke_reason = ? "
+                "WHERE proposal_id = ? AND proposal_version = ? AND revoked_at IS NULL",
+                (datetime.now(timezone.utc).isoformat(), reason, proposal_id, proposal_version),
+            )
+            return cursor.rowcount > 0
+
+    def bind_consent_mission(self, proposal_id: str, proposal_version: int, mission_id: str) -> None:
+        with self._transaction() as cursor:
+            cursor.execute(
+                "UPDATE proposal_consents SET mission_id = ? WHERE proposal_id = ? AND proposal_version = ? AND mission_id IS NULL",
+                (mission_id, proposal_id, proposal_version),
+            )
+
+    def backfill_legacy_consents(self) -> int:
+        """
+        Idempotent migration: every proposal accepted before consent records existed gets a clearly-marked
+        ``legacy`` consent (actor unknown), so old accepted proposals keep working but are never mistaken for
+        a recorded human decision.
+        """
+        from aether.planning.consent import ConsentRecord, proposal_digest, scope_from_constraints
+        import uuid as _uuid
+        created = 0
+        rows = self._get_connection().execute(
+            "SELECT id, version FROM mission_proposals WHERE status = 'accepted' AND NOT EXISTS ("
+            "SELECT 1 FROM proposal_consents c WHERE c.proposal_id = mission_proposals.id AND c.proposal_version = mission_proposals.version)"
+        ).fetchall()
+        for r in rows:
+            prop = self.get_proposal(r["id"])
+            if prop is None:
+                continue
+            rec = ConsentRecord(
+                id=f"cns-{_uuid.uuid4().hex[:12]}", workspace_id=prop.workspace_id, proposal_id=prop.id,
+                proposal_version=prop.version, actor="legacy_unknown", actor_kind="legacy", channel="migration",
+                content_digest=proposal_digest(prop), scope=scope_from_constraints(prop.constraints),
+            )
+            self.record_consent(rec)
+            created += 1
+        return created
 
     def is_step_executed(self, proposal_id: str, step_id: str) -> bool:
         """Checks if a specific step of a proposal has already been executed."""

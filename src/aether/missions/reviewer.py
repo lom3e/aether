@@ -49,6 +49,16 @@ class QualityGateEvaluation:
     redlines: list[str] = field(default_factory=list)
     reviewer_agent: str = "QualityGate Reviewer"
     evaluated_at: str = field(default_factory=lambda: datetime.now(timezone.utc).isoformat())
+    # How the verdict was reached and what it does NOT cover, so a pass is never read as more than it is.
+    method: str = "deterministic"            # deterministic | model_assisted
+    checks: list[str] = field(default_factory=list)
+    not_checked: list[str] = field(default_factory=list)
+    evidence_used: dict[str, Any] = field(default_factory=dict)
+
+    @property
+    def semantically_verified(self) -> bool:
+        """True only when a reviewer model judged the content, or concrete technical evidence backed the pass."""
+        return self.passed and (self.method == "model_assisted" or bool(self.evidence_used.get("coding_runs")))
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -59,6 +69,11 @@ class QualityGateEvaluation:
             "redlines": self.redlines,
             "reviewer_agent": self.reviewer_agent,
             "evaluated_at": self.evaluated_at,
+            "method": self.method,
+            "checks": list(self.checks),
+            "not_checked": list(self.not_checked),
+            "semantically_verified": self.semantically_verified,
+            "evidence_used": self.evidence_used,
         }
 
 
@@ -116,9 +131,13 @@ class QualityGateEvaluator:
         completed_context: list[str],
         team: Any = None,
         workspace: Any = None,
+        evidence: dict[str, Any] | None = None,
+        required_evidence: list[str] | None = None,
     ) -> QualityGateEvaluation:
         """
         Executes Quality Gate evaluation across all deliverables and completed stage context.
+        ``required_evidence`` (e.g. ["coding_run_verified", "tests_passed"]) turns the gate into a technical one:
+        the pass then also needs concrete evidence from ``evidence["coding_runs"]``; files existing is not enough.
         Combines deterministic structural validation with LLM reviewer evaluation if available.
         """
         reviewer_name = self.find_reviewer_agent(team)
@@ -217,21 +236,57 @@ class QualityGateEvaluator:
             grounding_reasons.append("Deliverable content contains unhandled exception or crash traceback.")
             redlines.append("Remove crash trace and provide valid verified output.")
 
+        # 3b. Technical evidence (only when the mission demands it)
+        technical_rule: QualityGateRuleResult | None = None
+        evidence = evidence or {}
+        if required_evidence:
+            runs = list(evidence.get("coding_runs") or [])
+            problems: list[str] = []
+            if "coding_run_verified" in required_evidence:
+                if not any(r.get("verification_passed") is True and r.get("status") == "completed" for r in runs):
+                    problems.append("no coding run completed with a passed independent verification")
+            if "tests_passed" in required_evidence:
+                if not any((r.get("test_run") or {}).get("passed") is True for r in runs):
+                    problems.append("the project's tests were not run, or did not pass")
+            technical_rule = QualityGateRuleResult(
+                rule_id="technical_verification", rule_name="Technical Verification",
+                passed=not problems, score=95 if not problems else 20,
+                reason=("Concrete evidence: " + "; ".join(
+                    f"run {r.get('id')} verified={r.get('verification_passed')} tests={(r.get('test_run') or {}).get('passed')}"
+                    for r in runs[:3])) if not problems else "Missing evidence: " + "; ".join(problems),
+            )
+            if problems:
+                redlines.append("Obtain the missing technical evidence: " + "; ".join(problems) + ".")
+
+        checks = ["deliverable files exist, are non-empty and syntactically valid (json/python)",
+                  "files named in the objective are among the deliverables",
+                  "no unhandled exception/traceback text in the output"]
+        if technical_rule is not None:
+            checks.append("technical evidence: " + ", ".join(required_evidence or []))
+
         # 4. Attempt Provider-Assisted Deep Review if Team & Provider Available
         provider = None
         if team:
             try:
-                target_agent_obj = getattr(team, "agents", {}).get(reviewer_name)
+                agents_attr = getattr(team, "agents", None)
+                agent_list = agents_attr() if callable(agents_attr) else (list(agents_attr.values()) if isinstance(agents_attr, dict) else [])
+                target_agent_obj = next((a for a in agent_list if getattr(a, "name", None) == reviewer_name), None)
                 if target_agent_obj and getattr(target_agent_obj, "provider", None):
                     provider = target_agent_obj.provider
                 elif hasattr(team, "_provider_for"):
                     cfg = team.config.get_agent(reviewer_name) if hasattr(team.config, "get_agent") else None
                     if cfg:
                         provider = team._provider_for(cfg)
-                if not provider and hasattr(team, "default_provider"):
-                    provider = team.default_provider
             except Exception:
                 provider = None
+        if provider is None and workspace is not None:
+            # No dedicated reviewer agent: the workspace's configured model reviews (never a different one).
+            try:
+                provider = workspace.runtime.resolve_provider()
+            except Exception:
+                provider = None
+        if provider is not None and type(provider).__name__ == "UnresolvedProvider":
+            provider = None   # configured but unusable: fall back to the deterministic gate and SAY so (method)
 
         llm_eval = None
         if provider and hasattr(provider, "generate") and getattr(provider, "name", "") != "mock":
@@ -294,7 +349,7 @@ class QualityGateEvaluator:
             r2_passed = bool(r2_data.get("passed", True)) and grounding_passed
             r2_reason = "; ".join(grounding_reasons) if not grounding_passed else r2_data.get("reason", "Content is grounded.")
 
-            all_passed = r1_passed and r2_passed and r3_passed
+            all_passed = r1_passed and r2_passed and r3_passed and (technical_rule.passed if technical_rule else True)
             llm_redlines = list(llm_eval.get("redlines") or [])
             combined_redlines = list(dict.fromkeys(redlines + llm_redlines))
 
@@ -302,10 +357,7 @@ class QualityGateEvaluator:
             if not all_passed and score > 60:
                 score = 50
 
-            return QualityGateEvaluation(
-                passed=all_passed,
-                score=score,
-                rules={
+            rules_llm = {
                     "requirement_coverage": QualityGateRuleResult(
                         rule_id="requirement_coverage",
                         rule_name="Requirement Coverage",
@@ -327,11 +379,21 @@ class QualityGateEvaluator:
                         score=r3_data.get("score", 95) if r3_passed else 30,
                         reason=r3_reason,
                     ),
-                },
+                }
+            if technical_rule is not None:
+                rules_llm["technical_verification"] = technical_rule
+            return QualityGateEvaluation(
+                passed=all_passed,
+                score=score,
+                rules=rules_llm,
                 feedback=llm_eval.get("feedback", "Review completed."),
                 redlines=combined_redlines,
                 reviewer_agent=reviewer_name,
                 evaluated_at=now,
+                method="model_assisted",
+                checks=checks + ["reviewer model judged coverage, grounding and structure"],
+                not_checked=[] if technical_rule else ["running the deliverables or their tests"],
+                evidence_used={"coding_runs": evidence.get("coding_runs", [])} if evidence.get("coding_runs") else {},
             )
 
         # Fallback Deterministic Evaluation
@@ -340,33 +402,37 @@ class QualityGateEvaluator:
             rule_name="Requirement Coverage",
             passed=coverage_passed,
             score=95 if coverage_passed else 40,
-            reason="Objective constraints verified against outputs." if coverage_passed else "; ".join(coverage_reasons),
+            reason="Files named in the objective are present among the deliverables (no semantic check of content)." if coverage_passed else "; ".join(coverage_reasons),
         )
         rule2 = QualityGateRuleResult(
             rule_id="citation_grounding",
             rule_name="Citation Grounding",
             passed=grounding_passed,
             score=95 if grounding_passed else 40,
-            reason="Content grounded in verified workspace context." if grounding_passed else "; ".join(grounding_reasons),
+            reason="No crash trace found in the output. Factual grounding was NOT semantically verified (no reviewer model)." if grounding_passed else "; ".join(grounding_reasons),
         )
         rule3 = QualityGateRuleResult(
             rule_id="structural_integrity",
             rule_name="Structural Integrity",
             passed=structural_passed,
             score=95 if structural_passed else 30,
-            reason="Deliverable files verified non-empty and structurally sound." if structural_passed else "; ".join(structural_reasons),
+            reason="Deliverable files exist, are non-empty and syntactically valid." if structural_passed else "; ".join(structural_reasons),
         )
 
-        overall_passed = coverage_passed and grounding_passed and structural_passed
+        overall_passed = coverage_passed and grounding_passed and structural_passed and (technical_rule.passed if technical_rule else True)
         overall_score = 95 if overall_passed else (60 if (coverage_passed or structural_passed) else 35)
 
         if overall_passed:
-            feedback = "All 3 assertion rules (Coverage, Grounding, Structural Integrity) passed review."
+            feedback = (
+                "Deterministic checks passed (structure, named files, no crash traces)"
+                + ("; technical evidence confirmed." if technical_rule else "; no reviewer model judged the content.")
+            )
         else:
             failed_names = []
             if not coverage_passed: failed_names.append("Requirement Coverage")
             if not grounding_passed: failed_names.append("Citation Grounding")
             if not structural_passed: failed_names.append("Structural Integrity")
+            if technical_rule is not None and not technical_rule.passed: failed_names.append("Technical Verification")
             feedback = f"Quality Gate failed assertions: {', '.join(failed_names)}."
 
         return QualityGateEvaluation(
@@ -376,9 +442,15 @@ class QualityGateEvaluator:
                 "requirement_coverage": rule1,
                 "citation_grounding": rule2,
                 "structural_integrity": rule3,
+                **({"technical_verification": technical_rule} if technical_rule else {}),
             },
             feedback=feedback,
             redlines=redlines,
             reviewer_agent=reviewer_name,
             evaluated_at=now,
+            method="deterministic",
+            checks=checks,
+            not_checked=["semantic correctness and factual grounding of the content (no reviewer model)"]
+            + ([] if technical_rule else ["running the deliverables or their tests"]),
+            evidence_used={"coding_runs": evidence.get("coding_runs", [])} if evidence.get("coding_runs") else {},
         )

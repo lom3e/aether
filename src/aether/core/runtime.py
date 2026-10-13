@@ -63,6 +63,34 @@ class Runtime:
         self.provider_manager = provider_manager
 
     # ---------------------------------------------------------------------------
+    # Shared context (memory + knowledge + lessons + mission state)
+    # ---------------------------------------------------------------------------
+
+    @property
+    def context_assembler(self) -> Any:
+        """The one retrieval component every execution mode uses to decide what the model gets to know."""
+        asm = self.__dict__.get("_context_assembler")
+        if asm is None:
+            from aether.context import ContextAssembler
+            asm = ContextAssembler(self.workspace, intelligence=self.intelligence_service, mission_store=self.mission_store)
+            self.__dict__["_context_assembler"] = asm
+        return asm
+
+    def assemble_context(self, request: Task, purpose: str, query: str | None = None, exclude: tuple[str, ...] = ()) -> Any:
+        """Context for this request: the one already retrieved by the caller, else a fresh bounded retrieval."""
+        already = (request.context_data or {}).get("assembled_context")
+        if already is not None and getattr(already, "purpose", None) == purpose and not query:
+            return already
+        try:
+            return self.context_assembler.assemble(
+                query or request.instruction, purpose=purpose, workspace_id=request.workspace_id,
+                mission_id=request.mission_id, exclude=exclude,
+            )
+        except Exception as exc:
+            logger.warning("Context assembly failed (%s); continuing without shared context.", type(exc).__name__)
+            return None
+
+    # ---------------------------------------------------------------------------
     # Agent Registry (Backward Compatible)
     # ---------------------------------------------------------------------------
 
@@ -185,6 +213,7 @@ class Runtime:
             workspace_id=ws_id,
             recent_history=recent_history,
             intelligence_service=self.intelligence_service,
+            assembled=(request.context_data or {}).get("assembled_context"),
         )
 
         provider = self.resolve_provider()
@@ -206,7 +235,14 @@ class Runtime:
                     status=ExecutionStatus.COMPLETED,
                     output=res.content.strip(),
                     execution_id=request.id,
-                    metadata={"provider": getattr(provider, "model", "ai"), "history_turns": len(recent_history)},
+                    metadata={
+                        # What actually answered: the provider that produced the response and the model it reports.
+                        "provider": getattr(res, "provider", "") or type(provider).__name__.replace("Provider", "").lower(),
+                        "model": getattr(res, "model", None) or getattr(provider, "model", None),
+                        "history_turns": len(recent_history),
+                        # What the model was actually shown (not merely what exists in memory/knowledge).
+                        "context_trace": prep_ctx.metadata.get("context_trace"),
+                    },
                 )
             return ExecutionResult(
                 success=False,
@@ -222,7 +258,10 @@ class Runtime:
                 status=ExecutionStatus.FAILED,
                 error=f"AI provider error: {e}",
                 execution_id=request.id,
-                metadata={"code": "PROVIDER_ERROR"},
+                # Distinguishable from "no provider", "empty answer" and application errors: which class of failure
+                # (authentication, rate limit, connection, timeout, unresolved configuration...) and which provider.
+                metadata={"code": "PROVIDER_ERROR", "error_type": type(e).__name__,
+                          "provider": getattr(e, "provider", None) or type(provider).__name__.replace("Provider", "").lower()},
             )
 
     def _execute_do(self, request: Task) -> ExecutionResult:
@@ -257,11 +296,14 @@ class Runtime:
                     try:
                         from aether.providers.types import Message
                         filename = action_args.get("filename", "document")
+                        shared = self.assemble_context(request, "document")
+                        shared_text = (shared.rendered if shared is not None else "") or ""
                         gen_messages = [
                             Message(role="system", content=(
                                 "You are a helpful writing assistant. Generate the content for a document "
                                 "based on the user's request. Write only the document content, not meta-commentary. "
                                 "Use markdown formatting where appropriate."
+                                + (f"\n\n{shared_text}" if shared_text else "")
                             )),
                             Message(role="user", content=(
                                 f"Create the content for a file named '{filename}'. "
@@ -364,11 +406,15 @@ class Runtime:
         action_name = action_def.name if action_def else action_id
         action_args = dict(request.action_args or {})
 
+        # Consent is a structured field of the request, honoured only alongside a validated authority.
+        # A smuggled "auto_approve" key in the action data is discarded, never interpreted.
+        action_args.pop("auto_approve", None)
+        auto_approve_flag = bool(getattr(request, "auto_approve", False)) and request.authority is not None
         execution = self.action_executor.execute(
             action_id=action_id,
             workspace_id=ws_id,
             input_data=action_args,
-            auto_approve=False,
+            auto_approve=auto_approve_flag,
             authority=request.authority,
         )
 
@@ -436,15 +482,24 @@ class Runtime:
                 },
             )
 
+        action_out = execution.output_data or {}
+        done_message = f"Done! I've successfully executed **{action_name}**."
+        if action_id == "coding.delegate":
+            # The action record succeeded when the request was accepted; the RUN may still be going or unverified.
+            if action_out.get("run_terminal") is False:
+                done_message = (f"The coding run was accepted (state: {action_out.get('status')}); it has NOT finished "
+                                f"and nothing is verified yet.")
+            elif action_out.get("verified") is False:
+                done_message = "The coding run ended, but its result did NOT pass the independent verification."
         return ExecutionResult(
             success=True,
             status=ExecutionStatus.COMPLETED,
-            output=f"Done! I've successfully executed **{action_name}**.",
+            output=done_message,
             execution_id=request.id,
             metadata={
                 "action_execution_id": execution.id,
                 "action_id": action_id,
-                "action_result": execution.output_data or {},
+                "action_result": action_out,
             },
         )
 
@@ -505,9 +560,13 @@ class Runtime:
                 metadata={"code": "NO_PROVIDER"},
             )
 
-        coordinator.provider = live_provider
+        # Respect per-agent configuration: only agents WITHOUT their own provider inherit the runtime provider.
+        # (Overwriting every agent used to discard explicit per-agent provider/model overrides.)
+        if getattr(coordinator, "provider", None) is None:
+            coordinator.provider = live_provider
         for s in specialists:
-            s.provider = live_provider
+            if getattr(s, "provider", None) is None:
+                s.provider = live_provider
 
         # Wire AgentTools for all specialists into coordinator's tool registry
         from aether.tools.agent_tool import AgentTool
@@ -526,6 +585,13 @@ class Runtime:
 
         cb(35, f"Orchestrating coordinator '{coordinator.name}' with specialists: {', '.join(registered_tools)}")
 
+        shared = self.assemble_context(request, "delegate")
+        wf_metadata: dict[str, Any] = {}
+        if shared is not None and shared.rendered:
+            # Handed to the coordinator and, through AgentTool, to every specialist it delegates to.
+            wf_metadata["aether_context"] = shared.rendered
+            wf_metadata["aether_context_has_intelligence"] = True
+            wf_metadata["context_trace"] = shared.trace()
         wf_task = Task(
             instruction=f"Coordinate workforce to fulfill: {prompt}. Utilize available specialist tools and produce an executive synthesis.",
             agent_name=coordinator.name,
@@ -533,7 +599,9 @@ class Runtime:
             parent_id=request.id,
             session_id=request.session_id,
             workspace_id=ws_id,
+            mission_id=request.mission_id,
             authority=request.authority,
+            metadata=wf_metadata,
         )
         mgr_result = coordinator.execute(wf_task)
         if not mgr_result or not mgr_result.success or mgr_result.status == ExecutionStatus.FAILED:
@@ -559,38 +627,31 @@ class Runtime:
         deliverable_dir.mkdir(parents=True, exist_ok=True)
         deliverable_path = deliverable_dir / deliverable_filename
 
-        synthesis_text = mgr_result.output if (mgr_result and mgr_result.output) else f"Workforce execution completed for: {prompt}"
-        title_suffix = "Strategic Market Analysis" if ("market" in prompt.lower() or "mercato" in prompt.lower()) else "Analysis & Deliverable"
-
+        synthesis_text = (mgr_result.output or "").strip() if mgr_result else ""
+        if not synthesis_text:
+            return ExecutionResult(
+                success=False, status=ExecutionStatus.FAILED, execution_id=request.id,
+                error="The workforce coordinator returned no synthesis.", metadata={"coordinator": coordinator.name},
+            )
+        # The deliverable is the model's own synthesis, labelled as such. No invented sections, no claim of verification:
+        # verification is the quality gate's job (MissionRuntime) and is reported there with its method.
         report_content = (
-            f"# {topic_title} — {title_suffix}\n\n"
-            f"**Generated by Aether Digital Workforce**  \n"
-            f"**Lead Coordinator**: {coordinator.name} ({coordinator.role})  \n"
-            f"**Specialists**: {', '.join(registered_tools)}  \n"
-            f"**Timestamp**: {datetime.now(timezone.utc).isoformat()}  \n"
-            f"**Objective**: {prompt}  \n\n"
-            f"## 1. Executive Summary\n"
-            f"{synthesis_text}\n\n"
-            f"## 2. Workforce Coordination Details\n"
-            f"- **Coordinator**: {coordinator.name}\n"
-            f"- **Specialist Agents**: {', '.join(registered_tools)}\n"
-            f"- **Task ID**: {wf_task.id}\n"
-            f"- **Turns**: {mgr_result.metadata.get('turns', 1) if mgr_result else 1}\n\n"
-            f"## 3. Strategic Action Plan\n"
-            f"1. Review generated findings and operational recommendations.\n"
-            f"2. Integrate specialist outputs into project workflows.\n"
-            f"3. Establish monitoring and next milestone quality gates.\n"
+            f"# {topic_title}\n\n"
+            f"_Model-generated by the workforce (coordinator: {coordinator.name}; specialists: {', '.join(registered_tools)}). "
+            f"Not independently verified by this step._\n\n"
+            f"**Objective:** {prompt}\n\n{synthesis_text}\n"
         )
         deliverable_path.write_text(report_content, encoding="utf-8")
 
-        cb(90, "Verifying against quality gates and generating deliverable dossier")
-        cb(100, "Quality gates verified: deliverable ready")
+        cb(90, "Synthesis written (unverified: the mission quality gate evaluates it)")
 
         deliverables = [{
             "name": deliverable_filename,
             "path": str(deliverable_path),
             "type": "report",
             "topic": topic_title,
+            "origin": "model_generated",
+            "verified": False,
         }]
 
         return ExecutionResult(
@@ -744,7 +805,18 @@ class Runtime:
                 loader = PresetLoader()
                 _, preset_dir = loader.get_preset("starter_workforce")
                 team_cfg = TeamLoader.from_yaml(preset_dir / "team.yaml")
-                team = Team(config=team_cfg)
+                # This team is a scaffold, not a choice the user made: the preset's own provider/model (a local
+                # Ollama one) must not decide where the work runs. Its agents use the provider this runtime resolved
+                # from the real configuration; when there is none they stay provider-less and the delegation reports it.
+                team_cfg.default_provider = ""
+                team_cfg.default_model = None
+                for agent_cfg in team_cfg.agents:
+                    agent_cfg.provider = None
+                    agent_cfg.model = None
+                # NOT self.resolve_provider(): that looks the team up again (this very function) and recursed forever.
+                team = Team(config=team_cfg, provider=resolve_provider(
+                    explicit_provider=self.provider, workspace=self.workspace, provider_manager=self.provider_manager,
+                ))
             except Exception as e:
                 logger.warning(f"Could not load fallback starter workforce: {e}")
         return team

@@ -15,7 +15,7 @@ interface WorkforceHubProps {
   navigate?: (view: string, params?: any) => void;
 }
 
-export function WorkforceHub({ initialTab = 'teams', navigate = () => {} }: WorkforceHubProps) {
+export function WorkforceHub({ initialTab = 'agents', navigate = () => {} }: WorkforceHubProps) {
   const [currentTab, setCurrentTab] = useState<string>(initialTab);
 
   useEffect(() => {
@@ -49,7 +49,7 @@ export function WorkforceHub({ initialTab = 'teams', navigate = () => {} }: Work
             gap: '6px',
           }}
         >
-          <Users size={15} /> Team & Topology
+          <Users size={15} /> Team e Ruoli
         </button>
 
         <button
@@ -66,7 +66,7 @@ export function WorkforceHub({ initialTab = 'teams', navigate = () => {} }: Work
             gap: '6px',
           }}
         >
-          <Bot size={15} /> Agents
+          <Bot size={15} /> Assistenti e Agenti
         </button>
 
         <button
@@ -83,7 +83,7 @@ export function WorkforceHub({ initialTab = 'teams', navigate = () => {} }: Work
             gap: '6px',
           }}
         >
-          <Puzzle size={15} /> Skills
+          <Puzzle size={15} /> Competenze & Abilità
         </button>
 
         <button
@@ -101,7 +101,7 @@ export function WorkforceHub({ initialTab = 'teams', navigate = () => {} }: Work
             gap: '6px',
           }}
         >
-          <Brain size={15} /> Memory
+          <Brain size={15} /> Memoria Condivisa
         </button>
 
         <button
@@ -119,7 +119,7 @@ export function WorkforceHub({ initialTab = 'teams', navigate = () => {} }: Work
             gap: '6px',
           }}
         >
-          <GraduationCap size={15} /> Learning & Corrections
+          <GraduationCap size={15} /> Apprendimento e Feedback
         </button>
 
         <button
@@ -136,7 +136,7 @@ export function WorkforceHub({ initialTab = 'teams', navigate = () => {} }: Work
             gap: '6px',
           }}
         >
-          <Activity size={15} /> Workforce Health
+          <Activity size={15} /> Stato Operativo
         </button>
 
         <button
@@ -154,12 +154,12 @@ export function WorkforceHub({ initialTab = 'teams', navigate = () => {} }: Work
             gap: '6px',
           }}
         >
-          <Award size={15} /> Evolution & Benchmarks
+          <Award size={15} /> Valutazione Prestazioni
         </button>
       </div>
 
       {/* Tab Content */}
-      <div style={{ flex: 1, overflowY: 'auto' }}>
+      <div style={{ flex: 1, overflowY: 'auto', overscrollBehavior: 'contain' }}>
         {currentTab === 'teams' && <Teams />}
         {currentTab === 'agents' && <Agents navigate={navigate} />}
         {currentTab === 'memory' && <Memory />}

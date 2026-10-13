@@ -401,3 +401,80 @@ async def test_rework_loop_human_reject(workspace):
     assert rejected_exec.status == ExecutionStatus.INTERRUPTED
     assert store.get_mission(mission.id).status == MissionStatus.INTERRUPTED
     assert "Must fix redlines manually" in rejected_exec.error_message
+
+
+# --- evaluator compatibility (block A1) -------------------------------------------------------------------------------
+
+def _passing(eval_cls_calls):
+    def build(**kw):
+        eval_cls_calls.append(kw)
+        return QualityGateEvaluation(passed=True, score=95, rules={}, feedback="ok", method="deterministic")
+    return build
+
+
+class ModernEvaluator:
+    def __init__(self):
+        self.calls = []
+
+    async def evaluate(self, mission_title, mission_objective, deliverables, completed_context, team=None, workspace=None,
+                       evidence=None, required_evidence=None):
+        self.calls.append({"evidence": evidence, "required_evidence": required_evidence})
+        return QualityGateEvaluation(passed=True, score=95, rules={}, feedback="ok")
+
+
+class BuggyEvaluator:
+    """Accepts everything and fails with a genuine internal TypeError: it must surface, not be retried or hidden."""
+    def __init__(self):
+        self.calls = 0
+
+    async def evaluate(self, **kwargs):
+        self.calls += 1
+        raise TypeError("boom internal")
+
+
+class LegacyPassingEvaluator:
+    async def evaluate(self, mission_title, mission_objective, deliverables, completed_context, team=None, workspace=None):
+        return QualityGateEvaluation(passed=True, score=99, rules={}, feedback="ok")
+
+
+async def _run(workspace, evaluator, metadata=None):
+    store = workspace.missions
+    mission = store.create_mission(title="Gate compat", objective="Create docs",
+                                   milestones=[{"title": "Draft docs", "description": "Write documentation"}], metadata=metadata or {})
+    workspace.load_team = lambda name: MockTeam([MockAgent("Reviewer", "QA Reviewer")])
+    runtime = MissionRuntime(workspace, broadcaster=lambda e: None, evaluator=evaluator)
+    exec_obj = await runtime.start_mission(mission.id)
+    handle = runtime._active_executions.get(exec_obj.id)
+    if handle and handle.task:
+        await handle.task
+    return store.get_execution(exec_obj.id), store.get_mission(mission.id)
+
+
+@pytest.mark.asyncio
+async def test_modern_evaluator_receives_the_evidence(workspace):
+    ev = ModernEvaluator()
+    ex, mission = await _run(workspace, ev, metadata={"required_evidence": ["coding_run_verified"]})
+    assert len(ev.calls) == 1
+    assert ev.calls[0]["required_evidence"] == ["coding_run_verified"]
+    assert isinstance(ev.calls[0]["evidence"], dict)
+
+
+@pytest.mark.asyncio
+async def test_genuine_typeerror_inside_the_evaluator_is_not_masked_or_retried(workspace):
+    ev = BuggyEvaluator()
+    ex, mission = await _run(workspace, ev)
+    assert ev.calls == 1                                   # no blind retry with fewer arguments
+    assert ex.status != ExecutionStatus.COMPLETED and mission.status != MissionStatus.COMPLETED
+    assert "boom internal" in str(ex.error_message)
+
+
+@pytest.mark.asyncio
+async def test_legacy_evaluator_cannot_pass_a_mission_that_requires_evidence(workspace):
+    ex, mission = await _run(workspace, LegacyPassingEvaluator(), metadata={"required_evidence": ["tests_passed"]})
+    assert mission.status != MissionStatus.COMPLETED and ex.status != ExecutionStatus.COMPLETED
+
+
+@pytest.mark.asyncio
+async def test_legacy_evaluator_still_works_without_required_evidence(workspace):
+    ex, mission = await _run(workspace, LegacyPassingEvaluator())
+    assert ex.status == ExecutionStatus.COMPLETED and mission.status == MissionStatus.COMPLETED

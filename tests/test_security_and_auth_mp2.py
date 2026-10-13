@@ -268,7 +268,7 @@ def test_filesystem_sandbox_blocks_directory_traversal(tmp_path: Path):
             MagicMock(
                 action_id="files.create_document",
                 input_data={"filename": "../../../escaped.txt", "content": "malicious"},
-                workspace_id=ws.name,
+                workspace_id=ws.id,
             ),
         )
     assert not (tmp_path / "escaped.txt").exists()
@@ -279,7 +279,7 @@ def test_filesystem_sandbox_blocks_directory_traversal(tmp_path: Path):
         MagicMock(
             action_id="files.read_document",
             input_data={"filename": "../../../etc/passwd"},
-            workspace_id=ws.name,
+            workspace_id=ws.id,
         ),
     )
     assert res.get("exists") is False
@@ -362,7 +362,7 @@ async def test_telegram_webhook_verification(tmp_path: Path):
     ws.connections.save_connection(
         Connection(
             id="conn-tg-sec",
-            workspace_id=ws.name,
+            workspace_id=ws.id,
             provider="telegram",
             account_name="Bot",
             status=ConnectionStatus.CONNECTED,
@@ -428,7 +428,7 @@ async def test_telegram_webhook_fails_closed_when_unconfigured(tmp_path: Path):
     ws.connections.save_connection(
         Connection(
             id="conn-tg-no-sec",
-            workspace_id=ws.name,
+            workspace_id=ws.id,
             provider="telegram",
             account_name="Bot",
             status=ConnectionStatus.CONNECTED,

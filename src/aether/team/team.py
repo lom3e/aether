@@ -40,6 +40,7 @@ Usage (minimal, no YAML)::
 """
 from __future__ import annotations
 
+import os
 import sys
 import time
 from pathlib import Path
@@ -100,10 +101,12 @@ class Team:
         emitter: EventEmitter | None = None,
         project_id: str | None = None,
         workspace_name: str | None = None,
+        workspace_id: str | None = None,
         workforce_memory: Any | None = None,
         workforce_memory_store: Any | None = None,
         knowledge_graph: Any | None = None,
         knowledge_graph_store: Any | None = None,
+        secret_store: Any | None = None,
         verbose: bool = False,
     ) -> None:
         self.config = config
@@ -113,8 +116,11 @@ class Team:
         self.sandbox = sandbox
         self.project_id = str(project_id).strip() if project_id and str(project_id).strip() else None
         self.workspace_name = str(workspace_name).strip() if workspace_name and str(workspace_name).strip() else None
+        # Canonical key for every store this team touches (memory, knowledge graph); the name is display only.
+        self.workspace_id = str(workspace_id).strip() if workspace_id and str(workspace_id).strip() else self.workspace_name
         self.workforce_memory = workforce_memory_store or workforce_memory
         self.knowledge_graph = knowledge_graph_store or knowledge_graph
+        self.secret_store = secret_store
 
         # ---- Skills Registry ----
         from aether.skills.builtin import get_default_skill_registry
@@ -442,7 +448,7 @@ class Team:
                     conversation_memory=conv_mem,
                     workforce_memory_store=self.workforce_memory,
                     knowledge_graph_store=self.knowledge_graph,
-                    workspace_id=self.workspace_name,
+                    workspace_id=self.workspace_id,
                     agent_name=agent_config.name,
                     team_name=self.config.name,
                 )
@@ -620,6 +626,8 @@ class Team:
         """Return the appropriate provider for this agent."""
         provider_name = agent_config.provider or self.config.default_provider
         model_name = agent_config.model or self.config.default_model
+        if not provider_name:
+            return self.provider      # nothing chosen for this agent or team: only an injected provider may serve it
 
         if not hasattr(self, "_provider_manager"):
             from aether.providers.manager import ProviderManager
@@ -650,11 +658,31 @@ class Team:
                 except (ValueError, TypeError):
                     timeout_val = None
 
-            p_config = ProviderConfig(model=model_name, timeout=timeout_val)
+            # Resolve API key from SecretStore or environment
+            api_key = None
+            s_store = getattr(self, "secret_store", None)
+            if not s_store:
+                try:
+                    from aether.core.secrets import get_secret_store
+                    s_store = get_secret_store()
+                except Exception:
+                    s_store = None
+            if provider_name:
+                if s_store:
+                    api_key = s_store.get_secret(f"provider_api_key:{provider_name.lower()}")
+                if not api_key:
+                    api_key = os.environ.get(f"{provider_name.upper()}_API_KEY")
+
+            p_config = ProviderConfig(model=model_name, api_key=api_key, timeout=timeout_val)
             return self._provider_manager.get(provider_name, config=p_config)
         except Exception as e:
             if self.verbose:
                 print(f"[Team] Warning: could not resolve provider '{provider_name}' for agent '{agent_config.name}': {e}")
+            if provider_name:
+                # A provider/model was explicitly configured: never swap in another one silently.
+                from aether.providers.groq_provider import redact
+                from aether.providers.unresolved import UnresolvedProvider
+                return UnresolvedProvider(provider_name, model_name, redact(str(e), locals().get("api_key")))
             return self.provider
 
     def _system_prompt_for(self, agent_config: AgentConfig) -> str:

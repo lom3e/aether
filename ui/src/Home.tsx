@@ -426,6 +426,7 @@ export function Home({
         headers: { 'Content-Type': 'application/json' },
       });
       if (res.ok) {
+        const accepted = await res.json().catch(() => ({} as any));
         showToast('Proposal accepted and authorized for execution.', 'success');
         fetchOverview();
         setMessages(prev => prev.map(msg => {
@@ -438,6 +439,32 @@ export function Home({
           }
           return msg;
         }));
+
+        // Acceptance only grants the authority: the work starts when the request is sent again WITH it (the backend
+        // still asks for any further approval). Without this step nothing ever ran after "accepted".
+        const authority = accepted?.authority;
+        const proposalIdx = messages.findIndex(m => m.metadata?.proposal_id === proposalId);
+        const original = [...messages.slice(0, proposalIdx >= 0 ? proposalIdx : messages.length)].reverse().find(m => m.role === 'user');
+        if (authority && original?.content) {
+          const follow = await fetch(apiUrl('/api/personal/chat'), {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              prompt: original.content,
+              session_id: currentSessionId,
+              workspace_id: workspaceName,
+              authority,
+            }),
+          });
+          if (follow.ok) {
+            const data = await follow.json();
+            setMessages(prev => [...prev, data]);
+            fetchOverview();
+          } else {
+            const errData = await follow.json().catch(() => ({}));
+            showToast(errData.detail || 'The accepted request could not be started.', 'error');
+          }
+        }
       } else {
         const err = await res.json().catch(() => ({}));
         showToast(err.detail || 'Failed to accept proposal.', 'error');
@@ -512,9 +539,9 @@ export function Home({
   }
 
   return (
-    <div style={{ display: 'flex', flexDirection: 'column', height: '100%', flex: 1 }}>
+    <div style={{ display: 'flex', flexDirection: 'column', width: '100%', minHeight: '100%' }}>
       <TopHeader
-        title="Personal Aether"
+        title="Personal AI Office"
         subtitle={workspaceName}
         icon={Sparkles}
         actions={
@@ -525,284 +552,43 @@ export function Home({
               onClick={fetchOverview}
               style={{ display: 'flex', alignItems: 'center', gap: '6px', fontSize: '13px' }}
             >
-              <RefreshCw size={14} /> Refresh
+              <RefreshCw size={14} /> Aggiorna
             </button>
           </div>
         }
       />
-      <div style={{ flex: 1, overflowY: 'auto', padding: '32px 28px', maxWidth: '1000px', margin: '0 auto', width: '100%' }}>
-        {/* Top Banner & Workspace Overview Status */}
+      <div style={{ padding: '32px 28px 64px 28px', maxWidth: '1080px', margin: '0 auto', width: '100%', boxSizing: 'border-box' }}>
+        {/* Top Hero Banner & Status */}
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '24px' }}>
           <div>
             <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
               <h1 style={{ fontSize: '24px', fontWeight: 700, margin: 0, color: 'hsl(var(--fg))' }}>
-                Personal Aether
+                Di cosa hai bisogno oggi?
               </h1>
               <span className="badge badge-primary" style={{ fontSize: '12px', padding: '2px 8px' }}>
                 {workspaceName}
               </span>
               {overview.pending_approvals?.length > 0 ? (
                 <span className="badge" style={{ backgroundColor: '#f59e0b20', color: '#f59e0b', border: '1px solid #f59e0b50', fontSize: '11px' }}>
-                  {overview.pending_approvals.length} Requires Review
+                  {overview.pending_approvals.length} Richiede la tua approvazione
                 </span>
               ) : overview.background_tasks?.some((t: any) => t.status === 'running') ? (
                 <span className="badge" style={{ backgroundColor: 'hsl(var(--primary)/0.15)', color: 'hsl(var(--primary))', fontSize: '11px' }}>
-                  Work In Progress
+                  Lavori in corso
                 </span>
               ) : (
                 <span className="badge" style={{ backgroundColor: '#10b98115', color: '#10b981', border: '1px solid #10b98130', fontSize: '11px' }}>
-                  Workforce Ready
+                  Pronto ad aiutarti
                 </span>
               )}
             </div>
-            <p style={{ margin: '4px 0 0', fontSize: '14px', color: 'hsl(var(--muted-fg))' }}>
-              {t('homeWelcome')}. State your goal, review what needs authorization, and receive verified outcomes.
+            <p style={{ margin: '6px 0 0', fontSize: '14px', color: 'hsl(var(--muted-fg))' }}>
+              Descrivi il tuo obiettivo o chiedi ad Aether di occuparsi delle tue attività. Le azioni critiche richiederanno sempre la tua approvazione.
             </p>
           </div>
         </div>
 
-        {/* 1. NEEDS ATTENTION / APPROVALS (TOP OPERATIONAL PRIORITY) */}
-        {overview.pending_approvals && overview.pending_approvals.length > 0 && (
-          <div data-testid="needs-attention-section" style={{ marginBottom: '28px' }}>
-            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '12px' }}>
-              <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-                <Shield size={18} color="#f59e0b" />
-                <h2 style={{ fontSize: '16px', fontWeight: 700, margin: 0, color: 'hsl(var(--fg))' }}>
-                  {t('needsAttention') || 'Needs Attention'} ({overview.pending_approvals.length})
-                </h2>
-              </div>
-              <span style={{ fontSize: '12px', color: '#f59e0b', fontWeight: 500 }}>
-                Operations paused awaiting your sign-off
-              </span>
-            </div>
-            <div style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
-              {overview.pending_approvals.map((appr: any) => {
-                const isTargeted = initialApprovalId === appr.execution_id;
-                const isLoading = actionLoading === appr.execution_id;
-                return (
-                  <div
-                    key={appr.execution_id}
-                    id={`approval-card-${appr.execution_id}`}
-                    className="card"
-                    style={{
-                      padding: '16px 20px',
-                      borderRadius: '12px',
-                      border: isTargeted ? '2px solid #f59e0b' : '1px solid #f59e0b50',
-                      boxShadow: isTargeted ? '0 0 16px rgba(245, 158, 11, 0.3)' : '0 2px 8px rgba(0,0,0,0.04)',
-                      backgroundColor: isTargeted ? '#f59e0b14' : '#f59e0b08',
-                      display: 'flex',
-                      justifyContent: 'space-between',
-                      alignItems: 'center',
-                      transition: 'all 0.3s ease',
-                    }}
-                  >
-                    <div style={{ flex: 1, marginRight: '16px' }}>
-                      <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-                        <span style={{ fontSize: '10px', fontWeight: 700, padding: '2px 7px', borderRadius: '4px', backgroundColor: '#f59e0b20', color: '#f59e0b', textTransform: 'uppercase', letterSpacing: '0.04em' }}>
-                          Confirmation Required
-                        </span>
-                        <span style={{ fontWeight: 600, fontSize: '14.5px' }}>{appr.human_summary || appr.action_name}</span>
-                      </div>
-                      {appr.action_id === 'email.send' && (
-                        <div style={{ fontSize: '12.5px', color: 'hsl(var(--fg)/0.85)', marginTop: '6px', padding: '8px 12px', backgroundColor: 'hsl(var(--muted)/0.3)', borderRadius: '6px' }}>
-                          <div><strong>To:</strong> {appr.input_data?.to}</div>
-                          <div><strong>Subject:</strong> {appr.input_data?.subject}</div>
-                          {appr.input_data?.body && <div style={{ marginTop: '4px', whiteSpace: 'pre-wrap', color: 'hsl(var(--muted-fg))' }}>{appr.input_data.body}</div>}
-                        </div>
-                      )}
-                      {appr.action_id === 'github.create_issue' && (
-                        <div style={{ fontSize: '12.5px', color: 'hsl(var(--fg)/0.85)', marginTop: '6px', padding: '8px 12px', backgroundColor: 'hsl(var(--muted)/0.3)', borderRadius: '6px' }}>
-                          <div><strong>Repo:</strong> {appr.input_data?.owner ? `${appr.input_data.owner}/${appr.input_data.repository}` : (appr.input_data?.repository || 'repository')}</div>
-                          <div><strong>Title:</strong> {appr.input_data?.title}</div>
-                          {appr.input_data?.body && <div style={{ marginTop: '4px', whiteSpace: 'pre-wrap', color: 'hsl(var(--muted-fg))' }}>{appr.input_data.body}</div>}
-                        </div>
-                      )}
-                      {appr.action_id === 'slack.send_message' && (
-                        <div style={{ fontSize: '12.5px', color: 'hsl(var(--fg)/0.85)', marginTop: '6px', padding: '8px 12px', backgroundColor: 'hsl(var(--muted)/0.3)', borderRadius: '6px' }}>
-                          <div><strong>Channel:</strong> {appr.input_data?.channel || '#general'}</div>
-                          {appr.input_data?.text && <div style={{ marginTop: '4px', whiteSpace: 'pre-wrap', color: 'hsl(var(--muted-fg))' }}>{appr.input_data.text}</div>}
-                        </div>
-                      )}
-                      {appr.action_id === 'calendar.create_event' && (
-                        <div style={{ fontSize: '12.5px', color: 'hsl(var(--muted-fg))', marginTop: '4px' }}>
-                          {appr.input_data?.start_time ? `Time: ${appr.input_data.start_time}` : ''} {appr.input_data?.location ? `• Location: ${appr.input_data.location}` : ''}
-                        </div>
-                      )}
-                    </div>
-                    <div style={{ display: 'flex', gap: '8px', alignItems: 'center' }}>
-                      <button
-                        className="btn btn-ghost"
-                        disabled={isLoading}
-                        onClick={() => handleRejectAction(appr.execution_id)}
-                        style={{ fontSize: '12px', padding: '6px 12px', color: 'hsl(var(--destructive))', opacity: isLoading ? 0.6 : 1 }}
-                      >
-                        Decline
-                      </button>
-                      <button
-                        className="btn btn-primary"
-                        disabled={isLoading}
-                        onClick={() => handleApproveAction(appr.execution_id)}
-                        style={{
-                          fontSize: '12px',
-                          padding: '6px 16px',
-                          backgroundColor: '#10b981',
-                          borderColor: '#10b981',
-                          display: 'flex',
-                          alignItems: 'center',
-                          gap: '6px',
-                          opacity: isLoading ? 0.6 : 1,
-                        }}
-                      >
-                        {isLoading && <Loader2 size={13} className="animate-spin" />}
-                        {isLoading ? 'Approving...' : 'Approve'}
-                      </button>
-                    </div>
-                  </div>
-                );
-              })}
-            </div>
-          </div>
-        )}
-
-        {/* 2. ACTIVE WORK / RUNNING TASKS */}
-        {((overview.background_tasks && overview.background_tasks.length > 0) || (overview.active_works && overview.active_works.length > 0)) && (
-          <div data-testid="background-tasks-section" style={{ marginBottom: '28px' }}>
-            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '12px' }}>
-              <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-                <Clock size={16} className="text-primary" />
-                <h2 style={{ fontSize: '16px', fontWeight: 700, margin: 0, color: 'hsl(var(--fg))' }}>
-                  {t('activeWork') || 'Active Work'} ({(overview.background_tasks?.length || 0) + (overview.active_works?.length || 0)})
-                </h2>
-              </div>
-              <button
-                className="btn btn-ghost"
-                onClick={() => navigate('missions')}
-                style={{ fontSize: '12px', padding: '2px 8px', color: 'hsl(var(--primary))' }}
-              >
-                View all in Work →
-              </button>
-            </div>
-            <div style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
-              {overview.background_tasks?.map((task: any) => (
-                <div
-                  key={task.id}
-                  className="card"
-                  data-testid="background-task-card"
-                  style={{
-                    padding: '16px 20px',
-                    borderRadius: '12px',
-                    border: '1px solid hsl(var(--border))',
-                    display: 'flex',
-                    flexDirection: 'column',
-                    gap: '8px',
-                  }}
-                >
-                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                    <div>
-                      <span style={{ fontWeight: 600, fontSize: '14px' }}>{task.title || 'Operational Background Task'}</span>
-                      <div style={{ fontSize: '12px', color: 'hsl(var(--muted-fg))', marginTop: '2px' }}>
-                        {task.current_step || task.status}
-                      </div>
-                    </div>
-                    <span
-                      className={`badge ${task.status === 'completed' ? 'badge-success' : task.status === 'running' ? 'badge-primary' : 'badge-warning'}`}
-                      style={{ fontSize: '11px', textTransform: 'capitalize' }}
-                    >
-                      {task.status}
-                    </span>
-                  </div>
-
-                  {/* Progress Bar */}
-                  <div style={{ width: '100%', height: '6px', borderRadius: '3px', backgroundColor: 'hsl(var(--muted))', overflow: 'hidden' }}>
-                    <div
-                      style={{
-                        width: `${task.progress_pct || (task.status === 'completed' ? 100 : 25)}%`,
-                        height: '100%',
-                        backgroundColor: task.status === 'completed' ? '#10b981' : 'hsl(var(--primary))',
-                        transition: 'width 0.4s ease',
-                      }}
-                    />
-                  </div>
-
-                  {task.deliverable_path && (
-                    <div style={{ display: 'flex', justifyContent: 'flex-end', marginTop: '4px' }}>
-                      <button
-                        className="btn btn-ghost"
-                        onClick={() => navigate('missions')}
-                        style={{ fontSize: '12px', padding: '4px 8px', color: 'hsl(var(--primary))', display: 'inline-flex', alignItems: 'center', gap: '4px' }}
-                      >
-                        <ExternalLink size={12} /> View Deliverable
-                      </button>
-                    </div>
-                  )}
-                </div>
-              ))}
-            </div>
-          </div>
-        )}
-
-        {/* 3. RECENT DELIVERABLES / OUTCOMES */}
-        {overview.recent_deliverables && overview.recent_deliverables.length > 0 && (
-          <div style={{ marginBottom: '28px' }}>
-            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '12px' }}>
-              <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-                <FileText size={16} className="text-primary" />
-                <h2 style={{ fontSize: '16px', fontWeight: 700, margin: 0, color: 'hsl(var(--fg))' }}>
-                  {t('recentDeliverables') || 'Recent Deliverables'} ({overview.recent_deliverables.length})
-                </h2>
-              </div>
-              <button
-                className="btn btn-ghost"
-                onClick={() => navigate('missions')}
-                style={{ fontSize: '12px', padding: '2px 8px', color: 'hsl(var(--primary))' }}
-              >
-                Open in Work →
-              </button>
-            </div>
-            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(280px, 1fr))', gap: '12px' }}>
-              {overview.recent_deliverables.map((deliv: any) => (
-                <div
-                  key={deliv.id || deliv.file_path}
-                  className="card"
-                  onClick={() => navigate('missions')}
-                  style={{
-                    padding: '14px 16px',
-                    borderRadius: '10px',
-                    border: '1px solid hsl(var(--border))',
-                    cursor: 'pointer',
-                    display: 'flex',
-                    flexDirection: 'column',
-                    gap: '6px',
-                    transition: 'border-color 0.15s ease',
-                  }}
-                >
-                  <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
-                    <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-                      <FileText size={15} color="hsl(var(--primary))" />
-                      <span style={{ fontSize: '13.5px', fontWeight: 600 }}>{deliv.title || deliv.name}</span>
-                    </div>
-                    <span className="badge" style={{ fontSize: '10px', textTransform: 'uppercase' }}>
-                      {deliv.file_type || 'artifact'}
-                    </span>
-                  </div>
-                  {deliv.summary && (
-                    <p style={{ margin: 0, fontSize: '12px', color: 'hsl(var(--muted-fg))', lineHeight: 1.4 }}>
-                      {deliv.summary}
-                    </p>
-                  )}
-                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginTop: '4px', fontSize: '11px', color: 'hsl(var(--muted-fg))' }}>
-                    <span>{deliv.created_at ? new Date(deliv.created_at).toLocaleDateString([], { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' }) : ''}</span>
-                    <span style={{ color: 'hsl(var(--primary))', display: 'inline-flex', alignItems: 'center', gap: '3px' }}>
-                      View outcome <ArrowRight size={10} />
-                    </span>
-                  </div>
-                </div>
-              ))}
-            </div>
-          </div>
-        )}
-
-        {/* 4. MAIN COLLABORATOR INPUT BOX */}
+        {/* 1. HERO COLLABORATOR PROMPT BOX (TOP PROMINENT INTERACTION) */}
         <div className="card" style={{
           padding: '24px',
           borderRadius: '16px',
@@ -831,7 +617,7 @@ export function Home({
                 data-testid="companion-input-field"
                 className="input"
                 rows={2}
-                placeholder={isListening ? "Listening... Speak your goal clearly" : "What would you like Aether to take care of? (e.g. 'Schedule a meeting with Sarah tomorrow', 'Create a brief', 'Run full market analysis')"}
+                placeholder={isListening ? "In ascolto... Parla chiaramente" : "Cosa vuoi che faccia Aether oggi? (es. 'Pianifica la mia giornata', 'Scrivi un brief', 'Verifica impegni di domani', 'Aether, pensaci tu')"}
                 value={promptInput}
                 onChange={e => setPromptInput(e.target.value)}
                 onKeyDown={e => {
@@ -842,43 +628,51 @@ export function Home({
                 }}
                 style={{ width: '100%', resize: 'none', fontSize: '14px', lineHeight: 1.5, border: 'none', outline: 'none', padding: '4px 0', background: 'transparent' }}
               />
-              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginTop: '12px', paddingTop: '10px', borderTop: '1px solid hsl(var(--border)/0.5)' }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginTop: '12px', paddingTop: '10px', borderTop: '1px solid hsl(var(--border)/0.5)', flexWrap: 'wrap', gap: '8px' }}>
                 {/* Suggestion Chips */}
                 <div style={{ display: 'flex', gap: '6px', flexWrap: 'wrap' }}>
                   <button
                     type="button"
                     className="btn btn-ghost"
+                    onClick={() => handleSendPrompt('Aether, fai un punto della situazione e dimmi cosa richiede la mia attenzione oggi')}
+                    style={{ fontSize: '12px', padding: '4px 10px', borderRadius: '12px', backgroundColor: 'hsl(var(--primary)/0.1)', color: 'hsl(var(--primary))', fontWeight: 600 }}
+                  >
+                    <Sparkles size={12} style={{ marginRight: '4px' }} /> Aether, pensaci tu
+                  </button>
+                  <button
+                    type="button"
+                    className="btn btn-ghost"
                     onClick={() => {
                       if (onNewTask) onNewTask();
-                      else handleSendPrompt('New task');
+                      else handleSendPrompt('Nuovo compito');
                     }}
                     style={{ fontSize: '12px', padding: '4px 10px', borderRadius: '12px', backgroundColor: 'hsl(var(--muted)/0.5)' }}
                   >
-                    <Plus size={12} style={{ marginRight: '4px' }} /> Start a Task
+                    <Plus size={12} style={{ marginRight: '4px' }} /> Nuovo compito
                   </button>
                   <button
                     type="button"
                     className="btn btn-ghost"
-                    onClick={() => handleSendPrompt('Schedule a meeting with Team tomorrow at 10am')}
+                    onClick={() => handleSendPrompt('Verifica i miei appuntamenti sul calendario per domani')}
                     style={{ fontSize: '12px', padding: '4px 10px', borderRadius: '12px', backgroundColor: 'hsl(var(--muted)/0.5)' }}
                   >
-                    <Calendar size={12} style={{ marginRight: '4px' }} /> Schedule Meeting
+                    <Calendar size={12} style={{ marginRight: '4px' }} /> Verifica agenda
                   </button>
                   <button
                     type="button"
                     className="btn btn-ghost"
-                    onClick={() => handleSendPrompt('Create a document named summary.md with product notes')}
+                    onClick={() => handleSendPrompt('Crea un documento con le note operative di progetto')}
                     style={{ fontSize: '12px', padding: '4px 10px', borderRadius: '12px', backgroundColor: 'hsl(var(--muted)/0.5)' }}
                   >
-                    <FileText size={12} style={{ marginRight: '4px' }} /> Create Document
+                    <FileText size={12} style={{ marginRight: '4px' }} /> Crea documento
                   </button>
                   <button
                     type="button"
                     className="btn btn-ghost"
-                    onClick={() => handleSendPrompt('Launch mission: Analyze competitive landscape for Q4')}
+                    onClick={() => handleSendPrompt('Delega al team: analizza gli obiettivi del workspace')}
                     style={{ fontSize: '12px', padding: '4px 10px', borderRadius: '12px', backgroundColor: 'hsl(var(--muted)/0.5)' }}
                   >
-                    <Users size={12} style={{ marginRight: '4px' }} /> Delegate to Workforce
+                    <Users size={12} style={{ marginRight: '4px' }} /> Delega al team
                   </button>
                 </div>
 
@@ -888,7 +682,7 @@ export function Home({
                     type="button"
                     data-testid="voice-mic-btn"
                     onClick={toggleListening}
-                    title={isListening ? "Stop listening" : "Voice input (push to speak)"}
+                    title={isListening ? "Interrompi ascolto" : "Input vocale (clicca per parlare)"}
                     className={`btn ${isListening ? 'btn-danger' : 'btn-ghost'}`}
                     style={{
                       padding: '6px 10px',
@@ -900,7 +694,7 @@ export function Home({
                     }}
                   >
                     {isListening ? <MicOff size={16} /> : <Mic size={16} />}
-                    <span style={{ fontSize: '12px' }}>{isListening ? 'Listening...' : 'Voice'}</span>
+                    <span style={{ fontSize: '12px' }}>{isListening ? 'In ascolto...' : 'Voce'}</span>
                   </button>
 
                   <button
@@ -910,7 +704,7 @@ export function Home({
                     onClick={() => handleSendPrompt(promptInput)}
                     style={{ padding: '6px 16px', display: 'flex', alignItems: 'center', gap: '6px', fontSize: '13px' }}
                   >
-                    {isSubmitting ? 'Thinking...' : 'Take Care of It'}
+                    {isSubmitting ? 'Elaborazione...' : 'Pensaci tu'}
                     <Send size={14} />
                   </button>
                 </div>
@@ -936,7 +730,7 @@ export function Home({
                 <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '8px' }}>
                   <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
                     <span style={{ fontWeight: 600, fontSize: '13px', color: msg.role === 'user' ? 'hsl(var(--fg))' : 'hsl(var(--primary))' }}>
-                      {msg.role === 'user' ? 'You' : 'Personal Aether'}
+                      {msg.role === 'user' ? 'Tu' : 'Aether'}
                     </span>
                     <span style={{ fontSize: '11px', color: 'hsl(var(--muted-fg))' }}>
                       {msg.created_at ? new Date(msg.created_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : ''}
@@ -947,7 +741,7 @@ export function Home({
                     <button
                       type="button"
                       onClick={() => handleSpeakText(msg.id, msg.content)}
-                      title={isSpeaking && speakingMessageId === msg.id ? "Stop audio" : "Read aloud"}
+                      title={isSpeaking && speakingMessageId === msg.id ? "Interrompi audio" : "Leggi a voce"}
                       className="btn btn-ghost"
                       style={{ padding: '4px', height: 'auto', color: 'hsl(var(--muted-fg))' }}
                     >
@@ -985,7 +779,7 @@ export function Home({
                   <div style={{ marginTop: '14px', padding: '12px 16px', borderRadius: '10px', backgroundColor: '#f59e0b10', border: '1px solid #f59e0b40', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
                     <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
                       <Shield size={16} color="#f59e0b" />
-                      <span style={{ fontSize: '13px', fontWeight: 600, color: '#f59e0b' }}>Confirmation Required</span>
+                      <span style={{ fontSize: '13px', fontWeight: 600, color: '#f59e0b' }}>Conferma richiesta</span>
                     </div>
                     <div style={{ display: 'flex', gap: '8px' }}>
                       <button
@@ -999,7 +793,7 @@ export function Home({
                           opacity: actionLoading === msg.action_execution_id ? 0.6 : 1,
                         }}
                       >
-                        <X size={13} style={{ marginRight: '4px' }} /> Decline
+                        <X size={13} style={{ marginRight: '4px' }} /> Rifiuta
                       </button>
                       <button
                         className="btn btn-primary"
@@ -1018,7 +812,7 @@ export function Home({
                         ) : (
                           <Check size={13} style={{ marginRight: '4px' }} />
                         )}
-                        {actionLoading === msg.action_execution_id ? 'Approving...' : 'Approve'}
+                        {actionLoading === msg.action_execution_id ? 'Approvazione…' : 'Approva'}
                       </button>
                     </div>
                   </div>
@@ -1029,7 +823,7 @@ export function Home({
                   <div style={{ marginTop: '14px', padding: '12px 16px', borderRadius: '10px', backgroundColor: '#f59e0b10', border: '1px solid #f59e0b40', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
                     <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
                       <Shield size={16} color="#f59e0b" />
-                      <span style={{ fontSize: '13px', fontWeight: 600, color: '#f59e0b' }}>Confirmation Required</span>
+                      <span style={{ fontSize: '13px', fontWeight: 600, color: '#f59e0b' }}>Conferma richiesta</span>
                     </div>
                     <div style={{ display: 'flex', gap: '8px' }}>
                       <button
@@ -1043,7 +837,7 @@ export function Home({
                           opacity: actionLoading === msg.metadata!.proposal_id ? 0.6 : 1,
                         }}
                       >
-                        <X size={13} style={{ marginRight: '4px' }} /> Decline
+                        <X size={13} style={{ marginRight: '4px' }} /> Rifiuta
                       </button>
                       <button
                         className="btn btn-primary"
@@ -1062,7 +856,7 @@ export function Home({
                         ) : (
                           <Check size={13} style={{ marginRight: '4px' }} />
                         )}
-                        {actionLoading === msg.metadata!.proposal_id ? 'Approving...' : 'Approve'}
+                        {actionLoading === msg.metadata!.proposal_id ? 'Approvazione…' : 'Approva'}
                       </button>
                     </div>
                   </div>
@@ -1072,9 +866,250 @@ export function Home({
           </div>
         )}
 
-        {/* 5. HUB CARDS GRID: Work, Connections, Automations, Activity */}
+        {/* 2. IN ATTESA DI APPROVAZIONE (SE PRESENTI) */}
+        {overview.pending_approvals && overview.pending_approvals.length > 0 && (
+          <div data-testid="needs-attention-section" style={{ marginBottom: '28px' }}>
+            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '12px' }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                <Shield size={18} color="#f59e0b" />
+                <h2 style={{ fontSize: '16px', fontWeight: 700, margin: 0, color: 'hsl(var(--fg))' }}>
+                  In attesa di approvazione ({overview.pending_approvals.length})
+                </h2>
+              </div>
+              <span style={{ fontSize: '12px', color: '#f59e0b', fontWeight: 500 }}>
+                Operazioni in pausa in attesa della tua conferma
+              </span>
+            </div>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
+              {overview.pending_approvals.map((appr: any) => {
+                const isTargeted = initialApprovalId === appr.execution_id;
+                const isLoading = actionLoading === appr.execution_id;
+                return (
+                  <div
+                    key={appr.execution_id}
+                    id={`approval-card-${appr.execution_id}`}
+                    className="card"
+                    style={{
+                      padding: '16px 20px',
+                      borderRadius: '12px',
+                      border: isTargeted ? '2px solid #f59e0b' : '1px solid #f59e0b50',
+                      boxShadow: isTargeted ? '0 0 16px rgba(245, 158, 11, 0.3)' : '0 2px 8px rgba(0,0,0,0.04)',
+                      backgroundColor: isTargeted ? '#f59e0b14' : '#f59e0b08',
+                      display: 'flex',
+                      justifyContent: 'space-between',
+                      alignItems: 'center',
+                      transition: 'all 0.3s ease',
+                    }}
+                  >
+                    <div style={{ flex: 1, marginRight: '16px' }}>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                        <span style={{ fontSize: '10px', fontWeight: 700, padding: '2px 7px', borderRadius: '4px', backgroundColor: '#f59e0b20', color: '#f59e0b', textTransform: 'uppercase', letterSpacing: '0.04em' }}>
+                          Conferma richiesta
+                        </span>
+                        <span style={{ fontWeight: 600, fontSize: '14.5px' }}>{appr.human_summary || appr.action_name}</span>
+                      </div>
+                      {appr.action_id === 'email.send' && (
+                        <div style={{ fontSize: '12.5px', color: 'hsl(var(--fg)/0.85)', marginTop: '6px', padding: '8px 12px', backgroundColor: 'hsl(var(--muted)/0.3)', borderRadius: '6px' }}>
+                          <div><strong>A:</strong> {appr.input_data?.to}</div>
+                          <div><strong>Oggetto:</strong> {appr.input_data?.subject}</div>
+                          {appr.input_data?.body && <div style={{ marginTop: '4px', whiteSpace: 'pre-wrap', color: 'hsl(var(--muted-fg))' }}>{appr.input_data.body}</div>}
+                        </div>
+                      )}
+                      {appr.action_id === 'github.create_issue' && (
+                        <div style={{ fontSize: '12.5px', color: 'hsl(var(--fg)/0.85)', marginTop: '6px', padding: '8px 12px', backgroundColor: 'hsl(var(--muted)/0.3)', borderRadius: '6px' }}>
+                          <div><strong>Repository:</strong> {appr.input_data?.owner ? `${appr.input_data.owner}/${appr.input_data.repository}` : (appr.input_data?.repository || 'repository')}</div>
+                          <div><strong>Titolo:</strong> {appr.input_data?.title}</div>
+                          {appr.input_data?.body && <div style={{ marginTop: '4px', whiteSpace: 'pre-wrap', color: 'hsl(var(--muted-fg))' }}>{appr.input_data.body}</div>}
+                        </div>
+                      )}
+                      {appr.action_id === 'slack.send_message' && (
+                        <div style={{ fontSize: '12.5px', color: 'hsl(var(--fg)/0.85)', marginTop: '6px', padding: '8px 12px', backgroundColor: 'hsl(var(--muted)/0.3)', borderRadius: '6px' }}>
+                          <div><strong>Canale:</strong> {appr.input_data?.channel || '#general'}</div>
+                          {appr.input_data?.text && <div style={{ marginTop: '4px', whiteSpace: 'pre-wrap', color: 'hsl(var(--muted-fg))' }}>{appr.input_data.text}</div>}
+                        </div>
+                      )}
+                      {appr.action_id === 'calendar.create_event' && (
+                        <div style={{ fontSize: '12.5px', color: 'hsl(var(--muted-fg))', marginTop: '4px' }}>
+                          {appr.input_data?.start_time ? `Orario: ${appr.input_data.start_time}` : ''} {appr.input_data?.location ? `• Luogo: ${appr.input_data.location}` : ''}
+                        </div>
+                      )}
+                    </div>
+                    <div style={{ display: 'flex', gap: '8px', alignItems: 'center' }}>
+                      <button
+                        className="btn btn-ghost"
+                        disabled={isLoading}
+                        onClick={() => handleRejectAction(appr.execution_id)}
+                        style={{ fontSize: '12px', padding: '6px 12px', color: 'hsl(var(--destructive))', opacity: isLoading ? 0.6 : 1 }}
+                      >
+                        Rifiuta
+                      </button>
+                      <button
+                        className="btn btn-primary"
+                        disabled={isLoading}
+                        onClick={() => handleApproveAction(appr.execution_id)}
+                        style={{
+                          fontSize: '12px',
+                          padding: '6px 16px',
+                          backgroundColor: '#10b981',
+                          borderColor: '#10b981',
+                          display: 'flex',
+                          alignItems: 'center',
+                          gap: '6px',
+                          opacity: isLoading ? 0.6 : 1,
+                        }}
+                      >
+                        {isLoading && <Loader2 size={13} className="animate-spin" />}
+                        {isLoading ? 'Approvazione…' : 'Approva'}
+                      </button>
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+        )}
+
+        {/* 3. LAVORI IN CORSO */}
+        {((overview.background_tasks && overview.background_tasks.length > 0) || (overview.active_works && overview.active_works.length > 0)) && (
+          <div data-testid="background-tasks-section" style={{ marginBottom: '28px' }}>
+            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '12px' }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                <Clock size={16} className="text-primary" />
+                <h2 style={{ fontSize: '16px', fontWeight: 700, margin: 0, color: 'hsl(var(--fg))' }}>
+                  Lavori in corso ({(overview.background_tasks?.length || 0) + (overview.active_works?.length || 0)})
+                </h2>
+              </div>
+              <button
+                className="btn btn-ghost"
+                onClick={() => navigate('missions')}
+                style={{ fontSize: '12px', padding: '2px 8px', color: 'hsl(var(--primary))' }}
+              >
+                Vedi tutti i lavori →
+              </button>
+            </div>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
+              {overview.background_tasks?.map((task: any) => (
+                <div
+                  key={task.id}
+                  className="card"
+                  data-testid="background-task-card"
+                  style={{
+                    padding: '16px 20px',
+                    borderRadius: '12px',
+                    border: '1px solid hsl(var(--border))',
+                    display: 'flex',
+                    flexDirection: 'column',
+                    gap: '8px',
+                  }}
+                >
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                    <div>
+                      <span style={{ fontWeight: 600, fontSize: '14px' }}>{task.title || 'Attività operativa in background'}</span>
+                      <div style={{ fontSize: '12px', color: 'hsl(var(--muted-fg))', marginTop: '2px' }}>
+                        {task.current_step || task.status}
+                      </div>
+                    </div>
+                    <span
+                      className={`badge ${task.status === 'completed' ? 'badge-success' : task.status === 'running' ? 'badge-primary' : 'badge-warning'}`}
+                      style={{ fontSize: '11px', textTransform: 'capitalize' }}
+                    >
+                      {task.status === 'completed' ? 'Completato' : task.status === 'running' ? 'In esecuzione' : task.status}
+                    </span>
+                  </div>
+
+                  {/* Progress Bar */}
+                  <div style={{ width: '100%', height: '6px', borderRadius: '3px', backgroundColor: 'hsl(var(--muted))', overflow: 'hidden' }}>
+                    <div
+                      style={{
+                        width: `${task.progress_pct || (task.status === 'completed' ? 100 : 25)}%`,
+                        height: '100%',
+                        backgroundColor: task.status === 'completed' ? '#10b981' : 'hsl(var(--primary))',
+                        transition: 'width 0.4s ease',
+                      }}
+                    />
+                  </div>
+
+                  {task.deliverable_path && (
+                    <div style={{ display: 'flex', justifyContent: 'flex-end', marginTop: '4px' }}>
+                      <button
+                        className="btn btn-ghost"
+                        onClick={() => navigate('missions')}
+                        style={{ fontSize: '12px', padding: '4px 8px', color: 'hsl(var(--primary))', display: 'inline-flex', alignItems: 'center', gap: '4px' }}
+                      >
+                        <ExternalLink size={12} /> Visualizza documento
+                      </button>
+                    </div>
+                  )}
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
+
+        {/* 4. RISULTATI E DOCUMENTI RECENTI */}
+        {overview.recent_deliverables && overview.recent_deliverables.length > 0 && (
+          <div style={{ marginBottom: '28px' }}>
+            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '12px' }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                <FileText size={16} className="text-primary" />
+                <h2 style={{ fontSize: '16px', fontWeight: 700, margin: 0, color: 'hsl(var(--fg))' }}>
+                  Risultati e documenti recenti ({overview.recent_deliverables.length})
+                </h2>
+              </div>
+              <button
+                className="btn btn-ghost"
+                onClick={() => navigate('results')}
+                style={{ fontSize: '12px', padding: '2px 8px', color: 'hsl(var(--primary))' }}
+              >
+                Apri in Risultati →
+              </button>
+            </div>
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(280px, 1fr))', gap: '12px' }}>
+              {overview.recent_deliverables.map((deliv: any) => (
+                <div
+                  key={deliv.id || deliv.file_path}
+                  className="card"
+                  onClick={() => navigate('results')}
+                  style={{
+                    padding: '14px 16px',
+                    borderRadius: '10px',
+                    border: '1px solid hsl(var(--border))',
+                    cursor: 'pointer',
+                    display: 'flex',
+                    flexDirection: 'column',
+                    gap: '6px',
+                    transition: 'border-color 0.15s ease',
+                  }}
+                >
+                  <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                      <FileText size={15} color="hsl(var(--primary))" />
+                      <span style={{ fontSize: '13.5px', fontWeight: 600 }}>{deliv.title || deliv.name}</span>
+                    </div>
+                    <span className="badge" style={{ fontSize: '10px', textTransform: 'uppercase' }}>
+                      {deliv.file_type || 'documento'}
+                    </span>
+                  </div>
+                  {deliv.summary && (
+                    <p style={{ margin: 0, fontSize: '12px', color: 'hsl(var(--muted-fg))', lineHeight: 1.4 }}>
+                      {deliv.summary}
+                    </p>
+                  )}
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginTop: '4px', fontSize: '11px', color: 'hsl(var(--muted-fg))' }}>
+                    <span>{deliv.created_at ? new Date(deliv.created_at).toLocaleDateString([], { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' }) : ''}</span>
+                    <span style={{ color: 'hsl(var(--primary))', display: 'inline-flex', alignItems: 'center', gap: '3px' }}>
+                      Visualizza risultato <ArrowRight size={10} />
+                    </span>
+                  </div>
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
+
+        {/* 5. HUB SHORTCUTS: Lavori, Connessioni, Automazioni, Attività */}
         <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))', gap: '16px', marginBottom: '28px' }}>
-          {/* Work Hub Card */}
+          {/* Lavori */}
           <div
             className="card"
             style={{ padding: '18px', borderRadius: '12px', cursor: 'pointer' }}
@@ -1082,20 +1117,20 @@ export function Home({
           >
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '8px' }}>
               <div style={{ display: 'flex', alignItems: 'center', gap: '8px', fontWeight: 600, fontSize: '14.5px' }}>
-                <Users size={17} color="hsl(var(--primary))" /> Work & Missions
+                <Users size={17} color="hsl(var(--primary))" /> Lavori e Missioni
               </div>
               <ArrowRight size={15} color="hsl(var(--muted-fg))" />
             </div>
             <div style={{ fontSize: '12.5px', color: 'hsl(var(--muted-fg))' }}>
               {overview.active_works?.length > 0 ? (
-                <span><strong>{overview.active_works.length}</strong> active missions running.</span>
+                <span><strong>{overview.active_works.length}</strong> missioni attive in esecuzione.</span>
               ) : (
-                <span>Outcome commitments and verifiable milestones.</span>
+                <span>Progetti in corso e compiti supervisionati.</span>
               )}
             </div>
           </div>
 
-          {/* Connections Hub Card */}
+          {/* Servizi Collegati */}
           <div
             className="card"
             style={{ padding: '18px', borderRadius: '12px', cursor: 'pointer' }}
@@ -1103,16 +1138,16 @@ export function Home({
           >
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '8px' }}>
               <div style={{ display: 'flex', alignItems: 'center', gap: '8px', fontWeight: 600, fontSize: '14.5px' }}>
-                <Calendar size={17} color="#4285F4" /> Connections
+                <Calendar size={17} color="#4285F4" /> Servizi Collegati
               </div>
               <ArrowRight size={15} color="hsl(var(--muted-fg))" />
             </div>
             <div style={{ fontSize: '12.5px', color: 'hsl(var(--muted-fg))' }}>
-              <span><strong>{overview.connected_apps_count || 0}</strong> apps configured and verified.</span>
+              <span><strong>{overview.connected_apps_count || 0}</strong> app configurate e verificate.</span>
             </div>
           </div>
 
-          {/* Automations Hub Card */}
+          {/* Automazioni */}
           <div
             className="card"
             style={{ padding: '18px', borderRadius: '12px', cursor: 'pointer' }}
@@ -1120,16 +1155,16 @@ export function Home({
           >
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '8px' }}>
               <div style={{ display: 'flex', alignItems: 'center', gap: '8px', fontWeight: 600, fontSize: '14.5px' }}>
-                <Clock size={17} color="#8b5cf6" /> Automations
+                <Clock size={17} color="#8b5cf6" /> Automazioni
               </div>
               <ArrowRight size={15} color="hsl(var(--muted-fg))" />
             </div>
             <div style={{ fontSize: '12.5px', color: 'hsl(var(--muted-fg))' }}>
-              <span>Scheduled cron jobs and event watchers.</span>
+              <span>Pianificazioni automatiche e compiti ricorrenti.</span>
             </div>
           </div>
 
-          {/* Activity Hub Card */}
+          {/* Cronologia Attività */}
           <div
             className="card"
             style={{ padding: '18px', borderRadius: '12px', cursor: 'pointer' }}
@@ -1137,12 +1172,12 @@ export function Home({
           >
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '8px' }}>
               <div style={{ display: 'flex', alignItems: 'center', gap: '8px', fontWeight: 600, fontSize: '14.5px' }}>
-                <Activity size={17} color="#10b981" /> Activity Feed
+                <Activity size={17} color="#10b981" /> Cronologia Attività
               </div>
               <ArrowRight size={15} color="hsl(var(--muted-fg))" />
             </div>
             <div style={{ fontSize: '12.5px', color: 'hsl(var(--muted-fg))' }}>
-              <span>Plain-language audit trail of operations.</span>
+              <span>Registro trasparente di tutte le azioni eseguite.</span>
             </div>
           </div>
         </div>

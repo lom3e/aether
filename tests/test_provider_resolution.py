@@ -151,8 +151,8 @@ agents:
 
 
 def test_provider_resolution_invalid_provider_fallback(mock_manager):
-    # If the provider is completely unknown, and we passed a provider instance to Team,
-    # it should log a warning and fallback to the instance.
+    # An EXPLICITLY configured but unusable provider must never be silently replaced by another one:
+    # the agent keeps the configured identity and fails loudly on use.
     config = TeamConfig(
         default_provider="openai",
         agents=[AgentConfig(name="manager", provider="unknown_provider")]
@@ -162,4 +162,6 @@ def test_provider_resolution_invalid_provider_fallback(mock_manager):
     team = Team(config, provider=fallback_provider)
 
     agent = team.get_agent("manager")
-    assert agent.provider is fallback_provider
+    from aether.providers.unresolved import UnresolvedProvider
+    assert isinstance(agent.provider, UnresolvedProvider) and agent.provider is not fallback_provider
+    assert agent.provider.provider_name == "unknown_provider"

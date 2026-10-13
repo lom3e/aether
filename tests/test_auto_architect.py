@@ -125,6 +125,8 @@ async def test_apply_architect_workforce_persists_to_workspace(tmp_path):
     req = Request(scope={"type": "http", "app": DummyApp()})
 
     payload = ApplyArchitectWorkforcePayload(
+        default_provider="ollama",          # explicit choice: no provider is ever assumed any more (block B)
+        default_model="llama3",
         team_name="Cybersecurity Red Team",
         description="Vulnerability assessment and pentesting squad",
         icon="ShieldCheck",

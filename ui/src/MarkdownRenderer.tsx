@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { Copy, Check } from 'lucide-react';
+import { Copy, Check, ExternalLink } from 'lucide-react';
 import { useTranslation } from './i18n';
 
 interface MarkdownRendererProps {
@@ -9,12 +9,7 @@ interface MarkdownRendererProps {
 export function MarkdownRenderer({ content }: MarkdownRendererProps) {
   if (!content) return null;
 
-  // Sanitize raw html breaks and line breaks before parsing blocks
-  const normalized = content
-    .replace(/<br\s*\/?>/gi, '\n')
-    .replace(/<hr\s*\/?>/gi, '\n---\n');
-
-  const blocks = parseMarkdownBlocks(normalized);
+  const blocks = parseMarkdownBlocks(content);
 
   return (
     <div className="markdown-content" style={{ lineHeight: 1.65, fontSize: '13.5px', color: 'hsl(var(--fg))' }}>
@@ -23,6 +18,51 @@ export function MarkdownRenderer({ content }: MarkdownRendererProps) {
       ))}
     </div>
   );
+}
+
+// ---------------------------------------------------------------------------
+// Entity Decoding & Syntax Normalization (Precision 4: Safe decode outside code)
+// ---------------------------------------------------------------------------
+
+function safeDecodeEntities(str: string): string {
+  if (!str) return '';
+  // Hexadecimal entities: &#x47; -> G
+  let decoded = str.replace(/&#x([0-9a-fA-F]+);/g, (match, hex) => {
+    try {
+      const code = parseInt(hex, 16);
+      return String.fromCodePoint(code);
+    } catch {
+      return match;
+    }
+  });
+
+  // Decimal entities: &#71; -> G
+  decoded = decoded.replace(/&#([0-9]+);/g, (match, dec) => {
+    try {
+      const code = parseInt(dec, 10);
+      return String.fromCodePoint(code);
+    } catch {
+      return match;
+    }
+  });
+
+  // Standard safe entities
+  const entityMap: Record<string, string> = {
+    '&quot;': '"',
+    '&apos;': "'",
+    '&#39;': "'",
+    '&nbsp;': ' ',
+    '&amp;': '&',
+    '&lt;': '<',
+    '&gt;': '>',
+  };
+  return decoded.replace(/&(?:quot|apos|#39|nbsp|amp|lt|gt);/g, m => entityMap[m] || m);
+}
+
+function normalizeMarkdownLine(line: string): string {
+  // Normalize escaped markdown characters: \# -> #, \* -> *, \_ -> _, \- -> -, \` -> `, \> -> >
+  const unescaped = line.replace(/\\([#*_`>~\[\]\(\)\-])/g, '$1');
+  return safeDecodeEntities(unescaped);
 }
 
 // ---------------------------------------------------------------------------
@@ -39,17 +79,23 @@ type Block =
   | { type: 'paragraph'; text: string }
   | { type: 'divider' };
 
-function parseMarkdownBlocks(text: string): Block[] {
-  const lines = text.split('\n');
+function parseMarkdownBlocks(rawText: string): Block[] {
+  // Normalize line endings and break tags
+  const sanitized = rawText
+    .replace(/\r\n/g, '\n')
+    .replace(/<br\s*\/?>/gi, '\n')
+    .replace(/<hr\s*\/?>/gi, '\n---\n');
+
+  const lines = sanitized.split('\n');
   const blocks: Block[] = [];
   let i = 0;
 
   while (i < lines.length) {
-    const line = lines[i];
+    const rawLine = lines[i];
 
-    // 1. Fenced Code Blocks
-    if (line.trim().startsWith('```')) {
-      const language = line.trim().replace(/^```/, '').trim();
+    // 1. Fenced Code Blocks (Preserved completely literal without unescaping)
+    if (rawLine.trim().startsWith('```')) {
+      const language = rawLine.trim().replace(/^```/, '').trim();
       const codeLines: string[] = [];
       i++;
       while (i < lines.length && !lines[i].trim().startsWith('```')) {
@@ -60,6 +106,8 @@ function parseMarkdownBlocks(text: string): Block[] {
       blocks.push({ type: 'code', language, code: codeLines.join('\n') });
       continue;
     }
+
+    const line = normalizeMarkdownLine(rawLine);
 
     // 2. Horizontal Rules
     if (/^(-{3,}|\*{3,}|_{3,})$/.test(line.trim())) {
@@ -83,8 +131,10 @@ function parseMarkdownBlocks(text: string): Block[] {
     // 4. Blockquotes
     if (line.trim().startsWith('>')) {
       const quoteLines: string[] = [];
-      while (i < lines.length && lines[i].trim().startsWith('>')) {
-        quoteLines.push(lines[i].replace(/^>\s?/, ''));
+      while (i < lines.length) {
+        const curLine = normalizeMarkdownLine(lines[i]);
+        if (!curLine.trim().startsWith('>')) break;
+        quoteLines.push(curLine.replace(/^>\s?/, ''));
         i++;
       }
       blocks.push({ type: 'blockquote', text: quoteLines.join(' ') });
@@ -92,24 +142,31 @@ function parseMarkdownBlocks(text: string): Block[] {
     }
 
     // 5. Tables
-    if (line.includes('|') && i + 1 < lines.length && lines[i + 1].includes('|') && /[-:]+/.test(lines[i + 1])) {
-      const headers = parseTableRow(line);
-      i += 2; // skip header and separator
-      const rows: string[][] = [];
-      while (i < lines.length && lines[i].includes('|')) {
-        const row = parseTableRow(lines[i]);
-        if (row.length > 0) rows.push(row);
-        i++;
+    if (line.includes('|') && i + 1 < lines.length) {
+      const nextLine = normalizeMarkdownLine(lines[i + 1]);
+      if (nextLine.includes('|') && /[-:]+/.test(nextLine)) {
+        const headers = parseTableRow(line);
+        i += 2; // skip header and separator
+        const rows: string[][] = [];
+        while (i < lines.length) {
+          const rowLine = normalizeMarkdownLine(lines[i]);
+          if (!rowLine.includes('|')) break;
+          const row = parseTableRow(rowLine);
+          if (row.length > 0) rows.push(row);
+          i++;
+        }
+        blocks.push({ type: 'table', headers, rows });
+        continue;
       }
-      blocks.push({ type: 'table', headers, rows });
-      continue;
     }
 
     // 6. Unordered List
     if (/^[*+-]\s+/.test(line.trim())) {
       const items: string[] = [];
-      while (i < lines.length && /^[*+-]\s+/.test(lines[i].trim())) {
-        items.push(lines[i].trim().replace(/^[*+-]\s+/, ''));
+      while (i < lines.length) {
+        const curLine = normalizeMarkdownLine(lines[i]);
+        if (!/^[*+-]\s+/.test(curLine.trim())) break;
+        items.push(curLine.trim().replace(/^[*+-]\s+/, ''));
         i++;
       }
       blocks.push({ type: 'ul', items });
@@ -119,8 +176,10 @@ function parseMarkdownBlocks(text: string): Block[] {
     // 7. Ordered List
     if (/^\d+\.\s+/.test(line.trim())) {
       const items: string[] = [];
-      while (i < lines.length && /^\d+\.\s+/.test(lines[i].trim())) {
-        items.push(lines[i].trim().replace(/^\d+\.\s+/, ''));
+      while (i < lines.length) {
+        const curLine = normalizeMarkdownLine(lines[i]);
+        if (!/^\d+\.\s+/.test(curLine.trim())) break;
+        items.push(curLine.trim().replace(/^\d+\.\s+/, ''));
         i++;
       }
       blocks.push({ type: 'ol', items });
@@ -135,20 +194,25 @@ function parseMarkdownBlocks(text: string): Block[] {
 
     // 9. Regular Paragraph
     const paraLines: string[] = [];
-    while (
-      i < lines.length &&
-      lines[i].trim() &&
-      !lines[i].trim().startsWith('```') &&
-      !lines[i].trim().startsWith('#') &&
-      !lines[i].trim().startsWith('>') &&
-      !/^[*+-]\s+/.test(lines[i].trim()) &&
-      !/^\d+\.\s+/.test(lines[i].trim()) &&
-      !(lines[i].includes('|') && i + 1 < lines.length && lines[i + 1].includes('|') && /[-:]+/.test(lines[i + 1]))
-    ) {
-      paraLines.push(lines[i]);
+    while (i < lines.length) {
+      if (lines[i].trim().startsWith('```')) break;
+      const curNorm = normalizeMarkdownLine(lines[i]);
+      if (
+        !curNorm.trim() ||
+        curNorm.trim().startsWith('#') ||
+        curNorm.trim().startsWith('>') ||
+        /^[*+-]\s+/.test(curNorm.trim()) ||
+        /^\d+\.\s+/.test(curNorm.trim()) ||
+        (curNorm.includes('|') && i + 1 < lines.length && normalizeMarkdownLine(lines[i + 1]).includes('|') && /[-:]+/.test(normalizeMarkdownLine(lines[i + 1])))
+      ) {
+        break;
+      }
+      paraLines.push(curNorm);
       i++;
     }
-    blocks.push({ type: 'paragraph', text: paraLines.join('\n') });
+    if (paraLines.length > 0) {
+      blocks.push({ type: 'paragraph', text: paraLines.join('\n') });
+    }
   }
 
   return blocks;
@@ -336,13 +400,13 @@ function CodeBlock({ code, language }: { code: string; language?: string }) {
 }
 
 // ---------------------------------------------------------------------------
-// Inline Renderer (Bold, Italic, Inline Code, Links)
+// Inline Renderer (Links, Code, Bold, Italic, Strikethrough)
 // ---------------------------------------------------------------------------
 
 function renderInline(text: string): React.ReactNode {
   if (!text) return null;
 
-  // Split by inline code first: `code`
+  // 1. Split by inline code: `code`
   const codeParts = text.split(/(`[^`]+`)/g);
 
   return codeParts.map((part, pIdx) => {
@@ -364,19 +428,55 @@ function renderInline(text: string): React.ReactNode {
       );
     }
 
-    // Bold & Italic: **bold** or *italic*
-    const formattedParts = part.split(/(\*\*[^*]+\*\*|\*[^*]+\*|__[^_]+__)/g);
+    // 2. Parse Markdown Links: [label](url)
+    const linkParts = part.split(/(\[[^\]]+\]\([^\)]+\))/g);
 
     return (
       <React.Fragment key={pIdx}>
-        {formattedParts.map((fPart, fIdx) => {
-          if ((fPart.startsWith('**') && fPart.endsWith('**')) || (fPart.startsWith('__') && fPart.endsWith('__'))) {
-            return <strong key={fIdx}>{fPart.slice(2, -2)}</strong>;
+        {linkParts.map((lPart, lIdx) => {
+          const linkMatch = lPart.match(/^\[([^\]]+)\]\(([^\)]+)\)$/);
+          if (linkMatch) {
+            const [, linkLabel, linkUrl] = linkMatch;
+            const isExternal = linkUrl.startsWith('http://') || linkUrl.startsWith('https://');
+            return (
+              <a
+                key={lIdx}
+                href={linkUrl}
+                target={isExternal ? '_blank' : undefined}
+                rel={isExternal ? 'noopener noreferrer' : undefined}
+                style={{
+                  color: 'hsl(var(--primary))',
+                  textDecoration: 'underline',
+                  display: 'inline-flex',
+                  alignItems: 'center',
+                  gap: '2px',
+                }}
+              >
+                <span>{linkLabel}</span>
+                {isExternal && <ExternalLink size={10} style={{ opacity: 0.7 }} />}
+              </a>
+            );
           }
-          if (fPart.startsWith('*') && fPart.endsWith('*') && fPart.length > 2) {
-            return <em key={fIdx}>{fPart.slice(1, -1)}</em>;
-          }
-          return fPart;
+
+          // 3. Bold, Italic, Strikethrough
+          const formattedParts = lPart.split(/(\*\*[^*]+\*\*|\*[^*]+\*|__[^_]+__|~~[^~]+~~)/g);
+
+          return (
+            <React.Fragment key={lIdx}>
+              {formattedParts.map((fPart, fIdx) => {
+                if ((fPart.startsWith('**') && fPart.endsWith('**')) || (fPart.startsWith('__') && fPart.endsWith('__'))) {
+                  return <strong key={fIdx}>{fPart.slice(2, -2)}</strong>;
+                }
+                if (fPart.startsWith('*') && fPart.endsWith('*') && fPart.length > 2) {
+                  return <em key={fIdx}>{fPart.slice(1, -1)}</em>;
+                }
+                if (fPart.startsWith('~~') && fPart.endsWith('~~') && fPart.length > 4) {
+                  return <s key={fIdx}>{fPart.slice(2, -2)}</s>;
+                }
+                return fPart;
+              })}
+            </React.Fragment>
+          );
         })}
       </React.Fragment>
     );

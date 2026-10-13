@@ -1,0 +1,344 @@
+<!DOCTYPE html>
+<html lang="it">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Aether V2 — Assistant-First & Living Orb Concept</title>
+  
+  <!-- CSS Foundations & Components -->
+  <link rel="stylesheet" href="./styles/main.css">
+  <link rel="stylesheet" href="./styles/orb.css">
+  <link rel="stylesheet" href="./styles/bubbles.css">
+  <link rel="stylesheet" href="./styles/field.css">
+  <link rel="stylesheet" href="./styles/conversation.css">
+  <link rel="stylesheet" href="./styles/manual-mode.css">
+  <link rel="stylesheet" href="./styles/prototype-controls.css">
+</head>
+<body>
+
+  <!-- Ambient Cosmic Background -->
+  <div class="ambient-background">
+    <div class="ambient-gradient-center"></div>
+    <div class="ambient-noise"></div>
+  </div>
+
+  <div class="app-container">
+    
+    <!-- Top Minimal Navigation -->
+    <header class="top-header">
+      <div class="brand-wrapper">
+        <div class="brand-dot"></div>
+        <span class="brand-name">Aether</span>
+        <span class="brand-badge">V2 Concept</span>
+      </div>
+
+      <div class="header-status-indicator">
+        <div class="status-pulse-dot"></div>
+        <span>Disponibile</span>
+      </div>
+
+      <div class="header-actions">
+        <button class="header-btn" id="open-command-palette-btn" title="Cerca o avvia comandi">
+          <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
+          <span>Comandi</span>
+          <span class="kbd-badge">⌘K</span>
+        </button>
+
+        <button class="header-btn" id="open-manual-drawer-btn" title="Gestione manuale di servizi, lavori e impostazioni">
+          <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="7" height="7"/><rect x="14" y="3" width="7" height="7"/><rect x="14" y="14" width="7" height="7"/><rect x="3" y="14" width="7" height="7"/></svg>
+          <span>Spazio & Strumenti</span>
+        </button>
+      </div>
+    </header>
+
+    <!-- Prototype Design Lab Controls Dock -->
+    <div class="prototype-bar">
+      <div class="prototype-tag">
+        <svg viewBox="0 0 24 24" fill="currentColor"><circle cx="12" cy="12" r="10"/></svg>
+        <span>Stati Orb</span>
+      </div>
+
+      <!-- Quick States Switcher (6 Core States) -->
+      <div class="states-pill-group">
+        <button class="state-btn active" data-state="idle">Idle</button>
+        <button class="state-btn" data-state="listening">Listening</button>
+        <button class="state-btn" data-state="speaking">Speaking</button>
+        <button class="state-btn" data-state="working">Working</button>
+        <button class="state-btn" data-state="needs-you">Needs You</button>
+        <button class="state-btn" data-state="done">Done</button>
+      </div>
+
+      <div class="prototype-divider"></div>
+
+      <!-- Scenario Stepper Controls -->
+      <div class="scenario-controls">
+        <button class="scenario-play-btn" id="scenario-play-btn">
+          <svg width="12" height="12" viewBox="0 0 24 24" fill="currentColor"><polygon points="5 3 19 12 5 21 5 3"/></svg>
+          Play Scenario
+        </button>
+        <button class="scenario-step-btn" id="scenario-prev-btn" title="Passo precedente">
+          <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="15 18 9 12 15 6"/></svg>
+        </button>
+        <span class="scenario-indicator" id="scenario-step-indicator">1/10</span>
+        <button class="scenario-step-btn" id="scenario-next-btn" title="Passo successivo">
+          <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="9 18 15 12 9 6"/></svg>
+        </button>
+      </div>
+
+      <div class="prototype-divider"></div>
+
+      <!-- Audio Voice Simulation Toggle -->
+      <div class="audio-sim-pill" id="audio-sim-pill" title="Attiva o disattiva la modulazione audio sintetica">
+        <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5"/><path d="M15.54 8.46a5 5 0 0 1 0 7.07"/></svg>
+        <span>Voce: Muto</span>
+      </div>
+
+      <div class="prototype-divider"></div>
+
+      <!-- Adaptive Quality Profiles -->
+      <div class="quality-pill-group" title="Profili di qualità e prestazioni per dispositivi diversi">
+        <span class="ctrl-sublabel">Res:</span>
+        <button class="quality-btn active" data-quality="auto">Auto</button>
+        <button class="quality-btn" data-quality="high">High</button>
+        <button class="quality-btn" data-quality="medium">Med</button>
+        <button class="quality-btn" data-quality="low">Low</button>
+      </div>
+
+      <div class="prototype-divider"></div>
+
+      <!-- Motion Accessibility Toggle -->
+      <button class="motion-toggle-btn" id="motion-toggle-btn" title="Simula o attiva prefers-reduced-motion">
+        <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>
+        <span>Moto: Normale</span>
+      </button>
+
+      <div class="prototype-divider"></div>
+
+      <!-- Live Performance Telemetry -->
+      <div class="telemetry-pill" id="telemetry-pill" title="Metriche di rendering in tempo reale">
+        <div class="telemetry-dot"></div>
+        <span id="telemetry-text">60 FPS • 0.8ms</span>
+      </div>
+    </div>
+
+    <!-- Walkthrough Narration Toast -->
+    <div class="scenario-toast" id="scenario-toast">
+      <span class="scenario-toast-step" id="scenario-toast-step">Step 1</span>
+      <span class="scenario-toast-text" id="scenario-toast-text">1. Presenza Iniziale: Orb in quiete, Aether attende la richiesta</span>
+    </div>
+
+    <!-- Main Stage Canvas -->
+    <main class="main-stage">
+      
+      <!-- Central Living 3D Point Sphere Orb (Dominant 640px Stage) -->
+      <div class="orb-stage-container orb-state-idle">
+        <div class="orb-viewport" title="Clicca per attraversare gli stati dell'Orb">
+          <canvas id="orb-canvas" width="640" height="640"></canvas>
+        </div>
+
+        <div class="orb-state-meta">
+          <div class="orb-state-badge">
+            <div class="orb-state-dot"></div>
+            <span>Disponibile</span>
+          </div>
+          <p class="orb-presence-text">Aether è presente e in ascolto</p>
+        </div>
+      </div>
+
+      <!-- Thought Bubbles Emerge Orbitally -->
+      <div class="thought-bubbles-container" id="thought-bubbles-container"></div>
+
+      <!-- Aether Field Contextual Workspace Emergence -->
+      <div class="aether-field-container field-hidden" id="aether-field-container"></div>
+
+    </main>
+
+    <!-- Assistant-First Conversation Overlay & Prompt Dock -->
+    <div class="conversation-overlay">
+      
+      <div class="dialogue-stream">
+        <!-- Dynamic concise dialogue entries appear here -->
+      </div>
+
+      <!-- Prompt Suggestion Chips -->
+      <div class="prompt-chips-row">
+        <button class="prompt-chip" data-prompt="Organizzami la giornata.">
+          “Organizzami la giornata.”
+        </button>
+        <button class="prompt-chip" data-prompt="Sistema questo progetto.">
+          “Sistema questo progetto.”
+        </button>
+        <button class="prompt-chip" data-prompt="Occupati di questo cliente.">
+          “Occupati di questo cliente.”
+        </button>
+        <button class="prompt-chip" data-prompt="Preparami qualcosa da pubblicare.">
+          “Preparami qualcosa da pubblicare.”
+        </button>
+        <button class="prompt-chip" data-prompt="Ricordami di fare questa cosa domani.">
+          “Ricordami di fare questa cosa domani.”
+        </button>
+      </div>
+
+      <!-- Input Dock -->
+      <div class="input-dock">
+        <input 
+          type="text" 
+          class="prompt-input" 
+          id="prompt-input" 
+          placeholder="Tu dimmi cosa vuoi ottenere. Aether si occupa del resto..." 
+          autocomplete="off"
+        >
+
+        <div class="input-actions">
+          <button class="voice-mic-btn" id="voice-mic-btn" title="Ascolta con il microfono">
+            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 1a3 3 0 0 0-3 3v8a3 3 0 0 0 6 0V4a3 3 0 0 0-3-3z"/><path d="M19 10v2a7 7 0 0 1-14 0v-2"/><line x1="12" y1="19" x2="12" y2="23"/><line x1="8" y1="23" x2="16" y2="23"/></svg>
+          </button>
+          
+          <button class="send-prompt-btn" id="send-prompt-btn" title="Invia ad Aether">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><line x1="22" y1="2" x2="11" y2="13"/><polygon points="22 2 15 22 11 13 2 9 22 2"/></svg>
+          </button>
+        </div>
+      </div>
+
+    </div>
+
+  </div>
+
+  <!-- Manual Mode Sliding Drawer (Secondary Access) -->
+  <div class="manual-backdrop" id="manual-drawer-backdrop">
+    <aside class="manual-drawer">
+      <div class="manual-drawer-header">
+        <div class="manual-drawer-title">
+          <h2>
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="7" height="7"/><rect x="14" y="3" width="7" height="7"/><rect x="14" y="14" width="7" height="7"/><rect x="3" y="14" width="7" height="7"/></svg>
+            Spazio & Strumenti
+          </h2>
+          <p>Accesso manuale secondario alle risorse operative</p>
+        </div>
+        <button class="drawer-close-btn" title="Chiudi pannello">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
+        </button>
+      </div>
+
+      <div class="manual-drawer-content">
+        
+        <!-- Navigation Grid -->
+        <div class="manual-section-group">
+          <div class="manual-group-label">Aree Operative</div>
+          <div class="manual-nav-grid">
+            <div class="manual-nav-card">
+              <div class="manual-card-icon">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polygon points="12 2 2 7 12 12 22 7 12 2"/><polyline points="2 17 12 22 22 17"/><polyline points="2 12 12 17 22 12"/></svg>
+              </div>
+              <span class="manual-card-title">Lavori & Missioni</span>
+              <span class="manual-card-badge">2 attivi</span>
+            </div>
+
+            <div class="manual-nav-card">
+              <div class="manual-card-icon">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="20 6 9 17 4 12"/></svg>
+              </div>
+              <span class="manual-card-title">Risultati</span>
+              <span class="manual-card-badge">14 recenti</span>
+            </div>
+
+            <div class="manual-nav-card">
+              <div class="manual-card-icon">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71"/><path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71"/></svg>
+              </div>
+              <span class="manual-card-title">Servizi & Connettori</span>
+              <span class="manual-card-badge">6 connessi</span>
+            </div>
+
+            <div class="manual-nav-card">
+              <div class="manual-card-icon">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg>
+              </div>
+              <span class="manual-card-title">Assistenti</span>
+              <span class="manual-card-badge">4 specialisti</span>
+            </div>
+
+            <div class="manual-nav-card">
+              <div class="manual-card-icon">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>
+              </div>
+              <span class="manual-card-title">Automazioni</span>
+              <span class="manual-card-badge">3 attive</span>
+            </div>
+
+            <div class="manual-nav-card">
+              <div class="manual-card-icon">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><ellipse cx="12" cy="5" rx="9" ry="3"/><path d="M21 12c0 1.66-4 3-9 3s-9-1.34-9-3"/><path d="M3 5v14c0 1.66 4 3 9 3s9-1.34 9-3V5"/></svg>
+              </div>
+              <span class="manual-card-title">Memoria</span>
+              <span class="manual-card-badge">Sincronizzata</span>
+            </div>
+          </div>
+        </div>
+
+        <!-- Recent Deliverables in Drawer -->
+        <div class="manual-section-group">
+          <div class="manual-group-label">Risultati Recenti Consegnati</div>
+          <div class="manual-items-list">
+            <div class="manual-item-row">
+              <span class="manual-item-name">Analisi di sicurezza codice Alfa</span>
+              <span class="manual-item-meta">10 min fa</span>
+            </div>
+            <div class="manual-item-row">
+              <span class="manual-item-name">Report metriche pipeline CI/CD</span>
+              <span class="manual-item-meta">Oggi, 14:20</span>
+            </div>
+            <div class="manual-item-row">
+              <span class="manual-item-name">Sintesi allineamento strategico</span>
+              <span class="manual-item-meta">Ieri</span>
+            </div>
+          </div>
+        </div>
+
+        <!-- Settings Shortcut -->
+        <div class="manual-section-group">
+          <div class="manual-group-label">Preferenze di Sistema</div>
+          <div class="manual-item-row">
+            <span class="manual-item-name">Modelli AI, Chiavi API e Limiti di Esecuzione</span>
+            <span class="manual-item-meta">Impostazioni ›</span>
+          </div>
+        </div>
+
+      </div>
+    </aside>
+  </div>
+
+  <!-- Command Palette (⌘K) -->
+  <div class="command-palette-backdrop" id="command-palette-backdrop">
+    <div class="command-palette-card">
+      <div class="palette-input-box">
+        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
+        <input type="text" class="palette-input" placeholder="Cerca azioni o chiedi ad Aether...">
+        <span class="kbd-badge">ESC</span>
+      </div>
+
+      <div class="palette-results-list">
+        <div class="palette-item active">
+          <span>“Prendi il progetto Alfa, controlla cosa non va e sistemalo”</span>
+          <span class="kbd-badge">Azione Rapida</span>
+        </div>
+        <div class="palette-item">
+          <span>Apri archivio Risultati & Deliverables</span>
+          <span class="kbd-badge">Spazio</span>
+        </div>
+        <div class="palette-item">
+          <span>Stato Connettori (GitHub, Slack, Supabase)</span>
+          <span class="kbd-badge">Servizi</span>
+        </div>
+        <div class="palette-item">
+          <span>Pianifica nuova automazione</span>
+          <span class="kbd-badge">Automazioni</span>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- App Bootstrap JS -->
+  <script type="module" src="./scripts/app.js?v=starry3"></script>
+</body>
+</html>

@@ -26,9 +26,41 @@ import { WorkflowBuilder } from './WorkflowBuilder';
 import { ContentRepurposing } from './ContentRepurposing';
 import { ProactiveWatchersView } from './ProactiveWatchersView';
 import ExecutionFabricView from './ExecutionFabricView';
+import { ResultsView } from './ResultsView';
+import { AssistantV2 } from './AssistantV2';
 
 
 function MainApp() {
+  // Experience Mode: 'v2' (Assistant-First with Living Orb) or 'v1' (Classic Multi-Tab Workspace)
+  const [experienceMode, setExperienceMode] = useState<'v1' | 'v2'>(() => {
+    if (typeof window !== 'undefined') {
+      try {
+        const params = new URLSearchParams(window.location.search);
+        const urlMode = params.get('ui');
+        if (urlMode === 'v1' || urlMode === 'v2') return urlMode;
+        const saved = localStorage.getItem('aether_experience_mode');
+        if (saved === 'v1' || saved === 'v2') return saved;
+      } catch {
+        // ignore
+      }
+    }
+    return 'v2';
+  });
+
+  const handleSwitchExperience = useCallback((mode: 'v1' | 'v2') => {
+    setExperienceMode(mode);
+    if (typeof window !== 'undefined') {
+      try {
+        localStorage.setItem('aether_experience_mode', mode);
+        const url = new URL(window.location.href);
+        url.searchParams.set('ui', mode);
+        window.history.replaceState({}, '', url.toString());
+      } catch {
+        // ignore
+      }
+    }
+  }, []);
+
   const [currentView, setCurrentView] = useState('home');
   const [viewParams, setViewParams] = useState<any>(null);
   const [workspaceName, setWorkspaceName] = useState<string>('');
@@ -193,7 +225,10 @@ function MainApp() {
     }
     setCurrentView(targetView);
     setViewParams(params);
-  }, []);
+    if (targetView && targetView !== 'home') {
+      handleSwitchExperience('v1');
+    }
+  }, [handleSwitchExperience]);
 
   // Listen for Tauri IPC navigation events (triggered when clicking native macOS notifications or dock reopen)
   useEffect(() => {
@@ -370,6 +405,40 @@ function MainApp() {
 
   const hasWorkspace = Boolean(workspaceName && isInitialized);
 
+  if (experienceMode === 'v2') {
+    return (
+      <div className="app-container" style={{ padding: 0, overflow: 'hidden' }}>
+        <AssistantV2
+          workspaceName={workspaceName}
+          navigate={navigate}
+          onSwitchToV1={() => handleSwitchExperience('v1')}
+          onOpenWorkspaceModal={() => handleOpenWorkspaceModal('create')}
+        />
+
+        <CommandPalette
+          isOpen={isCommandPaletteOpen}
+          onClose={() => setIsCommandPaletteOpen(false)}
+          onNavigate={navigate}
+          onNewConversation={handleNewConversation}
+          conversations={conversations}
+          onSelectConversation={handleSelectConversation}
+        />
+
+        <WorkspaceModal
+          isOpen={isWorkspaceModalOpen}
+          onClose={() => setIsWorkspaceModalOpen(false)}
+          onWorkspaceSwitched={handleWorkspaceSwitched}
+          initialMode={workspaceModalMode}
+        />
+
+        <ShortcutsModal
+          isOpen={isShortcutsModalOpen}
+          onClose={closeShortcutsModal}
+        />
+      </div>
+    );
+  }
+
   return (
     <div className="app-container">
       <Sidebar
@@ -386,6 +455,7 @@ function MainApp() {
         onOpenWorkspaceModal={handleOpenWorkspaceModal}
         onRefreshConversations={fetchConversations}
         onWorkspaceSwitched={handleWorkspaceSwitched}
+        onSwitchToV2={() => handleSwitchExperience('v2')}
       />
 
       <div className="main-content">
@@ -410,6 +480,9 @@ function MainApp() {
             initialExecutionId={viewParams}
             initialTab={viewParams ? 'actions' : undefined}
           />
+        )}
+        {(currentView === 'results' || currentView === 'deliverables') && (
+          <ResultsView navigate={navigate} />
         )}
         {currentView === 'activity' && <ActivityFeed navigate={navigate} />}
         {currentView === 'chat' && (

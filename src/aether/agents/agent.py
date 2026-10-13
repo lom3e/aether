@@ -379,8 +379,19 @@ class Agent:
             agent_context.messages = list(initial_messages)
             agent_context.execution_state = "running"
 
+            task_meta = task.metadata or {}
+            if task_meta.get("aether_context"):
+                # Make the shared context (and the mission link) visible to tools, so AgentTool can hand it on.
+                agent_context.metadata["aether_context"] = task_meta["aether_context"]
+                agent_context.metadata["aether_context_has_intelligence"] = bool(task_meta.get("aether_context_has_intelligence"))
+            if getattr(task, "mission_id", None):
+                agent_context.metadata["mission_id"] = task.mission_id
+
             if self.memory_manager is not None:
-                self.memory_manager.load_context(agent_context)
+                self.memory_manager.load_context(
+                    agent_context,
+                    inject_intelligence=not task_meta.get("aether_context_has_intelligence"),
+                )
 
 
             metadata = self._build_metadata(task, agent_context)
@@ -1089,7 +1100,11 @@ class Agent:
                 )
                 messages.append(Message(role="system", content=skill_content))
 
-        learned_guidance = self._collect_learned_guidance(task, context)
+        shared_context = (task.metadata or {}).get("aether_context")
+        if shared_context:
+            messages.append(Message(role="system", content=str(shared_context)))
+
+        learned_guidance = None if shared_context else self._collect_learned_guidance(task, context)
         if learned_guidance:
             messages.append(Message(role="system", content=learned_guidance))
 
@@ -1165,7 +1180,7 @@ class Agent:
                 query=task.instruction,
                 limit=5,
             )
-            if not guidance and ws and hasattr(ws, "name") and ws.name and ws.name != ws_id:
+            if False:  # legacy alias fallback removed: one logical partition per workspace (canonical id)
                 guidance = learning_svc.get_relevant_guidance(
                     workspace_id=ws.name,
                     agent_name=self.name,

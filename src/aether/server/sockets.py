@@ -401,8 +401,8 @@ async def websocket_endpoint(websocket: WebSocket) -> None:
                 })
                 return
 
-            prov_name = team.config.default_provider if (team and getattr(team, "config", None)) else "ollama"
-            model_name = team.config.default_model if (team and getattr(team, "config", None)) else "qwen3.5:9b"
+            prov_name = team.config.default_provider if (team and getattr(team, "config", None)) else None
+            model_name = team.config.default_model if (team and getattr(team, "config", None)) else None
 
             def _execute_team():
                 try:
@@ -570,8 +570,8 @@ async def websocket_endpoint(websocket: WebSocket) -> None:
             })
             raise
         except Exception as exc:
-            prov_name = team.config.default_provider if (team and getattr(team, "config", None)) else "ollama"
-            model_name = team.config.default_model if (team and getattr(team, "config", None)) else "qwen3.5:9b"
+            prov_name = team.config.default_provider if (team and getattr(team, "config", None)) else None
+            model_name = team.config.default_model if (team and getattr(team, "config", None)) else None
             error_info = normalize_provider_error(exc, provider=prov_name, model=model_name)
             try:
                 curr_ws = getattr(app.state, "workspace", None) or workspace

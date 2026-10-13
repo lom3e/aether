@@ -31,13 +31,13 @@ def test_forged_authority_rejected_in_action_executor(tmp_path, accepted_authori
     forged_auth = ExecutionAuthority(
         proposal_id="prop-nonexistent-12345",
         proposal_version=1,
-        workspace_id=ws.name,
+        workspace_id=ws.id,
         granted_at=datetime.now(timezone.utc),
     )
     with pytest.raises(UnauthorizedExecutionError):
         executor.execute(
             action_id="notifications.send_briefing",
-            workspace_id=ws.name,
+            workspace_id=ws.id,
             input_data={"channel": "test", "content": "hello"},
             authority=forged_auth,
         )
@@ -53,7 +53,7 @@ def test_forged_authority_rejected_in_action_executor(tmp_path, accepted_authori
     with pytest.raises(UnauthorizedExecutionError):
         executor.execute(
             action_id="notifications.send_briefing",
-            workspace_id=ws.name,
+            workspace_id=ws.id,
             input_data={"channel": "test", "content": "hello"},
             authority=ws_mismatched_auth,
         )
@@ -62,13 +62,13 @@ def test_forged_authority_rejected_in_action_executor(tmp_path, accepted_authori
     version_mismatched_auth = ExecutionAuthority(
         proposal_id=proposal.id,
         proposal_version=99,
-        workspace_id=ws.name,
+        workspace_id=ws.id,
         granted_at=datetime.now(timezone.utc),
     )
     with pytest.raises(UnauthorizedExecutionError):
         executor.execute(
             action_id="notifications.send_briefing",
-            workspace_id=ws.name,
+            workspace_id=ws.id,
             input_data={"channel": "test", "content": "hello"},
             authority=version_mismatched_auth,
         )
@@ -76,14 +76,14 @@ def test_forged_authority_rejected_in_action_executor(tmp_path, accepted_authori
     # 4. Status not ACCEPTED (e.g. after transition to REVOKED)
     ws.personal_store.transition_proposal_status(
         proposal_id=proposal.id,
-        workspace_id=ws.name,
+        workspace_id=ws.id,
         from_status=ProposalStatus.ACCEPTED,
         to_status=ProposalStatus.REVOKED,
     )
     with pytest.raises(UnauthorizedExecutionError):
         executor.execute(
             action_id="notifications.send_briefing",
-            workspace_id=ws.name,
+            workspace_id=ws.id,
             input_data={"channel": "test", "content": "hello"},
             authority=real_auth,
         )
@@ -96,7 +96,7 @@ async def test_genuine_authority_lifecycle_in_mission_runtime(tmp_path, accepted
 
     mission = Mission(
         id="m-test-auth-1",
-        workspace_id=ws.name,
+        workspace_id=ws.id,
         title="Test Authorized Mission",
         objective="Verify persistent authority check",
     )
@@ -110,7 +110,7 @@ async def test_genuine_authority_lifecycle_in_mission_runtime(tmp_path, accepted
     fake_auth = ExecutionAuthority(
         proposal_id="prop-bogus-777",
         proposal_version=1,
-        workspace_id=ws.name,
+        workspace_id=ws.id,
         granted_at=datetime.now(timezone.utc),
     )
     with pytest.raises(UnauthorizedExecutionError):
@@ -139,7 +139,7 @@ def test_external_agent_adapter_enforces_persistent_authority(tmp_path, accepted
     task_unauth = Task(
         instruction="Work on task",
         agent_name="test_worker",
-        workspace_id=ws.name,
+        workspace_id=ws.id,
     )
     with pytest.raises(UnauthorizedExecutionError):
         adapter.execute(task_unauth)
@@ -148,13 +148,13 @@ def test_external_agent_adapter_enforces_persistent_authority(tmp_path, accepted
     fake_auth = ExecutionAuthority(
         proposal_id="prop-nonexistent-worker",
         proposal_version=1,
-        workspace_id=ws.name,
+        workspace_id=ws.id,
         granted_at=datetime.now(timezone.utc),
     )
     task_forged = Task(
         instruction="Work on task",
         agent_name="test_worker",
-        workspace_id=ws.name,
+        workspace_id=ws.id,
         authority=fake_auth,
     )
     with pytest.raises(UnauthorizedExecutionError):
@@ -165,7 +165,7 @@ def test_external_agent_adapter_enforces_persistent_authority(tmp_path, accepted
     task_auth = Task(
         instruction="Work on task",
         agent_name="test_worker",
-        workspace_id=ws.name,
+        workspace_id=ws.id,
         authority=valid_auth,
     )
     res = adapter.execute(task_auth)
@@ -195,7 +195,7 @@ def test_authority_scope_and_constraint_enforcement(tmp_path, accepted_authority
     # In-scope action succeeds (or requires approval, but authority validates)
     res_in_scope = executor.execute(
         action_id="notifications.configure_channel",
-        workspace_id=ws.name,
+        workspace_id=ws.id,
         input_data={"channel_type": "desktop", "enabled": True},
         authority=auth_scoped,
     )
@@ -205,7 +205,7 @@ def test_authority_scope_and_constraint_enforcement(tmp_path, accepted_authority
     with pytest.raises(UnauthorizedExecutionError) as exc_scope:
         executor.execute(
             action_id="notifications.send_briefing",
-            workspace_id=ws.name,
+            workspace_id=ws.id,
             input_data={"channel": "test", "content": "hello"},
             authority=auth_scoped,
         )
@@ -221,7 +221,7 @@ def test_authority_scope_and_constraint_enforcement(tmp_path, accepted_authority
     with pytest.raises(UnauthorizedExecutionError) as exc_deny:
         executor.execute(
             action_id="notifications.send_briefing",
-            workspace_id=ws.name,
+            workspace_id=ws.id,
             input_data={"channel": "test", "content": "hello"},
             authority=auth_prohibit,
         )
@@ -237,7 +237,7 @@ def test_authority_scope_and_constraint_enforcement(tmp_path, accepted_authority
     with pytest.raises(UnauthorizedExecutionError) as exc_exp:
         executor.execute(
             action_id="notifications.configure_channel",
-            workspace_id=ws.name,
+            workspace_id=ws.id,
             input_data={"channel_type": "desktop", "enabled": True},
             authority=auth_exp,
         )

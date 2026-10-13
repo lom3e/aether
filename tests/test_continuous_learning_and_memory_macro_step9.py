@@ -49,7 +49,7 @@ def test_learning_store_and_service_lifecycle(temp_ws: Workspace):
     """Verifies atomic learning events and corrections recorded in real SQLite storage."""
     learning_svc = temp_ws.learning
     assert learning_svc is not None
-    ws_id = temp_ws.name
+    ws_id = temp_ws.id
 
     # 1. Direct correction creation with auto_verify=False
     corr, lesson = learning_svc.record_correction(
@@ -100,7 +100,7 @@ def test_learning_store_and_service_lifecycle(temp_ws: Workspace):
 def test_deterministic_regression_detection(temp_ws: Workspace):
     """Verifies that recurring quality gate failures for verified lessons trigger regression flags."""
     learning_svc = temp_ws.learning
-    ws_id = temp_ws.name
+    ws_id = temp_ws.id
 
     # Setup initial verified lesson for a quality gate rule
     init_corr, init_lesson = learning_svc.record_correction(
@@ -158,7 +158,7 @@ def test_deterministic_regression_detection(temp_ws: Workspace):
 def test_active_runtime_learned_guidance_in_agent(temp_ws: Workspace):
     """Verifies that verified lessons are dynamically injected into agent prompts at runtime."""
     learning_svc = temp_ws.learning
-    ws_id = temp_ws.name
+    ws_id = temp_ws.id
 
     # Create verified lesson for coder agent
     learning_svc.record_correction(
@@ -216,7 +216,7 @@ def test_action_executor_learning_actions(temp_ws: Workspace, accepted_authority
         workspace=temp_ws,
         personal_store=temp_ws.personal_store,
     )
-    ws_id = temp_ws.name
+    ws_id = temp_ws.id
     _, auth = accepted_authority_factory(temp_ws, title="Learning Actions")
 
     # 1. learning.record_correction
@@ -301,7 +301,7 @@ async def test_api_route_learning_insights(temp_ws: Workspace):
 
     # Setup lesson in workspace
     temp_ws.learning.record_correction(
-        workspace_id=temp_ws.name,
+        workspace_id=temp_ws.id,
         target_scope="workspace",
         target_identifier="workspace",
         problem="Unbounded memory usage during large batch ingestion",
@@ -314,7 +314,7 @@ async def test_api_route_learning_insights(temp_ws: Workspace):
     mock_req.app.state = State()
     mock_req.app.state.workspace = temp_ws
 
-    data = await get_learning_insights_route(mock_req, workspace_id=temp_ws.name)
+    data = await get_learning_insights_route(mock_req, workspace_id=temp_ws.id)
     assert data["total_lessons"] >= 1
     assert data["verified_lessons"] >= 1
     assert "recent_lessons" in data

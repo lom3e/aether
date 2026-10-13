@@ -134,7 +134,7 @@ def collect_workspace_deliverables(workspace: Any, limit: int = 25) -> list[Comp
     # 1. Mission outputs
     if hasattr(workspace, "missions") and workspace.missions:
         try:
-            missions = workspace.missions.list_missions(workspace_id=workspace.name)
+            missions = workspace.missions.list_missions(workspace_id=workspace.id)
             for m in missions:
                 m_dict = m.to_dict() if hasattr(m, "to_dict") else vars(m)
                 outputs = m_dict.get("outputs") or {}
@@ -184,7 +184,7 @@ def collect_workspace_deliverables(workspace: Any, limit: int = 25) -> list[Comp
     # 2. Background Tasks deliverable_path
     if hasattr(workspace, "personal_store") and workspace.personal_store:
         try:
-            tasks = workspace.personal_store.list_tasks(workspace_id=workspace.name, limit=limit)
+            tasks = workspace.personal_store.list_tasks(workspace_id=workspace.id, limit=limit)
             for t in tasks:
                 if t.deliverable_path and t.deliverable_path not in seen_paths:
                     seen_paths.add(t.deliverable_path)
@@ -274,7 +274,7 @@ def handle_drag_and_drop_file(
     if hasattr(workspace, "activity") and workspace.activity:
         try:
             workspace.activity.log(
-                workspace_id=workspace.name,
+                workspace_id=workspace.id,
                 title=f"File Ingested: {target_file.name}",
                 description=f"Received via Companion drag & drop ({file_size} bytes)",
                 category="companion",

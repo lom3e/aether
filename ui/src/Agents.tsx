@@ -1,17 +1,22 @@
 import { useEffect, useState } from 'react';
-import { Bot, Cpu, Plus } from 'lucide-react';
+import { Bot, Plus, MessageSquare, Sparkles, ChevronDown, ChevronUp } from 'lucide-react';
 import { AgentBuilder } from './AgentBuilder';
 import { TopHeader } from './TopHeader';
 import { apiUrl } from './api';
 import { useTranslation } from './i18n';
-import { Tooltip } from './Tooltip';
 import { IdentityBadge } from './identity';
 
 export function Agents({ navigate }: { navigate: (view: string, params?: any) => void }) {
   const [agents, setAgents] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
   const [isBuilding, setIsBuilding] = useState(false);
+  const [expandedTech, setExpandedTech] = useState<Record<string, boolean>>({});
   const { t } = useTranslation();
+
+  const toggleTech = (name: string, e: React.MouseEvent) => {
+    e.stopPropagation();
+    setExpandedTech(prev => ({ ...prev, [name]: !prev[name] }));
+  };
 
   const fetchAgents = () => {
     fetch(apiUrl('/api/agents'))
@@ -33,14 +38,14 @@ export function Agents({ navigate }: { navigate: (view: string, params?: any) =>
   return (
     <div style={{ flex: 1, overflowY: 'auto' }}>
       <TopHeader
-        title={t('agentsTitle')}
+        title="Assistenti e Agenti"
         icon={Bot}
         actions={
           <button
             className="btn btn-primary"
             onClick={() => setIsBuilding(true)}
           >
-            <Plus size={16} /> {t('createAgent')}
+            <Plus size={16} /> Nuovo assistente
           </button>
         }
       />
@@ -64,47 +69,61 @@ export function Agents({ navigate }: { navigate: (view: string, params?: any) =>
                   />
                   <div>
                     <h3 style={{ fontSize: '15px', margin: 0, fontWeight: 600 }}>{agent.name}</h3>
-                    <div style={{ fontSize: '12px', color: 'hsl(var(--muted-fg))' }}>{agent.role}</div>
+                    <div style={{ fontSize: '12px', color: 'hsl(var(--muted-fg))' }}>{agent.role || 'Assistente autonomo'}</div>
                   </div>
                 </div>
-                <Tooltip content={t('configured')} position="left">
+                <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+                  <span style={{ fontSize: '11px', color: '#10b981', fontWeight: 500 }}>Pronto</span>
                   <div className="status-dot idle" />
-                </Tooltip>
+                </div>
               </div>
 
               <div style={{ marginBottom: '14px', fontSize: '13px', color: 'hsl(var(--muted-fg))', display: '-webkit-box', WebkitLineClamp: 2, WebkitBoxOrient: 'vertical', overflow: 'hidden', minHeight: '38px', lineHeight: 1.5 }}>
-                {agent.description || agent.instructions || <em>{t('autonomousAgentDesc')}</em>}
-              </div>
-
-              <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '14px', fontSize: '11.5px', color: 'hsl(var(--muted-fg))', flexWrap: 'wrap' }}>
-                {agent.is_external ? (
-                  <span className="badge" style={{ fontSize: '10.5px', background: 'rgba(56, 189, 248, 0.15)', color: '#38bdf8', border: '1px solid rgba(56, 189, 248, 0.3)' }}>
-                    External · {(agent.protocol || 'HTTP').toUpperCase()}
-                  </span>
-                ) : (
-                  <span className="badge" style={{ fontSize: '10.5px' }}>
-                    {agent.provider || 'default'}
-                  </span>
-                )}
-                {agent.model && (
-                  <span className="badge" style={{ fontSize: '10.5px' }}>
-                    {agent.model}
-                  </span>
-                )}
-                {agent.endpoint_url && (
-                  <span className="badge" style={{ fontSize: '10.5px', maxWidth: '140px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }} title={agent.endpoint_url}>
-                    {agent.endpoint_url}
-                  </span>
-                )}
+                {agent.description || agent.instructions || 'Assistente configurato per collaborare alle attività del tuo ufficio virtuale.'}
               </div>
 
               {agent.skills && agent.skills.length > 0 && (
-                <div style={{ display: 'flex', gap: '6px', flexWrap: 'wrap', marginTop: 'auto', paddingTop: '12px', borderTop: '1px solid hsl(var(--border)/0.4)' }}>
+                <div style={{ display: 'flex', gap: '6px', flexWrap: 'wrap', marginBottom: '14px' }}>
                   {agent.skills.map((s: string) => (
-                    <span key={s} className="badge" style={{ background: 'hsl(var(--muted))', fontSize: '10.5px' }}>
-                      <Cpu size={11} className="text-primary" /> {s}
+                    <span key={s} className="badge" style={{ background: 'hsl(var(--muted))', fontSize: '11px' }}>
+                      <Sparkles size={11} className="text-primary" /> {s}
                     </span>
                   ))}
+                </div>
+              )}
+
+              {/* Action buttons */}
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginTop: 'auto', paddingTop: '12px', borderTop: '1px solid hsl(var(--border)/0.4)' }}>
+                <button
+                  type="button"
+                  className="btn btn-primary"
+                  style={{ fontSize: '12px', padding: '6px 14px', display: 'inline-flex', alignItems: 'center', gap: '6px' }}
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    navigate('agent', agent.name);
+                  }}
+                >
+                  <MessageSquare size={13} /> Parla
+                </button>
+
+                {(agent.is_external || agent.model || agent.endpoint_url) && (
+                  <button
+                    type="button"
+                    className="btn btn-ghost"
+                    style={{ fontSize: '11px', padding: '4px 8px', color: 'hsl(var(--muted-fg))' }}
+                    onClick={(e) => toggleTech(agent.name, e)}
+                  >
+                    Dettagli tecnici {expandedTech[agent.name] ? <ChevronUp size={12} /> : <ChevronDown size={12} />}
+                  </button>
+                )}
+              </div>
+
+              {/* Hidden/expandable technical parameters */}
+              {expandedTech[agent.name] && (
+                <div style={{ marginTop: '10px', padding: '8px 10px', backgroundColor: 'hsl(var(--muted)/0.3)', borderRadius: '6px', fontSize: '11px', display: 'flex', flexDirection: 'column', gap: '4px' }}>
+                  {agent.provider && <div><strong>Provider:</strong> {agent.provider}</div>}
+                  {agent.model && <div><strong>Modello:</strong> {agent.model}</div>}
+                  {agent.endpoint_url && <div><strong>Endpoint:</strong> <code>{agent.endpoint_url}</code></div>}
                 </div>
               )}
             </div>

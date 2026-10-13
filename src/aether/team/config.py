@@ -200,7 +200,8 @@ class TeamConfig:
         file, or absolute).
     default_provider:
         Provider name to use for agents that don't specify their own
-        model (e.g. ``"openai"``, ``"ollama"``, ``"anthropic"``).
+        model (e.g. ``"openai"``, ``"ollama"``, ``"anthropic"``). ``None`` means
+        the user has not chosen one: nothing is assumed.
     icon:
         Optional Lucide icon identifier (e.g. ``"Bot"``, ``"Code"``, ``"Layers"``).
     color:
@@ -211,7 +212,7 @@ class TeamConfig:
     name: str = "aether-team"
     agents: list[AgentConfig] = field(default_factory=list)
     knowledge_path: str | None = None
-    default_provider: str = "openai"
+    default_provider: str | None = None   # None = no provider chosen (never an implicit "openai")
     default_model: str | None = None
     icon: str | None = None
     color: str | None = None

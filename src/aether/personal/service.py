@@ -6,7 +6,7 @@ and notification fabric integration.
 """
 from __future__ import annotations
 
-from datetime import datetime, timezone
+from datetime import datetime, timezone, timedelta
 import logging
 from pathlib import Path
 import re
@@ -29,6 +29,7 @@ from aether.core.execution import (
 )
 from aether.missions.models import Deliverable, MilestoneStatus, MissionStatus
 from aether.personal.events import PersonalEventHub, get_personal_event_hub
+from aether.personal.intent_rules import assess_coding_prompt
 from aether.personal.models import (
     IntentTier,
     PendingApproval,
@@ -54,6 +55,282 @@ from aether.planning.resolver import ContextResolver
 from aether.planning.validation import ProposalValidator
 
 logger = logging.getLogger(__name__)
+
+
+WEEKDAY_NAMES_IT = ["lunedì", "martedì", "mercoledì", "giovedì", "venerdì", "sabato", "domenica"]
+MONTHS_IT = [
+    "gennaio", "febbraio", "marzo", "aprile", "maggio", "giugno",
+    "luglio", "agosto", "settembre", "ottobre", "novembre", "dicembre"
+]
+WEEKDAYS_MAP = {
+    "lunedì": 0, "lunedi": 0, "monday": 0, "lun": 0,
+    "martedì": 1, "martedi": 1, "tuesday": 1, "mar": 1,
+    "mercoledì": 2, "mercoledi": 2, "wednesday": 2, "mer": 2,
+    "giovedì": 3, "giovedi": 3, "thursday": 3, "gio": 3,
+    "venerdì": 4, "venerdi": 4, "friday": 4, "ven": 4,
+    "sabato": 5, "saturday": 5, "sab": 5,
+    "domenica": 6, "sunday": 6, "dom": 6,
+}
+
+
+def resolve_calendar_time_window(prompt: str, ref_dt: datetime | None = None) -> tuple[str | None, str | None, str, str | None]:
+    """
+    Parses natural language date references to resolve time_min, time_max, scope, and label
+    in local user time.
+    """
+    if ref_dt is None:
+        ref_dt = datetime.now().astimezone()
+    local_tz = ref_dt.tzinfo
+    p_lower = prompt.lower().strip()
+
+    # Dopodomani
+    if any(k in p_lower for k in ["dopodomani", "dopo domani", "day after tomorrow"]):
+        target_d = ref_dt.date() + timedelta(days=2)
+        scope = "dopodomani"
+        label = f"{WEEKDAY_NAMES_IT[target_d.weekday()]} {target_d.day} {MONTHS_IT[target_d.month - 1]}"
+        t_min = datetime(target_d.year, target_d.month, target_d.day, 0, 0, 0, tzinfo=local_tz).isoformat()
+        t_max = datetime(target_d.year, target_d.month, target_d.day, 23, 59, 59, tzinfo=local_tz).isoformat()
+        return t_min, t_max, scope, label
+
+    # Domani
+    if any(k in p_lower for k in ["domani", "tomorrow"]):
+        target_d = ref_dt.date() + timedelta(days=1)
+        scope = "tomorrow"
+        label = f"domani ({WEEKDAY_NAMES_IT[target_d.weekday()]} {target_d.day} {MONTHS_IT[target_d.month - 1]})"
+        t_min = datetime(target_d.year, target_d.month, target_d.day, 0, 0, 0, tzinfo=local_tz).isoformat()
+        t_max = datetime(target_d.year, target_d.month, target_d.day, 23, 59, 59, tzinfo=local_tz).isoformat()
+        return t_min, t_max, scope, label
+
+    # Oggi
+    if any(k in p_lower for k in ["oggi", "today", "giornata"]):
+        target_d = ref_dt.date()
+        scope = "today"
+        label = f"oggi ({WEEKDAY_NAMES_IT[target_d.weekday()]} {target_d.day} {MONTHS_IT[target_d.month - 1]})"
+        t_min = datetime(target_d.year, target_d.month, target_d.day, 0, 0, 0, tzinfo=local_tz).isoformat()
+        t_max = datetime(target_d.year, target_d.month, target_d.day, 23, 59, 59, tzinfo=local_tz).isoformat()
+        return t_min, t_max, scope, label
+
+    # Prossima settimana
+    if any(k in p_lower for k in ["prossima settimana", "next week"]):
+        days_to_next_mon = (7 - ref_dt.weekday()) % 7 or 7
+        mon_d = ref_dt.date() + timedelta(days=days_to_next_mon)
+        sun_d = mon_d + timedelta(days=6)
+        scope = "next_week"
+        label = f"la prossima settimana (dal {mon_d.day} al {sun_d.day} {MONTHS_IT[sun_d.month - 1]})"
+        t_min = datetime(mon_d.year, mon_d.month, mon_d.day, 0, 0, 0, tzinfo=local_tz).isoformat()
+        t_max = datetime(sun_d.year, sun_d.month, sun_d.day, 23, 59, 59, tzinfo=local_tz).isoformat()
+        return t_min, t_max, scope, label
+
+    # Questa settimana
+    if any(k in p_lower for k in ["questa settimana", "this week"]):
+        cur_d = ref_dt.date()
+        days_to_sun = 6 - ref_dt.weekday()
+        sun_d = cur_d + timedelta(days=days_to_sun)
+        scope = "this_week"
+        label = "questa settimana"
+        t_min = datetime(cur_d.year, cur_d.month, cur_d.day, 0, 0, 0, tzinfo=local_tz).isoformat()
+        t_max = datetime(sun_d.year, sun_d.month, sun_d.day, 23, 59, 59, tzinfo=local_tz).isoformat()
+        return t_min, t_max, scope, label
+
+    # Specific weekday name
+    wd_match = re.search(
+        r"\b(lunedì|lunedi|martedì|martedi|mercoledì|mercoledi|giovedì|giovedi|venerdì|venerdi|sabato|domenica|monday|tuesday|wednesday|thursday|friday|saturday|sunday)\b",
+        p_lower,
+    )
+    if wd_match:
+        matched_str = wd_match.group(1)
+        target_wd = WEEKDAYS_MAP[matched_str]
+        cur_wd = ref_dt.weekday()
+        if cur_wd == target_wd:
+            days_ahead = 7 if ("prossim" in p_lower or "next" in p_lower) else 0
+        else:
+            days_ahead = (target_wd - cur_wd) % 7
+            if days_ahead == 0 and ("prossim" in p_lower or "next" in p_lower):
+                days_ahead = 7
+        target_d = ref_dt.date() + timedelta(days=days_ahead)
+        wd_canonical = WEEKDAY_NAMES_IT[target_wd]
+        scope = wd_canonical
+        label = f"{wd_canonical} {target_d.day} {MONTHS_IT[target_d.month - 1]}"
+        t_min = datetime(target_d.year, target_d.month, target_d.day, 0, 0, 0, tzinfo=local_tz).isoformat()
+        t_max = datetime(target_d.year, target_d.month, target_d.day, 23, 59, 59, tzinfo=local_tz).isoformat()
+        return t_min, t_max, scope, label
+
+    # Upcoming general window
+    cur_d = ref_dt.date()
+    end_d = cur_d + timedelta(days=14)
+    t_min = datetime(cur_d.year, cur_d.month, cur_d.day, 0, 0, 0, tzinfo=local_tz).isoformat()
+    t_max = datetime(end_d.year, end_d.month, end_d.day, 23, 59, 59, tzinfo=local_tz).isoformat()
+    return t_min, t_max, "upcoming", None
+
+
+def format_event_time(start_str: str, end_str: str | None, is_all_day: bool, tzinfo: Any = None) -> str:
+    """Formats event time into clean Italian range in the user's timezone."""
+    if is_all_day or not start_str or "T" not in start_str:
+        return "Tutto il giorno"
+    try:
+        clean_start = start_str.replace("Z", "+00:00")
+        s_dt = datetime.fromisoformat(clean_start)
+        if tzinfo and s_dt.tzinfo:
+            s_dt = s_dt.astimezone(tzinfo)
+        s_formatted = s_dt.strftime("%H:%M")
+
+        if end_str and "T" in end_str:
+            clean_end = end_str.replace("Z", "+00:00")
+            e_dt = datetime.fromisoformat(clean_end)
+            if tzinfo and e_dt.tzinfo:
+                e_dt = e_dt.astimezone(tzinfo)
+            e_formatted = e_dt.strftime("%H:%M")
+            return f"{s_formatted} – {e_formatted}"
+        return f"dalle {s_formatted}"
+    except Exception:
+        return start_str[:16] if len(start_str) >= 16 else start_str
+
+
+def format_calendar_response(
+    events: list[dict[str, Any]],
+    scope: str,
+    target_day_label: str | None,
+    is_academic: bool,
+    prompt: str = "",
+    tzinfo: Any = None,
+) -> str:
+    """Formats retrieved calendar events into concise, natural Italian text."""
+    target_label = target_day_label or (
+        "domani" if scope == "tomorrow"
+        else ("oggi" if scope == "today"
+        else ("i prossimi giorni" if scope == "upcoming" else scope))
+    )
+
+    if not events:
+        if is_academic:
+            return f"Non risultano lezioni in programma per {target_label} sul tuo calendario."
+        return f"Non risultano appuntamenti o impegni in programma per {target_label}."
+
+    academic_keywords = [
+        "uni", "universit", "lezion", "cors", "studio", "didattic", "accademic",
+        "laboratorio", "aula", "esame", "lecture", "class", "cineca", "unito",
+    ]
+
+    events_to_show = events
+    other_events: list[dict[str, Any]] = []
+
+    if is_academic:
+        ac_matches = [
+            e for e in events
+            if any(k in (e.get("calendar_summary") or "").lower() for k in academic_keywords)
+            or any(k in (e.get("title") or "").lower() for k in academic_keywords)
+            or any(k in (e.get("location") or "").lower() for k in ["aula", "lab", "dipartimento", "torino", "campus"])
+        ]
+        if ac_matches:
+            events_to_show = ac_matches
+            other_events = [e for e in events if e not in ac_matches]
+
+    lines: list[str] = []
+    for e in events_to_show:
+        title = e.get("title", "Senza titolo").strip()
+        time_str = format_event_time(
+            e.get("start_time", ""),
+            e.get("end_time"),
+            e.get("is_all_day", False),
+            tzinfo=tzinfo,
+        )
+        location = (e.get("location") or "").strip()
+        loc_str = f" ({location})" if location else ""
+        lines.append(f"- **{title}** — {time_str}{loc_str}")
+
+    count = len(events_to_show)
+    if is_academic:
+        noun = "lezione" if count == 1 else "lezioni"
+        header = f"{target_label.capitalize()} hai {count} {noun} in programma:"
+    else:
+        noun = "impegno" if count == 1 else "impegni"
+        header = f"Ecco i tuoi {noun} in programma per {target_label}:"
+
+    response = header + "\n\n" + "\n".join(lines)
+    if other_events:
+        o_count = len(other_events)
+        response += f"\n\n*(Hai anche {o_count} {'altro impegno' if o_count == 1 else 'altri impegni'} registrati in calendario)*"
+
+    return response
+
+
+def has_preliminary_review_request(prompt: str) -> bool:
+    """Detects if the user explicitly requested a preliminary review/proposal before execution."""
+    p_lower = prompt.lower().strip()
+    triggers = [
+        "prepara prima la proposta",
+        "prepara una proposta",
+        "prepara la proposta",
+        "mostra prima il piano",
+        "mostrami prima il piano",
+        "mostra prima la proposta",
+        "mostrami prima la proposta",
+        "mostra chiaramente il provider",
+        "mostrami chiaramente il provider",
+        "non modificare i file e non avviare",
+        "non modificare i file finch",
+        "non toccare i file finch",
+        "non eseguire finch",
+        "chiedi approvazione prima",
+        "chiedi conferma prima",
+        "attendi la mia approvazione",
+        "attendi la mia conferma",
+        "aspetta la mia approvazione",
+        "aspetta la mia conferma",
+        "prima di modificare",
+        "prima di eseguire",
+        "dry run",
+        "dry-run",
+        "prepare proposal first",
+        "show plan first",
+        "ask for confirmation before",
+        "do not modify files until approved",
+        "wait for my approval",
+    ]
+    return any(t in p_lower for t in triggers)
+
+
+_MANDATE_PREFIX_HEAD = "MANDATO ESECUTIVO AUTORIZZATO DALL'OPERATORE:"
+
+
+def generate_executive_mandate(instruction: str, proposal: Any | None = None) -> str:
+    """
+    Generates a structured executive mandate for the coding agent.
+    Strips satisfied preliminary workflow constraints (e.g. 'prepara la proposta prima e non toccare i file'),
+    while strictly preserving technical requirements, scope, target files, negative constraints,
+    and execution boundaries.
+    """
+    if (instruction or "").startswith(_MANDATE_PREFIX_HEAD):
+        return instruction  # already wrapped: wrapping twice would stack mandates
+    clean_text = instruction
+    removal_patterns = [
+        r"(?i)prepara\s+prima\s+la\s+proposta(?:\s+e\s+mostra\s+chiaramente\s+il\s+provider\s+designato\s+e\s+il\s+progetto\s+di\s+destinazione)?[\.,;]?",
+        r"(?i)prepara\s+(?:prima\s+)?(?:una|la)\s+proposta[\.,;]?",
+        r"(?i)mostra\s+(?:prima\s+)?il\s+piano[\.,;]?",
+        r"(?i)non\s+modificare\s+i\s+file\s+e\s+non\s+avviare\s+l'esecuzione\s+finch[eé]\s+non\s+avr[oò]\s+approvato\s+esplicitamente\s+la\s+proposta[\.,;]?",
+        r"(?i)non\s+modificare\s+i\s+file\s+finch[eé]\s+non\s+avr[oò]\s+approvato[^\.,\n]*[\.,;]?",
+        r"(?i)attendi\s+l'esplicita\s+approvazione[^\.,\n]*[\.,;]?",
+        r"(?i)prepare\s+(?:the\s+)?proposal\s+first[^\.,\n]*[\.,;]?",
+        r"(?i)do\s+not\s+modify\s+files\s+until\s+explicitly\s+approved[^\.,\n]*[\.,;]?",
+    ]
+
+    for pat in removal_patterns:
+        clean_text = re.sub(pat, "", clean_text)
+
+    clean_text = re.sub(r"[ \t]+", " ", clean_text)
+    clean_text = re.sub(r"\n\s*\n\s*\n+", "\n\n", clean_text)
+    clean_text = clean_text.strip()
+
+    mandate_prefix = (
+        "MANDATO ESECUTIVO AUTORIZZATO DALL'OPERATORE:\n"
+        "La proposta e il piano di esecuzione sono stati approvati esplicitamente. "
+        "Procedi ora direttamente all'implementazione del codice, alla modifica dei file autorizzati e alla verifica dei relativi test nel perimetro assegnato.\n\n"
+    )
+    return mandate_prefix + clean_text
+
+
+class MissionCreationError(RuntimeError):
+    """A delegation could not be backed by a real, persisted mission, so nothing was started."""
 
 
 class PersonalAgentService:
@@ -143,6 +420,18 @@ class PersonalAgentService:
         """Returns the VoiceService instance."""
         return self.voice_service
 
+    def _canon(self, workspace_id: str | None) -> str:
+        """Maps any alias of this service's workspace (name, folder, "default") to the canonical id."""
+        canon = getattr(self.workspace, "canonical_id", None)
+        if callable(canon):
+            try:
+                value = canon(workspace_id)
+                if isinstance(value, str) and value:
+                    return value
+            except Exception:
+                pass
+        return workspace_id  # type: ignore[return-value]
+
     def create_intent_and_proposal(
         self,
         raw_input: str,
@@ -156,7 +445,10 @@ class PersonalAgentService:
         Zero side effects: does not create missions in MissionStore, does not execute actions.
         Persists intent, context pack, and proposal in PersonalStore.
         """
+        workspace_id = self._canon(workspace_id)
         ws_id = (workspace_id or getattr(self.workspace, "name", getattr(self.workspace, "id", "default"))).strip()
+        # Pre-classify to capture action_id and action_args if available
+        classified = self.classify_intent(raw_input)
         intent = IntentRequest(
             id=f"intent-{uuid.uuid4().hex[:12]}",
             workspace_id=ws_id,
@@ -164,6 +456,8 @@ class PersonalAgentService:
             session_id=session_id,
             source_surface=source_surface,
             constraints=list(constraints or []),
+            action_id=classified.action_id,
+            action_args=classified.action_args,
         )
 
         resolver = ContextResolver(
@@ -198,13 +492,17 @@ class PersonalAgentService:
         expires_at: str | None = None,
         step_id: str | None = None,
         args_digest: str | None = None,
+        channel: str = "api",
+        policy_code: str | None = None,
     ) -> tuple[MissionProposal, ExecutionAuthority]:
         """
         Explicitly accepts a MissionProposal (Phase A Macro-pass 1.2).
+        Acceptance also records a persistent consent (who, when, channel, scope, proposal version and content).
         Validates proposal status, verifies workspace ownership and version matching,
         performs atomic transition to ACCEPTED, and issues an authoritative ExecutionAuthority.
         Zero execution side effects: does not execute actions or start missions.
         """
+        workspace_id = self._canon(workspace_id)
         if not self.store:
             raise RuntimeError("PersonalStore is not available to accept proposal.")
 
@@ -248,6 +546,8 @@ class PersonalAgentService:
             to_status=ProposalStatus.ACCEPTED,
         )
 
+        self._record_consent(accepted_proposal, ws_id, actor, channel, policy_code)
+
         authority = ExecutionBoundary.issue_authority(
             accepted_proposal, expires_at=expires_at, step_id=step_id, args_digest=args_digest
         )
@@ -260,6 +560,273 @@ class PersonalAgentService:
             authority.proposal_version,
         )
         return accepted_proposal, authority
+
+    def _sync_legacy_mission(self, mission_id: str, res: Any, deliverables: list[Any], topic_title: str, objective: str = ""):
+        """
+        Records the outcome of the legacy workforce delegation on its mission with the SAME invariant as the canonical
+        path: a deliverable is ``verified`` and the mission ``completed`` only when the quality gate passed. A file
+        merely existing proves nothing; an unsuccessful run is failed; a run whose output the gate rejects is
+        ``blocked`` with its deliverables marked ``needs_revision`` (kept, never presented as verified).
+        """
+        from aether.missions.models import Deliverable, MilestoneStatus, MissionStatus
+        from aether.missions.reviewer import QualityGateEvaluator
+        from aether.missions.coding_outcomes import _run_coro
+
+        from aether.missions.models import ExecutionStatus as MExec
+
+        store = self.mission_store
+        root = Path(self.workspace.root) if getattr(self.workspace, "root", None) else None
+        # Deliverables reference mission_executions(id): the legacy run needs a real execution row of its own
+        # (the task id of the runtime request is not one, and an unrecorded id made the old sync fail silently).
+        mexec = store.create_execution(mission_id=mission_id, team_name=None, status=MExec.RUNNING)
+        store.update_mission(mission_id, active_execution_id=mexec.id)
+        items: list[Deliverable] = []
+        for d in deliverables or []:
+            if not (isinstance(d, dict) and d.get("path")):
+                continue
+            p = Path(d["path"])
+            if not p.is_absolute() and root is not None:
+                p = root / p
+            items.append(Deliverable(
+                id=f"del_{uuid.uuid4().hex[:12]}", mission_id=mission_id, execution_id=mexec.id,
+                name=d.get("name", "deliverable"), path=str(p), type=d.get("type", "document"), status="draft",
+            ))
+
+        gate = None
+        if res.success:
+            gate = _run_coro(QualityGateEvaluator().evaluate(
+                mission_title=f"Task: {topic_title}", mission_objective=objective or topic_title,
+                deliverables=items, completed_context=[str(getattr(res, "output", "") or "")], team=None, workspace=self.workspace,
+            ))
+        passed = bool(gate is not None and gate.passed and items)
+        for d in items:
+            d.status = "verified" if passed else ("needs_revision" if res.success else "draft")
+            d.metadata = dict(d.metadata or {})
+            if gate is not None:
+                d.metadata.update({"verification_method": gate.method, "semantically_verified": gate.semantically_verified,
+                                   "not_checked": list(gate.not_checked), "quality_score": gate.score})
+            store.add_deliverable(mission_id, d)
+
+        milestones = store.list_milestones(mission_id)
+        if not res.success:
+            status, ms_status, meta_note = MissionStatus.FAILED, MilestoneStatus.FAILED, "The workforce run did not complete successfully."
+        elif passed:
+            status, ms_status, meta_note = MissionStatus.COMPLETED, MilestoneStatus.COMPLETED, None
+        else:
+            status, ms_status = MissionStatus.BLOCKED, None
+            meta_note = (gate.feedback if gate is not None and not gate.passed
+                         else "The run produced no deliverable that could be verified.")
+        for i, m in enumerate(milestones):
+            if ms_status is not None:
+                one = ms_status
+            else:  # blocked: the stages ran, only the final verification is missing
+                one = MilestoneStatus.FAILED if i == len(milestones) - 1 else MilestoneStatus.COMPLETED
+            store.update_milestone(m.id, status=one)                                       # template row
+            store.update_execution_milestone(mexec.id, m.id, status=one.value)             # row of the active execution
+        store.update_execution(mexec.id, status=MExec.COMPLETED if passed else MExec.FAILED,
+                               error_message=None if passed else (meta_note or "Not verified."))
+        meta = {}
+        if meta_note:
+            current = store.get_mission(mission_id)
+            meta = dict(current.metadata or {}) if current else {}
+            meta["verification_note"] = meta_note
+        store.update_mission(mission_id, status=status, metadata=meta or None)
+        return gate
+
+    def _can_use_mission_runtime(self) -> bool:
+        """The canonical mission path needs a real Workspace with a real mission store."""
+        try:
+            from aether.missions.store import MissionStore
+            from aether.workspace.workspace import Workspace
+            return isinstance(self.workspace, Workspace) and isinstance(self.mission_store, MissionStore)
+        except Exception:
+            return False
+
+    def _create_planned_mission(self, prompt: str, intent: Any, workspace_id: str, authority: Any, topic_title: str, assembled: Any):
+        """Plans the work with the configured model and persists it as a real mission bound to proposal and consent."""
+        from aether.missions.models import MissionStatus
+        from aether.missions.planner import MissionPlanner
+
+        agents: list[tuple[str, str]] = []
+        try:
+            team = self.workspace.load_team()
+            agents = [(a.name, a.role or "") for a in team.agents()]
+        except Exception:
+            pass
+        proposal_steps = None
+        try:
+            if authority is not None:
+                proposal_steps = self.store.get_proposal(authority.proposal_id, workspace_id=workspace_id).proposed_steps
+        except Exception:
+            pass
+        provider = None
+        try:
+            provider = self.runtime.resolve_provider()
+        except Exception:
+            provider = None
+        objective = intent.delegation_goal or prompt
+        plan = MissionPlanner(provider).plan(
+            objective, context_text=(assembled.rendered if assembled is not None else ""), agents=agents,
+            proposal_steps=proposal_steps,
+        )
+        metadata = {
+            **plan.plan_metadata(), "source": "chat", "plan_warnings": plan.warnings,
+            "proposal_id": getattr(authority, "proposal_id", None),
+            "context_trace": assembled.trace() if assembled is not None else None,
+        }
+        mission = self.mission_store.create_mission(
+            title=f"Task: {topic_title}", objective=objective, workspace_id=workspace_id,
+            milestones=plan.milestone_dicts(), metadata=metadata, status=MissionStatus.READY,
+        )
+        note = plan.warnings[0] if plan.warnings else ""
+        return mission.id, plan, note
+
+    def _execute_mission_via_runtime(self, mission_id: str, authority: Any, progress_cb: Any) -> dict[str, Any]:
+        """Runs the mission to completion on MissionRuntime and returns ONLY facts read back from the stores."""
+        import asyncio
+        from aether.missions.runtime import MissionRuntime
+
+        progress_cb(5, "Starting mission on the canonical runtime")
+
+        async def _go() -> str:
+            runtime = MissionRuntime(self.workspace)
+            execution = await runtime.start_mission(mission_id, authority=authority)
+            handle = runtime._active_executions.get(execution.id)
+            if handle is not None and handle.task is not None:
+                await handle.task
+            await runtime.shutdown()
+            return execution.id
+
+        error = None
+        exec_id = None
+        try:
+            exec_id = asyncio.run(_go())
+        except Exception as exc:
+            error = f"{type(exc).__name__}: {exc}"
+        progress_cb(95, "Reading back the mission outcome")
+        return self._mission_outcome(mission_id, exec_id, error)
+
+    def _mission_outcome(self, mission_id: str, exec_id: str | None, error: str | None) -> dict[str, Any]:
+        """Facts, not prose: statuses, per-stage results, deliverables and how (and whether) they were verified."""
+        mission = self.mission_store.get_mission(mission_id)
+        execution = self.mission_store.get_execution(exec_id) if exec_id else None
+        stages = []
+        for em in (self.mission_store.get_execution_milestones(exec_id) if exec_id else []):
+            tmpl = self.mission_store.get_milestone(em.milestone_id)
+            stages.append({"title": tmpl.title if tmpl else em.milestone_id, "status": getattr(em.status, "value", str(em.status)),
+                           "error": em.error})
+        deliverables = self.mission_store.list_deliverables(mission_id)
+        verified = [d for d in deliverables if d.status == "verified"]
+        m_status = getattr(getattr(mission, "status", None), "value", "unknown")
+        e_status = getattr(getattr(execution, "status", None), "value", "not_started")
+        done = sum(1 for s_ in stages if s_["status"] == "completed")
+        method = None
+        for d in verified:
+            method = (d.metadata or {}).get("verification_method") or method
+        if error and not execution:
+            headline = f"La missione non è partita: {error}"
+        elif m_status == "completed":
+            headline = (f"Missione completata: {done}/{len(stages)} fasi, {len(verified)} deliverable verificati"
+                        + (f" (verifica: {method})" if method else "") + ".")
+        else:
+            headline = (f"Missione NON completata (stato: {m_status}/{e_status}): {done}/{len(stages)} fasi riuscite"
+                        + (f". Errore: {execution.error_message}" if execution and execution.error_message else "") + ".")
+        first = verified[0] if verified else (deliverables[0] if deliverables else None)
+        return {
+            "summary": headline, "mission_id": mission_id, "mission_status": m_status, "execution_status": e_status,
+            "stages": stages, "deliverable_name": first.name if first else None, "deliverable_path": first.path if first else None,
+            "deliverables": [{"name": d.name, "path": d.path, "status": d.status,
+                              "verification_method": (d.metadata or {}).get("verification_method"),
+                              "semantically_verified": (d.metadata or {}).get("semantically_verified")} for d in deliverables],
+            "plan_source": (mission.metadata or {}).get("plan_source") if mission else None,
+            "plan_model": (mission.metadata or {}).get("plan_model") if mission else None,
+        }
+
+    def _record_consent(self, proposal: MissionProposal, ws_id: str, actor: str, channel: str, policy_code: str | None) -> Any:
+        """Persists WHO agreed to WHICH proposal version/content, through which channel, within which scope."""
+        if not hasattr(self.store, "record_consent"):
+            return None
+        import uuid as _uuid
+        from aether.planning.consent import ConsentRecord, proposal_digest, scope_from_constraints
+        kind = "policy_autonomous" if str(actor).startswith("system") else "human"
+        record = ConsentRecord(
+            id=f"cns-{_uuid.uuid4().hex[:12]}", workspace_id=ws_id, proposal_id=proposal.id,
+            proposal_version=proposal.version, actor=str(actor), actor_kind=kind, channel=channel,
+            content_digest=proposal_digest(proposal), scope=scope_from_constraints(proposal.constraints),
+            policy_code=policy_code,
+        )
+        return self.store.record_consent(record)
+
+    def revoke_proposal(self, proposal_id: str, workspace_id: str, actor: str = "user", reason: str = "revoked by user") -> MissionProposal:
+        """Withdraws an accepted proposal: its consent is revoked, so every authority derived from it stops working."""
+        workspace_id = self._canon(workspace_id)
+        proposal = self.store.get_proposal(proposal_id, workspace_id=workspace_id)
+        if not proposal:
+            raise ValueError(f"Proposal '{proposal_id}' not found in workspace '{workspace_id}'.")
+        revoked = self.store.transition_proposal_status(
+            proposal_id=proposal_id, workspace_id=workspace_id,
+            from_status=[ProposalStatus.ACCEPTED, ProposalStatus.READY_FOR_ACCEPTANCE, ProposalStatus.DRAFT],
+            to_status=ProposalStatus.REVOKED,
+        )
+        if hasattr(self.store, "revoke_consent"):
+            self.store.revoke_consent(proposal_id, proposal.version, f"{actor}: {reason}")
+        logger.info("Proposal '%s' revoked by '%s': %s", proposal_id, actor, reason)
+        return revoked
+
+    def _semantic_extract_coding_details(self, prompt: str) -> dict[str, Any] | None:
+        """Uses internal LLM to semantically understand coding task parameters without writing code."""
+        prov = self.provider
+        if not prov or not hasattr(prov, "generate"):
+            return None
+        try:
+            from aether.providers.types import Message
+            sys_msg = (
+                "Extract coding task parameters from user prompt. Respond with ONLY valid JSON: "
+                "{\"target_project\": \"path or null\", \"target_files\": [\"file1\"], \"designated_provider\": \"antigravity\"|\"claude_code\"|\"codex\"|null, \"summary\": \"max 6 words\"}"
+            )
+            res = prov.generate([
+                Message(role="system", content=sys_msg),
+                Message(role="user", content=prompt),
+            ])
+            text = (res.content or "").strip()
+            if "```" in text:
+                m = re.search(r"```(?:json)?\s*([\s\S]*?)\s*```", text)
+                if m:
+                    text = m.group(1).strip()
+            data = json.loads(text)
+            if isinstance(data, dict):
+                return data
+        except Exception as exc:
+            logger.debug("Internal LLM semantic extraction skipped: %s", exc)
+        return None
+
+    def _advisory_coding_verdict(self, prompt: str) -> str:
+        """
+        Asks the configured LLM, only for prompts the deterministic rules found ambiguous, whether the user is
+        ordering code work. Returns "operational" only on an explicit, parseable yes; anything else (no provider,
+        error, "unclear", "informational") returns "informational": the safe side. Never grants authority.
+        """
+        prov = self.provider
+        if not prov or not hasattr(prov, "generate"):
+            return "informational"
+        try:
+            import json
+            from aether.providers.types import Message
+            res = prov.generate([
+                Message(role="system", content=(
+                    "Classify the user's message. Respond with ONLY JSON {\"intent\": \"operational\"|\"informational\"|\"unclear\"}. "
+                    "operational = the user is ordering code to be written or changed now. informational = a question, "
+                    "opinion, explanation request or hesitation. unclear = cannot tell."
+                )),
+                Message(role="user", content=prompt),
+            ])
+            text = (res.content or "").strip()
+            m = re.search(r"\{.*\}", text, re.S)
+            data = json.loads(m.group(0)) if m else {}
+            return "operational" if data.get("intent") == "operational" else "informational"
+        except Exception as exc:
+            logger.debug("Advisory intent check skipped: %s", exc)
+            return "informational"
 
     def classify_intent(
         self,
@@ -278,8 +845,36 @@ class PersonalAgentService:
             if last_user_msgs:
                 context_hint = last_user_msgs[-1].content
 
-            # Check if this is a follow-up directive
-            if any(p_lower.startswith(k) for k in ["fallo", "procedi", "esegui", "vai avanti", "sì", "si", "ok procedi", "fallo subito", "do it", "go ahead", "proceed"]):
+            # Check if this is an explicit rejection / refusal
+            is_rejection = bool(
+                re.search(r"\b(?:no|non\s+farlo|non\s+procedere|non\s+eseguire|sicuramente\s+no|assolutamente\s+no|annulla|cancella|rifiuta|stop|abort|don['’]?t|do\s+not)\b", p_lower)
+            )
+            if is_rejection and any(p_lower.startswith(k) or k in p_lower for k in ["no", "non farlo", "sicuramente no", "assolutamente no", "annulla", "cancella", "rifiuta", "stop", "abort", "don't"]):
+                return UserIntent(
+                    raw_prompt=prompt,
+                    tier=IntentTier.ANSWER,
+                    summary="User declined operation",
+                    intent_type="cancellation",
+                )
+
+            # A confirmation that is conditional, postponed or paired with a question is NOT a confirmation:
+            # it must not re-trigger the previous operational request.
+            is_hedged_followup = bool(re.search(
+                r"\b(?:ma|però|pero|aspetta|aspetti|attendi|prima|solo\s+dopo|dopo\s+che|non\s+(?:adesso|ora|ancora|subito)|"
+                r"dimmi|rischi|finch[eé]|hold\s+on|wait|but|first|only\s+after|until|not\s+(?:now|yet))\b", p_lower
+            ))
+            if not is_rejection and is_hedged_followup and re.match(
+                r"^(?:s[ìi]|yes|ok|va\s+bene|confermo|conferma|procedi|fallo|esegui|vai\s+avanti|do\s+it|go\s+ahead|proceed)\b", p_lower
+            ):
+                return UserIntent(
+                    raw_prompt=prompt,
+                    tier=IntentTier.ANSWER,
+                    summary="Conditional or postponed confirmation: no operation is started",
+                    intent_type="deferred_confirmation",
+                )
+
+            # Check if this is an affirmative follow-up directive (with word boundary to prevent matching words like 'sicuramente')
+            if not is_rejection and re.match(r"^(?:s[ìi]|yes|ok\s+procedi|ok|va\s+bene|confermo|conferma|procedi|fallo|esegui|vai\s+avanti|do\s+it|go\s+ahead|proceed)\b", p_lower):
                 if context_hint:
                     effective_prompt = f"{context_hint} (Confirmed by user: {prompt})"
                     p_lower = effective_prompt.lower()
@@ -350,18 +945,70 @@ class PersonalAgentService:
             )
 
         # 2. Calendar query (ANSWER tier with read action)
+        # Exclude continuous learning directives like "lezioni apprese"
+        is_lessons_learned = any(k in p_lower for k in ["lezioni appres", "lezioni abbiamo appres", "lezioni imparat", "lessons learned"])
+
         calendar_query_triggers = [
             "what's on my calendar", "what is on my calendar", "check my schedule", "list meetings",
             "list events", "upcoming events", "view calendar", "cosa ho in calendario",
             "controlla il mio calendario", "i miei appuntamenti", "mostra eventi", "prossimi eventi",
+            "appuntamenti ho", "impegni ho", "cosa ho da fare", "cosa ho in agenda",
+            "agenda di oggi", "agenda di domani", "impegni di domani", "impegni per domani",
+            "appuntamenti per domani", "appuntamenti di domani", "schedule tomorrow", "schedule today",
+            "che lezione ho", "quali lezioni ho", "che lezioni ho", "che corsi ho", "quali corsi ho",
+            "orario delle lezioni", "orario lezioni", "orario uni", "orario universitario",
+            "orario di lunedì", "orario per lunedì", "lezioni di lunedì", "lezioni per lunedì",
         ]
-        if any(k in p_lower for k in calendar_query_triggers):
+
+        academic_matched = (
+            not is_lessons_learned
+            and bool(
+                re.search(
+                    r"\b(lezione|lezioni|orario|corsi|corso|università|universita|esame|esami|aula|lecture|lectures|classes)\b|\ball['’]?uni\b|\buni\b",
+                    p_lower,
+                )
+            )
+        )
+        calendar_matched = any(w in p_lower for w in ["appuntament", "impegn", "agend", "riunion", "calendari", "schedule", "meeting"])
+
+        query_markers = [
+            "che", "quali", "cosa", "mostra", "elenca", "vedi", "controlla", "trova",
+            "ho", "hai", "quando", "a che ora", "dove", "dimmi", "what", "list", "check", "show",
+        ]
+        has_query_marker = any(re.search(r"\b" + re.escape(q) + r"\b", p_lower) for q in query_markers)
+
+        day_markers = [
+            "lunedì", "lunedi", "martedì", "martedi", "mercoledì", "mercoledi",
+            "giovedì", "giovedi", "venerdì", "venerdi", "sabato", "domenica",
+            "monday", "tuesday", "wednesday", "thursday", "friday", "saturday", "sunday",
+            "oggi", "today", "domani", "tomorrow", "dopodomani", "settimana", "week",
+        ]
+        has_day_marker = any(re.search(r"\b" + re.escape(d) + r"\b", p_lower) for d in day_markers)
+
+        is_calendar_query = (
+            any(k in p_lower for k in calendar_query_triggers)
+            or (
+                (academic_matched or calendar_matched)
+                and (has_query_marker or has_day_marker)
+            )
+        )
+        if is_calendar_query:
+            time_min, time_max, scope, target_day_label = resolve_calendar_time_window(p_lower)
             return UserIntent(
                 raw_prompt=effective_prompt,
                 tier=IntentTier.ANSWER,
-                summary="Query upcoming calendar events",
+                summary=f"Query calendar events: {scope}",
                 action_id="calendar.list_events",
-                action_args={"limit": 10},
+                action_args={
+                    "limit": 50,
+                    "scope": scope,
+                    "target_day": target_day_label,
+                    "time_min": time_min,
+                    "time_max": time_max,
+                    "is_academic": academic_matched,
+                    "raw_query": prompt,
+                },
+                intent_type="query",
             )
 
         # 3. File / Document creation (DO tier - safe local mutation)
@@ -1338,6 +1985,115 @@ class PersonalAgentService:
                 delegation_goal=prompt,
             )
 
+        # 3h. Coding status query (ANSWER tier - read-only query of active/recent coding agent task)
+        coding_status_triggers = [
+            "stato del coding", "stato coding", "stato del task di coding", "stato task coding",
+            "controlla lo stato del coding", "come procede il coding", "coding status",
+            "stato del task di sviluppo", "stato sviluppo", "status coding",
+            "risultati del coding", "risultati del task di coding", "risultato del task di coding",
+            "mostrami i risultati del coding", "esito del coding", "esito del task di coding",
+            "cosa ha fatto l'agente di coding", "cosa ha fatto il coding agent",
+        ]
+        if any(t in p_lower for t in coding_status_triggers):
+            return UserIntent(
+                raw_prompt=effective_prompt,
+                tier=IntentTier.ANSWER,
+                summary="Controlla lo stato del coding agent",
+                action_id="coding.status",
+                action_args={},
+                intent_type="coding_status",
+            )
+
+        # 3i. External autonomous coding agent delegation (ACT tier - modifies code/project)
+        # Actionable coding patterns (creating apps, implementing code, writing tests, fixing bugs, delegating coding)
+        assessment = assess_coding_prompt(p_lower)
+        is_purely_informational = assessment.informational
+        has_coding_trigger = assessment.has_coding_trigger
+        has_agent_coding = assessment.has_agent_coding
+        coding_ambiguous = assessment.ambiguous
+        if coding_ambiguous:
+            # Advisory only: the model may keep the request non-operational or ask for clarification;
+            # it can never upgrade a request, grant consent or issue authority.
+            verdict = self._advisory_coding_verdict(effective_prompt)
+            if verdict == "operational":
+                coding_ambiguous = False
+            else:
+                is_purely_informational = True
+
+        if not is_purely_informational and (
+            has_coding_trigger
+            or has_agent_coding
+        ):
+            preferred_prov = None
+            if "antigravity" in p_lower:
+                preferred_prov = "antigravity"
+            elif "claude code" in p_lower or "claude" in p_lower:
+                preferred_prov = "claude_code"
+            elif "codex" in p_lower:
+                preferred_prov = "codex"
+            else:
+                try:
+                    from aether.coding.orchestrator import get_coding_orchestrator
+                    preferred_prov = get_coding_orchestrator().get_preferred_provider_id(getattr(self, "workspace", None))
+                except Exception:
+                    preferred_prov = "antigravity"
+
+            args: dict[str, Any] = {"instruction": effective_prompt}
+            if preferred_prov:
+                args["provider_id"] = preferred_prov
+
+            # Extract project directory or target files from prompt if specified
+            path_match = re.search(r'(?:in|su|nel progetto|nel repository|nel percorso|directory|folder|path|workspace|repo)\s+(?:(?:locale|local|corrente|attuale|esistente)\s+)?[`"\'\(]?(/[^\s`"\'\)]+)[`"\'\)]?', effective_prompt, re.IGNORECASE)
+            if not path_match:
+                path_match = re.search(r'[`"\'\(]?(/[\w\.\-]+(?:/[\w\.\-]+)+)[`"\'\)]?', effective_prompt)
+            if path_match:
+                candidate_path = Path(path_match.group(1).rstrip(",;.")).resolve()
+                if candidate_path.is_file():
+                    args["project_path"] = str(candidate_path.parent)
+                    args["context_files"] = [str(candidate_path)]
+                elif candidate_path.is_dir() or candidate_path.parent.exists():
+                    args["project_path"] = str(candidate_path)
+
+            # Check for file mentions like math_utils.py, calc.py (stripping trailing punctuation like dots or commas)
+            raw_file_matches = re.findall(r'[`"\'\s]([\w\.\-]+\.(?:py|ts|tsx|js|jsx|json|md|html|css|rs|go|java|c|cpp|h)[,;.:]?)[`"\'\s]', f" {effective_prompt} ")
+            if raw_file_matches:
+                existing_files = list(args.get("context_files") or [])
+                for fm in raw_file_matches:
+                    clean_fm = fm.rstrip(",;.:")
+                    if clean_fm and clean_fm not in existing_files:
+                        existing_files.append(clean_fm)
+                args["context_files"] = existing_files
+
+            # Semantic enrichment via internal LLM if available
+            semantic_details = self._semantic_extract_coding_details(effective_prompt)
+            task_summary = f"Delegate coding task to external agent: {prompt[:40]}"
+            if semantic_details:
+                if semantic_details.get("target_project"):
+                    s_proj = Path(semantic_details["target_project"]).resolve()
+                    if s_proj.is_dir() or s_proj.parent.exists():
+                        args["project_path"] = str(s_proj)
+                if semantic_details.get("target_files") and isinstance(semantic_details["target_files"], list):
+                    curr_files = list(args.get("context_files") or [])
+                    for tf in semantic_details["target_files"]:
+                        clean_tf = str(tf).strip().strip("`'\",;.")
+                        if clean_tf and clean_tf not in curr_files:
+                            curr_files.append(clean_tf)
+                    args["context_files"] = curr_files
+                if semantic_details.get("designated_provider"):
+                    args["provider_id"] = semantic_details["designated_provider"]
+                if semantic_details.get("summary"):
+                    task_summary = f"Delegate coding: {semantic_details['summary']}"
+
+            return UserIntent(
+                raw_prompt=effective_prompt,
+                tier=IntentTier.ACT,
+                summary=task_summary,
+                action_id="coding.delegate",
+                action_args=args,
+                delegation_goal=effective_prompt,
+                intent_type="coding",
+            )
+
         # 4. Multi-agent workforce delegation & deep research / report generation (DELEGATE tier)
         delegate_triggers = [
             "launch mission", "start mission", "deploy workforce", "delegate to team",
@@ -1374,10 +2130,36 @@ class PersonalAgentService:
             )
 
         # 6. General Q&A / conversational inquiry (ANSWER tier)
+        # Distinguish casual conversation / greetings from informational inquiries
+        p_clean = re.sub(r"[^\w\s]", "", p_lower).strip()
+        conversational_phrases = {
+            "ciao", "ciao aether", "buongiorno", "buonasera", "salve", "ehi", "ehi aether",
+            "hello", "hi", "hey", "good morning", "good afternoon", "good evening",
+            "grazie", "grazie mille", "molte grazie", "grazie aether",
+            "thanks", "thank you", "thanks a lot", "thank you aether",
+            "come stai", "come va", "tutto bene", "how are you", "what's up",
+            "ci sei", "sei pronto", "are you there", "are you ready",
+        }
+        is_casual_conv = (
+            p_clean in conversational_phrases
+            or any(
+                p_clean.startswith(g) and len(p_clean.split()) <= 4
+                for g in ["ciao", "salve", "buongiorno", "buonasera", "grazie", "hello", "hi", "hey", "good morning", "thanks", "thank you"]
+            )
+        )
+        if is_casual_conv:
+            return UserIntent(
+                raw_prompt=effective_prompt,
+                tier=IntentTier.ANSWER,
+                summary="Casual conversation",
+                intent_type="conversation",
+            )
+
         return UserIntent(
             raw_prompt=effective_prompt,
             tier=IntentTier.ANSWER,
             summary="Answer informational inquiry",
+            intent_type="informational",
         )
 
     def process_prompt(
@@ -1387,8 +2169,10 @@ class PersonalAgentService:
         session_id: str | None = None,
         is_voice: bool = False,
         authority: ExecutionAuthority | None = None,
+        provider_id: str | None = None,
     ) -> PersonalMessage:
         """Processes user input, orchestrates execution steps, and returns response."""
+        workspace_id = self._canon(workspace_id)
         now_iso = datetime.now(timezone.utc).isoformat()
 
         # 1. Resolve or create session
@@ -1438,37 +2222,59 @@ class PersonalAgentService:
 
         # 4. Intent classification (with multi-turn context)
         intent = self.classify_intent(prompt, recent_history=recent_history)
-        steps: list[PersonalStep] = [
-            PersonalStep(
+        if provider_id and (intent.action_id == "coding.delegate" or "coding" in (intent.action_id or "")):
+            if intent.action_args is None:
+                intent.action_args = {}
+            intent.action_args["provider_id"] = provider_id
+        is_casual_conv = getattr(intent, "intent_type", "general") == "conversation"
+
+        steps: list[PersonalStep] = []
+        if not is_casual_conv:
+            step_und = PersonalStep(
                 id=f"step-{uuid.uuid4().hex[:8]}",
                 title="Understanding intent",
                 status="completed",
                 category="understanding",
                 details={"tier": intent.tier.value, "summary": intent.summary},
             )
-        ]
+            steps.append(step_und)
+            # Broadcast step
+            self.event_hub.publish(
+                workspace_id=workspace_id,
+                event_type="step_update",
+                data={"session_id": session_id, "step": step_und.to_dict()},
+            )
 
-        # Broadcast step
-        self.event_hub.publish(
-            workspace_id=workspace_id,
-            event_type="step_update",
-            data={"session_id": session_id, "step": steps[0].to_dict()},
-        )
-
-        # 5. Intelligence retrieval
+        # 5. Shared context retrieval (skipped for casual conversation and direct data queries).
+        #    ONE retrieval per request: the same AssembledContext feeds the model answer, document drafting,
+        #    workforce delegation and the coding-agent handoff (no duplicate or divergent lookups).
         intel_context = None
-        if self.intelligence_service:
+        if not is_casual_conv and intent.action_id not in ("calendar.list_events", "files.read_document"):
             try:
-                intel_context = self.intelligence_service.retrieve_unified_context(
-                    workspace_id=workspace_id,
-                    task_instruction=prompt,
+                _purpose = {
+                    IntentTier.ANSWER: "answer", IntentTier.DO: "document", IntentTier.DELEGATE: "delegate",
+                }.get(intent.tier, "answer")
+                if intent.action_id == "coding.delegate":
+                    _purpose = "coding"
+                intel_context = self.runtime.context_assembler.assemble(
+                    prompt, purpose=_purpose, workspace_id=workspace_id, exclude=("history",),
                 )
+                from aether.context import AssembledContext
+                if not isinstance(intel_context, AssembledContext):
+                    raise TypeError("context assembler unavailable")
+                _kinds: dict[str, int] = {}
+                for _it in intel_context.items:
+                    _kinds[_it.kind] = _kinds.get(_it.kind, 0) + 1
                 step_intel = PersonalStep(
                     id=f"step-{uuid.uuid4().hex[:8]}",
                     title="Consulting memory & knowledge",
                     status="completed",
                     category="knowledge",
-                    details={"sources_used": len(intel_context.evidence) if intel_context else 0},
+                    details={
+                        "sources_used": len(intel_context.items),
+                        "injected_by_kind": _kinds,
+                        "context_errors": intel_context.stats.get("errors", []),
+                    },
                 )
                 steps.append(step_intel)
                 self.event_hub.publish(
@@ -1477,19 +2283,60 @@ class PersonalAgentService:
                     data={"session_id": session_id, "step": step_intel.to_dict()},
                 )
             except Exception as e:
-                logger.warning(f"Unified intelligence retrieval skipped: {e}")
+                intel_context = None
+                logger.warning(f"Shared context retrieval skipped: {e}")
 
         # 6. Proposal Generation Boundary for mutating intents (DO / ACT / DELEGATE)
         # Only ANSWER (read-only) may proceed directly without authority.
         # All mutation-capable tiers must go through the proposal lifecycle.
         requires_proposal = intent.tier in (IntentTier.DO, IntentTier.ACT, IntentTier.DELEGATE)
+        is_coding_delegation = (intent.action_id == "coding.delegate" or "coding" in (intent.action_id or ""))
 
         if requires_proposal and not authority:
+            # Check if this is an explicit direct operational request eligible for autonomous execution (Principle 3.1)
+            wants_preliminary_review = has_preliminary_review_request(prompt)
+            auto_execute_allowed = False
+            auto_policy_code: str | None = None
+            if is_coding_delegation and not wants_preliminary_review:
+                proj_p = intent.action_args.get("project_path") if intent.action_args else None
+                dest_exists = bool(proj_p and Path(proj_p).exists() and Path(proj_p).is_dir())
+                forbidden_roots = {"/", "/System", "/usr", "/bin", "/sbin", "/etc", "/var", "/Library", "/private", "/private/var", "/tmp", "/private/tmp"}
+                if dest_exists and str(Path(proj_p).resolve()) not in forbidden_roots:
+                    # Security boundary (A2): Textual keyword matching in prompts ('subito', 'direttamente',
+                    # 'autonomamente', etc.) CANNOT grant execution consent or bypass confirmation gates.
+                    # Autonomous execution is ONLY permitted if the active workspace safety policy
+                    # explicitly authorizes autonomous operation for this action.
+                    safety_pol = getattr(self.action_executor, "safety_policy", None) if self.action_executor else None
+                    if safety_pol and getattr(safety_pol, "policy_service", None):
+                        from aether.policy.models import PolicyDecision
+                        _svc = safety_pol.policy_service
+                        _kw = dict(
+                            workspace_id=workspace_id,
+                            action_id=intent.action_id or "coding.delegate",
+                            permission_level=ActionPermissionLevel.EXTERNAL_MUTATION,
+                            requires_confirmation=True,
+                            auto_approve_requested=False,  # Prompt tokens never simulate auto-approval
+                        )
+                        _typed = getattr(_svc, "evaluate_action_decision", None)
+                        _decision = _typed(**_kw) if callable(_typed) else None
+                        if isinstance(_decision, PolicyDecision):
+                            auto_execute_allowed = _decision.can_auto_execute
+                            auto_policy_code = _decision.code
+                        else:
+                            can_auto, _ = _svc.evaluate_action(**_kw)
+                            auto_execute_allowed = bool(can_auto)
+                            auto_policy_code = "LEGACY_ALLOW" if can_auto else None
+                    else:
+                        auto_execute_allowed = False
+
             # Generate proposal via canonical Phase A pipeline
             try:
                 proposal_constraints = []
                 if intent.action_id:
                     proposal_constraints.append(f"allow:{intent.action_id}")
+                    if is_coding_delegation and intent.action_args and intent.action_args.get("project_path"):
+                        # The accepted proposal authorises work only inside the project the user named.
+                        proposal_constraints.append(f"allow_path:{Path(intent.action_args['project_path']).resolve()}")
                 elif intent.tier == IntentTier.DELEGATE:
                     proposal_constraints.append(f"allow:workforce.delegate,workforce.delegate:{workspace_id}")
                 _, _, proposal, val_res = self.create_intent_and_proposal(
@@ -1499,69 +2346,145 @@ class PersonalAgentService:
                     source_surface="companion" if is_voice else "api",
                     constraints=proposal_constraints,
                 )
-                response_text = proposal.to_human_markdown()
-                msg_metadata = {
-                    "status": "proposal_pending",
-                    "proposal_id": proposal.id,
-                    "proposal_version": proposal.version,
-                    "proposal": proposal.to_dict(),
-                    "validation": val_res.to_dict(),
-                }
-                step_prop = PersonalStep(
-                    id=f"step-{uuid.uuid4().hex[:8]}",
-                    title=f"Prepared proposal: {proposal.title}",
-                    status="completed" if intent.tier == IntentTier.DELEGATE else "waiting_acceptance",
-                    category="delegation" if intent.tier == IntentTier.DELEGATE else "proposal",
-                    details={"proposal_id": proposal.id, "version": proposal.version},
-                )
-                steps.append(step_prop)
-                self.event_hub.publish(
-                    workspace_id=workspace_id,
-                    event_type="step_update",
-                    data={"session_id": session_id, "step": step_prop.to_dict()},
-                )
+
+                if auto_execute_allowed:
+                    # Autonomous operational mode (Principle 3.1):
+                    # Internal planning completed; accept internally and issue authority
+                    accepted_prop, issued_auth = self.accept_proposal(
+                        proposal_id=proposal.id,
+                        workspace_id=workspace_id,
+                        expected_version=proposal.version,
+                        actor="system_autonomous",
+                        channel="policy",
+                        policy_code=auto_policy_code,
+                    )
+                    authority = issued_auth
+                    step_plan = PersonalStep(
+                        id=f"step-{uuid.uuid4().hex[:8]}",
+                        title=f"Piano operativo predisposto: {proposal.title}",
+                        status="completed",
+                        category="proposal",
+                        details={"proposal_id": proposal.id, "version": proposal.version},
+                    )
+                    steps.append(step_plan)
+                    self.event_hub.publish(
+                        workspace_id=workspace_id,
+                        event_type="step_update",
+                        data={"session_id": session_id, "step": step_plan.to_dict()},
+                    )
+                else:
+                    # Preliminary review mode (Principle 3.2):
+                    response_text = proposal.to_human_markdown()
+                    msg_metadata = {
+                        "status": "proposal_pending",
+                        "proposal_id": proposal.id,
+                        "proposal_version": proposal.version,
+                        "proposal": proposal.to_dict(),
+                        "validation": val_res.to_dict(),
+                    }
+                    if is_coding_delegation:
+                        designated_prov = provider_id or (intent.action_args.get("provider_id") if intent.action_args else None) or "antigravity"
+                        msg_metadata["designated_provider_id"] = designated_prov
+                        msg_metadata["action_id"] = "coding.delegate"
+                        msg_metadata["action_args"] = intent.action_args
+                    step_prop = PersonalStep(
+                        id=f"step-{uuid.uuid4().hex[:8]}",
+                        title=f"Prepared proposal: {proposal.title}",
+                        status="completed" if intent.tier == IntentTier.DELEGATE else "waiting_acceptance",
+                        category="delegation" if intent.tier == IntentTier.DELEGATE else "proposal",
+                        details={"proposal_id": proposal.id, "version": proposal.version},
+                    )
+                    steps.append(step_prop)
+                    self.event_hub.publish(
+                        workspace_id=workspace_id,
+                        event_type="step_update",
+                        data={"session_id": session_id, "step": step_prop.to_dict()},
+                    )
+                    resp_msg = PersonalMessage(
+                        id=f"msg-{uuid.uuid4().hex[:12]}",
+                        session_id=session_id,
+                        workspace_id=workspace_id,
+                        role="assistant",
+                        content=response_text,
+                        tier=intent.tier,
+                        steps=steps,
+                        action_execution_id=None,
+                        mission_id=None,
+                        metadata=msg_metadata,
+                        created_at=datetime.now(timezone.utc).isoformat(),
+                    )
+                    self.store.add_message(resp_msg)
+                    self.event_hub.publish(
+                        workspace_id=workspace_id,
+                        event_type="assistant_message",
+                        data=resp_msg.to_dict(),
+                    )
+                    return resp_msg
+
             except Exception as pe:
                 logger.error("Failed to generate proposal for intent: %s", pe)
                 response_text = f"Failed to formulate proposal: {pe}"
                 msg_metadata = {"status": "proposal_failed", "error": str(pe)}
-
-            resp_msg = PersonalMessage(
-                id=f"msg-{uuid.uuid4().hex[:12]}",
-                session_id=session_id,
-                workspace_id=workspace_id,
-                role="assistant",
-                content=response_text,
-                tier=intent.tier,
-                steps=steps,
-                action_execution_id=None,
-                mission_id=None,
-                metadata=msg_metadata,
-                created_at=datetime.now(timezone.utc).isoformat(),
-            )
-            self.store.add_message(resp_msg)
-            self.event_hub.publish(
-                workspace_id=workspace_id,
-                event_type="assistant_message",
-                data=resp_msg.to_dict(),
-            )
-            return resp_msg
+                resp_msg = PersonalMessage(
+                    id=f"msg-{uuid.uuid4().hex[:12]}",
+                    session_id=session_id,
+                    workspace_id=workspace_id,
+                    role="assistant",
+                    content=response_text,
+                    tier=intent.tier,
+                    steps=steps,
+                    action_execution_id=None,
+                    mission_id=None,
+                    metadata=msg_metadata,
+                    created_at=datetime.now(timezone.utc).isoformat(),
+                )
+                self.store.add_message(resp_msg)
+                self.event_hub.publish(
+                    workspace_id=workspace_id,
+                    event_type="assistant_message",
+                    data=resp_msg.to_dict(),
+                )
+                return resp_msg
 
         # 7. Tier execution & dispatch via canonical Aether Runtime
+        effective_instruction = prompt
+        effective_args = dict(intent.action_args or {})
+
+        if authority and is_coding_delegation:
+            raw_instr = effective_args.get("instruction") or prompt
+            mandate_instr = generate_executive_mandate(raw_instr)
+            effective_instruction = mandate_instr
+            effective_args["instruction"] = mandate_instr
+            if intel_context is not None and getattr(intel_context, "rendered", ""):
+                # Explicit, bounded handoff of relevant memory/knowledge to the coding agent (background, not orders).
+                handoff = dict(effective_args.get("context_data") or {})
+                handoff["aether_context"] = intel_context.rendered
+                handoff["aether_context_trace"] = intel_context.trace()
+                effective_args["context_data"] = handoff
+
         exec_request = Task(
-            instruction=prompt,
+            instruction=effective_instruction,
             workspace_id=workspace_id,
             session_id=session_id,
             mode=intent.tier.value,
             action_id=intent.action_id,
-            action_args=intent.action_args,
-            context_data={"recent_history": recent_history, "intel_context": intel_context},
+            action_args=effective_args,
+            context_data={"recent_history": recent_history, "intel_context": intel_context, "assembled_context": intel_context},
             authority=authority,
+            # Structured consent: an accepted proposal (user or policy-authorised) produced this authority.
+            # The executor still re-validates it and the workspace policy has the final word.
+            auto_approve=bool(authority is not None and is_coding_delegation),
         )
 
         action_execution_id = None
         mission_id = None
         response_text = ""
         msg_metadata: dict[str, Any] = {}
+        if is_coding_delegation:
+            designated_prov = provider_id or (intent.action_args.get("provider_id") if intent.action_args else None) or "antigravity"
+            msg_metadata["designated_provider_id"] = designated_prov
+            msg_metadata["action_id"] = "coding.delegate"
+            msg_metadata["action_args"] = intent.action_args
 
         if intent.tier == IntentTier.ACT and intent.action_id:
             action_def = self.action_executor.registry.get(intent.action_id) if self.action_executor else None
@@ -1586,11 +2509,31 @@ class PersonalAgentService:
                     title="Awaiting your approval",
                     status="waiting_approval",
                     category="action",
-                    details={"execution_id": action_execution_id},
+                    details={
+                        "execution_id": action_execution_id,
+                        "action_id": intent.action_id,
+                        "args": intent.action_args,
+                        "designated_provider_id": intent.action_args.get("provider_id", "antigravity"),
+                    },
                 )
                 steps.append(step_appr)
                 if intent.action_id == "automations.create_draft" and intent.action_args.get("proposal_summary"):
                     response_text = intent.action_args.get("proposal_summary", "")
+                elif intent.action_id == "coding.delegate":
+                    prov_id = intent.action_args.get("provider_id", "antigravity")
+                    prov_label = "Google Antigravity" if prov_id == "antigravity" else ("Claude Code" if prov_id == "claude_code" else "OpenAI Codex" if prov_id == "codex" else prov_id.capitalize())
+                    proj_p = intent.action_args.get("project_path", "")
+                    instr = intent.action_args.get("instruction", "")
+                    response_text = (
+                        f"Ho predisposto la delega per il coding agent **{prov_label}**.\n\n"
+                        f"- **Agente designato:** `{prov_label}` (`{prov_id}`)\n"
+                        f"- **Target/Repository:** `{proj_p}`\n"
+                        f"- **Attività:** {instr}\n\n"
+                        f"Verifica la richiesta e conferma per procedere con l'esecuzione reale del coding agent."
+                    )
+                    msg_metadata["designated_provider_id"] = prov_id
+                    msg_metadata["action_id"] = "coding.delegate"
+                    msg_metadata["action_args"] = intent.action_args
                 else:
                     response_text = runtime_res.output or (
                         f"I've prepared to **{action_name}** ({intent.action_args.get('title', '')}).\n\n"
@@ -1684,6 +2627,64 @@ class PersonalAgentService:
                         "",
                         out,
                     ]
+                    response_text = "\n".join(lines)
+                elif intent.action_id == "coding.delegate":
+                    res_data = runtime_res.metadata.get("action_result") or {}
+                    provider_id = res_data.get("provider_id", "external")
+                    prov_label = "Google Antigravity" if provider_id == "antigravity" else ("Claude Code" if provider_id == "claude_code" else provider_id.capitalize())
+                    status_badge = str(res_data.get("status", "completed")).upper()
+                    # "success" on the action only means: accepted and not failed. What the user is told depends on the run.
+                    run_terminal = res_data.get("run_terminal", True)       # results from older runs carry no such field
+                    awaiting = res_data.get("awaiting")
+                    if not run_terminal:
+                        steps[-1].status = "running"
+                        steps[-1].title = ("Coding run waiting for your input" if awaiting == "interaction"
+                                           else "Coding run waiting for approval" if awaiting == "approval"
+                                           else "Coding run in progress")
+                        default_summary = ("Il run è in attesa di una tua risposta: non è ancora terminato e nulla è stato verificato."
+                                           if awaiting else "Il run è stato avviato ma non è ancora terminato: nulla è stato verificato.")
+                    elif res_data.get("verified") is False:
+                        default_summary = "Il run è terminato, ma il risultato NON ha superato la verifica indipendente."
+                    else:
+                        default_summary = "Attività di coding completata con successo."
+                    summary_text = res_data.get("summary") or runtime_res.output or default_summary
+                    diff_text = res_data.get("diff", "")
+                    mod_files = res_data.get("modified_files", [])
+                    conv_id = res_data.get("external_task_id")
+
+                    lines = [
+                        f"### 💻 Delegated Coding Execution: `{prov_label}`",
+                        f"- **Status:** `{status_badge}`",
+                    ]
+                    if conv_id:
+                        lines.append(f"- **Conversation ID:** `{conv_id}`")
+                    if "verification_passed" in res_data:
+                        v_pass = res_data["verification_passed"]
+                        v_det = res_data.get("verification_details") or {}
+                        v_icon = "✅" if v_pass else "⚠️"
+                        v_label = "PASSED" if v_pass else "FAILED / REWORK"
+                        lines.append(f"- **Verification Gate:** {v_icon} `{v_label}`")
+                        if v_det.get("reason"):
+                            lines.append(f"  - Nota verifiche: {v_det['reason']}")
+                    if mod_files:
+                        lines.append(f"- **File modificati ({len(mod_files)}):** {', '.join(f'`{f}`' for f in mod_files)}")
+                    lines.append("")
+                    lines.append(summary_text)
+
+                    if diff_text:
+                        lines.append("")
+                        lines.append("#### Diff Verificabile")
+                        if len(diff_text) > 2500:
+                            lines.append("```diff\n" + diff_text[:2500] + "\n... (diff troncato)```")
+                        else:
+                            lines.append("```diff\n" + diff_text + "\n```")
+
+                    if res_data.get("test_output"):
+                        lines.append("")
+                        lines.append("#### Evidenza Test Automatici")
+                        lines.append(f"```text\n{res_data['test_output']}\n```")
+
+                    msg_metadata["coding_result"] = res_data
                     response_text = "\n".join(lines)
                 else:
                     response_text = runtime_res.output or f"Action **{action_name}** executed successfully."
@@ -1780,6 +2781,29 @@ class PersonalAgentService:
                     lines.append("")
                     lines.append("All external entities have been merged into persistent workforce memory and knowledge.")
                     response_text = "\n".join(lines)
+                elif intent.action_id == "coding.status":
+                    res_data = runtime_res.metadata.get("action_result") or {}
+                    st_val = str(res_data.get("status", "unknown")).upper()
+                    prov_id = res_data.get("provider_id", "external")
+                    prov_label = "Google Antigravity" if prov_id == "antigravity" else ("Claude Code" if prov_id == "claude_code" else prov_id.capitalize())
+                    exec_id = res_data.get("execution_id", "")
+                    conv_id = res_data.get("external_task_id", "")
+                    instr = res_data.get("instruction", "")
+                    p_path = res_data.get("project_path", "")
+
+                    lines = [
+                        f"### 💻 Stato Coding Agent: `{prov_label}`",
+                        f"- **Stato:** `{st_val}`",
+                    ]
+                    if exec_id:
+                        lines.append(f"- **Execution ID:** `{exec_id}`")
+                    if conv_id:
+                        lines.append(f"- **Conversation ID:** `{conv_id}`")
+                    if p_path:
+                        lines.append(f"- **Workspace:** `{p_path}`")
+                    if instr:
+                        lines.append(f"- **Attività:** {instr}")
+                    response_text = "\n".join(lines)
                 else:
                     target = intent.action_args.get("filename", "item")
                     response_text = runtime_res.output or f"I've taken care of it! **{target}** has been created in your workspace."
@@ -1796,196 +2820,301 @@ class PersonalAgentService:
                         )
 
         elif intent.tier == IntentTier.DELEGATE:
-            step_del = PersonalStep(
-                id=f"step-{uuid.uuid4().hex[:8]}",
-                title="Orchestrating digital workforce",
-                status="running",
-                category="delegation",
-            )
-            steps.append(step_del)
+            if self._can_use_mission_runtime():
+                # Canonical path: plan -> real mission -> MissionRuntime (per-stage context, gate with evidence,
+                # verified-only memory write-back). The chat reports what the mission actually did.
+                step_del = PersonalStep(
+                    id=f"step-{uuid.uuid4().hex[:8]}", title="Planning the mission", status="running", category="delegation",
+                )
+                steps.append(step_del)
+                topic_title = self._extract_task_topic(prompt)
+                mission_id, plan, plan_note = self._create_planned_mission(
+                    prompt, intent, workspace_id, authority, topic_title, intel_context,
+                )
+                step_del.details = {"mission_id": mission_id, "plan_source": plan.source, "stages": [s_["title"] for s_ in plan.stages]}
+                exec_request.mission_id = mission_id
 
-            topic_title = self._extract_task_topic(prompt)
-            mission_title = f"Task: {topic_title}"
+                def background_workforce_worker(progress_cb: Any) -> dict[str, Any]:
+                    return self._execute_mission_via_runtime(mission_id, authority, progress_cb)
 
-            if self.mission_store:
-                try:
-                    milestones = [
-                        {"title": f"Scope & Context: {topic_title}", "description": f"Gather context and scope objective for {prompt}"},
-                        {"title": f"Workforce Execution: {topic_title}", "description": f"Domain specialists perform structured analysis for {prompt}"},
-                        {"title": f"Synthesize Deliverables", "description": f"Consolidate domain findings and verify deliverables for {prompt}"},
-                    ]
-                    mission = self.mission_store.create_mission(
-                        title=mission_title,
-                        objective=intent.delegation_goal or prompt,
-                        workspace_id=workspace_id,
-                        milestones=milestones,
-                    )
-                    mission_id = mission.id
-                    step_del.details = {"mission_id": mission_id}
-                except Exception as e:
-                    logger.warning(f"Mission creation fallback: {e}")
-                    mission_id = f"msn-{uuid.uuid4().hex[:8]}"
+                task = self.task_manager.submit_task(
+                    workspace_id=workspace_id,
+                    session_id=session_id,
+                    title=f"Mission: {topic_title}",
+                    tier=IntentTier.DELEGATE,
+                    worker_fn=background_workforce_worker,
+                    mission_id=mission_id,
+                    metadata={"prompt": prompt, "entity": topic_title, "plan_source": plan.source},
+                )
+                stage_list = "\n".join(f"{i + 1}. {s_['title']}" for i, s_ in enumerate(plan.stages))
+                response_text = (
+                    f"Ho pianificato la missione **{topic_title}** in {len(plan.stages)} fasi "
+                    f"(piano: {'generato dal modello' if plan.source == 'llm' else 'di riserva — ' + plan_note}):\n\n"
+                    f"{stage_list}\n\nL'esecuzione è partita in background (Mission: `{mission_id}`). "
+                    f"Ti dirò com'è andata davvero, con lo stato di ogni fase e la verifica effettuata."
+                )
             else:
-                mission_id = f"msn-{uuid.uuid4().hex[:8]}"
+                step_del = PersonalStep(
+                    id=f"step-{uuid.uuid4().hex[:8]}",
+                    title="Orchestrating digital workforce",
+                    status="running",
+                    category="delegation",
+                )
+                steps.append(step_del)
 
-            exec_request.mission_id = mission_id
-            exec_request.mode = ExecutionMode.DELEGATE
-            exec_request.authority = authority
+                topic_title = self._extract_task_topic(prompt)
+                mission_title = f"Task: {topic_title}"
 
-            def background_workforce_worker(progress_cb: Any) -> dict[str, Any]:
-                res = self.runtime.execute(exec_request, progress_callback=progress_cb)
-                deliverables = res.deliverables or []
-                deliv_path = deliverables[0]["path"] if deliverables else None
-                deliv_name = deliverables[0]["name"] if deliverables else None
-
-                if self.mission_store and mission_id:
+                if self.mission_store:
                     try:
-                        ms = self.mission_store.list_milestones(mission_id)
-                        for m in ms:
-                            self.mission_store.update_milestone(
-                                m.id,
-                                status=MilestoneStatus.COMPLETED if res.success else MilestoneStatus.FAILED,
-                            )
-                        self.mission_store.update_mission(
-                            mission_id,
-                            status=MissionStatus.COMPLETED if res.success else MissionStatus.FAILED,
+                        milestones = [
+                            {"title": f"Scope & Context: {topic_title}", "description": f"Gather context and scope objective for {prompt}"},
+                            {"title": f"Workforce Execution: {topic_title}", "description": f"Domain specialists perform structured analysis for {prompt}"},
+                            {"title": f"Synthesize Deliverables", "description": f"Consolidate domain findings and verify deliverables for {prompt}"},
+                        ]
+                        mission = self.mission_store.create_mission(
+                            title=mission_title,
+                            objective=intent.delegation_goal or prompt,
+                            workspace_id=workspace_id,
+                            milestones=milestones,
                         )
-                        if deliverables:
-                            for d in deliverables:
-                                if isinstance(d, dict) and d.get("path"):
-                                    deliv_p = Path(d["path"])
-                                    if not deliv_p.is_absolute() and hasattr(self.workspace, "root") and self.workspace.root:
-                                        deliv_p = Path(self.workspace.root) / deliv_p
-                                    is_verified_on_disk = deliv_p.exists() and deliv_p.is_file()
-                                    self.mission_store.add_deliverable(
-                                        mission_id=mission_id,
-                                        deliverable=Deliverable(
-                                            id=f"del_{uuid.uuid4().hex[:12]}",
-                                            mission_id=mission_id,
-                                            execution_id=res.execution_id or "",
-                                            name=d.get("name", "deliverable"),
-                                            path=d.get("path", ""),
-                                            type=d.get("type", "document"),
-                                            status="verified" if is_verified_on_disk else "draft",
-                                        ),
-                                    )
-                    except Exception as me:
-                        logger.warning(f"Failed to synchronize mission after workforce run: {me}")
+                        mission_id = mission.id
+                        step_del.details = {"mission_id": mission_id}
+                    except Exception as e:
+                        # Never continue with an identifier that does not exist in the store.
+                        logger.error("Mission creation failed: %s", e)
+                        step_del.status = "failed"
+                        raise MissionCreationError(f"The mission could not be created: {e}") from e
+                else:
+                    step_del.status = "failed"
+                    raise MissionCreationError("No mission store is available: the delegation was not started.")
 
-                return {
-                    "summary": f"Completed workforce delegation for {topic_title}. Findings compiled into executive deliverable.",
-                    "deliverable_name": deliv_name,
-                    "deliverable_path": deliv_path,
-                    "mission_id": mission_id,
-                    "specialists": res.metadata.get("specialists", []),
-                    "coordinator": res.metadata.get("coordinator", "coordinator"),
-                }
+                exec_request.mission_id = mission_id
+                exec_request.mode = ExecutionMode.DELEGATE
+                exec_request.authority = authority
 
-            task = self.task_manager.submit_task(
-                workspace_id=workspace_id,
-                session_id=session_id,
-                title=f"Analysis: {topic_title}",
-                tier=IntentTier.DELEGATE,
-                worker_fn=background_workforce_worker,
-                mission_id=mission_id,
-                metadata={"prompt": prompt, "entity": topic_title},
-            )
+                def background_workforce_worker(progress_cb: Any) -> dict[str, Any]:
+                    res = self.runtime.execute(exec_request, progress_callback=progress_cb)
+                    deliverables = res.deliverables or []
+                    deliv_path = deliverables[0]["path"] if deliverables else None
+                    deliv_name = deliverables[0]["name"] if deliverables else None
 
-            is_italian = any(w in prompt.lower() for w in ["chi", "cosa", "come", "perché", "perche", "dove", "dimmi", "puoi", "aiutami", "ciao", "buongiorno", "qual è", "quali", "grazie", "stai", "chiedi", "fai", "delega"])
-            if is_italian:
-                response_text = (
-                    f"Ho preso in carico la tua richiesta per **{topic_title}** e ho attivato la Digital Workforce in background.\n\n"
-                    f"Non è necessario attendere qui: riceverai una notifica non appena il deliverable sarà pronto. "
-                    f"Puoi anche seguire l'avanzamento in tempo reale o consultare la sezione **Work** (Mission: `{mission_id}`)."
+                    gate = None
+                    if self.mission_store and mission_id:
+                        try:
+                            gate = self._sync_legacy_mission(mission_id, res, deliverables, topic_title, intent.delegation_goal or prompt)
+                        except Exception as me:
+                            logger.warning(f"Failed to synchronize mission after workforce run: {me}")
+
+                    if not res.success:
+                        outcome_summary = f"The workforce run for {topic_title} did not complete successfully."
+                    elif gate is not None and gate.passed:
+                        outcome_summary = (f"Workforce run for {topic_title} completed; deliverables passed the "
+                                           f"{gate.method} quality gate (semantic content review: "
+                                           f"{'done' if gate.semantically_verified else 'not performed'}).")
+                    else:
+                        outcome_summary = (f"Workforce run for {topic_title} completed but its deliverables are NOT verified: "
+                                           f"{gate.feedback if gate is not None else 'no quality gate result is available.'}")
+                    return {
+                        "summary": outcome_summary,
+                        "verified": bool(gate is not None and gate.passed and res.success),
+                        "deliverable_name": deliv_name,
+                        "deliverable_path": deliv_path,
+                        "mission_id": mission_id,
+                        "specialists": res.metadata.get("specialists", []),
+                        "coordinator": res.metadata.get("coordinator", "coordinator"),
+                    }
+
+                task = self.task_manager.submit_task(
+                    workspace_id=workspace_id,
+                    session_id=session_id,
+                    title=f"Analysis: {topic_title}",
+                    tier=IntentTier.DELEGATE,
+                    worker_fn=background_workforce_worker,
+                    mission_id=mission_id,
+                    metadata={"prompt": prompt, "entity": topic_title},
                 )
-            else:
-                response_text = (
-                    f"I've initiated your request for **{topic_title}** with the digital workforce in the background.\n\n"
-                    f"You don't need to wait here: you'll receive a notification once the report and deliverables are ready. "
-                    f"You can monitor live progress or check the **Work** section (Mission: `{mission_id}`)."
-                )
+
+                is_italian = any(w in prompt.lower() for w in ["chi", "cosa", "come", "perché", "perche", "dove", "dimmi", "puoi", "aiutami", "ciao", "buongiorno", "qual è", "quali", "grazie", "stai", "chiedi", "fai", "delega"])
+                if is_italian:
+                    response_text = (
+                        f"Ho preso in carico la tua richiesta per **{topic_title}** e ho attivato la Digital Workforce in background.\n\n"
+                        f"Non è necessario attendere qui: riceverai una notifica non appena il deliverable sarà pronto. "
+                        f"Puoi anche seguire l'avanzamento in tempo reale o consultare la sezione **Work** (Mission: `{mission_id}`)."
+                    )
+                else:
+                    response_text = (
+                        f"I've initiated your request for **{topic_title}** with the digital workforce in the background.\n\n"
+                        f"You don't need to wait here: you'll receive a notification once the report and deliverables are ready. "
+                        f"You can monitor live progress or check the **Work** section (Mission: `{mission_id}`)."
+                    )
 
 
 
         else:
             # ANSWER tier
             if intent.action_id == "calendar.list_events":
-                execution = self.action_executor.execute(
-                    action_id=intent.action_id,
-                    workspace_id=workspace_id,
-                    input_data=intent.action_args,
-                    auto_approve=True,
-                )
-                from aether.actions.models import ActionExecutionStatus
-                if execution.status == ActionExecutionStatus.SUCCEEDED:
-                    events = execution.output_data.get("events", [])
-                    steps.append(
-                        PersonalStep(
-                            id=f"step-{uuid.uuid4().hex[:8]}",
-                            title="Querying calendar events",
-                            status="completed",
-                            category="action",
-                        )
-                    )
-                    if events:
-                        lines = [f"- **{e.get('title')}** ({e.get('start_time', '')[:16]})" for e in events]
-                        response_text = "Ecco i tuoi prossimi impegni in calendario:\n\n" + "\n".join(lines)
-                    else:
-                        response_text = "Non hai eventi programmati in calendario al momento."
+                if not self.action_executor:
+                    response_text = "Action executor non disponibile."
                 else:
-                    steps.append(
-                        PersonalStep(
-                            id=f"step-{uuid.uuid4().hex[:8]}",
-                            title="Querying calendar events",
-                            status="failed",
-                            category="action",
-                        )
+                    execution = self.action_executor.execute(
+                        action_id=intent.action_id,
+                        workspace_id=workspace_id,
+                        input_data=intent.action_args,
+                        auto_approve=True,
                     )
-                    response_text = f"Errore durante l'accesso al calendario: {execution.error_message or 'Operazione fallita.'}"
+                    from aether.actions.models import ActionExecutionStatus
+                    if execution.status == ActionExecutionStatus.SUCCEEDED:
+                        events = execution.output_data.get("events", [])
+                        steps.append(
+                            PersonalStep(
+                                id=f"step-{uuid.uuid4().hex[:8]}",
+                                title="Querying calendar events",
+                                status="completed",
+                                category="action",
+                            )
+                        )
+                        scope = intent.action_args.get("scope", "upcoming")
+                        target_day_label = intent.action_args.get("target_day")
+                        is_academic = intent.action_args.get("is_academic", False)
+                        user_tz = datetime.now().astimezone().tzinfo
+                        response_text = format_calendar_response(
+                            events=events,
+                            scope=scope,
+                            target_day_label=target_day_label,
+                            is_academic=is_academic,
+                            prompt=prompt,
+                            tzinfo=user_tz,
+                        )
+                    else:
+                        steps.append(
+                            PersonalStep(
+                                id=f"step-{uuid.uuid4().hex[:8]}",
+                                title="Querying calendar events",
+                                status="failed",
+                                category="action",
+                            )
+                        )
+                        response_text = f"Errore durante l'accesso al calendario: {execution.error_message or 'Operazione fallita.'}"
 
             elif intent.action_id == "files.read_document":
-                execution = self.action_executor.execute(
-                    action_id=intent.action_id,
-                    workspace_id=workspace_id,
-                    input_data=intent.action_args,
-                    auto_approve=True,
-                )
-                filename = intent.action_args.get("filename", "file")
-                from aether.actions.models import ActionExecutionStatus
-                if execution.status == ActionExecutionStatus.SUCCEEDED:
-                    steps.append(
-                        PersonalStep(
-                            id=f"step-{uuid.uuid4().hex[:8]}",
-                            title=f"Reading document: {filename}",
-                            status="completed",
-                            category="action",
-                        )
-                    )
-                    if execution.output_data.get("exists"):
-                        content = execution.output_data.get("content", "")
-                        response_text = f"Content of `{filename}`:\n\n```\n{content}\n```"
-                    else:
-                        response_text = f"File `{filename}` was not found in the workspace project directory."
+                if not self.action_executor:
+                    response_text = "Action executor non disponibile."
                 else:
-                    steps.append(
-                        PersonalStep(
-                            id=f"step-{uuid.uuid4().hex[:8]}",
-                            title=f"Reading document: {filename}",
-                            status="failed",
-                            category="action",
-                        )
+                    execution = self.action_executor.execute(
+                        action_id=intent.action_id,
+                        workspace_id=workspace_id,
+                        input_data=intent.action_args,
+                        auto_approve=True,
                     )
-                    response_text = f"Errore durante la lettura del documento `{filename}`: {execution.error_message or 'Operazione fallita.'}"
+                    filename = intent.action_args.get("filename", "file")
+                    from aether.actions.models import ActionExecutionStatus
+                    if execution.status == ActionExecutionStatus.SUCCEEDED:
+                        steps.append(
+                            PersonalStep(
+                                id=f"step-{uuid.uuid4().hex[:8]}",
+                                title=f"Reading document: {filename}",
+                                status="completed",
+                                category="action",
+                            )
+                        )
+                        if execution.output_data.get("exists"):
+                            content = execution.output_data.get("content", "")
+                            response_text = f"Content of `{filename}`:\n\n```\n{content}\n```"
+                        else:
+                            response_text = f"File `{filename}` was not found in the workspace project directory."
+                    else:
+                        steps.append(
+                            PersonalStep(
+                                id=f"step-{uuid.uuid4().hex[:8]}",
+                                title=f"Reading document: {filename}",
+                                status="failed",
+                                category="action",
+                            )
+                        )
+                        response_text = f"Errore durante la lettura del documento `{filename}`: {execution.error_message or 'Operazione fallita.'}"
+
+            elif intent.action_id == "coding.status":
+                if not self.action_executor:
+                    response_text = "Action executor non disponibile."
+                else:
+                    execution = self.action_executor.execute(
+                        action_id=intent.action_id,
+                        workspace_id=workspace_id,
+                        input_data=intent.action_args,
+                        auto_approve=True,
+                    )
+                    from aether.actions.models import ActionExecutionStatus
+                    if execution.status == ActionExecutionStatus.SUCCEEDED:
+                        res_data = execution.output_data or {}
+                        msg_metadata["coding_status"] = res_data
+                        st_val = str(res_data.get("status", "unknown")).upper()
+                        prov_id = res_data.get("provider_id", "external")
+                        prov_label = "Google Antigravity" if prov_id == "antigravity" else ("Claude Code" if prov_id == "claude_code" else prov_id.capitalize())
+                        exec_id = res_data.get("execution_id", "")
+                        conv_id = res_data.get("external_task_id", "")
+                        instr = res_data.get("instruction", "")
+                        p_path = res_data.get("project_path", "")
+
+                        lines = [
+                            f"### 💻 Stato Coding Agent: `{prov_label}`",
+                            f"- **Stato:** `{st_val}`",
+                        ]
+                        if exec_id:
+                            lines.append(f"- **Execution ID:** `{exec_id}`")
+                        if conv_id:
+                            lines.append(f"- **Conversation ID:** `{conv_id}`")
+                        if p_path:
+                            lines.append(f"- **Workspace:** `{p_path}`")
+                        if instr:
+                            lines.append(f"- **Attività:** {instr}")
+
+                        if st_val == "COMPLETED":
+                            try:
+                                res_exec = self.action_executor.execute(
+                                    action_id="coding.results",
+                                    workspace_id=workspace_id,
+                                    input_data={"execution_id": exec_id},
+                                    auto_approve=True,
+                                )
+                                if res_exec.status == ActionExecutionStatus.SUCCEEDED and res_exec.output_data:
+                                    r_data = res_exec.output_data
+                                    msg_metadata["coding_result"] = r_data
+                                    if r_data.get("summary"):
+                                        lines.append("")
+                                        lines.append(r_data["summary"])
+                                    if r_data.get("modified_files"):
+                                        mf = r_data["modified_files"]
+                                        lines.append(f"- **File modificati ({len(mf)}):** {', '.join(f'`{f}`' for f in mf)}")
+                                    if r_data.get("diff"):
+                                        lines.append("")
+                                        lines.append("#### Diff Verificabile")
+                                        d_text = r_data["diff"]
+                                        if len(d_text) > 2500:
+                                            lines.append("```diff\n" + d_text[:2500] + "\n... (diff troncato)```")
+                                        else:
+                                            lines.append("```diff\n" + d_text + "\n```")
+                                    if r_data.get("test_output"):
+                                        lines.append("")
+                                        lines.append("#### Evidenza Test Automatici")
+                                        lines.append(f"```text\n{r_data['test_output']}\n```")
+                            except Exception as r_err:
+                                logger.debug("Could not collect extra results evidence: %s", r_err)
+
+                        response_text = "\n".join(lines)
+                    else:
+                        response_text = f"Impossibile verificare lo stato del coding agent: {execution.error_message or 'Nessun task attivo.'}"
 
             else:
-                steps.append(
-                    PersonalStep(
-                        id=f"step-{uuid.uuid4().hex[:8]}",
-                        title="Synthesizing response",
-                        status="completed",
-                        category="response",
+                if not is_casual_conv:
+                    steps.append(
+                        PersonalStep(
+                            id=f"step-{uuid.uuid4().hex[:8]}",
+                            title="Synthesizing response",
+                            status="completed",
+                            category="response",
+                        )
                     )
-                )
                 p_lower = prompt.lower().strip()
                 is_asking_about_report = any(k in p_lower for k in [
                     "where was that report", "where did we save", "where is that report",
@@ -2019,7 +3148,30 @@ class PersonalAgentService:
                     else:
                         response_text = runtime_res.output or ""
 
+        # Guard against deceptive delegation claims when no actual action execution was created
+        if not action_execution_id and not mission_id:
+            false_delegation_signals = [
+                "inizio immediatamente la delega",
+                "attendo il feedback dell'agente",
+                "l'agente è stato attivato",
+                "ho delegato il lavoro all'agente",
+                "ho avviato la delega",
+                "attendo la risposta dell'agente",
+                "i have delegated",
+                "waiting for the agent",
+                "the agent has been activated",
+            ]
+            resp_low = response_text.lower()
+            if any(sig in resp_low for sig in false_delegation_signals):
+                logger.warning("Sanitized response that falsely claimed active delegation without an action execution.")
+                response_text = (
+                    "Questa richiesta è stata elaborata come informativa e non ha avviato un task di esecuzione reale. "
+                    "Per eseguire direttamente modifiche al codice o avviare una delega con un coding agent, "
+                    "specifica l'azione richiesta o autorizza l'esecuzione sul progetto."
+                )
+
         # 7. Record assistant message
+        msg_metadata["intent_type"] = getattr(intent, "intent_type", "general")
         assistant_msg = PersonalMessage(
             id=f"msg-{uuid.uuid4().hex[:12]}",
             session_id=session_id,
@@ -2043,15 +3195,16 @@ class PersonalAgentService:
         )
 
         # 9. Log Activity
-        self.activity_service.log(
-            workspace_id=workspace_id,
-            title=f"Personal Request: {prompt[:30]}",
-            description=response_text[:100],
-            category=ActivityCategory.WORK,
-            status=ActivityStatus.COMPLETED if intent.tier != IntentTier.ACT else ActivityStatus.PENDING_APPROVAL,
-            link_view="home",
-            link_id=assistant_msg.id,
-        )
+        if self.activity_service:
+            self.activity_service.log(
+                workspace_id=workspace_id,
+                title=f"Personal Request: {prompt[:30]}",
+                description=response_text[:100],
+                category=ActivityCategory.WORK,
+                status=ActivityStatus.COMPLETED if intent.tier != IntentTier.ACT else ActivityStatus.PENDING_APPROVAL,
+                link_view="home",
+                link_id=assistant_msg.id,
+            )
 
         return assistant_msg
 
@@ -2130,7 +3283,17 @@ class PersonalAgentService:
                 loader = PresetLoader()
                 _, preset_dir = loader.get_preset("starter_workforce")
                 team_cfg = TeamLoader.from_yaml(preset_dir / "team.yaml")
-                team = Team(config=team_cfg)
+                # A scaffold, not a user choice: the preset's built-in local provider must not decide anything.
+                team_cfg.default_provider = ""
+                team_cfg.default_model = None
+                for agent_cfg in team_cfg.agents:
+                    agent_cfg.provider = None
+                    agent_cfg.model = None
+                from aether.providers.resolution import resolve_provider as _resolve_without_team
+                team = Team(config=team_cfg, provider=_resolve_without_team(
+                    explicit_provider=getattr(self.runtime, "provider", None), workspace=self.workspace,
+                    provider_manager=getattr(self.runtime, "provider_manager", None),
+                ))
             except Exception as e:
                 logger.warning(f"Could not load fallback starter workforce: {e}")
         return team
@@ -2173,10 +3336,14 @@ class PersonalAgentService:
 
     def get_overview(self, workspace_id: str) -> dict[str, Any]:
         """Provides aggregated overview for the Home Companion hub."""
+        workspace_id = self._canon(workspace_id)
         # 1. Pending approvals
-        pending_executions = self.action_executor.store.list_executions(
-            workspace_id=workspace_id,
-            status=ActionExecutionStatus.WAITING_APPROVAL.value,
+        pending_executions = (
+            self.action_executor.store.list_executions(
+                workspace_id=workspace_id,
+                status=ActionExecutionStatus.WAITING_APPROVAL.value,
+            )
+            if self.action_executor else []
         )
         pending_approvals = []
         for p in pending_executions:
@@ -2208,6 +3375,12 @@ class PersonalAgentService:
                 agent_n = inp.get("agent_name", "external_worker")
                 instr = str(inp.get("instruction", "")).strip()[:50]
                 human = f"Delegate to external agent '{agent_n}': \"{instr}\""
+            elif p.action_id == "coding.delegate":
+                instr = str(inp.get("instruction", "")).strip()[:65]
+                p_path = inp.get("project_path", "")
+                prov = inp.get("provider_id") or "antigravity"
+                prov_lbl = "Google Antigravity" if prov == "antigravity" else ("Claude Code" if prov == "claude_code" else prov.capitalize())
+                human = f"Delega coding a {prov_lbl} su {p_path}: \"{instr}\""
             else:
                 title_item = inp.get("title") or inp.get("name") or inp.get("filename") or ""
                 human = f"{name}: {title_item}" if title_item else name
@@ -2266,6 +3439,17 @@ class PersonalAgentService:
         from aether.personal.context import collect_workspace_deliverables
         deliverables = collect_workspace_deliverables(self.workspace, limit=5)
 
+        # 8. Coding Providers Overview
+        coding_providers: list[dict[str, Any]] = []
+        preferred_coding_provider = "antigravity"
+        try:
+            from aether.coding.orchestrator import get_coding_orchestrator
+            orch = get_coding_orchestrator()
+            coding_providers = [p.to_dict() for p in orch.list_providers_status(self.workspace)]
+            preferred_coding_provider = orch.get_preferred_provider_id(self.workspace)
+        except Exception as e:
+            logger.debug(f"Could not load coding providers for overview: {e}")
+
         return {
             "pending_approvals": pending_approvals,
             "recent_activities": recent_activities,
@@ -2276,6 +3460,8 @@ class PersonalAgentService:
             "unread_notifications": unread_notifications,
             "recent_deliverables": [d.to_dict() for d in deliverables],
             "deliverables_count": len(deliverables),
+            "coding_providers": coding_providers,
+            "preferred_coding_provider": preferred_coding_provider,
         }
 
     def capture_context(self, timeout_seconds: float = 1.5) -> dict[str, Any]:
@@ -2286,6 +3472,7 @@ class PersonalAgentService:
 
     def list_deliverables(self, workspace_id: str, limit: int = 25) -> list[dict[str, Any]]:
         """Lists accessible deliverables and output artifacts in the workspace."""
+        workspace_id = self._canon(workspace_id)
         from aether.personal.context import collect_workspace_deliverables
         deliverables = collect_workspace_deliverables(self.workspace, limit=limit)
         return [d.to_dict() for d in deliverables]
@@ -2298,6 +3485,7 @@ class PersonalAgentService:
         session_id: str | None = None,
     ) -> dict[str, Any]:
         """Ingests a file dropped into the Companion into the workspace inbox and attaches context."""
+        workspace_id = self._canon(workspace_id)
         from aether.personal.context import handle_drag_and_drop_file
         res = handle_drag_and_drop_file(self.workspace, filename, content, session_id=session_id)
         return res
@@ -2309,6 +3497,7 @@ class PersonalAgentService:
         context: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
         """Dispatches an instant companion quick action across the unified system."""
+        workspace_id = self._canon(workspace_id)
         context = context or {}
         if quick_action_id == "capture_screen_context":
             ctx = self.capture_context()
@@ -2326,10 +3515,13 @@ class PersonalAgentService:
 
         elif quick_action_id == "run_quick_audit":
             # Delegate fast code/system check action
+            if not self.action_executor:
+                return {"action": "run_quick_audit", "status": "failed",
+                        "error": "Action executor non disponibile.", "telemetry": {}}
             exec_res = self.action_executor.execute("fabric.get_telemetry", workspace_id, {})
             return {
                 "action": "run_quick_audit",
-                "status": "completed",
+                "status": "completed" if getattr(exec_res, "status", None) == ActionExecutionStatus.SUCCEEDED else "failed",
                 "telemetry": exec_res.output_data.get("telemetry") if hasattr(exec_res, "output_data") else {},
             }
 

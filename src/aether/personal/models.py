@@ -35,6 +35,7 @@ class UserIntent:
     action_args: dict[str, Any] = field(default_factory=dict)
     delegation_goal: str | None = None
     confidence: float = 1.0
+    intent_type: str = "general"
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -45,6 +46,7 @@ class UserIntent:
             "action_args": self.action_args,
             "delegation_goal": self.delegation_goal,
             "confidence": self.confidence,
+            "intent_type": self.intent_type,
         }
 
 

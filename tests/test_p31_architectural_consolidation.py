@@ -468,7 +468,7 @@ async def test_action_and_mission_approval_routes_delegate_to_canonical():
         p_store = ws.personal_store
         p_store.save_intent_request(IntentRequest(
             id="intent-p31",
-            workspace_id="p31_ws",
+            workspace_id=ws.id,
             raw_input="Team Sync",
             source_surface="test",
             created_at=datetime.now(timezone.utc).isoformat(),
@@ -476,7 +476,7 @@ async def test_action_and_mission_approval_routes_delegate_to_canonical():
         prop = MissionProposal(
             id="prop-p31",
             intent_id="intent-p31",
-            workspace_id="p31_ws",
+            workspace_id=ws.id,
             title="Team Sync",
             objective="Create calendar event",
             why="Testing approval",
@@ -486,12 +486,12 @@ async def test_action_and_mission_approval_routes_delegate_to_canonical():
             status=ProposalStatus.READY_FOR_ACCEPTANCE,
         )
         p_store.save_proposal(prop)
-        _, auth = ws.personal.accept_proposal("prop-p31", "p31_ws")
+        _, auth = ws.personal.accept_proposal("prop-p31", ws.id)
 
         # 1. Action execution delegation
         execution = ws.actions.execute(
             action_id="calendar.create_event",
-            workspace_id="p31_ws",
+            workspace_id=ws.id,
             input_data={"title": "Team Sync", "start_time": "2026-10-10T12:00:00Z"},
             auto_approve=False,
             authority=auth,

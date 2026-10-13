@@ -38,8 +38,9 @@ function TeamBuilder({
 }) {
   const { t } = useTranslation();
   const [name, setName] = useState(initialTeam?.name || '');
-  const [provider, setProvider] = useState(initialTeam?.default_provider || 'ollama');
-  const [model, setModel] = useState(initialTeam?.default_model || 'qwen3.5:9b');
+  // '' = not chosen. A new team starts from the workspace's EXPLICIT setting (loaded below), never from a hidden default.
+  const [provider, setProvider] = useState(initialTeam?.default_provider || '');
+  const [model, setModel] = useState(initialTeam?.default_model || '');
   const [teamIcon, setTeamIcon] = useState(initialTeam?.icon || 'Bot');
   const [teamColor, setTeamColor] = useState(initialTeam?.color || 'violet');
   const [agents, setAgents] = useState<TeamAgent[]>([
@@ -54,10 +55,24 @@ function TeamBuilder({
   const showToast = useContext(ToastContext);
 
   useEffect(() => {
+    if (initialTeam) return;
+    // New team: start from what the workspace has EXPLICITLY configured (nothing if it has no provider).
+    fetch(apiUrl('/api/settings/provider'))
+      .then(res => (res.ok ? res.json() : {}))
+      .then((data: any) => {
+        if (data?.provider) {
+          setProvider((prev: string) => prev || data.provider);
+          if (data?.model) setModel((prev: string) => prev || data.model);
+        }
+      })
+      .catch(err => console.debug('Failed to load settings provider:', err));
+  }, [initialTeam]);
+
+  useEffect(() => {
     if (!initialTeam) return;
     setName(initialTeam.name || '');
-    setProvider(initialTeam.default_provider || 'ollama');
-    setModel(initialTeam.default_model || 'qwen3.5:9b');
+    setProvider(initialTeam.default_provider || '');
+    setModel(initialTeam.default_model || '');
     setTeamIcon(initialTeam.icon || 'Bot');
     setTeamColor(initialTeam.color || 'violet');
     const loadedAgents = (initialTeam.agents || []).map((agent: any) => ({
@@ -109,6 +124,10 @@ function TeamBuilder({
 
   const handleSaveClick = () => {
     if (!name.trim() || agents.some(agent => !agent.name.trim() || !agent.role.trim())) return;
+    if (!provider || !model.trim()) {
+      showToast('Choose a provider and a model for the team before saving.', 'error');
+      return;
+    }
     const modelChanged = initialTeam && model !== initialTeam.default_model;
     const hasAgentOverrides = agents.some(a => a.model !== null && a.model !== undefined && a.model !== '');
     if (modelChanged && hasAgentOverrides) {
@@ -260,11 +279,13 @@ function TeamBuilder({
             <div className="form-row" style={{ marginBottom: 0 }}>
               <div className="form-group" style={{ marginBottom: 0 }}>
                 <label className="form-label">{t('provider')}</label>
-                <select className="form-select" value={provider} onChange={event => setProvider(event.target.value)}>
+                <select className="form-select" value={provider} onChange={event => { setProvider(event.target.value); setModel(''); }}>
+                  <option value="">— Scegli un provider —</option>
                   <option value="ollama">Ollama (Locale)</option>
                   <option value="openai">OpenAI</option>
                   <option value="anthropic">Anthropic</option>
                   <option value="gemini">Google Gemini</option>
+                  <option value="groq">Groq</option>
                   <option value="mock">Mock</option>
                 </select>
               </div>
@@ -273,7 +294,7 @@ function TeamBuilder({
                   provider={provider}
                   value={model}
                   teamDefaultModel={model}
-                  onChange={newModel => setModel(newModel || 'qwen3.5:9b')}
+                  onChange={newModel => setModel(newModel || '')}
                   isTeamLevel={true}
                   label={t('model')}
                 />

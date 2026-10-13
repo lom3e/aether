@@ -22,6 +22,8 @@ from aether.core.secrets import MemorySecretStore, set_secret_store
 
 # Enable test providers by default for test execution
 os.environ.setdefault("AETHER_ENABLE_TEST_PROVIDERS", "1")
+# Sensitive routes fail closed without a session token; tests opt in to loopback-only dev mode explicitly.
+os.environ.setdefault("AETHER_INSECURE_LOCAL_DEV", "1")
 
 
 @pytest.fixture(autouse=True)
@@ -212,7 +214,9 @@ def make_test_accepted_authority(
     import uuid
     from aether.planning.contracts import IntentRequest, MissionProposal, ProposalStatus
 
-    ws_id = getattr(workspace, "name", None) or getattr(workspace, "id", None) or "test_ws"
+    # Canonical key: the immutable workspace id (the display name is only an alias).
+    _id, _name = getattr(workspace, "id", None), getattr(workspace, "name", None)
+    ws_id = _id if isinstance(_id, str) and _id else (_name if isinstance(_name, str) and _name else "test_ws")
     p_store = getattr(workspace, "personal_store", None)
     if not p_store:
         from aether.personal.store import PersonalStore

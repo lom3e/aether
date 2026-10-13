@@ -114,7 +114,7 @@ def test_compile_to_mission(temp_ws: Workspace):
     ]
     wf = Workflow(
         id="wf_pr_review",
-        workspace_id=temp_ws.name,
+        workspace_id=temp_ws.id,
         name="Automated PR Quality Review",
         description="Scans code, executes tests, gates via staff approval and emits report",
         graph=WorkflowGraph(nodes=nodes, edges=edges),
@@ -145,7 +145,7 @@ def test_compile_to_automation(temp_ws: Workspace):
     ]
     wf = Workflow(
         id="wf_daily_sync",
-        workspace_id=temp_ws.name,
+        workspace_id=temp_ws.id,
         name="Daily Data Sync",
         description="Syncs daily records into knowledge store",
         graph=WorkflowGraph(nodes=nodes, edges=edges),
@@ -172,7 +172,7 @@ def test_workflow_store_sqlite_crud(temp_ws: Workspace):
     assert Path(temp_ws.workflows_db_path).exists()
 
     # Initial empty list
-    wfs = store.list_workflows(temp_ws.name)
+    wfs = store.list_workflows(temp_ws.id)
     assert len(wfs) == 0
 
     # Save workflow
@@ -183,7 +183,7 @@ def test_workflow_store_sqlite_crud(temp_ws: Workspace):
     edges = [WorkflowEdge(id="e1", source="t1", target="a1")]
     wf = Workflow(
         id="wf_sample_crud",
-        workspace_id=temp_ws.name,
+        workspace_id=temp_ws.id,
         name="Sample CRUD Workflow",
         description="Testing persistence",
         graph=WorkflowGraph(nodes=nodes, edges=edges),
@@ -193,7 +193,7 @@ def test_workflow_store_sqlite_crud(temp_ws: Workspace):
     assert saved.id == "wf_sample_crud"
 
     # Retrieve
-    loaded = store.get_workflow("wf_sample_crud", workspace_id=temp_ws.name)
+    loaded = store.get_workflow("wf_sample_crud", workspace_id=temp_ws.id)
     assert loaded is not None
     assert loaded.name == "Sample CRUD Workflow"
     assert len(loaded.graph.nodes) == 2
@@ -201,15 +201,15 @@ def test_workflow_store_sqlite_crud(temp_ws: Workspace):
     assert loaded.graph.edges[0].target == "a1"
 
     # List
-    all_wfs = store.list_workflows(temp_ws.name)
+    all_wfs = store.list_workflows(temp_ws.id)
     assert len(all_wfs) == 1
     assert all_wfs[0].id == "wf_sample_crud"
 
     # Delete
-    deleted = store.delete_workflow("wf_sample_crud", workspace_id=temp_ws.name)
+    deleted = store.delete_workflow("wf_sample_crud", workspace_id=temp_ws.id)
     assert deleted is True
-    assert store.get_workflow("wf_sample_crud", workspace_id=temp_ws.name) is None
-    assert len(store.list_workflows(temp_ws.name)) == 0
+    assert store.get_workflow("wf_sample_crud", workspace_id=temp_ws.id) is None
+    assert len(store.list_workflows(temp_ws.id)) == 0
 
 
 # ---------------------------------------------------------------------------
@@ -231,7 +231,7 @@ def test_action_executor_workflow_actions(temp_ws: Workspace, accepted_authority
     _, auth = accepted_authority_factory(temp_ws, title="Workflow Actions")
 
     # 1. workflow.list when empty
-    res_list = executor.execute("workflow.list", temp_ws.name, {})
+    res_list = executor.execute("workflow.list", temp_ws.id, {})
     assert res_list.status == ActionExecutionStatus.SUCCESS
     assert res_list.output_data["count"] == 0
 
@@ -247,7 +247,7 @@ def test_action_executor_workflow_actions(temp_ws: Workspace, accepted_authority
     ]
     wf = Workflow(
         id="wf_audit_pipeline",
-        workspace_id=temp_ws.name,
+        workspace_id=temp_ws.id,
         name="Audit Pipeline",
         description="Auditing pipeline",
         graph=WorkflowGraph(nodes=nodes, edges=edges),
@@ -255,19 +255,19 @@ def test_action_executor_workflow_actions(temp_ws: Workspace, accepted_authority
     temp_ws.workflows.save_workflow(wf)
 
     # 2. workflow.list with items
-    res_list_2 = executor.execute("workflow.list", temp_ws.name, {})
+    res_list_2 = executor.execute("workflow.list", temp_ws.id, {})
     assert res_list_2.status == ActionExecutionStatus.SUCCESS
     assert res_list_2.output_data["count"] == 1
     assert res_list_2.output_data["workflows"][0]["id"] == "wf_audit_pipeline"
 
     # 3. workflow.compile
-    res_compile = executor.execute("workflow.compile", temp_ws.name, {"workflow_id": "wf_audit_pipeline", "target_type": "mission"}, auto_approve=True, authority=auth)
+    res_compile = executor.execute("workflow.compile", temp_ws.id, {"workflow_id": "wf_audit_pipeline", "target_type": "mission"}, auto_approve=True, authority=auth)
     assert res_compile.status == ActionExecutionStatus.SUCCESS
     assert res_compile.output_data["workflow_id"] == "wf_audit_pipeline"
     assert "compiled_id" in res_compile.output_data
 
     # 4. workflow.run
-    res_run = executor.execute("workflow.run", temp_ws.name, {"workflow_id": "wf_audit_pipeline"}, auto_approve=True, authority=auth)
+    res_run = executor.execute("workflow.run", temp_ws.id, {"workflow_id": "wf_audit_pipeline"}, auto_approve=True, authority=auth)
     assert res_run.status == ActionExecutionStatus.SUCCESS
     assert res_run.output_data["status"] == "ready"
     assert "mission_id" in res_run.output_data
@@ -311,13 +311,13 @@ async def test_fastapi_workflow_routes(temp_ws: Workspace):
     mock_req.app.state.workspace = temp_ws
 
     # 1. GET /api/workflows empty
-    items = await list_workflows_route(mock_req, workspace_id=temp_ws.name)
+    items = await list_workflows_route(mock_req, workspace_id=temp_ws.id)
     assert items == []
 
     # 2. POST /api/workflows
     payload = CreateWorkflowPayload(
         id="wf_rest_test",
-        workspace_id=temp_ws.name,
+        workspace_id=temp_ws.id,
         name="REST Test Workflow",
         description="Created via API",
         graph={
@@ -335,12 +335,12 @@ async def test_fastapi_workflow_routes(temp_ws: Workspace):
     assert created["name"] == "REST Test Workflow"
 
     # 3. GET /api/workflows/{id}
-    loaded = await get_workflow_route(mock_req, workflow_id="wf_rest_test", workspace_id=temp_ws.name)
+    loaded = await get_workflow_route(mock_req, workflow_id="wf_rest_test", workspace_id=temp_ws.id)
     assert loaded["id"] == "wf_rest_test"
 
     # 4. POST /api/workflows/{id}/compile
     compile_payload = CompileWorkflowPayload(
-        workspace_id=temp_ws.name,
+        workspace_id=temp_ws.id,
         target_type="mission",
     )
     compile_res = await compile_workflow_route(mock_req, workflow_id="wf_rest_test", payload=compile_payload)
@@ -349,7 +349,7 @@ async def test_fastapi_workflow_routes(temp_ws: Workspace):
 
     # 5. POST /api/workflows/{id}/run
     run_payload = CompileWorkflowPayload(
-        workspace_id=temp_ws.name,
+        workspace_id=temp_ws.id,
         target_type="mission",
     )
     run_res = await run_workflow_route(mock_req, workflow_id="wf_rest_test", payload=run_payload)
@@ -357,9 +357,9 @@ async def test_fastapi_workflow_routes(temp_ws: Workspace):
     assert run_res["status"] == "ready"
 
     # 6. DELETE /api/workflows/{id}
-    del_res = await delete_workflow_route(mock_req, workflow_id="wf_rest_test", workspace_id=temp_ws.name)
+    del_res = await delete_workflow_route(mock_req, workflow_id="wf_rest_test", workspace_id=temp_ws.id)
     assert del_res["status"] == "deleted"
 
     # 7. GET /api/workflows after delete
-    items_after = await list_workflows_route(mock_req, workspace_id=temp_ws.name)
+    items_after = await list_workflows_route(mock_req, workspace_id=temp_ws.id)
     assert len(items_after) == 0

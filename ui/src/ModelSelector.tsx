@@ -1,20 +1,27 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import { apiUrl } from './api';
 import { useTranslation } from './i18n';
-import { Sparkles, Sliders } from 'lucide-react';
+import { Sparkles, Sliders, RotateCw } from 'lucide-react';
 
 export const CURATED_PROVIDER_MODELS: Record<string, string[]> = {
   ollama: ['qwen3.5:9b', 'qwen3.5:14b', 'qwen3.5:0.8b', 'llama3.3:70b', 'llama3.2:3b', 'deepseek-r1:8b', 'mistral', 'phi4'],
   openai: ['gpt-4o', 'gpt-4o-mini', 'o3-mini', 'gpt-4-turbo'],
   anthropic: ['claude-3-5-sonnet-20241022', 'claude-3-5-haiku-20241022', 'claude-3-opus-20240229'],
   gemini: ['gemini-2.0-flash', 'gemini-1.5-pro', 'gemini-1.5-flash'],
+  groq: ['llama-3.3-70b-versatile', 'llama-3.1-8b-instant', 'mixtral-8x7b-32768', 'gemma2-9b-it'],
 };
+
+export const FEATURED_GROQ_MODELS = [
+  'llama-3.3-70b-versatile',
+  'llama-3.1-8b-instant',
+];
 
 export interface ModelSelectorProps {
   provider: string;
   value: string | null;
   teamDefaultModel: string;
   onChange: (model: string | null) => void;
+  apiKey?: string;
   isTeamLevel?: boolean;
   disabled?: boolean;
   className?: string;
@@ -27,6 +34,7 @@ export function ModelSelector({
   value,
   teamDefaultModel,
   onChange,
+  apiKey,
   isTeamLevel = false,
   disabled = false,
   className = '',
@@ -37,32 +45,65 @@ export function ModelSelector({
   const [availableModels, setAvailableModels] = useState<string[]>(
     CURATED_PROVIDER_MODELS[provider] || []
   );
+  const [loadingModels, setLoadingModels] = useState(false);
   const [customInputMode, setCustomInputMode] = useState(false);
   const [customValue, setCustomValue] = useState('');
 
-  useEffect(() => {
-    let isMounted = true;
-    const prov = provider || 'ollama';
-    fetch(apiUrl(`/api/settings/provider/models?provider=${encodeURIComponent(prov)}`))
-      .then(res => res.json())
+  const [modelsSource, setModelsSource] = useState<string>('curated_local');
+  const [modelsError, setModelsError] = useState<string | null>(null);
+
+  const loadModels = useCallback((prov: string, key?: string) => {
+    setLoadingModels(true);
+    setModelsError(null);
+    // An API key is NEVER placed in the URL (it would leak into logs and browser history): POST it in the body.
+    const hasKey = !!(key && key.trim());
+    const request = hasKey
+      ? fetch(apiUrl('/api/settings/provider/models'), {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ provider: prov, api_key: (key as string).trim() }),
+        })
+      : fetch(apiUrl(`/api/settings/provider/models?provider=${encodeURIComponent(prov)}`));
+
+    request
+      .then(async res => {
+        const data = await res.json().catch(() => ({}));
+        if (!res.ok) {
+          // A real failure is shown, not hidden behind a default list that looks live.
+          throw new Error(typeof data.detail === 'string' ? data.detail : `HTTP ${res.status}`);
+        }
+        return data;
+      })
       .then(data => {
-        if (!isMounted) return;
         if (data.models && Array.isArray(data.models) && data.models.length > 0) {
           setAvailableModels(data.models);
+          setModelsSource(data.source || (data.live ? 'live' : 'curated_local'));
         } else {
-          setAvailableModels(CURATED_PROVIDER_MODELS[prov] || []);
+          setAvailableModels(data.live ? [] : (CURATED_PROVIDER_MODELS[prov] || []));
+          setModelsSource(data.live ? 'live' : 'curated_local');
         }
       })
-      .catch(() => {
-        if (isMounted) {
-          setAvailableModels(CURATED_PROVIDER_MODELS[prov] || []);
-        }
+      .catch((err: Error) => {
+        setAvailableModels(CURATED_PROVIDER_MODELS[prov] || []);
+        setModelsSource('curated_local');
+        setModelsError(err.message);
+      })
+      .finally(() => {
+        setLoadingModels(false);
       });
+  }, []);
 
-    return () => {
-      isMounted = false;
-    };
-  }, [provider]);
+  useEffect(() => {
+    // No provider chosen: there is nothing to list, and nothing may be contacted (never assume a local one).
+    if (!provider) {
+      setAvailableModels([]);
+      setModelsSource('curated_local');
+      setModelsError(null);
+      setLoadingModels(false);
+      return;
+    }
+    loadModels(provider, apiKey);
+  }, [provider, apiKey, loadModels]);
 
   // Determine effective value
   const isInheriting = !isTeamLevel && (value === null || value === undefined || value === '');
@@ -71,6 +112,10 @@ export function ModelSelector({
   if (value && !isInheriting && !displayList.includes(value)) {
     displayList.push(value);
   }
+
+  const isGroq = provider === 'groq';
+  const groqFeatured = isGroq ? displayList.filter(m => FEATURED_GROQ_MODELS.includes(m)) : [];
+  const groqOthers = isGroq ? displayList.filter(m => !FEATURED_GROQ_MODELS.includes(m)) : [];
 
   const handleSelectChange = (e: React.ChangeEvent<HTMLSelectElement>) => {
     const val = e.target.value;
@@ -90,7 +135,7 @@ export function ModelSelector({
     const trimmed = customValue.trim();
     if (!trimmed) {
       setCustomInputMode(false);
-      onChange(isTeamLevel ? availableModels[0] || 'qwen3.5:9b' : null);
+      onChange(null);                         // emptied: no hidden default model, the caller asks for a real choice
     } else {
       onChange(trimmed);
     }
@@ -99,8 +144,31 @@ export function ModelSelector({
   return (
     <div className={`model-selector-container ${className}`} style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
       {label && (
-        <label className="form-label" style={{ marginBottom: 0, display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
-          <span>{label}</span>
+        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '2px' }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+            <label className="form-label" style={{ marginBottom: 0, fontWeight: 600, fontSize: '13px' }}>
+              {label}
+            </label>
+            <button
+              type="button"
+              className="btn btn-ghost"
+              style={{ padding: '2px 6px', height: 'auto', display: 'inline-flex', alignItems: 'center', gap: '4px', fontSize: '11px', color: 'hsl(var(--muted-fg))' }}
+              onClick={() => provider && loadModels(provider, apiKey)}
+              disabled={loadingModels}
+              title={loadingModels ? 'Caricamento modelli in corso...' : 'Ricarica lista modelli live'}
+            >
+              <RotateCw size={12} className={loadingModels ? 'animate-spin' : ''} />
+              {loadingModels ? 'Aggiornamento...' : 'Ricarica'}
+            </button>
+            {!loadingModels && modelsSource !== 'live' && (
+              <span
+                title={modelsError || 'Elenco predefinito: non verificato con il provider'}
+                style={{ fontSize: '10px', color: 'hsl(var(--muted-fg))' }}
+              >
+                {modelsError ? 'elenco non verificato: ' + modelsError.slice(0, 60) : 'elenco predefinito (non verificato)'}
+              </span>
+            )}
+          </div>
           {showBadge && !isTeamLevel && (
             <span
               style={{
@@ -129,7 +197,7 @@ export function ModelSelector({
               )}
             </span>
           )}
-        </label>
+        </div>
       )}
 
       {customInputMode ? (
@@ -138,7 +206,7 @@ export function ModelSelector({
             type="text"
             className="form-input"
             autoFocus
-            placeholder="e.g. qwen3.5:14b or custom-model"
+            placeholder={isGroq ? "e.g. llama-3.3-70b-versatile or custom-model" : "e.g. qwen3.5:14b or custom-model"}
             value={customValue}
             onChange={e => setCustomValue(e.target.value)}
             onBlur={handleCustomBlur}
@@ -169,21 +237,53 @@ export function ModelSelector({
             borderColor: !isInheriting && !isTeamLevel ? 'hsl(var(--primary) / 0.5)' : undefined,
           }}
         >
+          {isTeamLevel && (
+            // Without this the browser shows the first model as if it were selected while nothing is chosen.
+            <option value="" disabled>{provider ? '— Scegli un modello —' : '— Scegli prima un provider —'}</option>
+          )}
           {!isTeamLevel && (
             <option value="__inherit__">
               ✨ {t('inheritFromTeam') || 'Eredita dal Team'} ({teamDefaultModel || 'Default'})
             </option>
           )}
 
-          <optgroup label="Modelli Disponibili">
-            {displayList.map(m => (
-              <option key={m} value={m}>
-                {m} {m === teamDefaultModel && !isTeamLevel ? ' (Uguale al Team)' : ''}
-              </option>
-            ))}
-          </optgroup>
+          {isGroq ? (
+            <>
+              {groqFeatured.length > 0 && (
+                <optgroup label="Modelli Groq in Evidenza">
+                  {groqFeatured.map(m => (
+                    <option key={m} value={m}>
+                      {m === 'llama-3.3-70b-versatile'
+                        ? '⭐ llama-3.3-70b-versatile (Consigliato / Versatile)'
+                        : m === 'llama-3.1-8b-instant'
+                        ? '⚡ llama-3.1-8b-instant (Ultra-Veloce)'
+                        : m}
+                      {m === teamDefaultModel && !isTeamLevel ? ' (Uguale al Team)' : ''}
+                    </option>
+                  ))}
+                </optgroup>
+              )}
+              {groqOthers.length > 0 && (
+                <optgroup label="Altri Modelli Groq Disponibili">
+                  {groqOthers.map(m => (
+                    <option key={m} value={m}>
+                      {m} {m === teamDefaultModel && !isTeamLevel ? ' (Uguale al Team)' : ''}
+                    </option>
+                  ))}
+                </optgroup>
+              )}
+            </>
+          ) : (
+            <optgroup label="Modelli Disponibili">
+              {displayList.map(m => (
+                <option key={m} value={m}>
+                  {m} {m === teamDefaultModel && !isTeamLevel ? ' (Uguale al Team)' : ''}
+                </option>
+              ))}
+            </optgroup>
+          )}
 
-          <option value="__custom__">➕ Altro modello personalizzato...</option>
+          <option value="__custom__">➕ Altro modello personalizzato (digita o incolla)...</option>
         </select>
       )}
 

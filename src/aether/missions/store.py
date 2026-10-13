@@ -1898,7 +1898,8 @@ class MissionStore:
                        duration_seconds, error, output, metadata, created_at, updated_at
                 FROM mission_execution_milestones
                 WHERE execution_id = ?
-                ORDER BY created_at ASC
+                ORDER BY COALESCE((SELECT order_idx FROM mission_milestones mm WHERE mm.id = mission_execution_milestones.milestone_id), 0),
+                         created_at ASC
                 """,
                 (execution_id,),
             ).fetchall()

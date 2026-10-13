@@ -81,8 +81,9 @@ export function AutoArchitectModal({ isOpen, onClose, onSuccess }: AutoArchitect
   const [expandedAgentIndexes, setExpandedAgentIndexes] = useState<number[]>([]);
   const [openAgentOverrides, setOpenAgentOverrides] = useState<Record<number, boolean>>({});
 
-  const [workspaceProvider, setWorkspaceProvider] = useState('ollama');
-  const [workspaceModel, setWorkspaceModel] = useState('qwen3.5:9b');
+  // '' = the workspace has no provider chosen; the architect needs one, so we ask instead of assuming.
+  const [workspaceProvider, setWorkspaceProvider] = useState('');
+  const [workspaceModel, setWorkspaceModel] = useState('');
 
   useEffect(() => {
     fetch(apiUrl('/api/settings/provider'))
@@ -121,6 +122,11 @@ export function AutoArchitectModal({ isOpen, onClose, onSuccess }: AutoArchitect
       return;
     }
 
+    if (!workspaceProvider || !workspaceModel) {
+      showToast('Configura prima un provider e un modello nelle Impostazioni: Aether non ne sceglie uno per te.', 'error');
+      return;
+    }
+
     setStep('generating');
     try {
       const res = await fetch(apiUrl('/api/architect/workforce'), {
@@ -139,8 +145,8 @@ export function AutoArchitectModal({ isOpen, onClose, onSuccess }: AutoArchitect
       }
 
       const data: ArchitectBlueprint = await res.json();
-      data.default_provider = data.default_provider || workspaceProvider || 'ollama';
-      data.default_model = data.default_model || workspaceModel || 'qwen3.5:9b';
+      data.default_provider = data.default_provider || workspaceProvider;
+      data.default_model = data.default_model || workspaceModel;
       data.agents = (data.agents || []).map(a => ({
         ...a,
         provider: a.provider || null,
@@ -201,6 +207,11 @@ export function AutoArchitectModal({ isOpen, onClose, onSuccess }: AutoArchitect
       return;
     }
 
+    if (!(blueprint.default_provider || workspaceProvider) || !(blueprint.default_model || workspaceModel)) {
+      showToast('Scegli un provider e un modello per la squadra prima di applicarla.', 'error');
+      return;
+    }
+
     setIsApplying(true);
     try {
       const res = await fetch(apiUrl('/api/architect/apply'), {
@@ -211,8 +222,8 @@ export function AutoArchitectModal({ isOpen, onClose, onSuccess }: AutoArchitect
           description: blueprint.description,
           icon: blueprint.icon,
           color: blueprint.color,
-          default_provider: blueprint.default_provider || workspaceProvider || 'ollama',
-          default_model: blueprint.default_model || workspaceModel || 'qwen3.5:9b',
+          default_provider: blueprint.default_provider || workspaceProvider,
+          default_model: blueprint.default_model || workspaceModel,
           agents: blueprint.agents.map(a => ({
             name: a.name,
             role: a.role,
@@ -561,12 +572,14 @@ export function AutoArchitectModal({ isOpen, onClose, onSuccess }: AutoArchitect
                     <select
                       className="form-select"
                       value={blueprint.default_provider || workspaceProvider}
-                      onChange={e => setBlueprint({ ...blueprint, default_provider: e.target.value })}
+                      onChange={e => setBlueprint({ ...blueprint, default_provider: e.target.value, default_model: '' })}
                     >
+                      <option value="">— Scegli un provider —</option>
                       <option value="ollama">Ollama (Locale)</option>
                       <option value="openai">OpenAI</option>
                       <option value="anthropic">Anthropic</option>
                       <option value="gemini">Google Gemini</option>
+                      <option value="groq">Groq</option>
                       <option value="mock">Mock</option>
                     </select>
                   </div>
@@ -575,7 +588,7 @@ export function AutoArchitectModal({ isOpen, onClose, onSuccess }: AutoArchitect
                       provider={blueprint.default_provider || workspaceProvider}
                       value={blueprint.default_model || workspaceModel}
                       teamDefaultModel={blueprint.default_model || workspaceModel}
-                      onChange={newModel => setBlueprint({ ...blueprint, default_model: newModel || 'qwen3.5:9b' })}
+                      onChange={newModel => setBlueprint({ ...blueprint, default_model: newModel || '' })}
                       isTeamLevel={true}
                       label={t('model')}
                     />
