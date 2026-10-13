@@ -6992,6 +6992,43 @@ def _mark_approval_notification_done(ws: Any, *target_ids: str) -> None:
         logger.debug("Failed to auto-mark approval notification as read: %s", e)
 
 
+def describe_action_decision_outcome(decision: str, status_before: str, execution: Any) -> tuple[bool, str, str]:
+    """
+    Truthful (success, status, message) for an approve/reject answer, derived from the execution state AFTER the call
+    (the state read before it can be stale: a concurrent request may already be running the action).
+
+    ``success`` is False when the action did not end in the state the user asked for (it failed, was refused...).
+    Statuses: approved | already_completed | in_progress | rejected | failed | not_executed.
+    """
+    post = str(getattr(execution.status, "value", execution.status)).lower()
+    before = (status_before or "").lower()
+    if decision == "reject":
+        if post == "rejected":
+            if before == "rejected":
+                return True, "already_completed", "Action was already declined."
+            return True, "rejected", "Action declined."
+        return False, "not_executed", f"Action could not be declined (state: {post})."
+
+    output = getattr(execution, "output_data", None) or {}
+    if post == "succeeded":
+        if before in ("succeeded", "success", "completed"):
+            return True, "already_completed", "Action was already approved and completed."
+        if isinstance(output, dict) and output.get("run_terminal") is False:
+            return True, "approved", (
+                f"Action approved; the coding run was started (state: {output.get('status')}) and has not finished: "
+                "nothing is verified yet."
+            )
+        return True, "approved", "Action approved and executed."
+    if post in ("running", "approved", "queued"):
+        return True, "in_progress", (
+            f"Approval accepted; the action is still in progress (state: {post}) and has not completed yet."
+        )
+    if post == "failed":
+        detail = getattr(execution, "error_message", None) or "no error detail"
+        return False, "failed", f"Action approved but its execution failed: {detail}"
+    return False, "not_executed", f"Action was not executed (state: {post})."
+
+
 async def _handle_canonical_approval(
     request: Request,
     target_id: str,
@@ -7028,26 +7065,24 @@ async def _handle_canonical_approval(
 
         try:
             status_val = str(exec_obj.status.value if hasattr(exec_obj.status, "value") else exec_obj.status).lower()
-            was_already_decided = (
-                status_val in ("success", "succeeded", "completed", "approved")
-                if decision == "approve"
-                else (status_val in ("rejected", "declined"))
-            )
 
             if decision == "approve":
-                res = ws.actions.approve(clean_target_id, approver=payload.approver)
-                status_res = "already_completed" if was_already_decided else "approved"
-                msg = "Action was already approved and completed." if was_already_decided else "Action approved and executed."
+                # The action runs synchronously (a coding run or authorised tests can take minutes): never on the event loop.
+                import asyncio as _asyncio
+                res = await _asyncio.to_thread(ws.actions.approve, clean_target_id, approver=payload.approver)
             else:
                 reason = payload.reason or payload.notes or "Declined by user"
-                res = ws.actions.reject(clean_target_id, reason=reason)
-                status_res = "already_completed" if was_already_decided else "rejected"
-                msg = "Action was already declined." if was_already_decided else "Action declined."
+                import asyncio as _asyncio
+                res = await _asyncio.to_thread(ws.actions.reject, clean_target_id, reason=reason)
+
+            # The answer comes from the state AFTER the call: with the work off the event loop, a concurrent request
+            # can have approved/started the same action in the meantime.
+            decision_ok, status_res, msg = describe_action_decision_outcome(decision, status_val, res)
 
             _mark_approval_notification_done(ws, clean_target_id)
 
             return {
-                "success": True,
+                "success": decision_ok,
                 "status": status_res,
                 "target_type": "action_execution",
                 "target_id": clean_target_id,

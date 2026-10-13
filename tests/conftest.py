@@ -23,6 +23,8 @@ from aether.server.app import app
 from aether.core.paths import set_aether_data_dir
 from aether.core.secrets import MemorySecretStore, set_secret_store
 
+from network_guard import PROVIDER_KEY_VARS, NetworkPolicy, install_network_guard
+
 def _release_handles_under(path: str) -> None:
     """
     Close every open Workspace (and, via gc, orphaned stores) rooted under ``path``.
@@ -204,7 +206,8 @@ def aether_server(tmp_path_factory):
         text=True,
         encoding="utf-8",  # the banner contains non-ASCII characters; do not depend on the console code page
         errors="replace",
-        env={**os.environ, "PYTHONUTF8": "1", "PYTHONIOENCODING": "utf-8"},
+        # The server child is outside the in-process network guard: at least never hand it provider credentials.
+        env={**{k: v for k, v in os.environ.items() if k not in PROVIDER_KEY_VARS}, "PYTHONUTF8": "1", "PYTHONIOENCODING": "utf-8"},
         bufsize=1,
     )
 
@@ -364,3 +367,60 @@ def make_test_accepted_authority(
 @pytest.fixture
 def accepted_authority_factory():
     return make_test_accepted_authority
+
+
+# ---------------------------------------------------------------------------
+# Credential and network isolation (policy and limits: tests/network_guard.py).
+#   live_provider                    -> real keys, no network guard (explicit; live tests also need their own opt-in env)
+#   external_network("host", ...)    -> loopback + exactly those hosts, no keys
+#   ollama                           -> loopback incl. the local Ollama port, no keys
+#   integration / ordinary           -> no keys, loopback only (the servers the fixtures start)
+# A refused attempt fails the test at teardown even when the code under test swallowed the exception, unless the
+# test is marked ``network_block_expected`` (tests of the guard itself).
+# ---------------------------------------------------------------------------
+@pytest.fixture
+def network_attempts():
+    """Refused connection/DNS attempts of the current test (filled by the autouse isolation fixture)."""
+    return []
+
+
+@pytest.fixture
+def network_policy():
+    """The mutable policy of the guard for this test (e.g. ``network_policy.strict = True`` refuses loopback too)."""
+    return NetworkPolicy()
+
+
+@pytest.fixture(autouse=True)
+def _isolate_credentials_and_network(request, monkeypatch, network_attempts, network_policy):
+    live = request.node.get_closest_marker("live_provider") is not None
+    if not live:
+        for var in PROVIDER_KEY_VARS:
+            monkeypatch.delenv(var, raising=False)
+    if live:
+        yield
+        return
+    external = request.node.get_closest_marker("external_network")
+    if external is not None and not external.args:
+        pytest.fail("@pytest.mark.external_network needs the exact hosts it may reach, e.g. external_network('api.example.com')")
+    network_policy.allow_ollama = request.node.get_closest_marker("ollama") is not None
+    network_policy.extra_hosts = frozenset(str(h).lower() for h in (external.args if external else ()))
+    install_network_guard(monkeypatch, policy=network_policy, attempts=network_attempts)
+    yield
+    if network_attempts and request.node.get_closest_marker("network_block_expected") is None:
+        pytest.fail(
+            "The test attempted network access that the guard refused (the code under test may have swallowed the "
+            f"error): {network_attempts}. Mock it, or opt in with the ollama / external_network('host') markers.",
+            pytrace=False,
+        )
+
+
+@pytest.fixture
+def no_ollama_probe(monkeypatch):
+    """
+    Disables the model probe that ``OllamaProvider.__init__`` performs against the local server (``GET /api/tags``) for
+    tests that only need an Ollama provider object. It is a mock, not a permission: no connection is opened.
+    The constructor probing is itself a known defect (tests/test_ollama_construction_contract.py).
+    """
+    from aether.providers.ollama import OllamaProvider
+
+    monkeypatch.setattr(OllamaProvider, "get_available_models", lambda self: [])

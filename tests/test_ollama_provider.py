@@ -58,6 +58,7 @@ class TestOllamaProviderDefaults:
             assert p._endpoint == "http://localhost:11434/api/chat"
             assert p._model == "llama3"
 
+    @pytest.mark.usefixtures("no_ollama_probe")  # the constructor probes the server: see test_ollama_construction_contract.py
     def test_custom_config(self) -> None:
         cfg = ProviderConfig(base_url="http://myserver:11434", model="mistral")
         p = OllamaProvider(cfg)
@@ -258,6 +259,7 @@ class TestOllamaProviderErrors:
 
 
 @pytest.mark.integration
+@pytest.mark.ollama  # the only tests allowed to reach the local Ollama port (loopback 11434)
 class TestOllamaProviderIntegration:
     """
     Integration tests — require a running Ollama server.

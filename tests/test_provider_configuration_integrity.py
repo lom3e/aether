@@ -8,7 +8,6 @@ import socket
 from types import SimpleNamespace
 
 import pytest
-from network_guard import block_network
 import yaml
 from fastapi import HTTPException, Request
 
@@ -23,11 +22,12 @@ from aether.workspace.workspace import Workspace
 
 
 @pytest.fixture(autouse=True)
-def hermetic(monkeypatch, tmp_path):
+def hermetic(monkeypatch, tmp_path, network_attempts, network_policy):
     for k in ("OPENAI_API_KEY", "ANTHROPIC_API_KEY", "GEMINI_API_KEY", "GROQ_API_KEY"):
         monkeypatch.delenv(k, raising=False)
     set_aether_data_dir(tmp_path / "aether_home")           # the global registry/pointer never touches ~/.aether
-    attempts = block_network(monkeypatch)
+    network_policy.strict = True  # these tests prove "nothing is contacted": not even a loopback connection is allowed
+    attempts = network_attempts  # recorded by the autouse isolation fixture in conftest.py
     yield attempts
     set_aether_data_dir(None)
 
@@ -123,6 +123,7 @@ def test_explicit_ollama_still_works_and_keeps_its_own_suggested_model(tmp_path,
 
 # --- persisted configuration is never rewritten ------------------------------------------------------------------------------
 
+@pytest.mark.usefixtures("no_ollama_probe")  # the constructor probes the server: see test_ollama_construction_contract.py
 def test_existing_persisted_configuration_is_untouched(tmp_path):
     ws = Workspace.init(tmp_path / "old", "Old")
     cfg = dict(ws.config)

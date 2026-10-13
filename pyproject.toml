@@ -65,7 +65,10 @@ testpaths = [
     "tests"
 ]
 markers = [
-    "integration: marks tests that require external services (e.g., Ollama server). Deselect with '-m not integration'.",
-    "live_provider: marks live external provider tests (skips explicitly if real credentials not present in env).",
+    "integration: documents that the test exercises a locally running service. It grants NO credentials and NO external network; combine it with ollama/external_network when a connection is really needed.",
+    "live_provider: real external provider test. Only these tests receive the real API keys and have no network guard; they must additionally skip unless their own explicit opt-in environment is set (e.g. AETHER_RUN_LIVE_GROQ=1).",
     "mock_provider: marks isolated mock provider tests.",
+    "external_network: opt-in to exactly the hosts given as arguments, e.g. external_network('api.example.com'); loopback stays allowed, provider keys stay hidden. Without hosts it is an error.",
+    "ollama: opt-in to the local Ollama port (loopback 11434); no other destination, no provider keys.",
+    "network_block_expected: the test deliberately triggers a refused network attempt (tests of the guard itself); the teardown failure for refused attempts is waived.",
 ]

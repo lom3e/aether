@@ -77,6 +77,28 @@ class QualityGateEvaluation:
         }
 
 
+def _is_proving_run(run: Any) -> bool:
+    """A coding run is positive evidence only if it COMPLETED and its independent verification passed (strict bool)."""
+    return isinstance(run, dict) and run.get("status") == "completed" and run.get("verification_passed") is True
+
+
+def _test_run_passed(test_run: Any) -> bool:
+    """
+    The recorded result of running the project's tests (schema of ``coding.runs.run_authorised_tests``: ``passed``,
+    ``exit_code``, ``timed_out``...). Passed means ``passed is True`` and consistent with the other fields.
+    """
+    return (
+        isinstance(test_run, dict)
+        and test_run.get("passed") is True
+        and test_run.get("timed_out") is not True
+        and test_run.get("exit_code") in (None, 0)
+    )
+
+
+def _run_summary(run: dict[str, Any]) -> dict[str, Any]:
+    return {"id": run.get("id"), "status": run.get("status"), "verification_passed": run.get("verification_passed")}
+
+
 class QualityGateEvaluator:
     """
     Evaluates mission deliverables against the 3 core assertion rules:
@@ -239,21 +261,37 @@ class QualityGateEvaluator:
         # 3b. Technical evidence (only when the mission demands it)
         technical_rule: QualityGateRuleResult | None = None
         evidence = evidence or {}
+        # Only a run that COMPLETED and passed independent verification proves anything. A failed, unverified,
+        # waiting or rework run is context, never positive evidence (it used to make `semantically_verified` true).
+        all_runs = [r for r in (evidence.get("coding_runs") or []) if isinstance(r, dict)]
+        proving_runs = [r for r in all_runs if _is_proving_run(r)]
+        context_runs = [_run_summary(r) for r in all_runs if not _is_proving_run(r)]
+        evidence_used: dict[str, Any] = {}
+        if proving_runs:
+            evidence_used["coding_runs"] = proving_runs
+        if context_runs:
+            evidence_used["context_runs"] = context_runs  # explains a failure; never counts as proof
         if required_evidence:
-            runs = list(evidence.get("coding_runs") or [])
+            runs = all_runs
             problems: list[str] = []
             if "coding_run_verified" in required_evidence:
-                if not any(r.get("verification_passed") is True and r.get("status") == "completed" for r in runs):
+                if not proving_runs:
                     problems.append("no coding run completed with a passed independent verification")
             if "tests_passed" in required_evidence:
-                if not any((r.get("test_run") or {}).get("passed") is True for r in runs):
-                    problems.append("the project's tests were not run, or did not pass")
+                # Passing tests only count when they belong to a run that itself completed and was verified: the
+                # `test_run` of a failed, unfinished or unverified run proves nothing about the deliverable.
+                if not any(_is_proving_run(r) and _test_run_passed(r.get("test_run")) for r in runs):
+                    problems.append("the project's tests were not run, or did not pass, in a completed and verified coding run")
             technical_rule = QualityGateRuleResult(
                 rule_id="technical_verification", rule_name="Technical Verification",
                 passed=not problems, score=95 if not problems else 20,
                 reason=("Concrete evidence: " + "; ".join(
                     f"run {r.get('id')} verified={r.get('verification_passed')} tests={(r.get('test_run') or {}).get('passed')}"
-                    for r in runs[:3])) if not problems else "Missing evidence: " + "; ".join(problems),
+                    for r in proving_runs[:3])) if not problems else (
+                        "Missing evidence: " + "; ".join(problems)
+                        + ("; runs seen (not proof): " + ", ".join(
+                            f"{r.get('id')}[{r.get('status')}, verified={r.get('verification_passed')}]" for r in runs[:5])
+                           if runs else "")),
             )
             if problems:
                 redlines.append("Obtain the missing technical evidence: " + "; ".join(problems) + ".")
@@ -393,7 +431,7 @@ class QualityGateEvaluator:
                 method="model_assisted",
                 checks=checks + ["reviewer model judged coverage, grounding and structure"],
                 not_checked=[] if technical_rule else ["running the deliverables or their tests"],
-                evidence_used={"coding_runs": evidence.get("coding_runs", [])} if evidence.get("coding_runs") else {},
+                evidence_used=dict(evidence_used),
             )
 
         # Fallback Deterministic Evaluation
@@ -452,5 +490,5 @@ class QualityGateEvaluator:
             checks=checks,
             not_checked=["semantic correctness and factual grounding of the content (no reviewer model)"]
             + ([] if technical_rule else ["running the deliverables or their tests"]),
-            evidence_used={"coding_runs": evidence.get("coding_runs", [])} if evidence.get("coding_runs") else {},
+            evidence_used=dict(evidence_used),
         )

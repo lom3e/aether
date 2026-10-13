@@ -1,11 +1,12 @@
 """
-LIVE Groq integration tests (real network, real model).
+Groq tests: LIVE ones (real network, real model) and one deterministic local one.
 
-Run with ``GROQ_API_KEY`` set in the environment of the pytest process; nothing is read from, or written to, any
-local configuration file. Without a key every test is SKIPPED with an explicit reason: a skip is never a pass.
-Rate limits / quota / outages are reported as skips naming the cause, so they are not mistaken for a verified feature.
+The live tests run ONLY with an explicit opt-in: ``AETHER_RUN_LIVE_GROQ=1`` *and* ``GROQ_API_KEY`` in the environment of
+the pytest process. The ``live_provider`` marker alone is not an opt-in (pytest would still run the test), so an
+exported key never makes an ordinary run call the provider. Nothing is read from, or written to, local config files.
+Rate limits / quota / outages are reported as skips naming the cause, not as a verified feature.
 
-    GROQ_API_KEY=... pytest tests/test_groq_live.py -m live_provider -v
+    AETHER_RUN_LIVE_GROQ=1 GROQ_API_KEY=... pytest tests/test_groq_live.py -m live_provider -v
 """
 from __future__ import annotations
 
@@ -20,12 +21,19 @@ from aether.providers.errors import TimeoutError as ProviderTimeoutError
 from aether.providers.groq_provider import GroqProvider
 from aether.providers.types import Message, ProviderConfig
 
-pytestmark = pytest.mark.live_provider
-
 MODEL = os.environ.get("AETHER_LIVE_GROQ_MODEL", "openai/gpt-oss-20b")
 KEY = os.environ.get("GROQ_API_KEY")
 
-requires_key = pytest.mark.skipif(not KEY, reason="Live Groq test skipped: GROQ_API_KEY is not set in the environment")
+RUN_LIVE = os.environ.get("AETHER_RUN_LIVE_GROQ") == "1"
+
+
+def requires_key(test):
+    """Marks a real-provider test: live_provider (real key, no network guard) + an explicit opt-in to run it."""
+    test = pytest.mark.skipif(
+        not (KEY and RUN_LIVE),
+        reason="Live Groq test skipped: set AETHER_RUN_LIVE_GROQ=1 and GROQ_API_KEY to run it",
+    )(test)
+    return pytest.mark.live_provider(test)
 
 
 def _provider(**kw) -> GroqProvider:
@@ -130,19 +138,45 @@ def test_live_structured_output_is_validated():
     assert data["city"].lower() == "rome" and 1 <= float(data["population_millions"]) <= 6
 
 
-def test_live_invalid_key_is_an_authentication_error_that_never_echoes_the_key():
-    """Needs the network but NOT a valid key (a deliberately wrong one is used), so it runs even without GROQ_API_KEY
-    only when the network is reachable; otherwise it is skipped with the reason."""
+def test_invalid_key_is_an_authentication_error_that_never_echoes_the_key():
+    """Deterministic: a local HTTP server answers 401 like Groq does; no external network, no real key involved."""
+    import http.server
+    import threading
+
+    received: dict = {}
+
+    class Handler(http.server.BaseHTTPRequestHandler):
+        def do_POST(self):  # noqa: N802 (http.server API)
+            received["authorization"] = self.headers.get("Authorization")
+            self.rfile.read(int(self.headers.get("Content-Length") or 0))
+            body = b'{"error": {"message": "Invalid API Key", "type": "invalid_request_error", "code": "invalid_api_key"}}'
+            self.send_response(401)
+            self.send_header("Content-Type", "application/json")
+            self.send_header("Content-Length", str(len(body)))
+            self.end_headers()
+            self.wfile.write(body)
+
+        def log_message(self, *args):
+            pass
+
+    server = http.server.ThreadingHTTPServer(("127.0.0.1", 0), Handler)
+    thread = threading.Thread(target=server.serve_forever, daemon=True)
+    thread.start()
     bad = "gsk_" + "x" * 40
-    provider = GroqProvider(ProviderConfig(api_key=bad, model=MODEL, timeout=20.0))
     try:
-        provider.generate([Message(role="user", content="hi")])
-    except AuthenticationError as exc:
-        assert bad not in str(exc) and bad not in repr(provider)
-    except (ProviderConnectionError, ProviderTimeoutError) as exc:
-        pytest.skip(f"Groq unreachable from this machine: {type(exc).__name__}")
-    else:
-        pytest.fail("an invalid key must not authenticate")
+        provider = GroqProvider(
+            ProviderConfig(
+                api_key=bad, model=MODEL, timeout=10.0, base_url=f"http://127.0.0.1:{server.server_address[1]}/openai/v1"
+            )
+        )
+        with pytest.raises(AuthenticationError) as exc_info:
+            provider.generate([Message(role="user", content="hi")])
+    finally:
+        server.shutdown()
+        server.server_close()
+        thread.join(timeout=5)
+    assert received["authorization"] == f"Bearer {bad}"  # the key travels in the header, as designed...
+    assert bad not in str(exc_info.value) and bad not in repr(provider)  # ...and never comes back in errors or repr
 
 
 @requires_key

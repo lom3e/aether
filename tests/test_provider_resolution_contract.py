@@ -9,7 +9,6 @@ import socket
 from types import SimpleNamespace
 
 import pytest
-from network_guard import block_network
 from fastapi import HTTPException, Request
 
 from aether.providers.errors import AuthenticationError, ProviderError, RateLimitError
@@ -24,10 +23,11 @@ KEY_ENV = ("OPENAI_API_KEY", "ANTHROPIC_API_KEY", "GEMINI_API_KEY", "GROQ_API_KE
 
 
 @pytest.fixture(autouse=True)
-def hermetic(monkeypatch):
+def hermetic(monkeypatch, network_attempts, network_policy):
     for k in KEY_ENV:
         monkeypatch.delenv(k, raising=False)
-    attempts = block_network(monkeypatch)
+    network_policy.strict = True  # these tests prove "nothing is contacted": not even a loopback connection is allowed
+    attempts = network_attempts  # recorded by the autouse isolation fixture in conftest.py
     return attempts
 
 
@@ -97,6 +97,7 @@ def test_explicit_groq_from_agent_team_and_workspace():
     assert [p.model for p in (by_agent, by_team, by_ws)] == ["qwen/x", "qwen/y", "qwen/z"]
 
 
+@pytest.mark.usefixtures("no_ollama_probe")  # the constructor probes the server: see test_ollama_construction_contract.py
 def test_explicit_ollama_still_works_without_connecting_at_resolution_time():
     p = resolve_provider(team_config=SimpleNamespace(default_provider="ollama", default_model="llama3.2"), workspace=ws())
     assert isinstance(p, OllamaProvider)

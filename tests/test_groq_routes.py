@@ -27,6 +27,12 @@ def make_request(method: str = "GET", path: str = "/") -> Request:
     return Request(scope)
 
 
+@pytest.fixture(autouse=True)
+def _no_ollama_probe(no_ollama_probe):
+    """These route tests build teams whose default provider is Ollama; its constructor would probe the server."""
+    return no_ollama_probe
+
+
 @pytest.fixture
 def mock_runtime_state(tmp_path: Path):
     ws_root = tmp_path / "workspace"
