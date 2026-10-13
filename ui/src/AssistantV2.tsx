@@ -11,7 +11,7 @@ import { AetherOrb } from './orb/AetherOrb';
 import type { OrbState, QualityProfileKey } from './orb/OrbEngine';
 import { apiUrl } from './api';
 import { ToastContext } from './toast';
-import { submitApprovalDecision } from './canonicalNotification';
+import { submitApprovalDecision, approvalToastKind } from './canonicalNotification';
 import { MarkdownRenderer } from './MarkdownRenderer';
 import './assistant-v2.css';
 
@@ -901,7 +901,7 @@ export function AssistantV2({
       });
 
       if (res.success) {
-        showToast(res.message || 'Operazione approvata ed eseguita.', 'success');
+        showToast(res.message || 'Approvazione registrata.', approvalToastKind(res, 'approve'));
         setPendingApprovals(prev => prev.filter(a => (a.execution_id || a.id) !== targetId));
         setOrbState('working');
 

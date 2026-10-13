@@ -1,4 +1,6 @@
 import { apiUrl } from './api';
+import { defaultApprovalMessage } from './approvalOutcome';
+export { approvalToastKind, approvalIsFinished, approvalIsInProgress } from './approvalOutcome';
 
 export type NotificationTargetType =
   | 'mission'
@@ -43,7 +45,7 @@ export interface ApprovalDecisionOptions {
 
 export interface ApprovalDecisionResult {
   success: boolean;
-  status: 'approved' | 'rejected' | 'already_completed' | 'expired' | 'unauthorized' | 'failed';
+  status: 'approved' | 'rejected' | 'already_completed' | 'in_progress' | 'not_executed' | 'expired' | 'unauthorized' | 'failed';
   message: string;
   target_type?: string;
   target_id?: string;
@@ -255,9 +257,9 @@ export async function submitApprovalDecision(
   if (!endpoint) {
     if (target_type === 'mission' && target_id) {
       endpoint = `/api/missions/${encodeURIComponent(target_id)}/${decision}`;
-    } else if (target_type === 'action_execution' && target_id) {
-      endpoint = `/api/actions/executions/${encodeURIComponent(target_id)}/${decision}`;
     } else {
+      // Action executions also go through the canonical router: the legacy per-execution action routes return
+      // only the bare entity, with no success/status/message, which used to make every outcome look like a success.
       endpoint = `/api/approvals/${encodeURIComponent(tid)}/${decision}`;
     }
   }
@@ -331,12 +333,7 @@ export async function submitApprovalDecision(
 
     const data = await res.json().catch(() => ({}));
     const status = (data.status || (decision === 'approve' ? 'approved' : 'rejected')) as any;
-    const defaultMsg =
-      status === 'already_completed'
-        ? 'This review was already completed.'
-        : decision === 'approve'
-        ? 'Review approved and executed.'
-        : 'Review declined.';
+    const defaultMsg = defaultApprovalMessage(decision, status);
 
     // If an associated notification ID is present, acknowledge it as displayed/read
     if (notification_id) {
@@ -344,7 +341,8 @@ export async function submitApprovalDecision(
     }
 
     return {
-      success: true,
+      // The backend states whether the action ended as asked; only an absent flag (legacy mission routes) means success.
+      success: data.success !== false,
       status,
       target_type: data.target_type || target_type,
       target_id: data.target_id || tid,

@@ -7,7 +7,7 @@ import {
 } from 'lucide-react';
 import { apiUrl } from './api';
 import { ToastContext } from './toast';
-import { submitApprovalDecision } from './canonicalNotification';
+import { submitApprovalDecision, approvalToastKind } from './canonicalNotification';
 import { openExternalUrl } from './desktop';
 
 // Design System Core Imports
@@ -483,7 +483,7 @@ export function Connections({ initialExecutionId, initialTab }: ConnectionsProps
         approver: 'user',
       });
       if (res.success) {
-        showToast(res.message || 'Operazione approvata con successo.', 'success');
+        showToast(res.message || 'Approvazione registrata.', approvalToastKind(res, 'approve'));
         fetchAll();
       } else {
         showToast(res.message || 'Impossibile approvare l\'operazione.', 'error');

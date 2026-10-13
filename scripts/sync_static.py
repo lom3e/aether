@@ -23,6 +23,14 @@ MANIFEST_FILENAME = ".build_manifest.json"
 IGNORED_FILENAMES = {".DS_Store", "Thumbs.db", "desktop.ini"}
 
 
+def _display_path(path: Path) -> str:
+    """Repo-relative POSIX path when inside the repository (no machine-specific paths in the tracked manifest)."""
+    try:
+        return path.relative_to(REPO_ROOT).as_posix()
+    except ValueError:
+        return str(path)
+
+
 def compute_file_sha256(path: Path) -> str:
     """Computes SHA-256 hash of a file."""
     h = hashlib.sha256()
@@ -85,8 +93,8 @@ def sync_static_assets(
     manifest: dict[str, Any] = {
         "manifest_version": "1.0",
         "generated_at": datetime.now(timezone.utc).isoformat(),
-        "source": str(src),
-        "target": str(tgt),
+        "source": _display_path(src),
+        "target": _display_path(tgt),
         "file_count": len(file_hashes),
         "total_bytes": total_bytes,
         "files": file_hashes,

@@ -10,7 +10,7 @@ import { ToastContext } from './toast';
 import { AutoArchitectModal } from './AutoArchitectModal';
 import { TopHeader } from './TopHeader';
 import { NotificationCenter } from './NotificationCenter';
-import { submitApprovalDecision } from './canonicalNotification';
+import { submitApprovalDecision, approvalToastKind, approvalIsFinished, approvalIsInProgress } from './canonicalNotification';
 
 interface HomeProps {
   navigate: (view: string, params?: any) => void;
@@ -361,20 +361,38 @@ export function Home({
       });
 
       if (res.success) {
-        showToast(res.message, res.status === 'already_completed' ? 'info' : 'success');
+        showToast(res.message, approvalToastKind(res, 'approve'));
         fetchOverview();
-        // Update local message step status
+        // Update the local step with what really happened: finished, still going, or merely started.
+        const finished = approvalIsFinished(res);
+        const inProgress = approvalIsInProgress(res);
         setMessages(prev => prev.map(msg => {
           if (msg.action_execution_id === executionId) {
             return {
               ...msg,
-              steps: msg.steps.map(s => (s.status === 'pending_approval' || s.status === 'waiting_approval') ? { ...s, status: 'completed', title: 'Action approved & executed' } : s),
+              steps: msg.steps.map(s => (s.status === 'pending_approval' || s.status === 'waiting_approval')
+                ? (finished
+                    ? { ...s, status: 'completed', title: 'Action approved & executed' }
+                    : inProgress
+                    ? { ...s, status: 'running', title: 'Action approved - still in progress' }
+                    : { ...s, status: 'running', title: 'Action approved' })
+                : s),
             };
           }
           return msg;
         }));
       } else {
         showToast(res.message, 'error');
+        fetchOverview(); // the action may have failed after approval: show its real state
+        setMessages(prev => prev.map(msg => {
+          if (msg.action_execution_id === executionId && res.status === 'failed') {
+            return {
+              ...msg,
+              steps: msg.steps.map(s => (s.status === 'pending_approval' || s.status === 'waiting_approval') ? { ...s, status: 'failed', title: 'Action approved but failed' } : s),
+            };
+          }
+          return msg;
+        }));
       }
     } catch (err: any) {
       showToast(err.message || 'Error approving action.', 'error');
