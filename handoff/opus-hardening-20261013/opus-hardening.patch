@@ -1,0 +1,91 @@
+diff --git a/src/aether/missions/reviewer.py b/src/aether/missions/reviewer.py
+index 3db6f08..52b5ef8 100644
+--- a/src/aether/missions/reviewer.py
++++ b/src/aether/missions/reviewer.py
+@@ -239,6 +239,10 @@ class QualityGateEvaluator:
+         # 3b. Technical evidence (only when the mission demands it)
+         technical_rule: QualityGateRuleResult | None = None
+         evidence = evidence or {}
++        # Only a run that COMPLETED and passed independent verification proves anything. A failed, unverified,
++        # waiting or rework run is context, never positive evidence (it used to make `semantically_verified` true).
++        proving_runs = [r for r in (evidence.get("coding_runs") or [])
++                        if isinstance(r, dict) and r.get("status") == "completed" and r.get("verification_passed") is True]
+         if required_evidence:
+             runs = list(evidence.get("coding_runs") or [])
+             problems: list[str] = []
+@@ -393,7 +397,7 @@ class QualityGateEvaluator:
+                 method="model_assisted",
+                 checks=checks + ["reviewer model judged coverage, grounding and structure"],
+                 not_checked=[] if technical_rule else ["running the deliverables or their tests"],
+-                evidence_used={"coding_runs": evidence.get("coding_runs", [])} if evidence.get("coding_runs") else {},
++                evidence_used={"coding_runs": proving_runs} if proving_runs else {},
+             )
+ 
+         # Fallback Deterministic Evaluation
+@@ -452,5 +456,5 @@ class QualityGateEvaluator:
+             checks=checks,
+             not_checked=["semantic correctness and factual grounding of the content (no reviewer model)"]
+             + ([] if technical_rule else ["running the deliverables or their tests"]),
+-            evidence_used={"coding_runs": evidence.get("coding_runs", [])} if evidence.get("coding_runs") else {},
++            evidence_used={"coding_runs": proving_runs} if proving_runs else {},
+         )
+diff --git a/src/aether/server/routes.py b/src/aether/server/routes.py
+index a1fff93..f3abdbc 100644
+--- a/src/aether/server/routes.py
++++ b/src/aether/server/routes.py
+@@ -7041,12 +7041,15 @@ async def _handle_canonical_approval(
+             )
+ 
+             if decision == "approve":
+-                res = ws.actions.approve(clean_target_id, approver=payload.approver)
++                # The action runs synchronously (a coding run or authorised tests can take minutes): never on the event loop.
++                import asyncio as _asyncio
++                res = await _asyncio.to_thread(ws.actions.approve, clean_target_id, approver=payload.approver)
+                 status_res = "already_completed" if was_already_decided else "approved"
+                 msg = "Action was already approved and completed." if was_already_decided else "Action approved and executed."
+             else:
+                 reason = payload.reason or payload.notes or "Declined by user"
+-                res = ws.actions.reject(clean_target_id, reason=reason)
++                import asyncio as _asyncio
++                res = await _asyncio.to_thread(ws.actions.reject, clean_target_id, reason=reason)
+                 status_res = "already_completed" if was_already_decided else "rejected"
+                 msg = "Action was already declined." if was_already_decided else "Action declined."
+ 
+diff --git a/tests/conftest.py b/tests/conftest.py
+index 3e938ce..77c904a 100644
+--- a/tests/conftest.py
++++ b/tests/conftest.py
+@@ -274,3 +274,33 @@ def make_test_accepted_authority(
+ @pytest.fixture
+ def accepted_authority_factory():
+     return make_test_accepted_authority
++
++
++# ---------------------------------------------------------------------------
++# Credential and network isolation for ordinary tests (audit finding 7).
++# Only tests marked ``live_provider`` (or ``integration``) see the process' API keys and may reach the network.
++# ---------------------------------------------------------------------------
++_PROVIDER_KEY_VARS = ("GROQ_API_KEY", "OPENAI_API_KEY", "ANTHROPIC_API_KEY", "GEMINI_API_KEY", "GOOGLE_API_KEY")
++_LOOPBACK = {"127.0.0.1", "::1", "localhost"}
++_OLLAMA_PORT = 11434
++
++
++@pytest.fixture(autouse=True)
++def _isolate_credentials_and_network(request, monkeypatch):
++    if request.node.get_closest_marker("live_provider") or request.node.get_closest_marker("integration"):
++        yield
++        return
++    for var in _PROVIDER_KEY_VARS:
++        monkeypatch.delenv(var, raising=False)
++
++    real_connect = socket.socket.connect
++
++    def guarded_connect(self, address, *args, **kwargs):
++        host, port = (address[0], address[1]) if isinstance(address, tuple) and len(address) >= 2 else (None, None)
++        if host is not None and (host not in _LOOPBACK or port == _OLLAMA_PORT):
++            raise RuntimeError(f"Ordinary tests must not open network connections (attempted {host}:{port}); "
++                               f"mark the test live_provider/integration if it really needs a provider.")
++        return real_connect(self, address, *args, **kwargs)
++
++    monkeypatch.setattr(socket.socket, "connect", guarded_connect)
++    yield
