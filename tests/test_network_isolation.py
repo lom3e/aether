@@ -175,3 +175,41 @@ def test_key_isolation_is_proven_with_a_key_that_was_really_exported(nested_repo
     assert outcomes["test_ordinary_test_does_not_see_the_exported_key"] == {"PASSED"}
     assert outcomes["test_live_provider_test_sees_the_real_key"] == {"PASSED"}
     assert outcomes["test_integration_marker_grants_nothing"] == {"PASSED"}
+
+
+def test_child_processes_started_by_the_suite_inherit_the_network_guard():
+    """The server of the aether_server fixture and uvicorn subprocesses are separate processes: the in-process guard cannot
+    see them, so tests/child_guard/sitecustomize.py installs the same guard there (refused before any packet is sent)."""
+    import socket
+
+    code = (
+        "import socket, sys\n"
+        "if socket.socket.connect.__name__ != 'guarded_connect':\n"
+        "    print('GUARD-NOT-INSTALLED')  # never open a connection from an unguarded child\n"
+        "    sys.exit(0)\n"
+        "def attempt(addr):\n"
+        "    try:\n"
+        "        socket.create_connection(addr, timeout=2).close()\n"
+        "        return 'connected'\n"
+        "    except Exception as exc:\n"
+        "        return type(exc).__name__\n"
+        "print(attempt(('127.0.0.1', 11434)), attempt(('93.184.216.34', 443)), attempt(('127.0.0.1', int(sys.argv[1]))))\n"
+    )
+    listener = socket.socket()
+    listener.bind(("127.0.0.1", 0))
+    listener.listen(1)
+    try:
+        result = subprocess.run(
+            [sys.executable, "-c", code, str(listener.getsockname()[1])],
+            capture_output=True,
+            text=True,
+            timeout=60,
+            env=os.environ.copy(),
+        )
+    finally:
+        listener.close()
+    assert result.returncode == 0, result.stderr
+    assert "GUARD-NOT-INSTALLED" not in result.stdout, "the child did not load tests/child_guard/sitecustomize.py"
+    ollama, external, own_loopback = result.stdout.split()
+    assert ollama == "UnexpectedNetworkConnection" and external == "UnexpectedNetworkConnection"
+    assert own_loopback == "connected", "loopback servers started by the tests must stay reachable"

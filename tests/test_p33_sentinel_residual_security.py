@@ -133,7 +133,13 @@ def test_email_connector_masks_password_in_errors(monkeypatch):
         "smtp_port": 587,
     })
 
-    # Test verify error masking
+    # Test verify error masking: an unresolvable host, simulated (no DNS lookup is made)
+    import socket as _socket
+
+    def unresolvable_host(*args, **kwargs):
+        raise _socket.gaierror(11001, "getaddrinfo failed")
+
+    monkeypatch.setattr("smtplib.SMTP", unresolvable_host)
     valid, msg = connector.verify(live_check=True)
     assert valid is False
     assert plain_password not in msg

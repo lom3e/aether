@@ -71,6 +71,12 @@ def _cleanup_releasing_workspaces(self) -> None:
 
 tempfile.TemporaryDirectory.cleanup = _cleanup_releasing_workspaces
 
+# Child processes started by the suite (the aether_server fixture, uvicorn subprocesses of the browser tests) get the same
+# network guard through tests/child_guard/sitecustomize.py. Set after pytest started, so it does not affect pytest itself.
+os.environ["PYTHONPATH"] = os.pathsep.join(filter(None, [str(Path(__file__).resolve().parent / "child_guard"), os.environ.get("PYTHONPATH", "")]))
+os.environ["AETHER_TEST_CHILD_NETWORK_GUARD"] = "1"
+os.environ["AETHER_TEST_GUARD_FILE"] = str(Path(__file__).resolve().parent / "network_guard.py")
+
 # Enable test providers by default for test execution
 os.environ.setdefault("AETHER_ENABLE_TEST_PROVIDERS", "1")
 # Never pop real desktop notifications while the suite runs (the Windows toast fallback is exercised with a mock).
@@ -415,12 +421,24 @@ def _isolate_credentials_and_network(request, monkeypatch, network_attempts, net
 
 
 @pytest.fixture
-def no_ollama_probe(monkeypatch):
+def fake_dns(monkeypatch):
     """
-    Disables the model probe that ``OllamaProvider.__init__`` performs against the local server (``GET /api/tags``) for
-    tests that only need an Ollama provider object. It is a mock, not a permission: no connection is opened.
-    The constructor probing is itself a known defect (tests/test_ollama_construction_contract.py).
+    Deterministic name resolution for tests that exercise URL validation (SSRF checks...): returns a dict to fill, e.g.
+    ``fake_dns["example.com"] = "93.184.216.34"``. Listed names resolve to the given address WITHOUT any DNS query; every
+    other name still goes through the network guard (and is refused). This is a mock, not a permission.
     """
-    from aether.providers.ollama import OllamaProvider
+    import socket
 
-    monkeypatch.setattr(OllamaProvider, "get_available_models", lambda self: [])
+    table: dict[str, str] = {}
+    guarded = socket.getaddrinfo
+
+    def resolve(host, port=None, *args, **kwargs):
+        ip = table.get(str(host).strip("[]").lower())
+        if ip is None:
+            return guarded(host, port, *args, **kwargs)
+        family = socket.AF_INET6 if ":" in ip else socket.AF_INET
+        sockaddr = (ip, port or 0, 0, 0) if family == socket.AF_INET6 else (ip, port or 0)
+        return [(family, socket.SOCK_STREAM, 6, "", sockaddr)]
+
+    monkeypatch.setattr(socket, "getaddrinfo", resolve)
+    return table

@@ -123,7 +123,6 @@ def test_explicit_ollama_still_works_and_keeps_its_own_suggested_model(tmp_path,
 
 # --- persisted configuration is never rewritten ------------------------------------------------------------------------------
 
-@pytest.mark.usefixtures("no_ollama_probe")  # the constructor probes the server: see test_ollama_construction_contract.py
 def test_existing_persisted_configuration_is_untouched(tmp_path):
     ws = Workspace.init(tmp_path / "old", "Old")
     cfg = dict(ws.config)

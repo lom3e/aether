@@ -58,12 +58,12 @@ class TestOllamaProviderDefaults:
             assert p._endpoint == "http://localhost:11434/api/chat"
             assert p._model == "llama3"
 
-    @pytest.mark.usefixtures("no_ollama_probe")  # the constructor probes the server: see test_ollama_construction_contract.py
     def test_custom_config(self) -> None:
         cfg = ProviderConfig(base_url="http://myserver:11434", model="mistral")
-        p = OllamaProvider(cfg)
+        p = OllamaProvider(cfg)  # no I/O
         assert p._endpoint == "http://myserver:11434/api/chat"
-        assert p._model == "mistral"
+        with patch.object(OllamaProvider, "get_available_models", return_value=[]):  # an untagged name is looked up on first use
+            assert p._model == "mistral"
 
 
 class TestOllamaProviderGenerate:

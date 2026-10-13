@@ -110,7 +110,6 @@ class TestProviderManager:
         with pytest.raises(ImportError, match="pip install google-genai"):
             manager.get("gemini")
 
-    @pytest.mark.usefixtures("no_ollama_probe")  # the constructor probes the server: see test_ollama_construction_contract.py
     def test_well_known_local_providers_are_resolved_lazily(self) -> None:
         manager = ProviderManager()
 

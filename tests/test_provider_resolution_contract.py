@@ -97,7 +97,6 @@ def test_explicit_groq_from_agent_team_and_workspace():
     assert [p.model for p in (by_agent, by_team, by_ws)] == ["qwen/x", "qwen/y", "qwen/z"]
 
 
-@pytest.mark.usefixtures("no_ollama_probe")  # the constructor probes the server: see test_ollama_construction_contract.py
 def test_explicit_ollama_still_works_without_connecting_at_resolution_time():
     p = resolve_provider(team_config=SimpleNamespace(default_provider="ollama", default_model="llama3.2"), workspace=ws())
     assert isinstance(p, OllamaProvider)
