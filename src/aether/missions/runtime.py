@@ -12,6 +12,7 @@ import hashlib
 import json
 import logging
 import os
+import re
 from pathlib import Path
 import socket
 import threading
@@ -53,6 +54,13 @@ class NotFoundError(Exception):
 def _has_usable_runtime(workspace: Any) -> bool:
     """Returns True if workspace has a valid runtime engine for executing tasks."""
     return hasattr(workspace, "runtime") and workspace.runtime is not None
+
+
+# Cancellation tokens of every live execution in this process, keyed by execution id. A mission started from chat runs
+# on its own MissionRuntime (own thread and event loop); a cancel arrives on another runtime (the server's), which does
+# not know that execution. threading.Event works across loops, so the registry lets any runtime stop any live run.
+_LIVE_CANCELLATION_TOKENS: dict[str, threading.Event] = {}
+_LIVE_TOKENS_LOCK = threading.Lock()
 
 
 @dataclass
@@ -364,6 +372,7 @@ class MissionRuntime:
                         effective_auth = ExecutionBoundary.issue_authority(prop)
 
             p_store = self._resolve_personal_store(mission.workspace_id)
+            self._assert_authority_belongs_to_mission(mission, effective_auth)
             ExecutionBoundary.validate_authority(
                 authority=effective_auth,
                 workspace_id=mission.workspace_id,
@@ -394,6 +403,10 @@ class MissionRuntime:
                 if handle.heartbeat_task and not handle.heartbeat_task.done():
                     handle.heartbeat_task.cancel()
                 del self._active_executions[active.id]
+            with _LIVE_TOKENS_LOCK:
+                foreign_token = _LIVE_CANCELLATION_TOKENS.get(active.id)
+            if foreign_token is not None:
+                foreign_token.set()        # the run lives on another runtime in this process: tell it to stop
 
             now = datetime.now(timezone.utc).isoformat()
             updated = self.store.update_execution(
@@ -421,6 +434,15 @@ class MissionRuntime:
             return updated or active
 
 
+    @staticmethod
+    def _assert_authority_belongs_to_mission(mission: Any, authority: ExecutionAuthority | None) -> None:
+        """A delegation's authority may continue ITS mission, never another one in the same workspace."""
+        bound = (mission.metadata or {}).get("proposal_id") if mission is not None else None
+        if bound and authority is not None and getattr(authority, "proposal_id", None) not in (None, bound):
+            raise UnauthorizedExecutionError(
+                f"The authority of proposal '{authority.proposal_id}' does not belong to mission '{mission.id}' (proposal '{bound}')."
+            )
+
     async def retry_mission(
         self,
         mission_id: str,
@@ -447,6 +469,7 @@ class MissionRuntime:
                     pass
 
             p_store = self._resolve_personal_store(mission.workspace_id)
+            self._assert_authority_belongs_to_mission(mission, effective_auth)
             ExecutionBoundary.validate_authority(
                 authority=effective_auth,
                 workspace_id=mission.workspace_id,
@@ -736,6 +759,8 @@ class MissionRuntime:
             authority=authority,
         )
 
+        with _LIVE_TOKENS_LOCK:
+            _LIVE_CANCELLATION_TOKENS[execution.id] = cancel_token
         handle.heartbeat_task = asyncio.create_task(self._heartbeat_loop(execution.id, self._instance_id))
         handle.task = asyncio.create_task(self._run_execution_loop(handle, team_name))
         self._active_executions[execution.id] = handle
@@ -855,11 +880,14 @@ class MissionRuntime:
 
 
             completed_context: list[str] = []
+            # Full text of every stage, in order: when no stage wrote a file, this is what the user actually receives.
+            stage_texts: list[tuple[str, str]] = []
 
             for em in exec_milestones:
                 if em.status in (MilestoneExecutionStatus.COMPLETED, MilestoneExecutionStatus.SKIPPED):
                     if em.output:
                         completed_context.append(f"Stage '{template_map.get(em.milestone_id, em).title}': {em.output}")
+                        stage_texts.append((template_map.get(em.milestone_id, em).title, str(em.output)))
                     continue
 
                 if handle.cancellation_token.is_set():
@@ -1113,6 +1141,8 @@ class MissionRuntime:
                         status=MilestoneStatus.COMPLETED,
                     )
                     completed_context.append(f"Stage '{tmpl_m.title}': {out_text[:300]}")
+                    if raw_out and str(raw_out).strip():
+                        stage_texts.append((tmpl_m.title, str(raw_out)))
 
                     self._log_activity(
                         mission_id=mid,
@@ -1181,6 +1211,7 @@ class MissionRuntime:
                 "execution_id": exec_id,
             })
 
+            self._materialize_text_result(mission, exec_id, stage_texts)
             all_delivs = self.store.list_deliverables(mid)
             exec_deliverables = [d for d in all_delivs if d.execution_id == exec_id] or all_delivs
 
@@ -1609,6 +1640,8 @@ class MissionRuntime:
                 handle.heartbeat_task.cancel()
             self.store.release_execution_lease(exec_id, handle.owner_token)
             self._active_executions.pop(exec_id, None)
+            with _LIVE_TOKENS_LOCK:
+                _LIVE_CANCELLATION_TOKENS.pop(exec_id, None)
 
     @staticmethod
     def _evaluator_parameters(evaluator: Any) -> set[str] | None:
@@ -1626,6 +1659,9 @@ class MissionRuntime:
         return set(params)
 
     def _handle_interrupted(self, exec_id: str, mid: str) -> None:
+        current = self.store.get_execution(exec_id)
+        if current is not None and current.status == ExecutionStatus.CANCELLED:
+            return      # a cancelled run stays cancelled: "paused at a step boundary" would undo the user's decision
         now = datetime.now(timezone.utc).isoformat()
         self.store.update_execution(exec_id, status=ExecutionStatus.INTERRUPTED, interrupted_at=now)
         self.store.update_mission(mid, status=MissionStatus.INTERRUPTED)
@@ -1651,6 +1687,56 @@ class MissionRuntime:
             if appr.get("milestone_id") == milestone_id and appr.get("decision") == "approved":
                 return True
         return False
+
+    def _materialize_text_result(self, mission: Any, execution_id: str, stage_texts: list[tuple[str, str]]) -> None:
+        """
+        A mission whose stages only produced text still has a result: save it as a document so it is a real, openable
+        deliverable that goes through the quality gate like any other, instead of existing only in a stage log.
+        Nothing is written when a stage already produced files for this execution.
+        """
+        if not stage_texts:
+            return
+        mid = mission.id
+        # Same rule as the quality gate: deliverables of this execution, else any the mission already has.
+        if self.store.list_deliverables(mid):
+            return
+        try:
+            base = getattr(self.workspace, "files_dir", None)
+            base = Path(base) if base else Path(self.workspace.root) / "files"
+            out_dir = base / "deliverables"
+            out_dir.mkdir(parents=True, exist_ok=True)
+            slug = re.sub(r"[^a-z0-9]+", "-", (mission.title or "risultato").lower()).strip("-")[:40] or "risultato"
+            path = out_dir / f"{slug}-{mid[:8]}.md"
+            parts = [f"# {mission.title}", ""]
+            if len(stage_texts) == 1:
+                parts.append(stage_texts[0][1].strip())
+            else:
+                for title, text in stage_texts:
+                    parts += [f"## {title}", "", text.strip(), ""]
+            content = "\n".join(parts).rstrip() + "\n"
+            path.write_text(content, encoding="utf-8")
+            data = content.encode("utf-8")
+            deliv = Deliverable(
+                id=f"del_{uuid.uuid4().hex[:12]}",
+                mission_id=mid,
+                execution_id=execution_id,
+                name=path.name,
+                path=str(path.resolve()),
+                type="document",
+                size_bytes=len(data),
+                sha256=hashlib.sha256(data).hexdigest(),
+                status="draft",
+                metadata={"synthesized_from_stage_output": True},
+            )
+            self.store.add_deliverable(mid, deliv)
+            self._log_activity(
+                mission_id=mid, agent="Deliverable Harvester", activity_type="deliverable_produced",
+                message=f"Saved the stages' output as a document: {path.name} ({len(data)} bytes)",
+                metadata={"path": str(path), "execution_id": execution_id, "synthesized": True},
+            )
+            self._broadcast({"type": "deliverable_added", "mission_id": mid, "deliverable": deliv.to_dict()})
+        except Exception as exc:
+            logger.warning("Could not save the text result of mission %s as a deliverable: %s", mid, exc)
 
     def _harvest_deliverables(
         self,

@@ -303,7 +303,7 @@ export function Settings({ onWorkspaceSwitched }: SettingsProps) {
       />
       <div style={{ maxWidth: '840px', margin: '0 auto', padding: '32px 24px' }}>
         <p className="text-muted" style={{ fontSize: '14px', marginBottom: '24px' }}>
-          Configure your workspace, default AI providers, knowledge storage, and system preferences.
+          {t('settingsIntro')}
         </p>
 
       {/* Tabs */}

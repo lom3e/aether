@@ -302,7 +302,8 @@ class Runtime:
                             Message(role="system", content=(
                                 "You are a helpful writing assistant. Generate the content for a document "
                                 "based on the user's request. Write only the document content, not meta-commentary. "
-                                "Use markdown formatting where appropriate."
+                                "Use markdown formatting where appropriate. "
+                                "Write in the same language as the user's request."
                                 + (f"\n\n{shared_text}" if shared_text else "")
                             )),
                             Message(role="user", content=(

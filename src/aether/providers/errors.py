@@ -37,8 +37,12 @@ class RateLimitError(ProviderError):
     """
     Raised when the provider rate-limits the request.
 
-    Callers may implement exponential back-off and retry on this error.
+    ``retry_after`` is the number of seconds the provider asked us to wait (``Retry-After``), when it said so.
     """
+
+    def __init__(self, message: str, *, provider: str = "unknown", retry_after: float | None = None) -> None:
+        super().__init__(message, provider=provider)
+        self.retry_after = retry_after
 
 
 class TimeoutError(ProviderError):

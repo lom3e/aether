@@ -45,7 +45,14 @@ export function Sidebar({
   onWorkspaceSwitched,
   onSwitchToV2
 }: SidebarProps) {
-  const [collapsed, setCollapsed] = useState(false);
+  // A phone-width window cannot afford a 260px sidebar next to the content: start collapsed and fold it whenever the
+  // window shrinks below that width (the user can still expand it with the toggle).
+  const [collapsed, setCollapsed] = useState(() => typeof window !== 'undefined' && window.innerWidth < 768);
+  useEffect(() => {
+    const onResize = () => { if (window.innerWidth < 768) setCollapsed(true); };
+    window.addEventListener('resize', onResize);
+    return () => window.removeEventListener('resize', onResize);
+  }, []);
   const [hoveredConv, setHoveredConv] = useState<string | null>(null);
   const [activeMenuConvId, setActiveMenuConvId] = useState<string | null>(null);
   const [editingConvId, setEditingConvId] = useState<string | null>(null);
@@ -517,7 +524,7 @@ export function Sidebar({
                   className="btn btn-ghost"
                   style={{ padding: '6px', borderRadius: '6px' }}
                   onClick={() => setCollapsed(true)}
-                  aria-label="Collapse Sidebar"
+                  aria-label={t('sidebarCollapse')}
                 >
                   <ChevronLeft size={16} />
                 </button>
@@ -542,7 +549,7 @@ export function Sidebar({
                   transition: 'background-color 0.15s ease, transform 0.15s ease'
                 }}
                 onClick={() => setCollapsed(false)}
-                aria-label="Expand Sidebar"
+                aria-label={t('sidebarExpand')}
               >
                 <img
                   src="/brand/logo_viola.svg"
@@ -914,7 +921,7 @@ export function Sidebar({
                 <span style={{ fontSize: '10px', fontWeight: 600, color: 'hsl(var(--muted-fg))', textTransform: 'uppercase', letterSpacing: '0.05em' }}>
                   Projects
                 </span>
-                <Tooltip content="New Project" position="top">
+                <Tooltip content={t('sidebarNewProject')} position="top">
                   <button
                     className="btn btn-ghost"
                     style={{ padding: '2px 4px', fontSize: '11px', color: 'hsl(var(--muted-fg))' }}
@@ -931,7 +938,7 @@ export function Sidebar({
                 <input
                   type="text"
                   className="form-input"
-                  placeholder="Project name..."
+                  placeholder={t('sidebarProjectNamePlaceholder')}
                   style={{ padding: '3px 6px', fontSize: '12px', height: '26px' }}
                   value={newProjectName}
                   onChange={e => setNewProjectName(e.target.value)}
@@ -1198,7 +1205,7 @@ export function Sidebar({
                           e.stopPropagation();
                           setActiveMenuConvId(isMenuOpen ? null : conv.id);
                         }}
-                        title="Conversation Actions"
+                        title={t('sidebarConversationActions')}
                       >
                         <MoreVertical size={13} />
                       </button>

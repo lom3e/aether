@@ -328,15 +328,31 @@ def test_multi_turn_context_entity_resolution(workspace):
     # Wait briefly for background report generator
     time.sleep(0.2)
 
-    # Turn 2: Follow-up query resolving "that report" / "where was it saved"
+    # Turn 2: Follow-up QUESTION about "that report". It is information, not a new mission: it must be answered by the
+    # model with the conversation in front of it (previously the word "report" re-launched a delegation).
+    from aether.providers.capabilities import ProviderCapabilities
+    from aether.providers.types import ProviderResponse
+
+    class _Recorder:
+        seen: list[str] = []
+        capabilities = ProviderCapabilities()
+
+        def generate(self, messages, tools=None, output_schema=None):
+            self.seen.append("\n".join(str(getattr(m, "content", "")) for m in messages))
+            return ProviderResponse(content="Il report non è ancora stato salvato.", model="recorder", provider="recorder")
+
+    recorder = _Recorder()
+    personal_service.provider = recorder
     msg2 = personal_service.process_prompt(
         workspace_id=ws_id,
         prompt="Where was that report saved?",
         session_id=session_id,
     )
     assert msg2.session_id == session_id
-    # Should resolve the context to the CarShine market analysis deliverable
-    assert "carshine" in msg2.content.lower() or "report" in msg2.content.lower() or "deliverable" in msg2.content.lower()
+    assert msg2.metadata.get("intent_type") == "informational"
+    assert not msg2.metadata.get("proposal_id") and not msg2.mission_id, "a question must not start a new mission"
+    assert recorder.seen and "CarShine" in recorder.seen[-1], "the model was not given the conversation"
+    assert msg2.metadata.get("model") == "recorder"
 
 
 # ---------------------------------------------------------------------------

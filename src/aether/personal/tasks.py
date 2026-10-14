@@ -157,6 +157,12 @@ class PersonalTaskManager:
         """Called when worker completes successfully."""
         summary = result.get("summary") or "Work completed successfully."
         mission_id = result.get("mission_id")
+        # The worker returning normally only means the code ran: what the work achieved is the mission's own status.
+        # A failed, blocked, interrupted or cancelled mission must never be shown to the user as "Completed".
+        outcome = str(result.get("mission_status") or "").lower()
+        if outcome in ("failed", "blocked", "interrupted", "cancelled"):
+            self._on_failed(task_id, summary, cancelled=(outcome == "cancelled"), mission_id=mission_id)
+            return
         action_id = result.get("action_execution_id")
         deliverable_path = result.get("deliverable_path")
 
@@ -220,17 +226,20 @@ class PersonalTaskManager:
         # 4. Synthesize Assistant Message in Session thread
         self._synthesize_completion_message(task, summary, result)
 
-    def _on_failed(self, task_id: str, error_msg: str) -> None:
-        """Called when worker encounters an error."""
+    def _on_failed(self, task_id: str, error_msg: str, cancelled: bool = False, mission_id: str | None = None) -> None:
+        """Called when worker encounters an error (or its mission ended failed/blocked/cancelled)."""
         task = self.store.update_task_progress(
             task_id=task_id,
             progress_percent=100,
-            current_step="Failed",
-            status=PersonalTaskStatus.FAILED,
+            current_step="Cancelled" if cancelled else "Failed",
+            status=PersonalTaskStatus.CANCELLED if cancelled else PersonalTaskStatus.FAILED,
             error=error_msg,
         )
         if not task:
             return
+        if mission_id and not task.mission_id:
+            task.mission_id = mission_id
+            self.store.save_task(task)
 
         with self._lock:
             self._active_futures.pop(task_id, None)

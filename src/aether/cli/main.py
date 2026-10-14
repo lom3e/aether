@@ -409,7 +409,9 @@ def _cmd_ui(args) -> None:
         except Exception:
             pass
 
-    config = uvicorn.Config(app, host=host, port=bound_port, reload=False, log_level="info")
+    # timeout_graceful_shutdown: whatever is still open after a few seconds (a stuck stream, a WebSocket) must not keep
+    # the process alive after SIGTERM.
+    config = uvicorn.Config(app, host=host, port=bound_port, reload=False, log_level="info", timeout_graceful_shutdown=8)
     server = uvicorn.Server(config)
     app.state.uvicorn_server = server
 

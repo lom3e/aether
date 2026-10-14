@@ -8,6 +8,7 @@ from __future__ import annotations
 from contextlib import contextmanager
 from datetime import datetime, timezone, timedelta
 import json
+import os
 from pathlib import Path
 import sqlite3
 from typing import Any, Generator
@@ -1261,8 +1262,21 @@ class MissionStore:
                     meta_raw = row["metadata"]
                     meta = json.loads(meta_raw) if isinstance(meta_raw, str) and meta_raw else {}
                     file_path = meta.get("path") or (meta.get("arguments") or {}).get("path")
-                    if file_path and file_path not in seen_paths:
-                        seen_paths.add(file_path)
+                    # Only tools that PRODUCE a file make a deliverable: listing a folder or reading a file leaves
+                    # nothing behind. The same file reached through two spellings ("x.md", "./x.md") is one result.
+                    tool_name = meta.get("tool_name")
+                    if tool_name and tool_name not in ("write_file", "patch_file"):
+                        continue
+                    if file_path:
+                        file_path = str(file_path)
+                        norm_path = os.path.normpath(file_path)
+                        if norm_path in (".", os.sep, "") or not Path(norm_path).name:
+                            continue
+                        if norm_path in seen_paths or file_path in seen_paths:
+                            continue
+                        seen_paths.add(norm_path)
+                        file_path = norm_path
+                    if file_path:
                         filename = Path(file_path).name
                         ext = Path(file_path).suffix.lower()
                         ftype = "document" if ext in (".md", ".txt", ".pdf", ".docx") else ("data" if ext in (".json", ".csv", ".tsv", ".yaml", ".yml", ".parquet") else ("code" if ext in (".py", ".ts", ".tsx", ".js", ".sh", ".rs", ".go") else "archive"))

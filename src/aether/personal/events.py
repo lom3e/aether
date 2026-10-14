@@ -8,7 +8,7 @@ import asyncio
 import json
 import logging
 import threading
-from typing import Any, AsyncGenerator
+from typing import Callable, Any, AsyncGenerator
 
 logger = logging.getLogger(__name__)
 
@@ -114,22 +114,43 @@ class PersonalEventHub:
     def _drop_queue(self, workspace_id: str, queue: asyncio.Queue) -> None:
         self.unsubscribe(workspace_id, queue)
 
-    async def event_generator(self, workspace_id: str, timeout_seconds: float = 30.0) -> AsyncGenerator[str, None]:
-        """Async generator formatting events according to SSE standard text/event-stream."""
+    async def event_generator(
+        self,
+        workspace_id: str,
+        timeout_seconds: float = 30.0,
+        should_stop: Callable[[], bool] | None = None,
+        poll_seconds: float = 1.0,
+    ) -> AsyncGenerator[str, None]:
+        """
+        Async generator formatting events according to SSE standard text/event-stream.
+
+        ``should_stop`` lets the server end open streams cleanly when it is shutting down: a stream that never ends
+        keeps the server waiting for its connections forever, and a stream cut by a forced kill reaches the browser
+        as ``ERR_INCOMPLETE_CHUNKED_ENCODING``. Ending the generator sends the terminating chunk instead.
+        """
         queue = self.subscribe(workspace_id)
+        idle = 0.0
         try:
             # Yield initial connected event
             yield f"event: connected\ndata: {json.dumps({'workspace_id': workspace_id})}\n\n"
 
             while True:
+                if should_stop is not None and should_stop():
+                    yield "event: shutdown\ndata: {}\n\n"
+                    return
+                wait = min(timeout_seconds, poll_seconds) if should_stop is not None else timeout_seconds
                 try:
-                    event = await asyncio.wait_for(queue.get(), timeout=timeout_seconds)
+                    event = await asyncio.wait_for(queue.get(), timeout=wait)
+                    idle = 0.0
                     event_type = event.get("type", "message")
                     data_str = json.dumps(event.get("data", {}))
                     yield f"event: {event_type}\ndata: {data_str}\n\n"
                 except asyncio.TimeoutError:
-                    # Keep-alive ping comment to prevent socket timeout
-                    yield ": ping\n\n"
+                    idle += wait
+                    if idle >= timeout_seconds:
+                        idle = 0.0
+                        # Keep-alive ping comment to prevent socket timeout
+                        yield ": ping\n\n"
         finally:
             self.unsubscribe(workspace_id, queue)
 

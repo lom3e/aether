@@ -660,7 +660,8 @@ async def test_u_personal_agent_real_file_operations_and_intelligence(workspace)
     assert proposal_id is not None
 
     # Verify physical file was NOT created before acceptance
-    created_file = workspace.root / "release_notes.txt"
+    # Documents requested from chat live in the workspace's files folder, not next to its databases and settings.
+    created_file = workspace.files_dir / "release_notes.txt"
     assert not created_file.exists()
 
     # 2. Obtain genuine ExecutionAuthority via accepted proposal
@@ -681,6 +682,7 @@ async def test_u_personal_agent_real_file_operations_and_intelligence(workspace)
 
     # Verify physical file creation on disk after authorized execution
     assert created_file.exists()
+    assert not (workspace.root / "release_notes.txt").exists()
     assert "1.6.0" in created_file.read_text(encoding="utf-8")
 
     # 2. Read back real document

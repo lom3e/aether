@@ -29,6 +29,17 @@ import {
   Modal,
 } from './design-system';
 
+// What the badge says must be what the backend knows: only a verified deliverable is "Verificato"; a record whose file
+// is empty or missing is never shown as ready.
+function resultBadge(item: { status?: string; size_bytes: number; mission_id?: string }): { status: string; label: string } {
+  const st = (item.status || '').toLowerCase();
+  if (st === 'verified') return { status: 'verified', label: 'Verificato' };
+  if (st === 'needs_revision') return { status: 'configured', label: 'Da rivedere' };
+  if (item.mission_id && !item.size_bytes) return { status: 'error', label: 'File non disponibile' };
+  if (st === 'draft') return { status: 'connecting', label: 'Bozza' };
+  return { status: 'connected', label: 'Pronto' };   // a file Aether produced outside a mission
+}
+
 export interface ResultItem {
   id: string;
   mission_id?: string;
@@ -63,44 +74,57 @@ export function ResultsView({ navigate }: ResultsViewProps) {
   const fetchResults = async () => {
     setLoading(true);
     try {
-      // 1. Try companion deliverables endpoint
-      const res = await fetch(apiUrl('/api/personal/companion/deliverables?limit=60'));
-      let items: ResultItem[] = [];
-      if (res.ok) {
-        const data = await res.json();
-        if (Array.isArray(data)) {
-          items = data;
-        }
-      }
-
-      // 2. If empty or as fallback, fetch from missions
-      if (items.length === 0) {
-        const missionsRes = await fetch(apiUrl('/api/missions'));
-        if (missionsRes.ok) {
-          const missions = await missionsRes.json();
-          if (Array.isArray(missions)) {
-            const allPromises = missions.slice(0, 15).map(async (m: any) => {
-              try {
-                const delivRes = await fetch(apiUrl(`/api/missions/${m.id}/deliverables`));
-                if (delivRes.ok) {
-                  const delivs = await delivRes.json();
-                  return delivs.map((d: any) => ({
-                    ...d,
-                    mission_id: m.id,
-                    mission_title: m.title,
-                  }));
-                }
-              } catch {
-                return [];
-              }
+      // 1. Deliverables of missions: the only source with status, preview, download and "open" support.
+      const items: ResultItem[] = [];
+      const seenPaths = new Set<string>();
+      const missionsRes = await fetch(apiUrl('/api/missions'));
+      if (missionsRes.ok) {
+        const missions = await missionsRes.json();
+        if (Array.isArray(missions)) {
+          const gathered = await Promise.all(missions.slice(0, 30).map(async (m: any) => {
+            try {
+              const delivRes = await fetch(apiUrl(`/api/missions/${m.id}/deliverables`));
+              if (!delivRes.ok) return [];
+              const delivs = await delivRes.json();
+              return (Array.isArray(delivs) ? delivs : []).map((d: any) => ({
+                ...d,
+                mission_id: m.id,
+                mission_title: m.title,
+              }));
+            } catch {
               return [];
-            });
-            const gathered = await Promise.all(allPromises);
-            items = gathered.flat();
+            }
+          }));
+          for (const d of gathered.flat() as ResultItem[]) {
+            items.push(d);
+            if (d.path) seenPaths.add(d.path);
           }
         }
       }
 
+      // 2. Files Aether produced outside a mission (documents created from chat, inbox, ...). The companion
+      //    endpoint uses its own field names, so they are mapped to the shape of a result here.
+      const res = await fetch(apiUrl('/api/personal/companion/deliverables?limit=60'));
+      if (res.ok) {
+        const data = await res.json();
+        if (Array.isArray(data)) {
+          for (const c of data) {
+            if (!c.file_path || seenPaths.has(c.file_path)) continue;
+            seenPaths.add(c.file_path);
+            items.push({
+              id: c.id,
+              name: c.title || String(c.file_path).split('/').pop() || 'File',
+              path: c.file_path,
+              type: c.file_type || 'file',
+              size_bytes: c.file_size_bytes || 0,
+              created_at: c.created_at,
+              mission_title: c.source === 'task' ? c.title : undefined,
+            });
+          }
+        }
+      }
+
+      items.sort((x, y) => String(y.created_at || '').localeCompare(String(x.created_at || '')));
       setResults(items);
     } catch (err) {
       console.error('Failed to load results', err);
@@ -126,8 +150,11 @@ export function ResultsView({ navigate }: ResultsViewProps) {
         } else {
           setPreviewData({ message: 'Anteprima non disponibile per questo formato di file.' });
         }
+      } else if (item.path) {
+        const res = await fetch(apiUrl(`/api/personal/companion/file/preview?path=${encodeURIComponent(item.path)}`));
+        setPreviewData(res.ok ? await res.json() : { message: 'Anteprima non disponibile per questo file.' });
       } else {
-        setPreviewData({ message: 'Contenuto del file pronto nel tuo workspace.' });
+        setPreviewData({ message: 'Anteprima non disponibile per questo file.' });
       }
     } catch {
       setPreviewData({ message: 'Impossibile caricare l’anteprima.' });
@@ -344,7 +371,7 @@ export function ResultsView({ navigate }: ResultsViewProps) {
                       </div>
                     </div>
                   </div>
-                  <StatusBadge status="completed" label="Pronto" />
+                  <StatusBadge {...resultBadge(item)} />
                 </div>
 
                 {item.mission_title && (
@@ -391,6 +418,18 @@ export function ResultsView({ navigate }: ResultsViewProps) {
                   Anteprima
                 </Button>
 
+                {!item.mission_id && item.path && (
+                  <a
+                    href={apiUrl(`/api/personal/companion/file/download?path=${encodeURIComponent(item.path)}`)}
+                    download={item.name}
+                    style={{ textDecoration: 'none' }}
+                    title="Scarica file sul tuo computer"
+                  >
+                    <Button variant="ghost" size="sm" leftIcon={<Download size={13} />}>
+                      Scarica
+                    </Button>
+                  </a>
+                )}
                 {item.mission_id && (
                   <>
                     <Button

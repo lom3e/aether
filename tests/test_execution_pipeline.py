@@ -118,8 +118,9 @@ def test_runtime_execute_do_mode(tmp_path, accepted_authority_factory):
 
     assert result.success is True
     assert result.status == ExecutionStatus.COMPLETED
-    assert (ws.root / "note.txt").exists()
-    assert (ws.root / "note.txt").read_text() == "Hello Aether runtime"
+    # User documents go to the workspace's files folder, never next to its databases and settings.
+    assert (ws.files_dir / "note.txt").read_text() == "Hello Aether runtime"
+    assert not (ws.root / "note.txt").exists()
     assert len(result.deliverables) == 1
     assert result.deliverables[0]["name"] == "note.txt"
 

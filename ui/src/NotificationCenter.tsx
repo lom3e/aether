@@ -4,6 +4,7 @@ import { apiUrl } from './api';
 import { NotificationFabricModal } from './NotificationFabricModal';
 import { resolveCanonicalTarget, submitApprovalDecision, approvalToastKind } from './canonicalNotification';
 import { useToast } from './toast';
+import { useTranslation } from './i18n';
 
 export interface NotificationItem {
   id: string;
@@ -34,6 +35,7 @@ interface NotificationCenterProps {
 }
 
 export function NotificationCenter({ workspaceName, onNavigate }: NotificationCenterProps) {
+  const { t } = useTranslation();
   const showToast = useToast();
   const [isOpen, setIsOpen] = useState(false);
   const [fabricModalOpen, setFabricModalOpen] = useState(false);
@@ -252,7 +254,7 @@ export function NotificationCenter({ workspaceName, onNavigate }: NotificationCe
     <div ref={dropdownRef} style={{ position: 'relative', display: 'inline-block' }}>
       <button
         type="button"
-        aria-label="Notifications"
+        aria-label={t('notificationsLabel')}
         className="btn btn-ghost"
         onClick={handleToggle}
         data-testid="notification-bell-btn"
@@ -376,8 +378,8 @@ export function NotificationCenter({ workspaceName, onNavigate }: NotificationCe
             ) : notifications.length === 0 ? (
               <div style={{ padding: '40px 20px', textAlign: 'center', color: 'hsl(var(--muted-fg))' }}>
                 <CheckCircle2 size={32} style={{ margin: '0 auto 8px', opacity: 0.4 }} />
-                <div style={{ fontSize: '14px', fontWeight: 500 }}>All caught up!</div>
-                <div style={{ fontSize: '12px', marginTop: '4px' }}>No new notifications or pending actions.</div>
+                <div style={{ fontSize: '14px', fontWeight: 500 }}>{t('notificationsAllCaughtUp')}</div>
+                <div style={{ fontSize: '12px', marginTop: '4px' }}>{t('notificationsNoneNew')}</div>
               </div>
             ) : (
               notifications.map(item => (
@@ -458,7 +460,7 @@ export function NotificationCenter({ workspaceName, onNavigate }: NotificationCe
                   <div style={{ display: 'flex', flexDirection: 'column', gap: '4px', flexShrink: 0 }}>
                     {item.status === 'unread' && (
                       <button
-                        title="Mark as read"
+                        title={t('notificationsMarkAsRead')}
                         onClick={e => handleMarkAsRead(item.id, e)}
                         style={{
                           background: 'none',

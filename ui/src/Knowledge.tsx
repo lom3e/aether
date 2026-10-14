@@ -662,8 +662,8 @@ export function Knowledge() {
                   <Globe size={18} />
                 </div>
                 <div>
-                  <h3 style={{ margin: 0, fontSize: '16px', fontWeight: 600 }}>Ingest Web Documentation</h3>
-                  <div style={{ fontSize: '12px', color: 'hsl(var(--muted-fg))' }}>Extract and index web articles, API docs, or specs</div>
+                  <h3 style={{ margin: 0, fontSize: '16px', fontWeight: 600 }}>{t('knowledgeIngestWebTitle')}</h3>
+                  <div style={{ fontSize: '12px', color: 'hsl(var(--muted-fg))' }}>{t('knowledgeIngestWebDesc')}</div>
                 </div>
               </div>
               <button

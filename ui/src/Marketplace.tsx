@@ -188,7 +188,7 @@ export function Marketplace() {
             <input
               type="text"
               className="form-input"
-              placeholder="Search packages, tags..."
+              placeholder={t('marketplaceSearchPlaceholder')}
               value={searchQuery}
               onChange={e => setSearchQuery(e.target.value)}
               style={{ paddingLeft: '32px', height: '32px', fontSize: '13px', borderRadius: '8px' }}
@@ -298,7 +298,7 @@ export function Marketplace() {
                       style={{ padding: '8px 12px', color: 'hsl(var(--destructive))' }}
                       onClick={() => handleUninstall(pkg)}
                       disabled={actionLoadingId === pkg.id}
-                      title="Uninstall package"
+                      title={t('marketplaceUninstall')}
                     >
                       <Trash2 size={14} />
                     </button>
@@ -322,7 +322,7 @@ export function Marketplace() {
         {packages.length === 0 && !loading && (
           <div style={{ textAlign: 'center', padding: '48px', color: 'hsl(var(--muted-fg))' }}>
             <ShoppingBag size={36} style={{ margin: '0 auto 12px', opacity: 0.5 }} />
-            <p>No marketplace packages matching criteria.</p>
+            <p>{t('marketplaceEmpty')}</p>
           </div>
         )}
       </div>
@@ -384,7 +384,7 @@ export function Marketplace() {
                 REQUESTED PERMISSIONS
               </div>
               {inspectingPackage.security_summary.permissions.length === 0 ? (
-                <div style={{ fontSize: '12px', color: 'hsl(var(--muted-fg))' }}>No special permissions required.</div>
+                <div style={{ fontSize: '12px', color: 'hsl(var(--muted-fg))' }}>{t('marketplaceNoPermissions')}</div>
               ) : (
                 <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
                   {inspectingPackage.security_summary.permissions.map(perm => (

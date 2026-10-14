@@ -487,7 +487,17 @@ class Agent:
                 )
 
             # Generate provider response (with streaming chunk emission if supported)
-            response = self._generate_step(agent_context.messages, tools_schema, task)
+            step_tools = tools_schema
+            if tools_schema and agent_context.current_turn >= self.max_turns - 1:
+                # Last turn: a model that keeps searching never answers. Take the tools away and ask for the answer,
+                # so the work done so far ends as a result instead of as "Max turns reached".
+                step_tools = []
+                agent_context.messages.append(Message(
+                    role="user",
+                    content="[Aether] The tool budget is used up. Reply now with your final answer using what you already "
+                            "have, without calling any tool. If something is missing, say what, but still answer.",
+                ))
+            response = self._generate_step(agent_context.messages, step_tools, task)
 
             # Check cancellation immediately after generate step
             if cancellation_token and cancellation_token.is_set():

@@ -23,6 +23,7 @@ import logging
 import os
 import re
 import socket
+import time
 import urllib.error
 import urllib.request
 from dataclasses import dataclass
@@ -164,7 +165,35 @@ class GroqProvider(AIProvider):
     def _redact(self, text: str) -> str:
         return redact(text, self.config.api_key)
 
+    # Rate limits are a normal part of Groq's free and on-demand tiers: wait as long as Groq says (bounded) and retry a
+    # few times before giving up. A wait longer than MAX_RETRY_WAIT (e.g. a daily quota) is reported, never slept through.
+    MAX_RATE_LIMIT_RETRIES = 3
+    MAX_RETRY_WAIT = 60.0
+    MAX_CONNECTION_RETRIES = 2
+    DEFAULT_BACKOFF = 2.0
+
     def _open(self, req: urllib.request.Request, timeout: float):
+        attempt = 0
+        while True:
+            try:
+                return self._open_once(req, timeout)
+            except RateLimitError as exc:
+                wait = exc.retry_after if exc.retry_after is not None else self.DEFAULT_BACKOFF * (2 ** attempt)
+                if attempt >= self.MAX_RATE_LIMIT_RETRIES or wait > self.MAX_RETRY_WAIT:
+                    raise
+                logger.info("Groq rate limit: retrying in %.1fs (attempt %d/%d).", wait, attempt + 1, self.MAX_RATE_LIMIT_RETRIES)
+                time.sleep(wait + 0.25)
+                attempt += 1
+            except ProviderConnectionError:
+                # A momentary DNS or network drop: a couple of quick retries; a real outage still surfaces as an error.
+                if attempt >= self.MAX_CONNECTION_RETRIES:
+                    raise
+                wait = self.DEFAULT_BACKOFF * (2 ** attempt)
+                logger.info("Groq unreachable: retrying in %.1fs (attempt %d/%d).", wait, attempt + 1, self.MAX_CONNECTION_RETRIES)
+                time.sleep(wait)
+                attempt += 1
+
+    def _open_once(self, req: urllib.request.Request, timeout: float):
         try:
             return urllib.request.urlopen(req, timeout=timeout)
         except urllib.error.HTTPError as he:
@@ -191,8 +220,14 @@ class GroqProvider(AIProvider):
             return AuthenticationError(f"Groq rejected the API key (HTTP {code}). {detail}", provider="groq")
         if code == 429:
             retry = he.headers.get("retry-after") if getattr(he, "headers", None) else None
+            try:
+                retry_seconds = max(0.0, float(retry)) if retry is not None else None
+            except (TypeError, ValueError):
+                retry_seconds = None
             hint = f" Retry after {retry}s." if retry else ""
-            return RateLimitError(f"Groq rate limit or quota exceeded (HTTP 429).{hint} {detail}", provider="groq")
+            return RateLimitError(
+                f"Groq rate limit or quota exceeded (HTTP 429).{hint} {detail}", provider="groq", retry_after=retry_seconds,
+            )
         if code == 404 or ("model" in detail.lower() and ("not found" in detail.lower() or "does not exist" in detail.lower())):
             return ModelNotFoundError(f"Groq model '{self.config.model}' is not available: {detail}", provider="groq")
         return ProviderError(f"Groq API error (HTTP {code}): {detail}", provider="groq")

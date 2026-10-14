@@ -14,6 +14,7 @@ import re
 from typing import Any
 import uuid
 
+from aether.core.language import looks_english
 from aether.actions.executor import ActionExecutor
 from aether.actions.models import ActionExecutionStatus, ActionPermissionLevel
 from aether.activity.models import ActivityCategory, ActivityStatus
@@ -330,6 +331,73 @@ def generate_executive_mandate(instruction: str, proposal: Any | None = None) ->
     return mandate_prefix + clean_text
 
 
+_INTERROGATIVE_START_RE = re.compile(
+    r"^\s*(?:(?:in|a|di|da|con|per|su)\s+(?:che|quale|quali|quanto|quanti|quando|chi)\b|"
+    r"(?:chi|che|cosa|quando|dove|come|quanto|quanti|quanta|quante|quale|quali|perch[eé]|"
+    r"who|what|when|where|how|which|why|whose)\b)",
+    re.IGNORECASE,
+)
+_POLITE_REQUEST_RE = re.compile(
+    r"^\s*(?:per\s+favore|please|puoi|potresti|riesci\s+a|mi\s+(?:serve|servirebbe|occorre|fai|prepari|scrivi)|"
+    r"can\s+you|could\s+you|would\s+you|vorrei|voglio|ho\s+bisogno|i\s+need|i\s+want|i'd\s+like)\b",
+    re.IGNORECASE,
+)
+_IMPERATIVE_LEAD_RE = re.compile(
+    r"^\s*(?:(?:per\s+favore|please|ora|adesso|now)[,\s]+)?(?:fai|fammi|esegui|prepara|preparami|genera|crea|scrivi|redigi|"
+    r"compila|produci|elabora|avvia|lancia|make|run|do|prepare|generate|write|produce|draft|give\s+me|dammi)\b",
+    re.IGNORECASE,
+)
+
+
+def is_information_question(prompt: str) -> bool:
+    """True for questions that ask for information (who/when/what…), as opposed to polite requests for work."""
+    text = (prompt or "").strip()
+    if not text:
+        return False
+    if _INTERROGATIVE_START_RE.match(text):
+        return True
+    return text.endswith("?") and not _POLITE_REQUEST_RE.match(text) and not _IMPERATIVE_LEAD_RE.match(text)
+
+
+_DECLARATIVE_OPENING_RE = re.compile(
+    r"^\s*(?:il|lo|la|le|gli|i|l['’]|un|uno|una|un['’]|questo|questa|quel|quello|quella|mio|mia|miei|mie|nostro|nostra|"
+    r"sto|stavo|stiamo|ho|hai|ha|abbiamo|è|e'|era|erano|siamo|sono|ieri|oggi|the|this|that|these|those|my|our|it|its|i|we|he|she|they|there)\b",
+    re.IGNORECASE,
+)
+
+
+def is_request_shaped(prompt: str, verbs_pattern: str) -> bool:
+    """
+    True when the prompt reads as a work request rather than a statement: it opens with a delegation verb, an
+    imperative or a polite request, or at least does not open like a declarative sentence ("Il report di ieri era chiaro").
+    """
+    text = (prompt or "").strip()
+    return bool(
+        re.match(r"^\s*(?:(?:per\s+favore|please)[,\s]+)?" + verbs_pattern + r"\b", text, re.IGNORECASE)
+        or _IMPERATIVE_LEAD_RE.match(text)
+        or _POLITE_REQUEST_RE.match(text)
+        or not _DECLARATIVE_OPENING_RE.match(text)
+    )
+
+
+_MEMORY_STATEMENT_RE = re.compile(
+    r"^\s*(?:(?:per\s+favore|please|ok|ehi|ciao)[,\s]+)?(?:aether[,\s]+)?"
+    r"(?:ricordati|ricorda|tieni\s+(?:a\s+mente|presente)|prendi\s+nota|memorizza|annota|salva\s+in\s+memoria|"
+    r"remember|keep\s+in\s+mind|note\s+that|take\s+note)"
+    r"(?:\s+(?:che|di|ciò\s+che|that|:)|\s*:)\s*(?P<fact>.+)$",
+    re.IGNORECASE | re.DOTALL,
+)
+
+
+def extract_memory_statement(prompt: str) -> str | None:
+    """The fact to store when the user explicitly asks Aether to remember something, else None."""
+    match = _MEMORY_STATEMENT_RE.match(prompt or "")
+    if not match:
+        return None
+    fact = match.group("fact").strip()
+    return fact if len(fact) >= 3 else None
+
+
 class MissionCreationError(RuntimeError):
     """A delegation could not be backed by a real, persisted mission, so nothing was started."""
 
@@ -440,6 +508,7 @@ class PersonalAgentService:
         session_id: str | None = None,
         source_surface: str = "api",
         constraints: list[str] | None = None,
+        clarifications: dict[str, str] | None = None,
     ) -> tuple[IntentRequest, ContextPack, MissionProposal, ProposalValidationResult]:
         """
         Executes the canonical Intent -> Context -> Proposal -> Validation pipeline (Phase A Macro-pass 1).
@@ -467,6 +536,8 @@ class PersonalAgentService:
             connection_service=self.connection_service,
         )
         context_pack = resolver.resolve(intent)
+        if clarifications:
+            self._apply_user_clarifications(context_pack, clarifications)
 
         generator = ProposalGenerator(provider=self.provider)
         proposal = generator.generate(intent, context_pack)
@@ -596,7 +667,7 @@ class PersonalAgentService:
         gate = None
         if res.success:
             gate = _run_coro(QualityGateEvaluator().evaluate(
-                mission_title=f"Task: {topic_title}", mission_objective=objective or topic_title,
+                mission_title=topic_title, mission_objective=objective or topic_title,
                 deliverables=items, completed_context=[str(getattr(res, "output", "") or "")], team=None, workspace=self.workspace,
             ))
         passed = bool(gate is not None and gate.passed and items)
@@ -676,13 +747,13 @@ class PersonalAgentService:
             "context_trace": assembled.trace() if assembled is not None else None,
         }
         mission = self.mission_store.create_mission(
-            title=f"Task: {topic_title}", objective=objective, workspace_id=workspace_id,
+            title=topic_title, objective=objective, workspace_id=workspace_id,
             milestones=plan.milestone_dicts(), metadata=metadata, status=MissionStatus.READY,
         )
         note = plan.warnings[0] if plan.warnings else ""
         return mission.id, plan, note
 
-    def _execute_mission_via_runtime(self, mission_id: str, authority: Any, progress_cb: Any) -> dict[str, Any]:
+    def _execute_mission_via_runtime(self, mission_id: str, authority: Any, progress_cb: Any, english: bool = False) -> dict[str, Any]:
         """Runs the mission to completion on MissionRuntime and returns ONLY facts read back from the stores."""
         import asyncio
         from aether.missions.runtime import MissionRuntime
@@ -705,9 +776,23 @@ class PersonalAgentService:
         except Exception as exc:
             error = f"{type(exc).__name__}: {exc}"
         progress_cb(95, "Reading back the mission outcome")
-        return self._mission_outcome(mission_id, exec_id, error)
+        return self._mission_outcome(mission_id, exec_id, error, english=english)
 
-    def _mission_outcome(self, mission_id: str, exec_id: str | None, error: str | None) -> dict[str, Any]:
+    @staticmethod
+    def _deliverable_excerpt(path: str | None, limit: int = 700) -> str:
+        """First lines of a text deliverable, so the chat shows the result and not only that a file exists."""
+        try:
+            p = Path(path) if path else None
+            if p is None or not p.is_file() or p.suffix.lower() not in (".md", ".txt", ".csv", ".json"):
+                return ""
+            text = p.read_text(encoding="utf-8", errors="replace").strip()
+        except OSError:
+            return ""
+        lines = [ln for ln in text.splitlines() if not ln.startswith("# ")]  # the title is repeated by the caller
+        body = "\n".join(lines).strip()
+        return body if len(body) <= limit else body[:limit].rstrip() + "…"
+
+    def _mission_outcome(self, mission_id: str, exec_id: str | None, error: str | None, english: bool = False) -> dict[str, Any]:
         """Facts, not prose: statuses, per-stage results, deliverables and how (and whether) they were verified."""
         mission = self.mission_store.get_mission(mission_id)
         execution = self.mission_store.get_execution(exec_id) if exec_id else None
@@ -724,15 +809,27 @@ class PersonalAgentService:
         method = None
         for d in verified:
             method = (d.metadata or {}).get("verification_method") or method
-        if error and not execution:
-            headline = f"La missione non è partita: {error}"
-        elif m_status == "completed":
-            headline = (f"Missione completata: {done}/{len(stages)} fasi, {len(verified)} deliverable verificati"
-                        + (f" (verifica: {method})" if method else "") + ".")
-        else:
-            headline = (f"Missione NON completata (stato: {m_status}/{e_status}): {done}/{len(stages)} fasi riuscite"
-                        + (f". Errore: {execution.error_message}" if execution and execution.error_message else "") + ".")
         first = verified[0] if verified else (deliverables[0] if deliverables else None)
+        if error and not execution:
+            headline = (f"The mission did not start: {error}" if english else f"La missione non è partita: {error}")
+        elif m_status == "completed":
+            if english:
+                headline = (f"Mission completed: {done}/{len(stages)} stages, {len(verified)} verified deliverable(s)"
+                            + (f" (verification: {method})" if method else "") + ".")
+            else:
+                headline = (f"Missione completata: {done}/{len(stages)} fasi, {len(verified)} deliverable verificati"
+                            + (f" (verifica: {method})" if method else "") + ".")
+            excerpt = self._deliverable_excerpt(first.path) if first else ""
+            if first:
+                headline += (f"\n\n{'Result' if english else 'Risultato'} (`{first.name}`):\n{excerpt}" if excerpt
+                             else f"\n\n{'File' if english else 'File'}: `{first.name}`")
+        else:
+            if english:
+                headline = (f"Mission NOT completed (state: {m_status}/{e_status}): {done}/{len(stages)} stages succeeded"
+                            + (f". Error: {execution.error_message}" if execution and execution.error_message else "") + ".")
+            else:
+                headline = (f"Missione NON completata (stato: {m_status}/{e_status}): {done}/{len(stages)} fasi riuscite"
+                            + (f". Errore: {execution.error_message}" if execution and execution.error_message else "") + ".")
         return {
             "summary": headline, "mission_id": mission_id, "mission_status": m_status, "execution_status": e_status,
             "stages": stages, "deliverable_name": first.name if first else None, "deliverable_path": first.path if first else None,
@@ -758,15 +855,100 @@ class PersonalAgentService:
         )
         return self.store.record_consent(record)
 
+    @staticmethod
+    def _apply_user_clarifications(context: ContextPack, clarifications: dict[str, str]) -> None:
+        """
+        Records what the user answered to the open clarification requirements and treats those references as resolved
+        BY THE USER (not verified by Aether): the answer is kept as an explicit assumption and as entity metadata, and
+        the proposal still has to be accepted by the user, who sees it.
+        """
+        from aether.planning.contracts import ResolutionState
+
+        for key, answer in clarifications.items():
+            text = (answer or "").strip()
+            if not text:
+                continue
+            if key.split(":", 1)[0] in ("connection", "repository", "branch"):
+                continue  # facts Aether can check itself: a statement from the user does not make them true
+            context.assumptions.append(f"Chiarito dall'utente — {key}: {text}")
+            context.unresolved_references = [u for u in context.unresolved_references if u != key]
+            context.ambiguity = [a for a in context.ambiguity if a != key]
+            for entity in context.resolved_entities:
+                if f"{entity.entity_type}:{entity.display_name}" == key and entity.resolution_state != ResolutionState.MATCHED:
+                    entity.resolution_state = ResolutionState.MATCHED
+                    entity.confidence = max(entity.confidence, 0.6)
+                    entity.metadata = {**entity.metadata, "resolved_by": "user_clarification", "user_answer": text}
+
+    def answer_clarification(
+        self, proposal_id: str, workspace_id: str, answer: str, actor: str = "user", session_id: str | None = None,
+    ) -> tuple[MissionProposal, ProposalValidationResult, PersonalMessage | None]:
+        """
+        Resumes a proposal that was waiting for clarification: the user's answer is attached to the original request, the
+        open requirements are resolved by that answer, a NEW proposal is generated and validated, and the old one is
+        marked superseded. Nothing is executed; the new proposal still needs the user's acceptance.
+        """
+        from aether.planning.contracts import ProposalStatus
+
+        ws_id = self._canon(workspace_id).strip()
+        answer = (answer or "").strip()
+        if not answer:
+            raise ValueError("A clarification answer cannot be empty.")
+        old = self.store.get_proposal(proposal_id, workspace_id=ws_id)
+        if not old:
+            raise ValueError(f"Proposal '{proposal_id}' not found in workspace '{ws_id}'.")
+        if old.status != ProposalStatus.NEEDS_CLARIFICATION:
+            raise ValueError(f"Proposal '{proposal_id}' is '{old.status.value}', not waiting for clarification.")
+        original = self.store.get_intent_request(old.intent_id)
+        raw = original.raw_input if original else old.objective
+        label = "User clarification" if looks_english(raw) else "Chiarimento dell'utente"
+        # The prompt-level ambiguities are keyed by their own text, everything else by the requirement's context key.
+        keys = [c.question if c.context_key == "prompt_ambiguity" else c.context_key for c in old.clarification_requirements]
+        _, _, new_proposal, validation = self.create_intent_and_proposal(
+            f"{raw}\n\n{label}: {answer}", ws_id,
+            session_id=original.session_id if original else None,
+            source_surface=original.source_surface if original else "api",
+            constraints=list(original.constraints) if original else None,
+            clarifications={k: answer for k in keys if k},
+        )
+        self.store.transition_proposal_status(
+            proposal_id=old.id, workspace_id=ws_id,
+            from_status=ProposalStatus.NEEDS_CLARIFICATION, to_status=ProposalStatus.SUPERSEDED,
+        )
+        logger.info("Proposal '%s' superseded by '%s' after clarification by '%s'.", old.id, new_proposal.id, actor)
+        message = None
+        if session_id:
+            tier = IntentTier.ACT
+            for m in self.store.get_recent_messages(session_id, limit=30):
+                if (m.metadata or {}).get("proposal_id") == old.id:
+                    tier = m.tier
+            step = PersonalStep(
+                id=f"step-{uuid.uuid4().hex[:8]}",
+                title=f"Prepared proposal: {new_proposal.title}",
+                status="waiting_acceptance" if new_proposal.status != ProposalStatus.NEEDS_CLARIFICATION else "completed",
+                category="proposal",
+                details={"proposal_id": new_proposal.id, "version": new_proposal.version},
+            )
+            message = PersonalMessage(
+                id=f"msg-{uuid.uuid4().hex[:12]}", session_id=session_id, workspace_id=ws_id, role="assistant",
+                content=new_proposal.to_human_markdown(), tier=tier, steps=[step],
+                metadata={"status": "proposal_pending", "proposal_id": new_proposal.id, "proposal_version": new_proposal.version,
+                          "proposal": new_proposal.to_dict(), "validation": validation.to_dict(),
+                          "supersedes_proposal_id": old.id, "intent_type": "clarified_proposal"},
+                created_at=datetime.now(timezone.utc).isoformat(),
+            )
+            self.store.add_message(message)
+            self.event_hub.publish(workspace_id=ws_id, event_type="assistant_message", data=message.to_dict())
+        return new_proposal, validation, message
+
     def revoke_proposal(self, proposal_id: str, workspace_id: str, actor: str = "user", reason: str = "revoked by user") -> MissionProposal:
-        """Withdraws an accepted proposal: its consent is revoked, so every authority derived from it stops working."""
+        """Withdraws a proposal (rejecting a pending one, or revoking an accepted one): its consent is revoked, so every authority derived from it stops working."""
         workspace_id = self._canon(workspace_id)
         proposal = self.store.get_proposal(proposal_id, workspace_id=workspace_id)
         if not proposal:
             raise ValueError(f"Proposal '{proposal_id}' not found in workspace '{workspace_id}'.")
         revoked = self.store.transition_proposal_status(
             proposal_id=proposal_id, workspace_id=workspace_id,
-            from_status=[ProposalStatus.ACCEPTED, ProposalStatus.READY_FOR_ACCEPTANCE, ProposalStatus.DRAFT],
+            from_status=[ProposalStatus.ACCEPTED, ProposalStatus.READY_FOR_ACCEPTANCE, ProposalStatus.DRAFT, ProposalStatus.NEEDS_CLARIFICATION],
             to_status=ProposalStatus.REVOKED,
         )
         if hasattr(self.store, "revoke_consent"):
@@ -834,7 +1016,28 @@ class PersonalAgentService:
         prompt: str,
         recent_history: list[PersonalMessage] | None = None,
     ) -> UserIntent:
-        """Classifies natural language user intent into execution tier, resolving multi-turn references."""
+        """Classifies natural language user intent into execution tier, resolving multi-turn references.
+
+        The keyword rules below can match a topic word ("report", "cliente", "mail", "ogni settimana") inside a plain
+        question. A question that opens with an interrogative ("Quando riceve il report il cliente Bianchi?") asks for
+        information: it is answered, it never becomes a draft, an action or a mission. Reading queries (calendar,
+        documents, status) are ANSWER-tier already and are left untouched.
+        """
+        intent = self._classify_intent_rules(prompt, recent_history=recent_history)
+        if intent.tier in (IntentTier.DO, IntentTier.ACT, IntentTier.DELEGATE) and _INTERROGATIVE_START_RE.match(prompt or ""):
+            return UserIntent(
+                raw_prompt=prompt,
+                tier=IntentTier.ANSWER,
+                summary="Answer informational inquiry",
+                intent_type="informational",
+            )
+        return intent
+
+    def _classify_intent_rules(
+        self,
+        prompt: str,
+        recent_history: list[PersonalMessage] | None = None,
+    ) -> UserIntent:
         p_lower = prompt.lower().strip()
 
         # Multi-turn context resolution: if short prompt or follow-up, resolve referents
@@ -879,6 +1082,18 @@ class PersonalAgentService:
                 if context_hint:
                     effective_prompt = f"{context_hint} (Confirmed by user: {prompt})"
                     p_lower = effective_prompt.lower()
+
+        # Explicit memory request ("Ricorda che…", "Remember that…"): a statement to store, never a mission.
+        memory_fact = extract_memory_statement(prompt)
+        if memory_fact:
+            return UserIntent(
+                raw_prompt=prompt,
+                tier=IntentTier.ANSWER,
+                summary="Save explicit memory",
+                action_id="memory.save",
+                action_args={"fact": memory_fact},
+                intent_type="memory_save",
+            )
 
         # Operational Autonomy ("Aether, take care of it" / "Prenditene cura tu")
         from aether.autonomy.engine import AutonomousGoalOrchestrator
@@ -2104,7 +2319,7 @@ class PersonalAgentService:
             "deep research", "deep analysis", "audit codebase", "analisi di mercato",
             "ricerca di mercato", "market report", "competitive landscape",
         ]
-        if any(k in p_lower for k in delegate_triggers):
+        if any(k in p_lower for k in delegate_triggers) and not is_information_question(prompt):
             return UserIntent(
                 raw_prompt=effective_prompt,
                 tier=IntentTier.DELEGATE,
@@ -2120,7 +2335,12 @@ class PersonalAgentService:
         delegation_verbs = r"(?:audit|analisi|ricerca|analizza|analysis|research|report|review|studio|valutazione|assessment)"
         delegation_prep = r"(?:\s+(?:di\s+)?(?:sicurezza|mercato|qualità|performance|codebase|codice|sistema|competitivo|strategico|market|security|competitive|strategic|quality|code|system))?"
         delegation_target = r"\s+(?:per|di|su|for|of|on|about|su|riguardo)\s+\S+"
-        if re.search(delegation_verbs + r"(?:" + delegation_prep + delegation_target + r"|" + delegation_prep + r")", effective_prompt, re.IGNORECASE):
+        # A question about a report/client ("Quando riceve il report il cliente Bianchi?") is informational: the
+        # delegation verbs only count in a request shape (imperative / "vorrei…" / "mi serve…"), never in a question.
+        if not is_information_question(prompt) and re.search(
+            r"\b" + delegation_verbs + r"\b(?:" + delegation_prep + delegation_target + r"|" + delegation_prep + r")",
+            effective_prompt, re.IGNORECASE,
+        ) and is_request_shaped(prompt, delegation_verbs):
             return UserIntent(
                 raw_prompt=effective_prompt,
                 tier=IntentTier.DELEGATE,
@@ -2805,7 +3025,14 @@ class PersonalAgentService:
                     response_text = "\n".join(lines)
                 else:
                     target = intent.action_args.get("filename", "item")
-                    response_text = runtime_res.output or f"I've taken care of it! **{target}** has been created in your workspace."
+                    saved_path = ((runtime_res.metadata or {}).get("action_result") or {}).get("path")
+                    where = f" (`{saved_path}`)" if saved_path else ""
+                    if saved_path:
+                        msg_metadata["file_path"] = saved_path
+                    response_text = runtime_res.output or (
+                        f"Done! **{target}** has been created{where}." if looks_english(prompt)
+                        else f"Fatto! **{target}** è stato creato{where}."
+                    )
 
                     if self.notification_service and action_execution_id:
                         self.notification_service.notify(
@@ -2834,7 +3061,7 @@ class PersonalAgentService:
                 exec_request.mission_id = mission_id
 
                 def background_workforce_worker(progress_cb: Any) -> dict[str, Any]:
-                    return self._execute_mission_via_runtime(mission_id, authority, progress_cb)
+                    return self._execute_mission_via_runtime(mission_id, authority, progress_cb, english=looks_english(prompt))
 
                 task = self.task_manager.submit_task(
                     workspace_id=workspace_id,
@@ -2862,7 +3089,7 @@ class PersonalAgentService:
                 steps.append(step_del)
 
                 topic_title = self._extract_task_topic(prompt)
-                mission_title = f"Task: {topic_title}"
+                mission_title = topic_title
 
                 if self.mission_store:
                     try:
@@ -2934,7 +3161,7 @@ class PersonalAgentService:
                     metadata={"prompt": prompt, "entity": topic_title},
                 )
 
-                is_italian = any(w in prompt.lower() for w in ["chi", "cosa", "come", "perché", "perche", "dove", "dimmi", "puoi", "aiutami", "ciao", "buongiorno", "qual è", "quali", "grazie", "stai", "chiedi", "fai", "delega"])
+                is_italian = not looks_english(prompt)
                 if is_italian:
                     response_text = (
                         f"Ho preso in carico la tua richiesta per **{topic_title}** e ho attivato la Digital Workforce in background.\n\n"
@@ -3032,6 +3259,21 @@ class PersonalAgentService:
                             )
                         )
                         response_text = f"Errore durante la lettura del documento `{filename}`: {execution.error_message or 'Operazione fallita.'}"
+
+            elif intent.action_id == "memory.save":
+                response_text, saved_memory_id = self._save_explicit_memory(
+                    workspace_id, intent.action_args.get("fact", ""), prompt, session_id,
+                )
+                steps.append(
+                    PersonalStep(
+                        id=f"step-{uuid.uuid4().hex[:8]}",
+                        title="Saving to memory",
+                        status="completed" if saved_memory_id else "failed",
+                        category="action",
+                    )
+                )
+                if saved_memory_id:
+                    msg_metadata["memory_id"] = saved_memory_id
 
             elif intent.action_id == "coding.status":
                 if not self.action_executor:
@@ -3139,7 +3381,14 @@ class PersonalAgentService:
                     )
                 else:
                     runtime_res = self.runtime.execute(exec_request)
+                    _rt_meta = runtime_res.metadata or {}
+                    # Which provider/model actually answered (or failed): the UI must not have to guess.
+                    for _k in ("provider", "model"):
+                        if _rt_meta.get(_k):
+                            msg_metadata[_k] = _rt_meta[_k]
                     if runtime_res.status == ExecutionStatus.FAILED:
+                        if _rt_meta.get("code"):
+                            msg_metadata["error_code"] = _rt_meta["code"]
                         if steps:
                             steps[-1].status = "failed"
                             steps[-1].details = {"error": runtime_res.error}
@@ -3207,6 +3456,66 @@ class PersonalAgentService:
 
         return assistant_msg
 
+    def _save_explicit_memory(self, workspace_id: str, fact: str, prompt: str, session_id: str | None) -> tuple[str, str | None]:
+        """Persists a fact the user explicitly asked Aether to remember; returns (reply, memory_id or None)."""
+        english = looks_english(prompt)
+        store = getattr(self.workspace, "memory", None)
+        if store is None:
+            return (
+                "I could not save this: the memory store is not available." if english
+                else "Non posso salvarlo: l'archivio della memoria non è disponibile.",
+                None,
+            )
+        from aether.memory.models import MemoryCategory, MemoryProvenance, WorkforceMemory
+        from aether.memory.sanitization import sanitize_memory_text
+
+        clean = sanitize_memory_text(fact).strip()
+        if not clean:
+            return (
+                "There is nothing to remember in that message." if english
+                else "Non c'è nulla da ricordare in questo messaggio.",
+                None,
+            )
+        low = clean.lower()
+        if re.search(r"\b(?:client[ei]?|customer|referente|contatto|contact|collega|colleague|fornitore|supplier)\b", low):
+            category = MemoryCategory.PERSON
+        elif re.search(r"\b(?:preferisco|preferisce|voglio|vuole|sempre|mai|always|never|prefer)\b", low):
+            category = MemoryCategory.PREFERENCE
+        else:
+            category = MemoryCategory.FACT
+        memory = WorkforceMemory.create(
+            workspace_id=getattr(self.workspace, "id", None) or workspace_id,
+            category=category,
+            summary=clean[:80] + ("..." if len(clean) > 80 else ""),
+            content=clean,
+            provenance=MemoryProvenance(
+                source_entity="personal_chat",
+                source_id=session_id,
+                verification_status="user_stated",
+            ),
+            tags=["user-stated"],
+        )
+        try:
+            saved = store.create_memory(memory)
+        except Exception as exc:
+            logger.error("Explicit memory save failed: %s", exc)
+            return (
+                f"I could not save this to memory: {exc}" if english
+                else f"Non sono riuscito a salvarlo in memoria: {exc}",
+                None,
+            )
+        graph = getattr(self.workspace, "knowledge_graph", None)
+        if graph:
+            try:
+                from aether.knowledge.graph.builder import KnowledgeGraphBuilder
+                KnowledgeGraphBuilder.compile_memory(saved, graph)
+            except Exception as exc:
+                logger.debug("Memory saved but not compiled into the knowledge graph: %s", exc)
+        reply = (
+            f"Got it, I'll remember: {clean}" if english else f"Fatto, me lo ricordo: {clean}"
+        )
+        return reply, saved.id
+
     def _llm_classify_tier(self, prompt: str) -> str:
         """Ask the configured provider to classify an ambiguous prompt into 'answer', 'do', or 'delegate'.
 
@@ -3239,23 +3548,17 @@ class PersonalAgentService:
 
     def _extract_task_topic(self, prompt: str) -> str:
         """Extracts the subject or entity of a task from natural language prompt, preserving original casing."""
-        match = re.search(r"(?:per|for|su|about|on|riguardo a)\s+([A-Za-z0-9_\-\s]{2,30})", prompt, re.IGNORECASE)
+        match = re.search(r"\b(?:per|for|su|about|on|riguardo a)\s+([^\n]+)", prompt, re.IGNORECASE)
         if match:
-            candidate = match.group(1).strip()
-            if candidate.lower() not in ["un", "una", "il", "lo", "la", "questo", "questa", "this", "that", "the", "a", "an"]:
-                # Preserve original-case proper nouns from the prompt instead of blindly .title()-ing
-                # Search for the candidate words in the original prompt and use their actual casing
-                words_in_prompt = prompt.split()
-                candidate_words = candidate.split()
-                preserved_words = []
-                for cword in candidate_words:
-                    # Find the original casing of this word in the prompt (case-insensitive search)
-                    original = next(
-                        (w for w in words_in_prompt if w.lower() == cword.lower()),
-                        cword.title(),
-                    )
-                    preserved_words.append(original)
-                return " ".join(preserved_words)
+            # Whole first clause, never cut in the middle of a word.
+            candidate = re.split(r"[,.;:!?\n]", match.group(1), maxsplit=1)[0].strip()
+            candidate = re.sub(
+                r"^(?:un[oa]?|il|lo|la|l'|i|gli|le|questo|questa|this|that|the|an?)\s+", "", candidate, flags=re.IGNORECASE
+            ).strip()
+            if len(candidate) > 48:
+                candidate = candidate[:48].rsplit(" ", 1)[0].rstrip() + "…"
+            if len(candidate) >= 2:
+                return candidate
         words = [w for w in re.findall(r"\b[a-zA-Z0-9_\-]+\b", prompt) if len(w) > 2 and w.lower() not in [
             "chiedi", "alla", "persona", "più", "adatta", "del", "mio", "team", "analizzare",
             "questo", "problema", "fai", "un", "una", "analisi", "mercato", "report", "prepara",

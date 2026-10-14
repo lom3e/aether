@@ -225,8 +225,13 @@ async def test_phase_a_runtime_persistence_privacy_and_multirun(tmp_path: Path, 
     # Deliverables isolation per run
     d_list_1 = store.list_deliverables(mission.id, execution_id=exec1.id)
     d_list_2 = store.list_deliverables(mission.id, execution_id=exec2.id)
-    assert len(d_list_1) == 1 and d_list_1[0].id == "del_verif_1"
-    assert len(d_list_2) == 1 and d_list_2[0].id == "del_verif_2"
+    # A text-only stage output is saved as a document of the run that produced it (never of another run).
+    own_1 = [d for d in d_list_1 if not (d.metadata or {}).get("synthesized_from_stage_output")]
+    own_2 = [d for d in d_list_2 if not (d.metadata or {}).get("synthesized_from_stage_output")]
+    assert [d.id for d in own_1] == ["del_verif_1"]
+    assert [d.id for d in own_2] == ["del_verif_2"]
+    assert all(d.execution_id == exec1.id for d in d_list_1) and all(d.execution_id == exec2.id for d in d_list_2)
+    assert not {d.id for d in d_list_1} & {d.id for d in d_list_2}
 
     # Execution Graph isolation per run
     graph_comp = ExecutionGraphCompiler(store)

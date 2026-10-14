@@ -120,6 +120,26 @@ class ActionExecutor:
                 return workspace_id
         return workspace_id
 
+    def _user_files_base(self, ws: Any) -> Path:
+        """
+        Where documents the user asks for are read and written: an explicitly linked project folder, otherwise the
+        workspace's user-facing ``files`` folder. Never the workspace root, which holds its databases and settings
+        (the executor is built with the root as a fallback ``project_path``, which is not a user choice).
+        """
+        explicit = self.project_path
+        ws_root = Path(ws.root).resolve() if ws is not None and getattr(ws, "root", None) else None
+        if explicit and not (ws_root is not None and Path(explicit).resolve() == ws_root):
+            return Path(explicit)
+        if ws is not None:
+            linked = getattr(ws, "project_path", None)
+            if linked:
+                return Path(linked)
+            if getattr(ws, "files_dir", None):
+                return Path(ws.files_dir)
+            if ws_root is not None:
+                return ws_root
+        return Path(explicit) if explicit else Path.cwd()
+
     def _get_workspace(self, workspace_id: str | None = None) -> Any:
         """Resolves workspace from injected self.workspace or active registry without silent fake fallback."""
         if self.workspace is not None:
@@ -1001,7 +1021,7 @@ class ActionExecutor:
             content = inp.get("content", "")
             ws = self._get_workspace(ws_id)
             from aether.core.security import PathSandbox
-            base_dir = self.project_path or (ws.root if ws else None) or Path.cwd()
+            base_dir = self._user_files_base(ws)
             sandbox = PathSandbox(base_dir, auto_create=True)
             try:
                 target_path = sandbox.resolve(filename)
@@ -1021,7 +1041,7 @@ class ActionExecutor:
             filename = inp.get("filename", "")
             ws = self._get_workspace(ws_id)
             from aether.core.security import PathSandbox
-            base_dir = self.project_path or (ws.root if ws else None) or Path.cwd()
+            base_dir = self._user_files_base(ws)
             sandbox = PathSandbox(base_dir, auto_create=True)
             try:
                 target_path = sandbox.resolve(filename)

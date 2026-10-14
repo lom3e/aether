@@ -205,9 +205,14 @@ def collect_workspace_deliverables(workspace: Any, limit: int = 25) -> list[Comp
         except Exception as exc:
             logger.debug(f"Could not collect task deliverables: {exc}")
 
-    # 3. Workspace 'deliverables' or 'inbox' directory files
-    for subdir_name in ("deliverables", "inbox", "documents"):
-        target_dir = getattr(workspace, "root", Path(".")) / subdir_name
+    # 3. Workspace 'deliverables' or 'inbox' directory files, and the shared files folder (documents created from chat)
+    scan_dirs: list[tuple[str, Path]] = [
+        (name, getattr(workspace, "root", Path(".")) / name) for name in ("deliverables", "inbox", "documents")
+    ]
+    if getattr(workspace, "files_dir", None):
+        scan_dirs.append(("files", Path(workspace.files_dir)))
+        scan_dirs.append(("files", Path(workspace.files_dir) / "deliverables"))
+    for subdir_name, target_dir in scan_dirs:
         if target_dir.exists() and target_dir.is_dir():
             try:
                 for file_entry in sorted(target_dir.iterdir(), key=lambda p: p.stat().st_mtime, reverse=True):

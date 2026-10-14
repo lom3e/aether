@@ -1,4 +1,5 @@
 import { useState, useEffect, useContext, useRef } from 'react';
+import { translateStepTitle } from './stepTitles';
 import {
   Sparkles, Send, CheckCircle2, Clock, AlertTriangle, ArrowRight,
   Plus, Calendar, FileText, Users, Activity, Check, X, Shield, RefreshCw,
@@ -38,6 +39,7 @@ interface PersonalMsg {
   steps: StepItem[];
   action_execution_id?: string;
   mission_id?: string;
+  session_id?: string;
   metadata?: Record<string, any>;
   created_at: string;
 }
@@ -463,12 +465,17 @@ export function Home({
         const authority = accepted?.authority;
         const proposalIdx = messages.findIndex(m => m.metadata?.proposal_id === proposalId);
         const original = [...messages.slice(0, proposalIdx >= 0 ? proposalIdx : messages.length)].reverse().find(m => m.role === 'user');
-        if (authority && original?.content) {
+        // A clarified proposal carries the user's answer inside its objective: that, not the first message, is what was approved.
+        const approvedMsg = messages.find(m => m.metadata?.proposal_id === proposalId);
+        const promptToRun = approvedMsg?.metadata?.supersedes_proposal_id && approvedMsg?.metadata?.proposal?.objective
+          ? approvedMsg.metadata.proposal.objective
+          : original?.content;
+        if (authority && promptToRun) {
           const follow = await fetch(apiUrl('/api/personal/chat'), {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({
-              prompt: original.content,
+              prompt: promptToRun,
               session_id: currentSessionId,
               workspace_id: workspaceName,
               authority,
@@ -494,10 +501,54 @@ export function Home({
     }
   };
 
+  const [clarifyDrafts, setClarifyDrafts] = useState<Record<string, string>>({});
+
+  const handleClarifyProposal = async (proposalId: string, sessionId?: string) => {
+    const answer = (clarifyDrafts[proposalId] || '').trim();
+    if (!answer || actionLoading === proposalId) return;
+    setActionLoading(proposalId);
+    try {
+      const res = await fetch(apiUrl(`/api/personal/proposals/${encodeURIComponent(proposalId)}/clarify`), {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ answer, actor: 'user', session_id: sessionId || currentSessionId }),
+      });
+      const data = await res.json().catch(() => ({} as any));
+      if (!res.ok) {
+        showToast(data.detail || t('homeUiErrorClarifyingProposal'), 'error');
+        return;
+      }
+      setClarifyDrafts(prev => ({ ...prev, [proposalId]: '' }));
+      setMessages(prev => {
+        const marked = prev.map(msg => msg.metadata?.proposal_id === proposalId
+          ? { ...msg, metadata: { ...msg.metadata, status: 'superseded' } }
+          : msg);
+        return data.message ? [...marked, data.message] : marked;
+      });
+      fetchOverview();
+    } catch (err: any) {
+      showToast(err.message || t('homeUiErrorClarifyingProposal'), 'error');
+    } finally {
+      setActionLoading(null);
+    }
+  };
+
   const handleRejectProposal = async (proposalId: string) => {
     if (actionLoading === proposalId) return;
     setActionLoading(proposalId);
     try {
+      // The decision must outlive this screen: tell the backend, otherwise the proposal is still pending after a reload.
+      const res = await fetch(apiUrl(`/api/personal/proposals/${encodeURIComponent(proposalId)}/revoke`), {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ reason: 'rejected by user', actor: 'user' }),
+      });
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({}));
+        showToast(err.detail || t('homeUiErrorRejectingProposal'), 'error');
+        return;
+      }
+      fetchOverview();
       setMessages(prev => prev.map(msg => {
         if (msg.metadata?.proposal_id === proposalId) {
           return {
@@ -694,7 +745,7 @@ export function Home({
                   </button>
                 </div>
 
-                <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap', maxWidth: '100%' }}>
                   {/* Push-to-Talk Microphone Button */}
                   <button
                     type="button"
@@ -781,7 +832,7 @@ export function Home({
                           <Clock size={14} color="hsl(var(--primary))" />
                         )}
                         <span style={{ fontWeight: 500, color: (st.status === 'pending_approval' || st.status === 'waiting_approval') ? '#f59e0b' : 'hsl(var(--fg))' }}>
-                          {st.title}
+                          {translateStepTitle(st.title, t)}
                         </span>
                       </div>
                     ))}
@@ -791,6 +842,11 @@ export function Home({
                 <div style={{ fontSize: '14px', lineHeight: 1.6, color: 'hsl(var(--fg))', whiteSpace: 'pre-wrap' }}>
                   {msg.content}
                 </div>
+                {msg.role === 'assistant' && msg.metadata?.model && (
+                  <div data-testid="answer-model" style={{ marginTop: '6px', fontSize: '11px', color: 'hsl(var(--muted-fg))' }}>
+                    {msg.metadata.provider ? `${msg.metadata.provider} · ` : ''}{msg.metadata.model}
+                  </div>
+                )}
 
                 {/* Pending Approval Action Card in Message */}
                 {msg.action_execution_id && msg.steps.some(s => s.status === 'pending_approval' || s.status === 'waiting_approval') && (
@@ -836,8 +892,49 @@ export function Home({
                   </div>
                 )}
 
+                {/* Proposal waiting for the user's answer: the answer resumes the same request */}
+                {msg.metadata?.proposal_id && msg.metadata?.status === 'proposal_pending' && msg.metadata?.proposal?.status === 'needs_clarification' && (
+                  <div data-testid="proposal-clarification" style={{ marginTop: '14px', padding: '12px 16px', borderRadius: '10px', backgroundColor: '#f59e0b10', border: '1px solid #f59e0b40' }}>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '8px' }}>
+                      <Shield size={16} color="#f59e0b" />
+                      <span style={{ fontSize: '13px', fontWeight: 600, color: '#f59e0b' }}>{t('homeUiClarificationNeeded')}</span>
+                    </div>
+                    <ul style={{ margin: '0 0 10px 18px', fontSize: '13px', color: 'hsl(var(--fg))' }}>
+                      {(msg.metadata.proposal.clarification_requirements || []).map((c: any, i: number) => (
+                        <li key={i}>{c.question || c.context_key}</li>
+                      ))}
+                    </ul>
+                    <div style={{ display: 'flex', gap: '8px' }}>
+                      <input
+                        className="input"
+                        style={{ flex: 1, fontSize: '13px' }}
+                        placeholder={t('homeUiClarificationPlaceholder')}
+                        value={clarifyDrafts[msg.metadata.proposal_id] || ''}
+                        onChange={(e) => setClarifyDrafts(prev => ({ ...prev, [msg.metadata!.proposal_id]: e.target.value }))}
+                        onKeyDown={(e) => { if (e.key === 'Enter') handleClarifyProposal(msg.metadata!.proposal_id, msg.session_id); }}
+                      />
+                      <button
+                        className="btn btn-ghost"
+                        disabled={actionLoading === msg.metadata.proposal_id}
+                        onClick={() => handleRejectProposal(msg.metadata!.proposal_id)}
+                        style={{ fontSize: '12px', padding: '4px 10px', color: 'hsl(var(--destructive))' }}
+                      >
+                        <X size={13} style={{ marginRight: '4px' }} /> {t('reject')}
+                      </button>
+                      <button
+                        className="btn btn-primary"
+                        disabled={actionLoading === msg.metadata.proposal_id || !(clarifyDrafts[msg.metadata.proposal_id] || '').trim()}
+                        onClick={() => handleClarifyProposal(msg.metadata!.proposal_id, msg.session_id)}
+                        style={{ fontSize: '12px', padding: '4px 14px' }}
+                      >
+                        {t('homeUiClarificationSend')}
+                      </button>
+                    </div>
+                  </div>
+                )}
+
                 {/* Pending Proposal Acceptance Card in Message */}
-                {msg.metadata?.proposal_id && (msg.metadata?.status === 'proposal_pending' || msg.steps.some(s => s.status === 'waiting_acceptance')) && (
+                {msg.metadata?.proposal_id && msg.metadata?.proposal?.status !== 'needs_clarification' && (msg.metadata?.status === 'proposal_pending' || msg.steps.some(s => s.status === 'waiting_acceptance')) && (
                   <div style={{ marginTop: '14px', padding: '12px 16px', borderRadius: '10px', backgroundColor: '#f59e0b10', border: '1px solid #f59e0b40', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
                     <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
                       <Shield size={16} color="#f59e0b" />
@@ -994,7 +1091,7 @@ export function Home({
               <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
                 <Clock size={16} className="text-primary" />
                 <h2 style={{ fontSize: '16px', fontWeight: 700, margin: 0, color: 'hsl(var(--fg))' }}>
-                  Lavori in corso ({(overview.background_tasks?.length || 0) + (overview.active_works?.length || 0)})
+                  {t('homeWorkInProgress')} ({(overview.background_tasks?.length || 0) + (overview.active_works?.length || 0)})
                 </h2>
               </div>
               <button
@@ -1054,7 +1151,7 @@ export function Home({
                         onClick={() => navigate('missions')}
                         style={{ fontSize: '12px', padding: '4px 8px', color: 'hsl(var(--primary))', display: 'inline-flex', alignItems: 'center', gap: '4px' }}
                       >
-                        <ExternalLink size={12} /> Visualizza documento
+                        <ExternalLink size={12} /> {t('homeViewDocument')}
                       </button>
                     </div>
                   )}
@@ -1135,7 +1232,7 @@ export function Home({
           >
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '8px' }}>
               <div style={{ display: 'flex', alignItems: 'center', gap: '8px', fontWeight: 600, fontSize: '14.5px' }}>
-                <Users size={17} color="hsl(var(--primary))" /> Lavori e Missioni
+                <Users size={17} color="hsl(var(--primary))" /> {t('homeCardWorkTitle')}
               </div>
               <ArrowRight size={15} color="hsl(var(--muted-fg))" />
             </div>
@@ -1156,7 +1253,7 @@ export function Home({
           >
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '8px' }}>
               <div style={{ display: 'flex', alignItems: 'center', gap: '8px', fontWeight: 600, fontSize: '14.5px' }}>
-                <Calendar size={17} color="#4285F4" /> Servizi Collegati
+                <Calendar size={17} color="#4285F4" /> {t('homeCardServicesTitle')}
               </div>
               <ArrowRight size={15} color="hsl(var(--muted-fg))" />
             </div>
@@ -1190,7 +1287,7 @@ export function Home({
           >
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '8px' }}>
               <div style={{ display: 'flex', alignItems: 'center', gap: '8px', fontWeight: 600, fontSize: '14.5px' }}>
-                <Activity size={17} color="#10b981" /> Cronologia Attività
+                <Activity size={17} color="#10b981" /> {t('homeCardHistoryTitle')}
               </div>
               <ArrowRight size={15} color="hsl(var(--muted-fg))" />
             </div>

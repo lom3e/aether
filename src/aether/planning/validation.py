@@ -153,6 +153,7 @@ class ProposalValidator:
                 unres = [
                     e for e in context.resolved_entities
                     if e.resolution_state in (ResolutionState.UNRESOLVED, ResolutionState.NOT_FOUND, ResolutionState.AMBIGUOUS)
+                    and not e.metadata.get("non_blocking")
                 ]
                 if unres:
                     errors.append(

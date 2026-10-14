@@ -7,6 +7,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [Unreleased]
+
+### Fixed (QA reliability pass)
+- **Routing**: questions ("Quando riceve il report il cliente Bianchi?") are answered, never turned into missions; explicit "Ricorda che…" / "Remember that…" statements are saved as persistent, user-stated memory and recalled in later sessions.
+- **Clarifications**: a proposal waiting for an answer can be resumed (`POST /api/personal/proposals/{id}/clarify`) from the Home card or the Orb; rejecting a proposal is persisted (`revoked`); unverifiable client names no longer block a plan and relative pronouns are no longer taken for clients.
+- **Missions**: text-only stage output becomes a real, verified deliverable; the chat summary carries the result; cancelling a chat-launched mission really stops it; retry/resume work under the delegation's own authority; agents of an accepted delegation can write their report file; `search_knowledge` is read-only; an agent on its last turn must answer instead of searching again; failed/cancelled missions are no longer shown as completed tasks; tool activity (listing a folder, reading a file) no longer shows up as deliverables.
+- **Providers**: Groq HTTP 429 honours `Retry-After` with bounded retries (long quota waits are reported, not slept through) and momentary network drops are retried; non-chat models (speech, TTS, moderation, embeddings) are not offered as chat models; answers report the provider and model that produced them.
+- **Files**: documents created from chat go to the workspace `files/` folder (not next to its databases), are listed in Results, and can be previewed/downloaded through a path-restricted endpoint.
+- **API**: `GET /api/automations/suggestions` was shadowed by `/automations/{id}`; `/api/knowledge/search` (graph nodes) and `/api/knowledge/query` (document chunks) are documented as distinct.
+- **Server**: open SSE streams end cleanly on shutdown (no hang on SIGTERM, no `ERR_INCOMPLETE_CHUNKED_ENCODING`).
+- **UI**: responsive sidebar on narrow windows, truthful result badges, no guaranteed Google Calendar 404, more localized labels.
+
+---
+
 ## [v1.6.0] - 2026-08-25
 
 ### Minor Release: AI Workforce Auto-Architect, Model Hierarchy, Visual Form Design System & Interactive Topology

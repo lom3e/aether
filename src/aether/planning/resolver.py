@@ -750,10 +750,12 @@ class ContextResolver:
         """Resolves client or organization references mentioned in intent."""
         prompt = intent.raw_input
         # Look for explicit client patterns: "client X", "cliente Acme", "customer Y"
+        # The keyword is case-insensitive, the NAME is not: it must be a proper name ("cliente Rossi", "client Acme Corp"),
+        # otherwise "un cliente che vuole report" would make the relative pronoun "che" a client to resolve.
         client_match = re.search(
-            r"\b(?:client|cliente|customer|committente)\s+([a-zA-Z0-9_\-]+)",
+            r"(?i:\b(?:client|cliente|customer|committente))\s+(?:(?i:chiamato|di\s+nome|named|called)\s+)?"
+            r"([A-Z0-9][\w\-&]*(?:\s+[A-Z0-9][\w\-&]*)*)",
             prompt,
-            re.IGNORECASE,
         )
         if not client_match:
             return
@@ -761,19 +763,18 @@ class ContextResolver:
         client_name = client_match.group(1).strip()
         client_store = getattr(self.workspace, "client_store", None)
         if not client_store:
-            # No client store available
+            # Without a client directory a named client is simply unverified; it is not a reason to block the plan.
             resolved_entities.append(
                 ResolvedEntity(
                     entity_type="client",
                     canonical_id=None,
                     display_name=client_name,
                     workspace_scope=intent.workspace_id,
-                    resolution_state=ResolutionState.AMBIGUOUS,
+                    resolution_state=ResolutionState.NOT_FOUND,
                     confidence=0.2,
-                    metadata={"reason": "No client directory or client store active in workspace."},
+                    metadata={"reason": "No client directory or client store active in workspace; name taken from the request.", "non_blocking": True},
                 )
             )
-            ambiguities.append(f"Client '{client_name}' reference cannot be verified without active client store.")
             return
 
         try:
@@ -833,10 +834,9 @@ class ContextResolver:
                         workspace_scope=intent.workspace_id,
                         resolution_state=ResolutionState.NOT_FOUND,
                         confidence=0.0,
-                        metadata={"reason": f"Client '{client_name}' not found in client store."},
+                        metadata={"reason": f"Client '{client_name}' not found in client store; name taken from the request.", "non_blocking": True},
                     )
                 )
-                unresolved_refs.append(f"client:{client_name}")
 
         except Exception as exc:
             retrieval_failures.append(f"Failed to query client store: {exc}")

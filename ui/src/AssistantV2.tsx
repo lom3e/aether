@@ -852,13 +852,68 @@ export function AssistantV2({
     }
   };
 
-  const handleRejectProposal = (proposalId: string) => {
+  const handleRejectProposal = async (proposalId: string) => {
+    // The decision is stored by the backend, otherwise the proposal would still be pending after a reload.
+    try {
+      const res = await fetch(apiUrl(`/api/personal/proposals/${encodeURIComponent(proposalId)}/revoke`), {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ reason: 'rejected by user', actor: 'user' }),
+      });
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({}));
+        showToast(err.detail || 'Impossibile rifiutare la proposta.', 'error');
+        return;
+      }
+    } catch {
+      showToast('Impossibile rifiutare la proposta.', 'error');
+      return;
+    }
     setProposalDecisions(prev => ({ ...prev, [proposalId]: 'rejected' }));
     showToast('Proposta rifiutata.', 'info');
     setTimeout(() => {
       setActiveWorkContext(null);
       setOrbState('idle');
     }, 1200);
+  };
+
+  const [clarifyDraft, setClarifyDraft] = useState('');
+  const [isClarifying, setIsClarifying] = useState(false);
+
+  // The user answers the open question of a proposal: the request is resumed with a new proposal to approve.
+  const handleClarifyProposal = async (proposalId: string) => {
+    const answer = clarifyDraft.trim();
+    if (!proposalId || !answer || isClarifying) return;
+    setIsClarifying(true);
+    try {
+      const res = await fetch(apiUrl(`/api/personal/proposals/${encodeURIComponent(proposalId)}/clarify`), {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ answer, actor: 'user', session_id: sessionId }),
+      });
+      const data = await res.json().catch(() => ({} as any));
+      if (!res.ok) {
+        showToast(data.detail || 'Impossibile inviare il chiarimento.', 'error');
+        return;
+      }
+      const next = data.proposal;
+      setClarifyDraft('');
+      setLastUserMessage(next?.objective || answer);   // what gets executed on approval includes the answer
+      setActiveWorkContext(prev => prev ? {
+        ...prev,
+        description: next?.objective || prev.description,
+        proposalId: next?.id,
+        proposal: next,
+        steps: (next?.proposed_steps || []).map((st: any) => ({ id: st.id, title: st.title, status: 'pending', category: 'proposal' })),
+        status: 'needs-you',
+      } : prev);
+      showToast(next?.status === 'needs_clarification'
+        ? 'Serve ancora un chiarimento.' : 'Piano aggiornato: puoi approvarlo.', 'info');
+    } catch (err: any) {
+      showToast(err?.message || 'Impossibile inviare il chiarimento.', 'error');
+    } finally {
+      setIsClarifying(false);
+    }
   };
 
   // 6. Polling for Execution Results & Evidence
@@ -1471,9 +1526,29 @@ export function AssistantV2({
                             ))}
                           </ul>
                         )}
-                        <p style={{ margin: '8px 0 0', color: '#d1d5db', fontSize: '0.78rem' }}>
-                          Rispondi direttamente nella chat per chiarire i parametri necessari e consentire la generazione di un piano pronto per l'approvazione.
-                        </p>
+                        <div style={{ display: 'flex', gap: '8px', marginTop: '10px' }}>
+                          <input
+                            data-testid="clarification-input"
+                            value={clarifyDraft}
+                            onChange={(e) => setClarifyDraft(e.target.value)}
+                            onKeyDown={(e) => { if (e.key === 'Enter') handleClarifyProposal(activeWorkContext.proposalId || activeWorkContext.proposal?.id); }}
+                            placeholder="Rispondi qui: Aether aggiorna il piano…"
+                            style={{ flex: 1, background: 'rgba(0,0,0,0.25)', border: '1px solid rgba(245,158,11,0.3)', borderRadius: '6px', padding: '6px 10px', color: '#f8fafc', fontSize: '0.8rem' }}
+                          />
+                          <button
+                            className="btn-cancel-soft"
+                            onClick={() => handleRejectProposal(activeWorkContext.proposalId || activeWorkContext.proposal?.id)}
+                          >
+                            Rifiuta
+                          </button>
+                          <button
+                            className="btn-approve-purple"
+                            disabled={isClarifying || !clarifyDraft.trim()}
+                            onClick={() => handleClarifyProposal(activeWorkContext.proposalId || activeWorkContext.proposal?.id)}
+                          >
+                            {isClarifying ? 'Invio…' : 'Invia risposta'}
+                          </button>
+                        </div>
                       </div>
                     ) : (
                       <div className="approval-actions">

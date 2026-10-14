@@ -6,7 +6,7 @@ from __future__ import annotations
 from typing import TYPE_CHECKING
 
 from aether.tools.decorator import tool
-from aether.tools.base import Tool
+from aether.tools.base import Tool, ToolClassification
 
 if TYPE_CHECKING:
     from aether.knowledge.store import KnowledgeStore
@@ -19,7 +19,11 @@ def create_knowledge_tool(store: KnowledgeStore, project_id: str | None = None) 
     """
     bound_project_id = str(project_id).strip() if project_id and str(project_id).strip() else None
 
-    @tool(name="search_knowledge", description="Search the team's knowledge base for relevant information across workspace and active project.")
+    @tool(
+        name="search_knowledge",
+        description="Search the team's knowledge base for relevant information across workspace and active project.",
+        classification=ToolClassification.READ_ONLY,   # it only reads: it must not need a mutation authority
+    )
     def search_knowledge(
         query: str,
         limit: int = 5,

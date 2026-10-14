@@ -323,6 +323,7 @@ class ExecutionAuthority:
 
 
 _CODING_FOLLOWUP_ACTIONS = ("coding.interact", "coding.send_message", "coding.run_tests", "coding.release_project")
+_WORKFORCE_FILE_TOOLS = ("tool:write_file", "tool:patch_file")
 
 
 def _workspaces_match(a: str | None, b: str | None, canonicalize: Any = None) -> bool:
@@ -644,8 +645,17 @@ class ExecutionBoundary:
                 has_match = False
                 if act_clean in allowed_actions or base_act in allowed_actions:
                     has_match = True
-                elif act_clean.startswith("mission.start:") and any(a.startswith("workforce.delegate") for a in allowed_actions):
-                    # A mission started from an accepted workforce delegation is the delegation itself.
+                elif act_clean.startswith(("mission.start:", "mission.retry:", "mission.resume:")) and any(
+                    a.startswith("workforce.delegate") for a in allowed_actions
+                ):
+                    # A mission started from an accepted workforce delegation is the delegation itself, and so is
+                    # continuing it after an interruption or a failed stage (the runtime also checks that the mission
+                    # is the one this proposal created).
+                    has_match = True
+                elif act_clean in _WORKFORCE_FILE_TOOLS and any(a.startswith("workforce.delegate") for a in allowed_actions):
+                    # Accepting a workforce delegation that is meant to produce a document authorizes its agents to
+                    # write that document inside the workspace sandbox (PathSandbox still confines every path).
+                    # Deleting files and every external tool still need an authority of their own.
                     has_match = True
                 elif act_clean in _CODING_FOLLOWUP_ACTIONS and "coding.delegate" in allowed_actions:
                     # Replying to a coding run is part of the delegation the user accepted; the executor

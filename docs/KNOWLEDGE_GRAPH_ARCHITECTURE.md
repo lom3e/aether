@@ -152,7 +152,7 @@ All endpoints are workspace-scoped.
 - `GET /api/knowledge/nodes/{id}/neighbors` — Fetch directly connected adjacent nodes and connecting edges.
 - `GET /api/knowledge/nodes/{id}/subgraph` — Extract bounded local subgraph for visualization.
 - `GET /api/knowledge/edges` — List directed edges (`source_node_id`, `target_node_id`, `relation_type`).
-- `POST /api/knowledge/search` — Search nodes with token ranking (`{"query": "...", "node_types": [...]}`).
+- `POST /api/knowledge/search` — Search graph nodes with token ranking (`{"query": "...", "node_types": [...]}`). The graph holds distilled entities (memories the user asked Aether to keep, decisions, lessons, deliverables…), **not** the text of uploaded documents. Search uploaded documents with `POST /api/knowledge/query` (BM25 over chunks).
 - `POST /api/knowledge/subgraph` — Multi-seed subgraph traversal (`{"seed_node_ids": [...], "max_depth": 2}`).
 
 ---

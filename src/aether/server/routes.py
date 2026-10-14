@@ -987,7 +987,9 @@ async def _provider_models(request: Request, provider: str, api_key: str | None)
             models = listing.models
         else:
             models = await instance.aget_available_models()
-        return _payload(list(models), "live")
+        from aether.providers.model_filter import split_chat_models
+        chat_models, excluded_models = split_chat_models(list(models))
+        return _payload(chat_models, "live", excluded_non_chat=excluded_models)
     except AuthenticationError as ae:
         raise HTTPException(status_code=401, detail=f"Authentication failed for {provider}: {_provider_error_detail(ae, effective_key)}")
     except RateLimitError as rle:
@@ -2788,6 +2790,24 @@ async def list_automation_watchers(request: Request):
     return []
 
 
+# Static GET paths must be registered before the dynamic ``/automations/{automation_id}`` route.
+@router.get("/automations/suggestions")
+async def list_automation_suggestions(request: Request, status: str = "pending"):
+    """Lists automation suggestions discovered from workspace activity logs."""
+    ws = request.app.state.workspace
+    if not ws:
+        return []
+
+    # If pending requested and none exist yet, perform an initial passive analysis
+    existing = ws.automations.list_suggestions(status=status if status != "all" else None)
+    if not existing and status == "pending":
+        from aether.automation.suggestions import SuggestionEngine
+        SuggestionEngine.analyze_workspace(ws)
+        existing = ws.automations.list_suggestions(status="pending")
+
+    return [s.to_dict() for s in existing]
+
+
 @router.get("/automations/{automation_id}")
 async def get_automation(request: Request, automation_id: str):
     """Get details of a specific automation workflow."""
@@ -3002,23 +3022,6 @@ async def build_automation_from_nl(request: Request, data: BuildNlAutomationPayl
         "automation": (saved_auto or proposal.automation).to_dict(),
         "recurrence_text": proposal.recurrence_text,
     }
-
-
-@router.get("/automations/suggestions")
-async def list_automation_suggestions(request: Request, status: str = "pending"):
-    """Lists automation suggestions discovered from workspace activity logs."""
-    ws = request.app.state.workspace
-    if not ws:
-        return []
-
-    # If pending requested and none exist yet, perform an initial passive analysis
-    existing = ws.automations.list_suggestions(status=status if status != "all" else None)
-    if not existing and status == "pending":
-        from aether.automation.suggestions import SuggestionEngine
-        SuggestionEngine.analyze_workspace(ws)
-        existing = ws.automations.list_suggestions(status="pending")
-
-    return [s.to_dict() for s in existing]
 
 
 @router.post("/automations/suggestions/analyze")
@@ -4780,7 +4783,7 @@ async def retrieve_memories_route(request: Request, payload: MemoryRetrievePaylo
 # Knowledge Graph REST APIs (Phase B Slice 2)
 # ---------------------------------------------------------------------------
 
-class KnowledgeSearchPayload(BaseModel):
+class KnowledgeNodeSearchPayload(BaseModel):
     query: str
     node_types: list[str] | None = None
     limit: int = 10
@@ -4940,7 +4943,13 @@ async def list_knowledge_edges_route(
 
 
 @router.post("/knowledge/search")
-async def search_knowledge_nodes_route(request: Request, payload: KnowledgeSearchPayload):
+async def search_knowledge_nodes_route(request: Request, payload: KnowledgeNodeSearchPayload):
+    """
+    Searches the entity graph (people, projects, decisions, lessons… distilled from memory and missions).
+
+    This is NOT a full-text search of uploaded documents: document text is searched with ``POST /knowledge/query``
+    (BM25 over chunks). Uploaded documents are not graph nodes; facts the user asked Aether to remember are.
+    """
     ws = getattr(request.app.state, "workspace", None)
     if not ws:
         raise HTTPException(status_code=503, detail="Workspace not initialized.")
@@ -6505,6 +6514,34 @@ async def accept_proposal_route(
         raise HTTPException(status_code=500, detail=str(exc))
 
 
+class ClarifyProposalPayload(BaseModel):
+    answer: str
+    actor: str = "user"
+    session_id: str | None = None
+
+
+@router.post("/personal/proposals/{proposal_id}/clarify")
+async def clarify_proposal_route(request: Request, proposal_id: str, payload: ClarifyProposalPayload):
+    """
+    Answers the open questions of a proposal that needs clarification. Returns a NEW proposal (the old one becomes
+    superseded) that the user can then accept or reject; nothing is executed here.
+    """
+    ws = getattr(request.app.state, "workspace", None)
+    if not ws:
+        raise HTTPException(status_code=503, detail="Workspace not initialized.")
+    try:
+        new_proposal, validation, message = ws.personal.answer_clarification(
+            proposal_id, ws.id, payload.answer, actor="user" if payload.actor == "user" else f"user:{payload.actor}",
+            session_id=payload.session_id,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+    return {
+        "status": "clarified", "proposal": new_proposal.to_dict(), "validation": validation.to_dict(),
+        "message": message.to_dict() if message else None,
+    }
+
+
 class RevokeProposalPayload(BaseModel):
     reason: str = "revoked by user"
     actor: str = "user"
@@ -6822,6 +6859,58 @@ async def list_companion_deliverables_route(
         return []
     ws_id = _ws_key(ws, workspace_id)
     return ws.personal.list_deliverables(workspace_id=ws_id, limit=limit)
+
+
+def _companion_file_or_error(ws, path_str: str) -> Path:
+    """
+    A file the assistant itself produced for the user: only inside the user-facing folders of the workspace
+    (``files/``, ``deliverables/``, ``inbox/``, ``documents/``), never the workspace root with its databases and
+    settings. Rejects traversal, hidden files and anything that is not a regular file.
+    """
+    if not path_str or "\0" in path_str:
+        raise HTTPException(status_code=400, detail="Invalid file path.")
+    root = Path(ws.root).resolve()
+    allowed = [Path(ws.files_dir).resolve()] if getattr(ws, "files_dir", None) else []
+    allowed += [(root / name).resolve() for name in ("deliverables", "inbox", "documents")]
+    candidate = Path(path_str).expanduser()
+    candidate = candidate.resolve() if candidate.is_absolute() else (Path(ws.files_dir) / candidate).resolve()
+    if not any(candidate == d or d in candidate.parents for d in allowed):
+        raise HTTPException(status_code=403, detail="This file is outside the folders Aether shares with you.")
+    if candidate.name.startswith(".") or any(part.startswith(".") for part in candidate.relative_to(
+        next(d for d in allowed if candidate == d or d in candidate.parents)).parts):
+        raise HTTPException(status_code=403, detail="Hidden files are not available.")
+    if not candidate.is_file():
+        raise HTTPException(status_code=404, detail="File not found.")
+    return candidate
+
+
+@router.get("/personal/companion/file/preview")
+async def preview_companion_file(request: Request, path: str):
+    """Text preview of a file Aether produced outside a mission (e.g. a document created from chat)."""
+    ws = getattr(request.app.state, "workspace", None)
+    if not ws:
+        raise HTTPException(status_code=503, detail="Workspace not initialized.")
+    file_path = _companion_file_or_error(ws, path)
+    size = file_path.stat().st_size
+    fmt = _detect_deliverable_format(file_path)
+    base = {"name": file_path.name, "path": str(file_path), "format": fmt, "size_bytes": size}
+    if fmt == "binary":
+        return {**base, "content": None, "preview_available": False,
+                "message": "Binary preview not supported in browser. Use Download to inspect."}
+    if size > MAX_PREVIEW_SIZE_BYTES:
+        return {**base, "content": None, "preview_available": False,
+                "message": f"File size ({size} bytes) exceeds preview limit (512 KB). Use Download to inspect."}
+    return {**base, "content": file_path.read_text(encoding="utf-8", errors="replace"),
+            "preview_available": True, "message": None}
+
+
+@router.get("/personal/companion/file/download")
+async def download_companion_file(request: Request, path: str):
+    ws = getattr(request.app.state, "workspace", None)
+    if not ws:
+        raise HTTPException(status_code=503, detail="Workspace not initialized.")
+    file_path = _companion_file_or_error(ws, path)
+    return FileResponse(path=str(file_path), filename=file_path.name, media_type="application/octet-stream")
 
 
 @router.post("/personal/companion/drop")
@@ -8862,8 +8951,13 @@ async def personal_events_sse(request: Request, workspace_id: str | None = None)
     ws_id = _ws_key(ws, workspace_id)
     from aether.personal.events import get_personal_event_hub
     hub = getattr(ws.personal, "event_hub", None) or get_personal_event_hub()
+    server = getattr(request.app.state, "uvicorn_server", None)
+
+    def _server_is_stopping() -> bool:
+        return bool(getattr(server, "should_exit", False))
+
     return StreamingResponse(
-        hub.event_generator(workspace_id=ws_id),
+        hub.event_generator(workspace_id=ws_id, should_stop=_server_is_stopping),
         media_type="text/event-stream",
         headers={
             "Cache-Control": "no-cache",

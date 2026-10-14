@@ -460,10 +460,20 @@ export function Connections({ initialExecutionId, initialTab }: ConnectionsProps
 
   const fetchAll = () => {
     setLoading(true);
+    // Google Calendar events are requested only when a Google Calendar connection exists: asking without one is a
+    // guaranteed 404 (and a red line in the console) for something that is simply not set up.
+    const connectionsPromise = fetch(apiUrl('/api/connections')).then((r) => r.json());
+    const googleEventsPromise = connectionsPromise
+      .then((conns) =>
+        Array.isArray(conns) && conns.some((c: any) => c.provider === 'google_calendar')
+          ? fetch(apiUrl('/api/connections/google_calendar/events')).then((r) => (r.ok ? r.json() : []))
+          : [],
+      )
+      .catch(() => []);
     Promise.all([
-      fetch(apiUrl('/api/connections')).then((r) => r.json()),
+      connectionsPromise,
       fetch(apiUrl('/api/connections/calendar/events')).then((r) => r.json()),
-      fetch(apiUrl('/api/connections/google_calendar/events')).then((r) => (r.ok ? r.json() : [])).catch(() => []),
+      googleEventsPromise,
       fetch(apiUrl('/api/actions/executions')).then((r) => r.json()),
       fetch(apiUrl('/api/connections/oauth/providers')).then((r) => (r.ok ? r.json() : {})).catch(() => ({})),
     ])

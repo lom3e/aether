@@ -48,7 +48,7 @@ from aether.server.routes import (
     list_knowledge_edges_route,
     search_knowledge_nodes_route,
     get_multi_seed_subgraph_route,
-    KnowledgeSearchPayload,
+    KnowledgeNodeSearchPayload,
     KnowledgeSubgraphPayload,
 )
 
@@ -536,7 +536,7 @@ async def test_m_rest_api_endpoints(tmp_path):
     assert edges_res[0]["relation_type"] == "created_by"
 
     # 6. Search nodes
-    search_payload = KnowledgeSearchPayload(query="Linting")
+    search_payload = KnowledgeNodeSearchPayload(query="Linting")
     search_res = await search_knowledge_nodes_route(req, search_payload)
     assert len(search_res) >= 1
     assert "Ruff Linting" in search_res[0]["node"]["label"]

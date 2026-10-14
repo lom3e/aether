@@ -29,6 +29,7 @@ from aether.planning.contracts import (
     VerificationMethod,
     MissionProposal,
 )
+from aether.core.language import looks_english
 from aether.providers.base import AIProvider
 from aether.providers.types import Message
 
@@ -158,8 +159,11 @@ class ProposalGenerator:
 
         # 10. Lifecycle status determination
         has_blocking_clarification = any(c.blocking for c in clarification_reqs)
+        # An entity flagged non_blocking is a name the user gave us that no directory could confirm (e.g. a client
+        # nobody registered yet): it is shown on the plan, but it is not a question the user must answer first.
         has_ambiguous_or_unresolved_entity = any(
             e.resolution_state in (ResolutionState.AMBIGUOUS, ResolutionState.UNRESOLVED, ResolutionState.NOT_FOUND)
+            and not e.metadata.get("non_blocking")
             for e in context.resolved_entities
         )
         has_retrieval_failure = bool(context.retrieval_failures)
@@ -262,18 +266,32 @@ class ProposalGenerator:
 
         return title, objective, why
 
+    @staticmethod
+    def _topic(intent: IntentRequest) -> str:
+        """Short, readable subject of the request, used to make plan steps specific to it."""
+        text = re.sub(r"`([^`]+)`", r"\1", intent.raw_input or "").strip()
+        text = re.sub(r"^(?:please|per favore|aether|esegui|fai|run|execute)\s+", "", text, flags=re.IGNORECASE)
+        text = re.sub(r"\s+", " ", text)
+        return text if len(text) <= 60 else text[:57].rstrip() + "..."
+
     def _derive_steps(self, intent: IntentRequest, context: ContextPack) -> list[ProposedStep]:
         """Derives structured logical steps without executing any of them."""
         prompt = intent.raw_input.lower()
         steps: list[ProposedStep] = []
+
+        it = not looks_english(intent.raw_input)
+        topic = self._topic(intent)
 
         # Step 1: Scoping
         steps.append(
             ProposedStep(
                 id=f"step-1",
                 order_idx=0,
-                title="Environment & Preconditions Validation",
-                description="Verify workspace readiness, permissions, and available evidence.",
+                title=f"Verifica del contesto: {topic}" if it else f"Check context: {topic}",
+                description=(
+                    "Controllo che workspace, permessi e informazioni disponibili bastino per questa richiesta."
+                    if it else "Check that the workspace, permissions and available information are enough for this request."
+                ),
                 assigned_team_or_role="Workspace Coordinator",
                 dependencies=[],
                 required_tools_or_actions=[],
@@ -289,15 +307,18 @@ class ProposalGenerator:
             any(k in prompt for k in ["code", "refactor", "bug", "fix", "test", "git", "branch", "pull request"])
             or bool(re.search(r"\b(repo|repository|pr)\b", prompt))
         )
-        is_research = any(k in prompt for k in ["research", "report", "analisi", "audit", "investigate", "study"])
+        is_research = any(k in prompt for k in ["research", "report", "analisi", "audit", "investigate", "study", "ricerca"])
 
         if is_automation:
             steps.append(
                 ProposedStep(
                     id=f"step-2",
                     order_idx=1,
-                    title="Automation Workflow Configuration",
-                    description="Configure, test, and register the requested automation trigger and action pipeline.",
+                    title=f"Configurazione automazione: {topic}" if it else f"Configure automation: {topic}",
+                    description=(
+                        "Configuro e registro il trigger e le azioni richieste, in bozza fino alla tua conferma."
+                        if it else "Configure and register the requested trigger and actions, as a draft until you confirm."
+                    ),
                     assigned_team_or_role="Automation Lead",
                     dependencies=["step-1"],
                     required_tools_or_actions=["automations.create_draft", "automations.create", "automations.update", "automations.enable"],
@@ -308,8 +329,11 @@ class ProposalGenerator:
                 ProposedStep(
                     id=f"step-2",
                     order_idx=1,
-                    title="External Coding Agent Execution & Modification",
-                    description="Delegate code modifications to autonomous external coding agent and verify changes.",
+                    title=f"Modifica del codice con un coding agent: {topic}" if it else f"Change code with a coding agent: {topic}",
+                    description=(
+                        "Affido le modifiche al coding agent esterno e ne verifico diff e test."
+                        if it else "Delegate the changes to the external coding agent and verify the diff and tests."
+                    ),
                     assigned_team_or_role="External Coding Agent Orchestrator",
                     dependencies=["step-1"],
                     required_tools_or_actions=["coding.delegate", "coding.results", "files.read_document"],
@@ -320,8 +344,11 @@ class ProposalGenerator:
                 ProposedStep(
                     id=f"step-2",
                     order_idx=1,
-                    title="Domain Research & Information Synthesis",
-                    description="Aggregate evidence across workforce memory, knowledge graph, and external docs.",
+                    title=f"Ricerca e sintesi: {topic}" if it else f"Research and synthesis: {topic}",
+                    description=(
+                        "Raccolgo le informazioni da memoria e knowledge e le sintetizzo in un documento."
+                        if it else "Gather information from memory and knowledge and synthesize it into a document."
+                    ),
                     assigned_team_or_role="Research Lead",
                     dependencies=["step-1"],
                     required_tools_or_actions=["knowledge.search"],
@@ -332,8 +359,11 @@ class ProposalGenerator:
                 ProposedStep(
                     id=f"step-2",
                     order_idx=1,
-                    title="External Worker Task Delegation",
-                    description="Dispatch task to designated external specialist worker.",
+                    title=f"Delega a un worker esterno: {topic}" if it else f"Delegate to an external worker: {topic}",
+                    description=(
+                        "Invio il compito al worker esterno indicato."
+                        if it else "Dispatch the task to the designated external worker."
+                    ),
                     assigned_team_or_role="External Worker Specialist",
                     dependencies=["step-1"],
                     required_tools_or_actions=["agents.delegate_external"],
@@ -344,8 +374,11 @@ class ProposalGenerator:
                 ProposedStep(
                     id=f"step-2",
                     order_idx=1,
-                    title="Execution of Operational Directive",
-                    description=f"Execute tasks required to fulfill objective: {intent.raw_input[:80]}.",
+                    title=f"Esecuzione: {topic}" if it else f"Carry out: {topic}",
+                    description=(
+                        f"Eseguo il lavoro richiesto: {intent.raw_input[:120]}"
+                        if it else f"Carry out the requested work: {intent.raw_input[:120]}"
+                    ),
                     assigned_team_or_role="Operations Specialist",
                     dependencies=["step-1"],
                     required_tools_or_actions=["workforce.delegate"],
@@ -357,8 +390,11 @@ class ProposalGenerator:
             ProposedStep(
                 id=f"step-3",
                 order_idx=2,
-                title="Deliverable Verification & Quality Sign-Off",
-                description="Compile generated artifacts, run automated quality checks, and record verification status.",
+                title=f"Verifica del risultato: {topic}" if it else f"Verify the result: {topic}",
+                description=(
+                    "Controllo il risultato rispetto alla richiesta e registro l'esito della verifica."
+                    if it else "Check the result against the request and record the verification outcome."
+                ),
                 assigned_team_or_role="Quality Reviewer",
                 dependencies=["step-2"],
                 required_tools_or_actions=[],
@@ -560,10 +596,12 @@ class ProposalGenerator:
                 deliverables.append(
                     ExpectedDeliverableSpec(
                         id="exp-deliv-report",
-                        title="Analysis Report",
-                        file_path="deliverables/analysis_report.md",
+                        title=f"Report: {self._topic(intent)}" if not looks_english(intent.raw_input) else f"Report: {self._topic(intent)}",
                         deliverable_type="report",
-                        description="Comprehensive findings and recommendations summary.",
+                        description=(
+                            "Risultati e raccomandazioni in un documento."
+                            if not looks_english(intent.raw_input) else "Findings and recommendations in a document."
+                        ),
                     )
                 )
             elif any(k in prompt for k in ["code", "patch", "fix", "script"]):
@@ -579,9 +617,12 @@ class ProposalGenerator:
                 deliverables.append(
                     ExpectedDeliverableSpec(
                         id="exp-deliv-summary",
-                        title="Outcome Summary",
+                        title=f"Esito: {self._topic(intent)}" if not looks_english(intent.raw_input) else f"Outcome: {self._topic(intent)}",
                         deliverable_type="document",
-                        description="Consolidated execution summary and verification record.",
+                        description=(
+                            "Riepilogo dell'esecuzione e della verifica."
+                            if not looks_english(intent.raw_input) else "Summary of the execution and its verification."
+                        ),
                     )
                 )
 
