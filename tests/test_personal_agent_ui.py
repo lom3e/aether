@@ -61,7 +61,7 @@ def _ensure_workspace(page):
         create_btn = page.locator("button:has-text('Create & Open Workspace'), button:has-text('Initialize Workspace')").first
         expect(create_btn).to_be_enabled(timeout=5000)
         create_btn.click()
-        page.wait_for_selector("h1:has-text('Personal Aether'), .badge-primary", timeout=10000)
+        page.wait_for_selector("h1:has-text('What do you need today?'), .badge-primary", timeout=10000)
         page.wait_for_timeout(1000)
     except Exception:
         pass
@@ -81,7 +81,7 @@ def test_01_personal_agent_companion_flow(browser_context):
     page.locator("[data-testid='nav-home']").click()
     page.wait_for_timeout(500)
 
-    expect(page.locator("h1:has-text('Personal Aether')")).to_be_visible()
+    expect(page.locator("h1:has-text('What do you need today?')")).to_be_visible()
     expect(page.locator("textarea[placeholder*='What would you like Aether to take care of']")).to_be_visible()
 
     # 2. Click suggestion chip or type prompt
@@ -92,7 +92,7 @@ def test_01_personal_agent_companion_flow(browser_context):
     page.locator("button:has-text('Take Care of It')").click()
 
     # 3. Wait for response and stepper
-    page.wait_for_selector("div:has-text('Personal Aether')", timeout=10000)
+    page.wait_for_selector("text=Understanding intent", timeout=10000)
     expect(page.locator("text=Understanding intent").first).to_be_visible()
     expect(page.locator("text=project_plan.md").first).to_be_visible()
 

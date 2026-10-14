@@ -87,7 +87,7 @@ def test_01_companion_home_and_task_execution(browser_context):
     page.wait_for_timeout(500)
 
     # Verify Companion elements
-    expect(page.locator("h1:has-text('Personal Aether')")).to_be_visible()
+    expect(page.locator("h1:has-text('What do you need today?')")).to_be_visible()
     expect(page.locator("[data-testid='companion-input-field']")).to_be_visible()
     expect(page.locator("[data-testid='voice-mic-btn']")).to_be_visible()
     expect(page.locator("[data-testid='notification-bell-btn']")).to_be_visible()

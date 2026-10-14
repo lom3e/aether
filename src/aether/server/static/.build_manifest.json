@@ -1,23 +1,23 @@
 {
   "manifest_version": "1.0",
-  "generated_at": "2026-10-13T21:09:07.777069+00:00",
+  "generated_at": "2026-10-14T07:34:01.630939+00:00",
   "source": "ui/dist",
   "target": "src/aether/server/static",
   "file_count": 13,
-  "total_bytes": 5402494,
+  "total_bytes": 5445852,
   "files": {
-    "favicon.svg": "5e49bf20d68aa517195aa596b7444eb0db060da2ade6598ad523182ebde42eac",
     "icon.png": "658495e9568c6f0258ab16b69755d7bba43cc0766c7748bf6e05f0b23cacdb2f",
-    "icons.svg": "b45fa506195cfcdef406ba9f0c77b36ddc1a7c224040926ec70abc2fdea7b93a",
-    "index.html": "75696f8f123d848b7dcd35bc6e50c23f35e467fcc3121ba5e66591518a45f9b0",
+    "index.html": "0880558f42f0746120cab1ffe4e3897c35ce021157d1baf35dad04ef0ab61589",
     "logo.png": "658495e9568c6f0258ab16b69755d7bba43cc0766c7748bf6e05f0b23cacdb2f",
-    "assets/index-CiZI6hDi.js": "4211ffe3e2c4911ee32b49747a9ea181b962b0f6045e292b0564e849034a6fc5",
-    "assets/index-DnFy6kuN.css": "c80f305e7f8d910796e4d88db562924b425e756f65b1a7d12575fc0341ca10d4",
-    "brand/favicon.svg": "5e49bf20d68aa517195aa596b7444eb0db060da2ade6598ad523182ebde42eac",
+    "icons.svg": "b45fa506195cfcdef406ba9f0c77b36ddc1a7c224040926ec70abc2fdea7b93a",
+    "favicon.svg": "5e49bf20d68aa517195aa596b7444eb0db060da2ade6598ad523182ebde42eac",
+    "brand/logo_viola.svg": "ecd8bafd31ff4a6f58a78ea877a8859e3a0cdeb336e7894b4f8a0555d3d639a3",
+    "brand/scritta_AETHER.svg": "41933f4dd765da51c110901b74e28cd6f038d8e29eb230f66330173d15eeafb2",
+    "brand/logo_viola_con_scritta.svg": "d238b895a795458d686e1702f2ca5ba343295f5f731586f95d4e3bdc9e4ac992",
     "brand/logo_bianco.svg": "69c365adb03b0be08b407d48a2641ea6a05ae2bc87a61fdc04e678e1f3bd4ae7",
     "brand/logo_nero.svg": "57f24ea0a4fb899d494e9666a0d916103fcf9258ef77d80183c00e0341057285",
-    "brand/logo_viola.svg": "ecd8bafd31ff4a6f58a78ea877a8859e3a0cdeb336e7894b4f8a0555d3d639a3",
-    "brand/logo_viola_con_scritta.svg": "d238b895a795458d686e1702f2ca5ba343295f5f731586f95d4e3bdc9e4ac992",
-    "brand/scritta_AETHER.svg": "41933f4dd765da51c110901b74e28cd6f038d8e29eb230f66330173d15eeafb2"
+    "brand/favicon.svg": "5e49bf20d68aa517195aa596b7444eb0db060da2ade6598ad523182ebde42eac",
+    "assets/index-Cxf_zLgq.js": "34e6a549b71ab8ed3dc0203270cc3081619eb12b94800dc0f4e3b47da61784fd",
+    "assets/index-DnFy6kuN.css": "c80f305e7f8d910796e4d88db562924b425e756f65b1a7d12575fc0341ca10d4"
   }
 }
