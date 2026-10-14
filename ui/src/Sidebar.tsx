@@ -779,7 +779,7 @@ export function Sidebar({
               </button>
             </Tooltip>
 
-            <Tooltip content="Risultati & Documenti" position={collapsed ? 'right' : 'top'} disabled={!collapsed}>
+            <Tooltip content={t('navResultsTooltip')} position={collapsed ? 'right' : 'top'} disabled={!collapsed}>
               <button
                 data-testid="nav-results"
                 className={`btn btn-ghost ${currentView === 'results' || currentView === 'deliverables' ? 'active' : ''}`}
@@ -787,7 +787,7 @@ export function Sidebar({
                 onClick={() => onNavigate('results')}
               >
                 <FileCheck size={15} />
-                {!collapsed && <span>Risultati</span>}
+                {!collapsed && <span>{t('navResults')}</span>}
               </button>
             </Tooltip>
 
@@ -841,10 +841,10 @@ export function Sidebar({
               >
                 <span style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
                   {advancedOpen ? <ChevronDown size={13} /> : <ChevronRight size={13} />}
-                  <span>Sistema</span>
+                  <span>{t('navSystem')}</span>
                 </span>
                 <span className="badge" style={{ fontSize: '9px', padding: '1px 5px', opacity: 0.8 }}>
-                  Risorse
+                  {t('navSystemBadge')}
                 </span>
               </button>
             ) : (
@@ -853,7 +853,7 @@ export function Sidebar({
 
             {(advancedOpen || collapsed) && (
               <div style={{ display: 'flex', flexDirection: 'column', gap: '2px' }}>
-                <Tooltip content="Risorse del Computer" position={collapsed ? 'right' : 'top'} disabled={!collapsed}>
+                <Tooltip content={t('navComputerResourcesTooltip')} position={collapsed ? 'right' : 'top'} disabled={!collapsed}>
                   <button
                     data-testid="nav-fabric"
                     className={`btn btn-ghost ${currentView === 'fabric' ? 'active' : ''}`}
@@ -861,11 +861,11 @@ export function Sidebar({
                     onClick={() => onNavigate('fabric')}
                   >
                     <Cpu size={14} />
-                    {!collapsed && <span>Risorse Computer</span>}
+                    {!collapsed && <span>{t('navComputerResources')}</span>}
                   </button>
                 </Tooltip>
 
-                <Tooltip content="Memoria & Contesto" position={collapsed ? 'right' : 'top'} disabled={!collapsed}>
+                <Tooltip content={t('navMemoryContext')} position={collapsed ? 'right' : 'top'} disabled={!collapsed}>
                   <button
                     data-testid="nav-memory"
                     className={`btn btn-ghost ${currentView === 'memory' || currentView === 'knowledge' || currentView === 'learning' ? 'active' : ''}`}
@@ -873,7 +873,7 @@ export function Sidebar({
                     onClick={() => onNavigate('memory')}
                   >
                     <Database size={14} />
-                    {!collapsed && <span>Memoria & Contesto</span>}
+                    {!collapsed && <span>{t('navMemoryContext')}</span>}
                   </button>
                 </Tooltip>
 
@@ -885,7 +885,7 @@ export function Sidebar({
                     onClick={() => onNavigate('activity')}
                   >
                     <ActivityIcon size={14} />
-                    {!collapsed && <span>Attività Recenti</span>}
+                    {!collapsed && <span>{t('navRecentActivity')}</span>}
                   </button>
                 </Tooltip>
 

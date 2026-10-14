@@ -903,6 +903,16 @@
   gap: 10px;
 }
 
+/* The Orb UI is always dark, but MarkdownRenderer colours text with the app's theme tokens: in the light theme that gave
+   near-black text on this dark toast (contrast 1.05:1). Pin the dark tokens inside the toast so it reads in both themes. */
+.v2-dialogue-toast {
+  --fg: 210 20% 96%;
+  --muted: 240 5% 14%;
+  --muted-fg: 220 14% 65%;
+  --primary: 263 70% 66%;
+  --border: 240 5% 16%;
+}
+
 .v2-dialogue-text {
   flex: 1;
   color: #f1f5f9;

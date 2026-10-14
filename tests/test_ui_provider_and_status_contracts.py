@@ -145,3 +145,127 @@ def test_accepting_a_proposal_in_the_classic_home_actually_dispatches_the_work()
     src = (UI / "Home.tsx").read_text()
     handler = src[src.index("const handleApproveProposal"):src.index("const handleRejectProposal")]
     assert "accepted?.authority" in handler and "/api/personal/chat" in handler and "authority," in handler
+
+
+# --- QA pass 2026-10-14 ---------------------------------------------------------------------------------------
+
+@pytest.mark.skipif(NODE is None, reason="node is required to execute the TypeScript module")
+def test_only_a_404_marks_the_stored_session_as_stale():
+    script = (
+        "import { classifyRestoreResponse, forgetStaleSession, ACTIVE_SESSION_KEY } from %s;"
+        "const store = new Map([[ACTIVE_SESSION_KEY, 's-old']]);"
+        "const storage = { getItem: k => store.get(k) ?? null, removeItem: k => store.delete(k) };"
+        "const out = { codes: [200, 404, 401, 429, 500, 502, null].map(c => classifyRestoreResponse(c)),"
+        " forgotNewer: forgetStaleSession(storage, 's-other'), keptAfterNewer: store.has(ACTIVE_SESSION_KEY),"
+        " forgot: forgetStaleSession(storage, 's-old'), gone: !store.has(ACTIVE_SESSION_KEY) };"
+        "console.log(JSON.stringify(out));"
+    ) % json.dumps((UI / "sessionRestore.ts").as_uri())
+    out = subprocess.run([NODE, "--input-type=module", "-e", script], capture_output=True, text=True, timeout=60)
+    assert out.returncode == 0, out.stderr
+    r = json.loads(out.stdout)
+    assert r["codes"] == ["restored", "stale", "keep", "keep", "keep", "keep", "keep"]
+    assert r["forgotNewer"] is False and r["keptAfterNewer"] is True      # a newer id is never wiped
+    assert r["forgot"] is True and r["gone"] is True
+
+
+def test_restore_session_uses_the_classifier_and_guards_unmount():
+    src = (UI / "AssistantV2.tsx").read_text()
+    body = src[src.index("const restoreSession"):src.index("const handleSelectSession")]
+    assert "classifyRestoreResponse(res.status)" in body and "forgetStaleSession(localStorage, sid)" in body
+    assert body.count("isMountedRef.current") >= 2
+    assert "removeItem" not in body                       # the key is only ever removed through the stale-only helper
+
+
+def _luminance(hex_color: str) -> float:
+    r, g, b = (int(hex_color[i:i + 2], 16) / 255 for i in (1, 3, 5))
+    f = lambda c: c / 12.92 if c <= 0.03928 else ((c + 0.055) / 1.055) ** 2.4
+    return 0.2126 * f(r) + 0.7152 * f(g) + 0.0722 * f(b)
+
+
+def _hsl_to_hex(h, s, l):
+    import colorsys
+    r, g, b = colorsys.hls_to_rgb(h / 360, l / 100, s / 100)
+    return "#%02x%02x%02x" % tuple(round(x * 255) for x in (r, g, b))
+
+
+def test_dialogue_toast_pins_dark_tokens_so_text_is_readable_in_the_light_theme():
+    css = (UI / "assistant-v2.css").read_text()
+    block = css[css.index(".v2-dialogue-toast {\n  --fg"):]
+    block = block[:block.index("}")]
+    tokens = {m.group(1): tuple(float(x.rstrip('%')) for x in m.group(2).split()) for m in re.finditer(r"--([a-z-]+): ([0-9. %]+);", block)}
+    assert {"fg", "muted-fg", "primary"} <= set(tokens)
+    toast_bg = "#151722"        # rgba(22,25,36,.92) over the Orb background #040507
+    ratio = lambda a, b: (max(_luminance(a), _luminance(b)) + .05) / (min(_luminance(a), _luminance(b)) + .05)
+    assert ratio(_hsl_to_hex(*tokens["fg"]), toast_bg) >= 7                  # AAA for body text
+    assert ratio(_hsl_to_hex(*tokens["muted-fg"]), toast_bg) >= 4.5          # AA
+    assert ratio(_hsl_to_hex(*tokens["primary"]), toast_bg) >= 4.5
+    assert ratio("#94a3b8", toast_bg) >= 4.5                                 # the echoed user message colour
+
+
+def test_sidebar_labels_come_from_the_translation_dictionaries():
+    sidebar = (UI / "Sidebar.tsx").read_text()
+    for literal in ("Risultati", "Risorse Computer", "Risorse del Computer", "Memoria & Contesto", "Attività Recenti", ">Sistema<"):
+        assert literal not in sidebar, literal
+    i18n = (UI / "i18n.tsx").read_text()
+    en, it = i18n[:i18n.index("\n  it: {")], i18n[i18n.index("\n  it: {"):]
+    for key in ("navResults", "navResultsTooltip", "navSystem", "navSystemBadge", "navComputerResources",
+                "navComputerResourcesTooltip", "navMemoryContext", "navRecentActivity"):
+        assert f"{key}:" in en and f"{key}:" in it, key
+        assert f"t('{key}')" in sidebar, key
+
+
+# --- Google Calendar API: explicit states instead of a 500 -------------------------------------------------------
+
+def _gc_ws(tmp_path):
+    from aether.workspace.workspace import Workspace
+    return Workspace.init(tmp_path / "ws", "GC WS")
+
+
+def _gc_request(ws):
+    from aether.server.app import app
+    app.state.workspace = ws
+    return Request({"type": "http", "method": "GET", "path": "/", "headers": [], "app": app})
+
+
+@pytest.mark.asyncio
+async def test_google_calendar_not_configured_is_a_404_not_a_500(tmp_path):
+    from fastapi import HTTPException
+    from aether.server.routes import list_google_calendar_events_route, list_google_calendars_route
+    ws = _gc_ws(tmp_path)
+    for route in (list_google_calendar_events_route, list_google_calendars_route):
+        with pytest.raises(HTTPException) as exc:
+            await route(_gc_request(ws))
+        assert exc.value.status_code == 404 and "not configured" in exc.value.detail
+
+
+@pytest.mark.asyncio
+async def test_google_calendar_disconnected_is_a_409(tmp_path):
+    from fastapi import HTTPException
+    from aether.connections.models import Connection, ConnectionStatus
+    from aether.server.routes import list_google_calendar_events_route
+    ws = _gc_ws(tmp_path)
+    ws.connections.save_connection(Connection(id="c1", workspace_id=ws.id, provider="google_calendar", account_name="Google Calendar",
+                                              status=ConnectionStatus.DISCONNECTED, auth_metadata={}))
+    with pytest.raises(HTTPException) as exc:
+        await list_google_calendar_events_route(_gc_request(ws))
+    assert exc.value.status_code == 409 and "disconnected" in exc.value.detail
+
+
+@pytest.mark.asyncio
+async def test_a_real_provider_failure_is_a_502_and_never_an_empty_list(tmp_path, monkeypatch):
+    from fastapi import HTTPException
+    from aether.connections.base import ConnectorAuthError
+    from aether.connections.models import Connection, ConnectionStatus
+    from aether.server.routes import list_google_calendar_events_route
+    ws = _gc_ws(tmp_path)
+    ws.connections.save_connection(Connection(id="c1", workspace_id=ws.id, provider="google_calendar", account_name="Google Calendar",
+                                              status=ConnectionStatus.VERIFIED, auth_metadata={"access_token": "x"}))
+
+    class Boom:
+        def list_events(self, **kw):
+            raise ConnectorAuthError("token expired", provider="google_calendar")
+
+    monkeypatch.setattr(ws.connections, "get_google_calendar_connector", lambda workspace_id: Boom())
+    with pytest.raises(HTTPException) as exc:
+        await list_google_calendar_events_route(_gc_request(ws))
+    assert exc.value.status_code == 502 and "token expired" in exc.value.detail

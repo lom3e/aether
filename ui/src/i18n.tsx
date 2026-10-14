@@ -6,6 +6,14 @@ export const translations = {
   en: {
     // Navigation & Shell
     navHome: 'Home',
+    navResults: 'Results',
+    navResultsTooltip: 'Results & Documents',
+    navSystem: 'System',
+    navSystemBadge: 'Resources',
+    navComputerResources: 'Computer Resources',
+    navComputerResourcesTooltip: 'Computer Resources',
+    navMemoryContext: 'Memory & Context',
+    navRecentActivity: 'Recent Activity',
     navMissions: 'Missions',
     navWork: 'Work',
     navWorkforce: 'Workforce',
@@ -1508,6 +1516,14 @@ export const translations = {
   it: {
     // Navigation & Shell
     navHome: 'Home',
+    navResults: 'Risultati',
+    navResultsTooltip: 'Risultati & Documenti',
+    navSystem: 'Sistema',
+    navSystemBadge: 'Risorse',
+    navComputerResources: 'Risorse Computer',
+    navComputerResourcesTooltip: 'Risorse del Computer',
+    navMemoryContext: 'Memoria & Contesto',
+    navRecentActivity: 'Attività Recenti',
     navMissions: 'Missioni',
     navWork: 'Lavoro',
     navWorkforce: 'Forza Lavoro',

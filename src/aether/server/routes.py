@@ -8336,6 +8336,29 @@ async def exchange_google_oauth_route(request: Request, payload: GoogleOAuthExch
     }
 
 
+def _google_calendar_connector_or_http(ws: Any, ws_id: str):
+    """
+    The connector for this workspace, or an explicit HTTP answer when there is none to use: 404 when Google Calendar
+    was never configured, 409 when it was disconnected. These are states, not server faults (they used to be a 500).
+    """
+    store = getattr(ws.connections, "store", None)
+    conn = store.get_connection_by_provider(ws_id, "google_calendar") if store is not None else None
+    if conn is None:
+        raise HTTPException(status_code=404, detail="Google Calendar connection is not configured in this workspace.")
+    if getattr(getattr(conn, "status", None), "value", None) == "disconnected":
+        raise HTTPException(status_code=409, detail="Google Calendar connection is disconnected in this workspace.")
+    return ws.connections.get_google_calendar_connector(workspace_id=ws_id)
+
+
+def _google_provider_call(fn, *args, **kwargs):
+    """Runs a Google call: a failure reported by the connector/provider is a 502 with its own message (never an empty list)."""
+    from aether.connections.base import ConnectorError
+    try:
+        return fn(*args, **kwargs)
+    except ConnectorError as exc:
+        raise HTTPException(status_code=502, detail=f"Google Calendar error: {exc.message}")
+
+
 @router.get("/connections/google_calendar/calendars")
 async def list_google_calendars_route(request: Request, workspace_id: str | None = None):
     """Lists available Google Calendars for the authorized account."""
@@ -8343,8 +8366,8 @@ async def list_google_calendars_route(request: Request, workspace_id: str | None
     if not ws:
         raise HTTPException(status_code=503, detail="Workspace not initialized.")
     ws_id = _ws_key(ws, workspace_id)
-    connector = ws.connections.get_google_calendar_connector(workspace_id=ws_id)
-    calendars = connector.list_calendars()
+    connector = _google_calendar_connector_or_http(ws, ws_id)
+    calendars = _google_provider_call(connector.list_calendars)
     return {"calendars": calendars}
 
 
@@ -8381,8 +8404,9 @@ async def list_google_calendar_events_route(
     if not ws:
         return []
     ws_id = _ws_key(ws, workspace_id)
-    connector = ws.connections.get_google_calendar_connector(workspace_id=ws_id)
-    return connector.list_events(
+    connector = _google_calendar_connector_or_http(ws, ws_id)
+    return _google_provider_call(
+        connector.list_events,
         calendar_id=calendar_id,
         limit=limit,
         time_min=time_min,
@@ -8397,8 +8421,9 @@ async def create_google_calendar_event_route(request: Request, payload: CreateGo
     if not ws:
         raise HTTPException(status_code=503, detail="Workspace not initialized.")
     ws_id = _ws_key(ws, payload.workspace_id)
-    connector = ws.connections.get_google_calendar_connector(workspace_id=ws_id)
-    event = connector.create_event(
+    connector = _google_calendar_connector_or_http(ws, ws_id)
+    event = _google_provider_call(
+        connector.create_event,
         title=payload.title,
         start_time=payload.start_time,
         end_time=payload.end_time,

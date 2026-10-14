@@ -1,4 +1,5 @@
 import { classifyCodingResult, runStillActive, testOutcome } from './codingStatus';
+import { classifyRestoreResponse, forgetStaleSession } from './sessionRestore';
 import { useState, useEffect, useRef, useCallback, useContext } from 'react';
 import {
   Sparkles, Send, Mic, MicOff, CheckCircle2, AlertTriangle, X,
@@ -52,6 +53,11 @@ export function AssistantV2({
   const [promptInput, setPromptInput] = useState('');
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [sessionId, setSessionId] = useState<string | null>(null);
+  const isMountedRef = useRef(true);
+  useEffect(() => {
+    isMountedRef.current = true;
+    return () => { isMountedRef.current = false; };
+  }, []);
   const [lastUserMessage, setLastUserMessage] = useState<string>('');
   const [lastAssistantMessage, setLastAssistantMessage] = useState<string>('');
 
@@ -357,8 +363,22 @@ export function AssistantV2({
   const restoreSession = useCallback(async (sid: string) => {
     try {
       const res = await fetch(apiUrl(`/api/personal/sessions/${encodeURIComponent(sid)}`));
-      if (res.ok) {
+      if (!isMountedRef.current) return;
+      const outcome = classifyRestoreResponse(res.status);
+      if (outcome === 'stale') {
+        // The stored id points to a session that no longer exists: forget it and start from a clean, coherent state.
+        // (Other failures keep the id: they do not prove the session is gone.)
+        forgetStaleSession(localStorage, sid);
+        setSessionId(null);
+        setLastUserMessage('');
+        setLastAssistantMessage('');
+        setActiveWorkContext(null);
+        setOrbState('idle');
+        return;
+      }
+      if (outcome === 'restored') {
         const data = await res.json();
+        if (!isMountedRef.current) return;
         setSessionId(sid);
         localStorage.setItem('aether_active_session_id', sid);
         const msgs = data.messages || [];
