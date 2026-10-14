@@ -23,6 +23,8 @@ class CodingAssessment:
     has_coding_trigger: bool
     has_agent_coding: bool
     informational_reasons: tuple[str, ...] = field(default_factory=tuple)
+    # The request edits a document (a note, a report, a text file), not code: it must never reach a coding agent.
+    document_operation: bool = False
 
 
 _HEDGE_RE = re.compile(
@@ -46,6 +48,58 @@ _PATH_PATTERNS = (
     # Bare Windows path anywhere
     re.compile(r"""(?:^|[\s`"'(])([A-Za-z]:[\\/][^\s`"')<>|?*]+)"""),
 )
+
+
+
+# --- Object-of-the-verb evidence -------------------------------------------------------------------------------------
+# "Update the file X" is a coding request only when X is code. Instead of listing verbs, the classifier looks at WHAT the
+# verb acts on: code evidence (a code file, a code vocabulary, a coding agent) versus document evidence (a document file).
+_DOCUMENT_EXTENSIONS = r"(?:md|markdown|txt|rtf|docx?|odt|pdf|csv|tsv|xlsx?)"
+_CODE_EVIDENCE_RE = re.compile(
+    r"\.(?:py|pyi|ts|tsx|js|jsx|mjs|rs|go|java|kt|swift|c|cc|cpp|h|hpp|cs|rb|php|sh|css|scss|html|json|ya?ml|toml|ini|sql)\b"
+    r"|\b(?:codice|code|codebase|funzione|function|metodo|method|classe|class|bug|refactor\w*|repository|repo|branch|commit|"
+    r"pull\s+request|api|endpoint|script|programma|software|backend|frontend|database|query\s+sql|componente|component|"
+    r"modulo|libreria|library|compil\w+|dipendenz\w+|unit\s+test|test\s+automatic\w+|antigravity|claude\s+code|codex)\b",
+    re.IGNORECASE,
+)
+_DOCUMENT_TARGET_RE = re.compile(
+    r"(?P<file>[\w.\-]+\." + _DOCUMENT_EXTENSIONS + r")\b|\b(?:documento|document|nota|note|appunti|report|relazione|verbale|lettera|testo)\b",
+    re.IGNORECASE,
+)
+_DOCUMENT_FILE_RE = re.compile(r"(?P<file>[\w.\-]+\." + _DOCUMENT_EXTENSIONS + r")\b", re.IGNORECASE)
+_DOCUMENT_EDIT_VERB_RE = re.compile(
+    r"\b(?:modifica|modificare|aggiorna|aggiornare|riscrivi|riscrivere|rielabora|correggi|correggere|integra|integrare|"
+    r"completa|completare|aggiungi|aggiungere|accorcia|riassumi|traduci|sistema|edit|update|rewrite|revise|append|shorten|"
+    r"translate|fix|amend)\b",
+    re.IGNORECASE,
+)
+
+
+def has_code_evidence(prompt: str) -> bool:
+    """True when the request is about software: a code file, code vocabulary or a coding agent is named."""
+    return bool(_CODE_EVIDENCE_RE.search(prompt or ""))
+
+
+@dataclass(frozen=True)
+class DocumentOperation:
+    filename: str
+    instruction: str
+
+
+def assess_document_operation(prompt: str) -> DocumentOperation | None:
+    """
+    A request to edit a named document ("aggiorna il file report_finale.md con i dati di vendita"): an edit verb, a document
+    file as the object and NO code evidence. It is routed to the document actions, never to a coding agent.
+    """
+    text = (prompt or "").strip()
+    if not text or text.endswith("?") and not re.match(r"^(?:puoi|potresti|can\s+you|could\s+you)\b", text, re.IGNORECASE):
+        return None
+    if has_code_evidence(text) or not _DOCUMENT_EDIT_VERB_RE.search(text):
+        return None
+    match = _DOCUMENT_FILE_RE.search(text)
+    if not match:
+        return None
+    return DocumentOperation(filename=match.group("file"), instruction=text)
 
 
 def extract_project_path_mention(text: str) -> str | None:
@@ -182,6 +236,13 @@ def assess_coding_prompt(prompt: str) -> CodingAssessment:
         ) if flag
     )
     operational = (not is_purely_informational) and bool(has_coding_trigger or has_agent_coding)
+    document_operation = False
+    if operational and assess_document_operation(prompt) is not None:
+        # The patterns above match "aggiorna il file": with a document as the object and no code anywhere, it is not coding.
+        operational = False
+        has_actionable_coding_directive = False
+        has_coding_trigger = False
+        document_operation = True
     # Operational by the rules, yet phrased as a question or a hesitation: settle it with a person/LLM, never by default.
     ambiguous = operational and (p_lower.rstrip().endswith("?") or bool(_HEDGE_RE.search(p_lower))) \
         and not re.match(r"^(?:puoi|potresti|riesci\s+a|can\s+you|could\s+you|please|per\s+favore)\b", p_lower)
@@ -194,4 +255,5 @@ def assess_coding_prompt(prompt: str) -> CodingAssessment:
         has_coding_trigger=bool(has_coding_trigger),
         has_agent_coding=bool(has_agent_coding),
         informational_reasons=reasons,
+        document_operation=document_operation,
     )

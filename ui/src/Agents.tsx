@@ -38,20 +38,20 @@ export function Agents({ navigate }: { navigate: (view: string, params?: any) =>
   return (
     <div style={{ flex: 1, overflowY: 'auto' }}>
       <TopHeader
-        title="Assistenti e Agenti"
+        title={t('syAssistantsAndAgents')}
         icon={Bot}
         actions={
           <button
             className="btn btn-primary"
             onClick={() => setIsBuilding(true)}
           >
-            <Plus size={16} /> Nuovo assistente
+            <Plus size={16} /> {t('syNewAssistant')}
           </button>
         }
       />
 
       <div style={{ maxWidth: '1100px', margin: '36px auto', padding: '0 32px' }}>
-        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(320px, 1fr))', gap: '20px' }}>
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(min(320px, 100%), 1fr))', gap: '20px' }}>
           {agents.map((agent, i) => (
             <div
               key={i}
@@ -69,17 +69,17 @@ export function Agents({ navigate }: { navigate: (view: string, params?: any) =>
                   />
                   <div>
                     <h3 style={{ fontSize: '15px', margin: 0, fontWeight: 600 }}>{agent.name}</h3>
-                    <div style={{ fontSize: '12px', color: 'hsl(var(--muted-fg))' }}>{agent.role || 'Assistente autonomo'}</div>
+                    <div style={{ fontSize: '12px', color: 'hsl(var(--muted-fg))' }}>{agent.role || t('syAutonomousAssistant')}</div>
                   </div>
                 </div>
                 <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
-                  <span style={{ fontSize: '11px', color: '#10b981', fontWeight: 500 }}>Pronto</span>
+                  <span style={{ fontSize: '11px', color: '#10b981', fontWeight: 500 }}>{t('syReady')}</span>
                   <div className="status-dot idle" />
                 </div>
               </div>
 
               <div style={{ marginBottom: '14px', fontSize: '13px', color: 'hsl(var(--muted-fg))', display: '-webkit-box', WebkitLineClamp: 2, WebkitBoxOrient: 'vertical', overflow: 'hidden', minHeight: '38px', lineHeight: 1.5 }}>
-                {agent.description || agent.instructions || 'Assistente configurato per collaborare alle attività del tuo ufficio virtuale.'}
+                {agent.description || agent.instructions || t('syAssistantSetUpToCollaborateOn')}
               </div>
 
               {agent.skills && agent.skills.length > 0 && (
@@ -103,7 +103,7 @@ export function Agents({ navigate }: { navigate: (view: string, params?: any) =>
                     navigate('agent', agent.name);
                   }}
                 >
-                  <MessageSquare size={13} /> Parla
+                  <MessageSquare size={13} /> {t('agentTalk')}
                 </button>
 
                 {(agent.is_external || agent.model || agent.endpoint_url) && (

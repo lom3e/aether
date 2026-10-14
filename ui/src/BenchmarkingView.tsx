@@ -4,6 +4,7 @@ import {
   Play, Award, ArrowUpRight, ShieldCheck, Cpu
 } from 'lucide-react';
 import { apiUrl } from './api';
+import { useTranslation } from './i18n';
 
 export interface LeaderboardEntry {
   target_id: string;
@@ -48,6 +49,7 @@ export interface EvolutionProposalItem {
 }
 
 export const BenchmarkingView: React.FC = () => {
+  const { t } = useTranslation();
   const [leaderboard, setLeaderboard] = useState<LeaderboardEntry[]>([]);
   const [alerts, setAlerts] = useState<RegressionAlertItem[]>([]);
   const [proposals, setProposals] = useState<EvolutionProposalItem[]>([]);
@@ -93,7 +95,7 @@ export const BenchmarkingView: React.FC = () => {
           suite_name: 'automated_workforce_eval',
         }),
       });
-      if (!res.ok) throw new Error('Benchmark run failed');
+      if (!res.ok) throw new Error(t('sxBenchmarkRunFailed'));
       const data = await res.json();
       setNotification({
         type: 'success',
@@ -101,7 +103,7 @@ export const BenchmarkingView: React.FC = () => {
       });
       await fetchData();
     } catch (err: any) {
-      setNotification({ type: 'error', message: err.message || 'Evaluation error' });
+      setNotification({ type: 'error', message: err.message || t('sxEvaluationError') });
     } finally {
       setEvaluating(false);
     }
@@ -112,11 +114,11 @@ export const BenchmarkingView: React.FC = () => {
       const res = await fetch(apiUrl(`/benchmarking/proposals/${proposalId}/apply`), {
         method: 'POST',
       });
-      if (!res.ok) throw new Error('Failed to apply evolution proposal');
-      setNotification({ type: 'success', message: 'Evolution proposal applied to agent configuration!' });
+      if (!res.ok) throw new Error(t('sxFailedToApplyEvolutionProposal'));
+      setNotification({ type: 'success', message: t('sxEvolutionProposalAppliedToAgentConfiguration') });
       await fetchData();
     } catch (err: any) {
-      setNotification({ type: 'error', message: err.message || 'Apply error' });
+      setNotification({ type: 'error', message: err.message || t('sxApplyError') });
     }
   };
 
@@ -125,11 +127,11 @@ export const BenchmarkingView: React.FC = () => {
       const res = await fetch(apiUrl(`/benchmarking/alerts/${alertId}/resolve`), {
         method: 'POST',
       });
-      if (!res.ok) throw new Error('Failed to resolve alert');
-      setNotification({ type: 'success', message: 'Regression alert resolved.' });
+      if (!res.ok) throw new Error(t('sxFailedToResolveAlert'));
+      setNotification({ type: 'success', message: t('sxRegressionAlertResolved') });
       await fetchData();
     } catch (err: any) {
-      setNotification({ type: 'error', message: err.message || 'Resolve error' });
+      setNotification({ type: 'error', message: err.message || t('sxResolveError') });
     }
   };
 
@@ -143,10 +145,10 @@ export const BenchmarkingView: React.FC = () => {
         <div>
           <h2 style={{ fontSize: '20px', fontWeight: 700, margin: 0, display: 'flex', alignItems: 'center', gap: '8px' }}>
             <Award className="text-primary" size={24} />
-            Workforce Benchmarking & Evolution
+            {t('sxWorkforceBenchmarkingEvolution')}
           </h2>
           <p style={{ margin: '4px 0 0', fontSize: '13px', color: 'hsl(var(--muted-fg))' }}>
-            Continuous regression tracking, multi-dimensional scoring, and autonomous prompt & routing optimization.
+            {t('sxContinuousRegressionTrackingMultiDimensionalScoring')}
           </p>
         </div>
 
@@ -157,9 +159,9 @@ export const BenchmarkingView: React.FC = () => {
             onChange={(e) => setSelectedType(e.target.value)}
             style={{ fontSize: '12px', padding: '6px 12px', height: '36px' }}
           >
-            <option value="all">All Targets</option>
-            <option value="agent">Agents Only</option>
-            <option value="workforce">Workforces Only</option>
+            <option value="all">{t('sxAllTargets')}</option>
+            <option value="agent">{t('sxAgentsOnly')}</option>
+            <option value="workforce">{t('sxWorkforcesOnly')}</option>
           </select>
 
           <button
@@ -169,7 +171,7 @@ export const BenchmarkingView: React.FC = () => {
             style={{ display: 'flex', alignItems: 'center', gap: '6px', height: '36px', fontSize: '13px' }}
           >
             <RefreshCw size={14} className={loading ? 'animate-spin' : ''} />
-            Refresh
+            {t('uiRefresh')}
           </button>
 
           <button
@@ -179,7 +181,7 @@ export const BenchmarkingView: React.FC = () => {
             style={{ display: 'flex', alignItems: 'center', gap: '6px', height: '36px', fontSize: '13px' }}
           >
             <Play size={14} className={evaluating ? 'animate-pulse' : ''} />
-            {evaluating ? 'Evaluating...' : 'Run Benchmark'}
+            {evaluating ? 'Evaluating...' : t('sxRunBenchmark')}
           </button>
         </div>
       </div>
@@ -207,49 +209,49 @@ export const BenchmarkingView: React.FC = () => {
       )}
 
       {/* KPI Cards */}
-      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))', gap: '16px' }}>
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(min(220px, 100%), 1fr))', gap: '16px' }}>
         <div className="card" style={{ padding: '16px', backgroundColor: 'hsl(var(--card))', borderRadius: '8px', border: '1px solid hsl(var(--border))' }}>
           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '8px' }}>
-            <span style={{ fontSize: '12px', color: 'hsl(var(--muted-fg))', fontWeight: 600 }}>EVALUATED TARGETS</span>
+            <span style={{ fontSize: '12px', color: 'hsl(var(--muted-fg))', fontWeight: 600 }}>{t('sxEvaluatedTargets')}</span>
             <Cpu size={16} className="text-primary" />
           </div>
           <div style={{ fontSize: '24px', fontWeight: 700 }}>{leaderboard.length}</div>
-          <div style={{ fontSize: '11px', color: 'hsl(var(--muted-fg))', marginTop: '4px' }}>Active in performance tracker</div>
+          <div style={{ fontSize: '11px', color: 'hsl(var(--muted-fg))', marginTop: '4px' }}>{t('sxActiveInPerformanceTracker')}</div>
         </div>
 
         <div className="card" style={{ padding: '16px', backgroundColor: 'hsl(var(--card))', borderRadius: '8px', border: '1px solid hsl(var(--border))' }}>
           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '8px' }}>
-            <span style={{ fontSize: '12px', color: 'hsl(var(--muted-fg))', fontWeight: 600 }}>TOP SCORE</span>
+            <span style={{ fontSize: '12px', color: 'hsl(var(--muted-fg))', fontWeight: 600 }}>{t('sxTopScore')}</span>
             <TrendingUp size={16} style={{ color: 'hsl(var(--success))' }} />
           </div>
           <div style={{ fontSize: '24px', fontWeight: 700, color: 'hsl(var(--success))' }}>
             {leaderboard.length > 0 ? `${(Math.max(...leaderboard.map(e => e.overall_score)) * 100).toFixed(1)}%` : 'N/A'}
           </div>
-          <div style={{ fontSize: '11px', color: 'hsl(var(--muted-fg))', marginTop: '4px' }}>Benchmark composite index</div>
+          <div style={{ fontSize: '11px', color: 'hsl(var(--muted-fg))', marginTop: '4px' }}>{t('sxBenchmarkCompositeIndex')}</div>
         </div>
 
         <div className="card" style={{ padding: '16px', backgroundColor: 'hsl(var(--card))', borderRadius: '8px', border: '1px solid hsl(var(--border))' }}>
           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '8px' }}>
-            <span style={{ fontSize: '12px', color: 'hsl(var(--muted-fg))', fontWeight: 600 }}>REGRESSION ALERTS</span>
+            <span style={{ fontSize: '12px', color: 'hsl(var(--muted-fg))', fontWeight: 600 }}>{t('sxRegressionAlerts')}</span>
             <AlertTriangle size={16} style={{ color: unresolvedAlertsCount > 0 ? 'hsl(var(--warning))' : 'hsl(var(--muted-fg))' }} />
           </div>
           <div style={{ fontSize: '24px', fontWeight: 700, color: unresolvedAlertsCount > 0 ? 'hsl(var(--warning))' : 'inherit' }}>
             {unresolvedAlertsCount}
           </div>
           <div style={{ fontSize: '11px', color: 'hsl(var(--muted-fg))', marginTop: '4px' }}>
-            {unresolvedAlertsCount > 0 ? 'Performance regressions detected' : 'Zero performance degradations'}
+            {unresolvedAlertsCount > 0 ? t('sxPerformanceRegressionsDetected') : t('sxZeroPerformanceDegradations')}
           </div>
         </div>
 
         <div className="card" style={{ padding: '16px', backgroundColor: 'hsl(var(--card))', borderRadius: '8px', border: '1px solid hsl(var(--border))' }}>
           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '8px' }}>
-            <span style={{ fontSize: '12px', color: 'hsl(var(--muted-fg))', fontWeight: 600 }}>EVOLUTION PROPOSALS</span>
+            <span style={{ fontSize: '12px', color: 'hsl(var(--muted-fg))', fontWeight: 600 }}>{t('sxEvolutionProposals')}</span>
             <Zap size={16} className="text-primary" />
           </div>
           <div style={{ fontSize: '24px', fontWeight: 700, color: pendingProposalsCount > 0 ? 'hsl(var(--primary))' : 'inherit' }}>
             {pendingProposalsCount}
           </div>
-          <div style={{ fontSize: '11px', color: 'hsl(var(--muted-fg))', marginTop: '4px' }}>Ready for autonomous apply</div>
+          <div style={{ fontSize: '11px', color: 'hsl(var(--muted-fg))', marginTop: '4px' }}>{t('sxReadyForAutonomousApply')}</div>
         </div>
       </div>
 
@@ -258,14 +260,14 @@ export const BenchmarkingView: React.FC = () => {
         <div style={{ padding: '16px 20px', borderBottom: '1px solid hsl(var(--border))', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
           <h3 style={{ fontSize: '15px', fontWeight: 600, margin: 0, display: 'flex', alignItems: 'center', gap: '8px' }}>
             <Award size={18} className="text-primary" />
-            Performance Leaderboard
+            {t('sxPerformanceLeaderboard')}
           </h3>
-          <span style={{ fontSize: '12px', color: 'hsl(var(--muted-fg))' }}>Weighted Composite Score</span>
+          <span style={{ fontSize: '12px', color: 'hsl(var(--muted-fg))' }}>{t('sxWeightedCompositeScore')}</span>
         </div>
 
         {leaderboard.length === 0 ? (
           <div style={{ padding: '40px', textAlign: 'center', color: 'hsl(var(--muted-fg))', fontSize: '13px' }}>
-            No evaluations recorded yet. Click "Run Benchmark" above to test workforce performance.
+            {t('sxNoEvaluationsHint')}
           </div>
         ) : (
           <div style={{ overflowX: 'auto' }}>
@@ -274,9 +276,9 @@ export const BenchmarkingView: React.FC = () => {
                 <tr style={{ backgroundColor: 'hsl(var(--muted)/0.3)', borderBottom: '1px solid hsl(var(--border))' }}>
                   <th style={{ padding: '12px 16px', fontWeight: 600 }}>Target</th>
                   <th style={{ padding: '12px 16px', fontWeight: 600 }}>Type</th>
-                  <th style={{ padding: '12px 16px', fontWeight: 600 }}>Overall Score</th>
+                  <th style={{ padding: '12px 16px', fontWeight: 600 }}>{t('sxOverallScore')}</th>
                   <th style={{ padding: '12px 16px', fontWeight: 600 }}>Completion</th>
-                  <th style={{ padding: '12px 16px', fontWeight: 600 }}>Error Rate</th>
+                  <th style={{ padding: '12px 16px', fontWeight: 600 }}>{t('sxErrorRate')}</th>
                   <th style={{ padding: '12px 16px', fontWeight: 600 }}>Latency</th>
                   <th style={{ padding: '12px 16px', fontWeight: 600 }}>Safety</th>
                   <th style={{ padding: '12px 16px', fontWeight: 600, textAlign: 'right' }}>Action</th>
@@ -334,7 +336,7 @@ export const BenchmarkingView: React.FC = () => {
                         onClick={() => handleRunBenchmark(item.target_id, item.target_type)}
                         style={{ padding: '4px 8px', fontSize: '12px' }}
                       >
-                        Re-evaluate
+                        {t('uiReEvaluate')}
                       </button>
                     </td>
                   </tr>
@@ -346,13 +348,13 @@ export const BenchmarkingView: React.FC = () => {
       </div>
 
       {/* Grid: Regression Alerts & Evolution Proposals */}
-      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(450px, 1fr))', gap: '20px' }}>
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(min(450px, 100%), 1fr))', gap: '20px' }}>
         {/* Regression Alerts Guardrail */}
         <div className="card" style={{ backgroundColor: 'hsl(var(--card))', borderRadius: '8px', border: '1px solid hsl(var(--border))', padding: '20px' }}>
           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '16px' }}>
             <h3 style={{ fontSize: '15px', fontWeight: 600, margin: 0, display: 'flex', alignItems: 'center', gap: '8px' }}>
               <AlertTriangle size={18} style={{ color: 'hsl(var(--warning))' }} />
-              Regression Guardrail Alerts
+              {t('sxRegressionGuardrailAlerts')}
             </h3>
             <span style={{ fontSize: '12px', color: 'hsl(var(--muted-fg))' }}>
               {unresolvedAlertsCount} active
@@ -361,7 +363,7 @@ export const BenchmarkingView: React.FC = () => {
 
           {alerts.length === 0 ? (
             <div style={{ padding: '32px', textAlign: 'center', color: 'hsl(var(--muted-fg))', fontSize: '13px' }}>
-              No regression alerts detected. Performance is strictly within baseline limits.
+              {t('sxNoRegressionAlertsDetectedPerformanceIs')}
             </div>
           ) : (
             <div style={{ display: 'flex', flexDirection: 'column', gap: '12px', maxHeight: '420px', overflowY: 'auto' }}>
@@ -399,7 +401,7 @@ export const BenchmarkingView: React.FC = () => {
                         onClick={() => handleResolveAlert(alert.id)}
                         style={{ fontSize: '11px', padding: '2px 8px', height: '24px' }}
                       >
-                        Resolve
+                        {t('uiResolve')}
                       </button>
                     ) : (
                       <span style={{ fontSize: '11px', color: 'hsl(var(--success))', display: 'flex', alignItems: 'center', gap: '3px' }}>
@@ -430,7 +432,7 @@ export const BenchmarkingView: React.FC = () => {
           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '16px' }}>
             <h3 style={{ fontSize: '15px', fontWeight: 600, margin: 0, display: 'flex', alignItems: 'center', gap: '8px' }}>
               <Zap size={18} className="text-primary" />
-              Autonomous Evolution Proposals
+              {t('sxAutonomousEvolutionProposals')}
             </h3>
             <span style={{ fontSize: '12px', color: 'hsl(var(--muted-fg))' }}>
               {pendingProposalsCount} pending
@@ -439,7 +441,7 @@ export const BenchmarkingView: React.FC = () => {
 
           {proposals.length === 0 ? (
             <div style={{ padding: '32px', textAlign: 'center', color: 'hsl(var(--muted-fg))', fontSize: '13px' }}>
-              No evolution proposals generated yet. Benchmarking engine suggests enhancements automatically when errors or degradations are detected.
+              {t('sxNoEvolutionProposalsGeneratedYetBenchmarking')}
             </div>
           ) : (
             <div style={{ display: 'flex', flexDirection: 'column', gap: '12px', maxHeight: '420px', overflowY: 'auto' }}>

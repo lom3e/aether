@@ -73,10 +73,10 @@ export function ActivityFeed({ activities, isLive = false, taskStatus = 'complet
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '24px' }}>
           <div>
             <h1 style={{ fontSize: '24px', fontWeight: 700, margin: '0 0 6px', color: 'hsl(var(--fg))' }}>
-              Activity Feed
+              {t('sxActivityFeed')}
             </h1>
             <p style={{ margin: 0, fontSize: '14px', color: 'hsl(var(--muted-fg))' }}>
-              Chronological, human-readable timeline of all operations, actions, and decisions.
+              {t('sxChronologicalHumanReadableTimelineOfAll')}
             </p>
           </div>
           <button
@@ -85,7 +85,7 @@ export function ActivityFeed({ activities, isLive = false, taskStatus = 'complet
             disabled={loading}
             style={{ display: 'flex', alignItems: 'center', gap: '6px', fontSize: '13px' }}
           >
-            <RefreshCw size={14} className={loading ? 'animate-spin' : ''} /> Refresh
+            <RefreshCw size={14} className={loading ? 'animate-spin' : ''} /> {t('uiRefresh')}
           </button>
         </div>
 
@@ -115,8 +115,8 @@ export function ActivityFeed({ activities, isLive = false, taskStatus = 'complet
         {events.length === 0 ? (
           <div className="card" style={{ padding: '48px 24px', textAlign: 'center', color: 'hsl(var(--muted-fg))' }}>
             <ActivityIcon size={36} style={{ margin: '0 auto 12px', opacity: 0.4 }} />
-            <div style={{ fontWeight: 600, fontSize: '16px', marginBottom: '4px' }}>No activity records found</div>
-            <div style={{ fontSize: '13px' }}>Operations and requests will be logged here in plain language.</div>
+            <div style={{ fontWeight: 600, fontSize: '16px', marginBottom: '4px' }}>{t('sxNoActivityRecordsFound')}</div>
+            <div style={{ fontSize: '13px' }}>{t('sxOperationsAndRequestsWillBeLogged')}</div>
           </div>
         ) : (
           <div style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
@@ -225,7 +225,7 @@ export function ActivityFeed({ activities, isLive = false, taskStatus = 'complet
         <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
           <Sparkles size={15} className="text-primary" />
           <span style={{ fontSize: '13px', fontWeight: 600, color: 'hsl(var(--fg))' }}>
-            Aether Workforce
+            {t('sxAetherWorkforce')}
           </span>
           {isLive ? (
             <span
@@ -319,7 +319,7 @@ export function ActivityFeed({ activities, isLive = false, taskStatus = 'complet
           }}
         >
           <div style={{ fontSize: '10.5px', fontWeight: 600, textTransform: 'uppercase', color: 'hsl(var(--muted-fg))', marginBottom: '6px', letterSpacing: '0.05em' }}>
-            Technical Activity Log
+            {t('sxTechnicalActivityLog')}
           </div>
           <div style={{ display: 'flex', flexDirection: 'column', gap: '4px', fontFamily: 'monospace', fontSize: '11px' }}>
             {activities.map(act => (
@@ -386,16 +386,16 @@ function humanizeActivity(act: ActivityItem, isActive: boolean, t: (key: Transla
   const meta = act.metadata || {};
 
   if (event === 'thinking') {
-    return isActive ? 'Analyzing task & planning steps...' : 'Completed plan';
+    return isActive ? t('sxAnalyzingTaskPlanningSteps') : t('sxCompletedPlan');
   }
 
   if (event === 'tool_started' || event === 'tool_call') {
     const tool = meta.tool_name || '';
     if (tool === 'search_knowledge') {
-      return isActive ? 'Consulting memory & knowledge...' : t('actionFoundDocs');
+      return isActive ? t('sxConsultingMemoryKnowledge') : t('actionFoundDocs');
     }
     if (tool === 'search_web') {
-      return isActive ? 'Searching external sources...' : t('actionWebSearched');
+      return isActive ? t('sxSearchingExternalSources') : t('actionWebSearched');
     }
     if (tool === 'write_file') {
       const p = meta.arguments?.path || meta.path || '';

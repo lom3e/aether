@@ -5,6 +5,7 @@ import {
 } from 'lucide-react';
 
 import { apiUrl } from './api';
+import { useTranslation } from './i18n';
 
 export interface ProactiveSuggestionItem {
   id: string;
@@ -37,6 +38,7 @@ export interface AmbientWatcherItem {
 }
 
 export const ProactiveWatchersView: React.FC = () => {
+  const { t } = useTranslation();
   const [suggestions, setSuggestions] = useState<ProactiveSuggestionItem[]>([]);
   const [watchers, setWatchers] = useState<AmbientWatcherItem[]>([]);
   const [loading, setLoading] = useState(false);
@@ -78,7 +80,7 @@ export const ProactiveWatchersView: React.FC = () => {
       setScanning(true);
       setNotification(null);
       const res = await fetch(apiUrl('/proactive/suggestions/generate'), { method: 'POST' });
-      if (!res.ok) throw new Error('Scan failed');
+      if (!res.ok) throw new Error(t('sxScanFailed'));
       const data = await res.json();
       setNotification({
         type: 'success',
@@ -86,7 +88,7 @@ export const ProactiveWatchersView: React.FC = () => {
       });
       await fetchData();
     } catch (err: any) {
-      setNotification({ type: 'error', message: err.message || 'Error scanning opportunities' });
+      setNotification({ type: 'error', message: err.message || t('sxErrorScanningOpportunities') });
     } finally {
       setScanning(false);
     }
@@ -95,22 +97,22 @@ export const ProactiveWatchersView: React.FC = () => {
   const handleAcceptSuggestion = async (id: string) => {
     try {
       const res = await fetch(apiUrl(`/proactive/suggestions/${id}/accept`), { method: 'POST' });
-      if (!res.ok) throw new Error('Failed to accept suggestion');
-      setNotification({ type: 'success', message: 'Suggestion accepted and action executed!' });
+      if (!res.ok) throw new Error(t('sxFailedToAcceptSuggestion'));
+      setNotification({ type: 'success', message: t('sxSuggestionAcceptedAndActionExecuted') });
       await fetchData();
     } catch (err: any) {
-      setNotification({ type: 'error', message: err.message || 'Accept failed' });
+      setNotification({ type: 'error', message: err.message || t('sxAcceptFailed') });
     }
   };
 
   const handleDismissSuggestion = async (id: string) => {
     try {
       const res = await fetch(apiUrl(`/proactive/suggestions/${id}/dismiss`), { method: 'POST' });
-      if (!res.ok) throw new Error('Failed to dismiss suggestion');
-      setNotification({ type: 'success', message: 'Suggestion dismissed.' });
+      if (!res.ok) throw new Error(t('sxFailedToDismissSuggestion'));
+      setNotification({ type: 'success', message: t('sxSuggestionDismissed2') });
       await fetchData();
     } catch (err: any) {
-      setNotification({ type: 'error', message: err.message || 'Dismiss failed' });
+      setNotification({ type: 'error', message: err.message || t('sxDismissFailed') });
     }
   };
 
@@ -118,7 +120,7 @@ export const ProactiveWatchersView: React.FC = () => {
     try {
       setCheckingWatchers(true);
       const res = await fetch(apiUrl('/proactive/watchers/check-all'), { method: 'POST' });
-      if (!res.ok) throw new Error('Failed checking watchers');
+      if (!res.ok) throw new Error(t('sxFailedCheckingWatchers'));
       const data = await res.json();
       const triggered = data.results.filter((r: any) => r.triggered).length;
       setNotification({
@@ -127,7 +129,7 @@ export const ProactiveWatchersView: React.FC = () => {
       });
       await fetchData();
     } catch (err: any) {
-      setNotification({ type: 'error', message: err.message || 'Error checking watchers' });
+      setNotification({ type: 'error', message: err.message || t('sxErrorCheckingWatchers') });
     } finally {
       setCheckingWatchers(false);
     }
@@ -136,26 +138,26 @@ export const ProactiveWatchersView: React.FC = () => {
   const handleCheckSingleWatcher = async (id: string) => {
     try {
       const res = await fetch(apiUrl(`/proactive/watchers/${id}/check`), { method: 'POST' });
-      if (!res.ok) throw new Error('Watcher check failed');
+      if (!res.ok) throw new Error(t('sxWatcherCheckFailed'));
       const data = await res.json();
       setNotification({
         type: 'success',
-        message: data.triggered ? 'Watcher condition triggered! Event recorded.' : 'Target verified. No state change detected.',
+        message: data.triggered ? t('sxWatcherConditionTriggeredEventRecorded') : t('sxTargetVerifiedNoStateChangeDetected'),
       });
       await fetchData();
     } catch (err: any) {
-      setNotification({ type: 'error', message: err.message || 'Watcher check error' });
+      setNotification({ type: 'error', message: err.message || t('sxWatcherCheckError') });
     }
   };
 
   const handleDeleteWatcher = async (id: string) => {
     try {
       const res = await fetch(apiUrl(`/proactive/watchers/${id}`), { method: 'DELETE' });
-      if (!res.ok) throw new Error('Failed deleting watcher');
-      setNotification({ type: 'success', message: 'Watcher deleted.' });
+      if (!res.ok) throw new Error(t('sxFailedDeletingWatcher'));
+      setNotification({ type: 'success', message: t('sxWatcherDeleted') });
       await fetchData();
     } catch (err: any) {
-      setNotification({ type: 'error', message: err.message || 'Delete error' });
+      setNotification({ type: 'error', message: err.message || t('sxDeleteError') });
     }
   };
 
@@ -175,13 +177,13 @@ export const ProactiveWatchersView: React.FC = () => {
           auto_trigger: newWatcherAutoTrigger,
         }),
       });
-      if (!res.ok) throw new Error('Failed to create watcher');
+      if (!res.ok) throw new Error(t('sxFailedToCreateWatcher'));
       setShowCreateModal(false);
       setNewWatcherName('');
-      setNotification({ type: 'success', message: 'Ambient watcher active and registered!' });
+      setNotification({ type: 'success', message: t('sxAmbientWatcherActiveAndRegistered') });
       await fetchData();
     } catch (err: any) {
-      setNotification({ type: 'error', message: err.message || 'Creation error' });
+      setNotification({ type: 'error', message: err.message || t('sxCreationError') });
     }
   };
 
@@ -192,10 +194,10 @@ export const ProactiveWatchersView: React.FC = () => {
         <div>
           <h2 style={{ fontSize: '20px', fontWeight: 700, margin: 0, display: 'flex', alignItems: 'center', gap: '8px' }}>
             <Sparkles className="text-primary" size={24} />
-            Proactive Intelligence & Ambient Watchers
+            {t('sxProactiveIntelligenceAmbientWatchers')}
           </h2>
           <p style={{ margin: '4px 0 0', fontSize: '13px', color: 'hsl(var(--muted-fg))' }}>
-            Continuous workspace pattern discovery, automated opportunity suggestions, and ambient monitors.
+            {t('sxContinuousWorkspacePatternDiscoveryAutomatedOpportunity')}
           </p>
         </div>
 
@@ -207,7 +209,7 @@ export const ProactiveWatchersView: React.FC = () => {
             style={{ display: 'flex', alignItems: 'center', gap: '6px', height: '36px', fontSize: '13px' }}
           >
             <RefreshCw size={14} className={loading ? 'animate-spin' : ''} />
-            Refresh
+            {t('uiRefresh')}
           </button>
 
           <button
@@ -217,7 +219,7 @@ export const ProactiveWatchersView: React.FC = () => {
             style={{ display: 'flex', alignItems: 'center', gap: '6px', height: '36px', fontSize: '13px' }}
           >
             <Eye size={14} className={checkingWatchers ? 'animate-pulse' : ''} />
-            {checkingWatchers ? 'Checking...' : 'Check All Watchers'}
+            {checkingWatchers ? 'Checking...' : t('sxCheckAllWatchers')}
           </button>
 
           <button
@@ -227,7 +229,7 @@ export const ProactiveWatchersView: React.FC = () => {
             style={{ display: 'flex', alignItems: 'center', gap: '6px', height: '36px', fontSize: '13px' }}
           >
             <Sparkles size={14} className={scanning ? 'animate-spin' : ''} />
-            {scanning ? 'Scanning...' : 'Scan Opportunities'}
+            {scanning ? 'Scanning...' : t('sxScanOpportunities')}
           </button>
 
           <button
@@ -236,7 +238,7 @@ export const ProactiveWatchersView: React.FC = () => {
             style={{ display: 'flex', alignItems: 'center', gap: '6px', height: '36px', fontSize: '13px' }}
           >
             <Plus size={14} />
-            New Watcher
+            {t('sxNewWatcher')}
           </button>
         </div>
       </div>
@@ -264,36 +266,36 @@ export const ProactiveWatchersView: React.FC = () => {
       )}
 
       {/* KPI Cards */}
-      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))', gap: '16px' }}>
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(min(220px, 100%), 1fr))', gap: '16px' }}>
         <div className="card" style={{ padding: '16px', backgroundColor: 'hsl(var(--card))', borderRadius: '8px', border: '1px solid hsl(var(--border))' }}>
           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '8px' }}>
-            <span style={{ fontSize: '12px', color: 'hsl(var(--muted-fg))', fontWeight: 600 }}>ACTIVE WATCHERS</span>
+            <span style={{ fontSize: '12px', color: 'hsl(var(--muted-fg))', fontWeight: 600 }}>{t('sxActiveWatchers')}</span>
             <Eye size={16} className="text-primary" />
           </div>
           <div style={{ fontSize: '24px', fontWeight: 700 }}>{watchers.length}</div>
-          <div style={{ fontSize: '11px', color: 'hsl(var(--muted-fg))', marginTop: '4px' }}>Monitoring local & API state</div>
+          <div style={{ fontSize: '11px', color: 'hsl(var(--muted-fg))', marginTop: '4px' }}>{t('sxMonitoringLocalApiState')}</div>
         </div>
 
         <div className="card" style={{ padding: '16px', backgroundColor: 'hsl(var(--card))', borderRadius: '8px', border: '1px solid hsl(var(--border))' }}>
           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '8px' }}>
-            <span style={{ fontSize: '12px', color: 'hsl(var(--muted-fg))', fontWeight: 600 }}>PENDING SUGGESTIONS</span>
+            <span style={{ fontSize: '12px', color: 'hsl(var(--muted-fg))', fontWeight: 600 }}>{t('sxPendingSuggestions')}</span>
             <Zap size={16} style={{ color: 'hsl(var(--warning))' }} />
           </div>
           <div style={{ fontSize: '24px', fontWeight: 700, color: suggestions.length > 0 ? 'hsl(var(--warning))' : 'inherit' }}>
             {suggestions.length}
           </div>
-          <div style={{ fontSize: '11px', color: 'hsl(var(--muted-fg))', marginTop: '4px' }}>Ready for 1-click execution</div>
+          <div style={{ fontSize: '11px', color: 'hsl(var(--muted-fg))', marginTop: '4px' }}>{t('sxReadyFor1ClickExecution')}</div>
         </div>
 
         <div className="card" style={{ padding: '16px', backgroundColor: 'hsl(var(--card))', borderRadius: '8px', border: '1px solid hsl(var(--border))' }}>
           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '8px' }}>
-            <span style={{ fontSize: '12px', color: 'hsl(var(--muted-fg))', fontWeight: 600 }}>AUTOMATED TRIGGERS</span>
+            <span style={{ fontSize: '12px', color: 'hsl(var(--muted-fg))', fontWeight: 600 }}>{t('sxAutomatedTriggers')}</span>
             <CheckCircle2 size={16} style={{ color: 'hsl(var(--success))' }} />
           </div>
           <div style={{ fontSize: '24px', fontWeight: 700, color: 'hsl(var(--success))' }}>
             {watchers.filter(w => w.auto_trigger).length}
           </div>
-          <div style={{ fontSize: '11px', color: 'hsl(var(--muted-fg))', marginTop: '4px' }}>Autonomous action runners</div>
+          <div style={{ fontSize: '11px', color: 'hsl(var(--muted-fg))', marginTop: '4px' }}>{t('sxAutonomousActionRunners')}</div>
         </div>
       </div>
 
@@ -302,7 +304,7 @@ export const ProactiveWatchersView: React.FC = () => {
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '16px' }}>
           <h3 style={{ fontSize: '15px', fontWeight: 600, margin: 0, display: 'flex', alignItems: 'center', gap: '8px' }}>
             <Sparkles size={18} className="text-primary" />
-            Synthesized Proactive Recommendations
+            {t('sxSynthesizedProactiveRecommendations')}
           </h3>
           <span style={{ fontSize: '12px', color: 'hsl(var(--muted-fg))' }}>
             {suggestions.length} pending
@@ -311,10 +313,10 @@ export const ProactiveWatchersView: React.FC = () => {
 
         {suggestions.length === 0 ? (
           <div style={{ padding: '32px', textAlign: 'center', color: 'hsl(var(--muted-fg))', fontSize: '13px' }}>
-            No pending suggestions. Click "Scan Opportunities" above to discover automation patterns in workspace activity.
+            {t('sxNoSuggestionsHint')}
           </div>
         ) : (
-          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(360px, 1fr))', gap: '14px' }}>
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(min(360px, 100%), 1fr))', gap: '14px' }}>
             {suggestions.map((sug) => (
               <div
                 key={sug.id}
@@ -364,14 +366,14 @@ export const ProactiveWatchersView: React.FC = () => {
                       onClick={() => handleDismissSuggestion(sug.id)}
                       style={{ fontSize: '11px', padding: '4px 8px', height: '28px' }}
                     >
-                      Dismiss
+                      {t('uiDismiss')}
                     </button>
                     <button
                       className="btn btn-primary"
                       onClick={() => handleAcceptSuggestion(sug.id)}
                       style={{ fontSize: '11px', padding: '4px 10px', height: '28px', display: 'flex', alignItems: 'center', gap: '4px' }}
                     >
-                      <ArrowUpRight size={12} /> Accept & Run
+                      <ArrowUpRight size={12} /> {t('sxAcceptRun')}
                     </button>
                   </div>
                 </div>
@@ -386,24 +388,24 @@ export const ProactiveWatchersView: React.FC = () => {
         <div style={{ padding: '16px 20px', borderBottom: '1px solid hsl(var(--border))', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
           <h3 style={{ fontSize: '15px', fontWeight: 600, margin: 0, display: 'flex', alignItems: 'center', gap: '8px' }}>
             <Eye size={18} className="text-primary" />
-            Configured Ambient Watchers
+            {t('sxConfiguredAmbientWatchers')}
           </h3>
-          <span style={{ fontSize: '12px', color: 'hsl(var(--muted-fg))' }}>Real-time Background Monitors</span>
+          <span style={{ fontSize: '12px', color: 'hsl(var(--muted-fg))' }}>{t('sxRealTimeBackgroundMonitors')}</span>
         </div>
 
         {watchers.length === 0 ? (
           <div style={{ padding: '40px', textAlign: 'center', color: 'hsl(var(--muted-fg))', fontSize: '13px' }}>
-            No watchers configured yet. Click "New Watcher" to monitor files, folders, or metric thresholds.
+            {t('sxNoWatchersHint')}
           </div>
         ) : (
           <div style={{ overflowX: 'auto' }}>
             <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '13px', textAlign: 'left' }}>
               <thead>
                 <tr style={{ backgroundColor: 'hsl(var(--muted)/0.3)', borderBottom: '1px solid hsl(var(--border))' }}>
-                  <th style={{ padding: '12px 16px', fontWeight: 600 }}>Watcher Name</th>
+                  <th style={{ padding: '12px 16px', fontWeight: 600 }}>{t('sxWatcherName')}</th>
                   <th style={{ padding: '12px 16px', fontWeight: 600 }}>Type</th>
                   <th style={{ padding: '12px 16px', fontWeight: 600 }}>Target</th>
-                  <th style={{ padding: '12px 16px', fontWeight: 600 }}>Trigger Action</th>
+                  <th style={{ padding: '12px 16px', fontWeight: 600 }}>{t('sxTriggerAction')}</th>
                   <th style={{ padding: '12px 16px', fontWeight: 600 }}>Auto-Exec</th>
                   <th style={{ padding: '12px 16px', fontWeight: 600 }}>Status</th>
                   <th style={{ padding: '12px 16px', fontWeight: 600, textAlign: 'right' }}>Actions</th>
@@ -426,7 +428,7 @@ export const ProactiveWatchersView: React.FC = () => {
                       </span>
                     </td>
                     <td style={{ padding: '12px 16px', fontFamily: 'monospace', fontSize: '12px' }}>{w.target}</td>
-                    <td style={{ padding: '12px 16px', fontFamily: 'monospace', fontSize: '12px' }}>{w.action_id || 'Alert Only'}</td>
+                    <td style={{ padding: '12px 16px', fontFamily: 'monospace', fontSize: '12px' }}>{w.action_id || t('sxAlertOnly')}</td>
                     <td style={{ padding: '12px 16px' }}>
                       <span style={{
                         fontSize: '11px',
@@ -456,7 +458,7 @@ export const ProactiveWatchersView: React.FC = () => {
                           onClick={() => handleCheckSingleWatcher(w.id)}
                           style={{ padding: '4px 8px', fontSize: '12px' }}
                         >
-                          Check
+                          {t('uiCheck')}
                         </button>
                         <button
                           className="btn btn-ghost text-destructive"
@@ -498,16 +500,16 @@ export const ProactiveWatchersView: React.FC = () => {
             maxWidth: '500px',
           }}>
             <h3 style={{ fontSize: '16px', fontWeight: 600, margin: '0 0 16px' }}>
-              Create Ambient Watcher
+              {t('sxCreateAmbientWatcher')}
             </h3>
 
             <form onSubmit={handleCreateWatcher} style={{ display: 'flex', flexDirection: 'column', gap: '14px' }}>
               <div>
-                <label style={{ display: 'block', fontSize: '12px', fontWeight: 600, marginBottom: '4px' }}>Watcher Name</label>
+                <label style={{ display: 'block', fontSize: '12px', fontWeight: 600, marginBottom: '4px' }}>{t('sxWatcherName')}</label>
                 <input
                   className="input"
                   style={{ width: '100%' }}
-                  placeholder="e.g. Architecture Docs Monitor"
+                  placeholder={t('sxEGArchitectureDocsMonitor')}
                   value={newWatcherName}
                   onChange={(e) => setNewWatcherName(e.target.value)}
                   required
@@ -515,22 +517,22 @@ export const ProactiveWatchersView: React.FC = () => {
               </div>
 
               <div>
-                <label style={{ display: 'block', fontSize: '12px', fontWeight: 600, marginBottom: '4px' }}>Watcher Type</label>
+                <label style={{ display: 'block', fontSize: '12px', fontWeight: 600, marginBottom: '4px' }}>{t('sxWatcherType')}</label>
                 <select
                   className="input"
                   style={{ width: '100%' }}
                   value={newWatcherType}
                   onChange={(e) => setNewWatcherType(e.target.value)}
                 >
-                  <option value="file_change">File Change (Hash/Modified)</option>
-                  <option value="directory_watch">Directory Watch (File count)</option>
-                  <option value="metric_threshold">Metric Threshold (Performance/Error)</option>
-                  <option value="activity_pattern">Activity Pattern</option>
+                  <option value="file_change">{t('sxFileChangeHashModified')}</option>
+                  <option value="directory_watch">{t('sxDirectoryWatchFileCount')}</option>
+                  <option value="metric_threshold">{t('sxMetricThresholdPerformanceError')}</option>
+                  <option value="activity_pattern">{t('sxActivityPattern')}</option>
                 </select>
               </div>
 
               <div>
-                <label style={{ display: 'block', fontSize: '12px', fontWeight: 600, marginBottom: '4px' }}>Target Path or Identifier</label>
+                <label style={{ display: 'block', fontSize: '12px', fontWeight: 600, marginBottom: '4px' }}>{t('sxTargetPathOrIdentifier')}</label>
                 <input
                   className="input"
                   style={{ width: '100%' }}
@@ -542,7 +544,7 @@ export const ProactiveWatchersView: React.FC = () => {
               </div>
 
               <div>
-                <label style={{ display: 'block', fontSize: '12px', fontWeight: 600, marginBottom: '4px' }}>Trigger Action ID</label>
+                <label style={{ display: 'block', fontSize: '12px', fontWeight: 600, marginBottom: '4px' }}>{t('sxTriggerActionId')}</label>
                 <input
                   className="input"
                   style={{ width: '100%' }}
@@ -560,7 +562,7 @@ export const ProactiveWatchersView: React.FC = () => {
                   onChange={(e) => setNewWatcherAutoTrigger(e.target.checked)}
                 />
                 <label htmlFor="auto_trigger" style={{ fontSize: '13px' }}>
-                  Auto-execute action immediately when condition triggers
+                  {t('sxAutoExecuteActionImmediatelyWhenCondition')}
                 </label>
               </div>
 
@@ -570,13 +572,13 @@ export const ProactiveWatchersView: React.FC = () => {
                   className="btn btn-ghost"
                   onClick={() => setShowCreateModal(false)}
                 >
-                  Cancel
+                  {t('uiCancel')}
                 </button>
                 <button
                   type="submit"
                   className="btn btn-primary"
                 >
-                  Create Watcher
+                  {t('sxCreateWatcher')}
                 </button>
               </div>
             </form>

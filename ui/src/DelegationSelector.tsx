@@ -129,7 +129,7 @@ export function DelegationSelector({
           }}
         >
           <Users size={14} className="text-muted" />
-          <span>{t('noOtherAgentsForDelegation') || 'Nessun altro agente registrato nella squadra a cui delegare.'}</span>
+          <span>{t('noOtherAgentsForDelegation') || t('seNoOtherAgentIsRegisteredIn')}</span>
         </div>
       )}
     </div>

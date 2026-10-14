@@ -44,8 +44,8 @@ function TeamBuilder({
   const [teamIcon, setTeamIcon] = useState(initialTeam?.icon || 'Bot');
   const [teamColor, setTeamColor] = useState(initialTeam?.color || 'violet');
   const [agents, setAgents] = useState<TeamAgent[]>([
-    { name: 'Manager', role: 'Coordinates the workforce', delegates_to: [], skills: [], icon: 'Bot', color: 'violet', model: null },
-    { name: 'Researcher', role: 'Researches and summarizes knowledge', delegates_to: [], skills: ['search_knowledge'], icon: 'Search', color: 'cyan', model: null },
+    { name: 'Manager', role: t('szCoordinatesTheWorkforce'), delegates_to: [], skills: [], icon: 'Bot', color: 'violet', model: null },
+    { name: 'Researcher', role: t('szResearchesAndSummarizesKnowledge'), delegates_to: [], skills: ['search_knowledge'], icon: 'Search', color: 'cyan', model: null },
   ]);
   const [openOverrides, setOpenOverrides] = useState<Record<number, boolean>>({});
   const [saving, setSaving] = useState(false);
@@ -104,7 +104,7 @@ function TeamBuilder({
 
   const removeAgent = (index: number) => {
     if (agents.length <= 1) {
-      showToast(t('minOneAgentRequired') || 'A team must have at least one agent.', 'warning');
+      showToast(t('minOneAgentRequired') || t('szATeamMustHaveAtLeast'), 'warning');
       return;
     }
     const removedName = agents[index].name;
@@ -125,7 +125,7 @@ function TeamBuilder({
   const handleSaveClick = () => {
     if (!name.trim() || agents.some(agent => !agent.name.trim() || !agent.role.trim())) return;
     if (!provider || !model.trim()) {
-      showToast('Choose a provider and a model for the team before saving.', 'error');
+      showToast(t('szChooseAProviderAndAModel'), 'error');
       return;
     }
     const modelChanged = initialTeam && model !== initialTeam.default_model;
@@ -165,13 +165,13 @@ function TeamBuilder({
         }),
       });
       if (!response.ok) {
-        throw await apiError(response, initialTeam ? 'Unable to update team.' : 'Unable to create team.');
+        throw await apiError(response, initialTeam ? t('szUnableToUpdateTeam') : t('szUnableToCreateTeam'));
       }
-      showToast(initialTeam ? (t('teamUpdated') || 'Team aggiornato con successo.') : (t('teamCreated') || 'Team creato con successo.'), 'success');
+      showToast(initialTeam ? (t('teamUpdated') || t('syTeamUpdatedSuccessfully')) : (t('teamCreated') || t('syTeamCreatedSuccessfully')), 'success');
       onSaved();
       onClose();
     } catch (error) {
-      showToast(error instanceof Error ? error.message : (initialTeam ? 'Unable to update team.' : 'Unable to create team.'), 'error');
+      showToast(error instanceof Error ? error.message : (initialTeam ? t('szUnableToUpdateTeam') : t('szUnableToCreateTeam')), 'error');
     } finally {
       setSaving(false);
     }
@@ -189,14 +189,14 @@ function TeamBuilder({
         method: 'DELETE',
       });
       if (!response.ok) {
-        throw await apiError(response, 'Impossibile eliminare questa squadra.');
+        throw await apiError(response, t('syCouldNotDeleteThisTeam'));
       }
       showToast(`Squadra "${initialTeam.name}" eliminata.`, 'info');
       if (onDeleted) onDeleted();
       else onSaved();
       onClose();
     } catch (error) {
-      showToast(error instanceof Error ? error.message : 'Impossibile eliminare questa squadra.', 'error');
+      showToast(error instanceof Error ? error.message : t('syCouldNotDeleteThisTeam'), 'error');
     } finally {
       setDeleting(false);
     }
@@ -215,7 +215,7 @@ function TeamBuilder({
                 {initialTeam ? t('editTeam') : t('createTeam')}
               </h2>
               <div style={{ fontSize: '12px', color: 'hsl(var(--muted-fg))', marginTop: '2px' }}>
-                {name ? `${name} · ${agents.length} ${agents.length === 1 ? 'membro' : 'membri'}` : 'Configura workforce, topologia e membri'}
+                {name ? `${name} · ${agents.length} ${agents.length === 1 ? 'membro' : 'membri'}` : t('syConfigureTheWorkforceTopologyAndMembers')}
               </div>
             </div>
           </div>
@@ -232,7 +232,7 @@ function TeamBuilder({
             <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '16px' }}>
               <Bot size={16} className="text-primary" />
               <h3 style={{ fontSize: '14.5px', fontWeight: 600, margin: 0 }}>
-                {t('teamIdentitySection') || 'Profilo e Identità della Squadra'}
+                {t('teamIdentitySection') || t('syTeamProfileAndIdentity')}
               </h3>
             </div>
 
@@ -243,7 +243,7 @@ function TeamBuilder({
                   className="form-input"
                   value={name}
                   onChange={event => setName(event.target.value)}
-                  placeholder={t('teamNamePlaceholder') || 'e.g. Market Intelligence'}
+                  placeholder={t('teamNamePlaceholder') || t('sdEGMarketIntelligence')}
                 />
               </div>
 
@@ -251,13 +251,13 @@ function TeamBuilder({
                 <VisualIconSelect
                   value={teamIcon}
                   onChange={setTeamIcon}
-                  label="Team Icon"
+                  label={t('szTeamIcon')}
                   disabled={saving}
                 />
                 <VisualColorSelect
                   value={teamColor}
                   onChange={setTeamColor}
-                  label="Team Color"
+                  label={t('szTeamColor')}
                   disabled={saving}
                 />
               </div>
@@ -269,19 +269,19 @@ function TeamBuilder({
             <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '14px' }}>
               <Sparkles size={16} className="text-primary" />
               <h3 style={{ fontSize: '14.5px', fontWeight: 600, margin: 0 }}>
-                {t('teamModelSection') || 'Provider e Modello IA della Squadra'}
+                {t('teamModelSection') || t('syTeamAiProviderAndModel')}
               </h3>
             </div>
             <p style={{ fontSize: '12px', color: 'hsl(var(--muted-fg))', marginTop: 0, marginBottom: '14px' }}>
-              Questo è il modello predefinito utilizzato automaticamente da tutti i membri della squadra.
+              {t('syThisIsTheDefaultModelUsed')}
             </p>
 
             <div className="form-row" style={{ marginBottom: 0 }}>
               <div className="form-group" style={{ marginBottom: 0 }}>
                 <label className="form-label">{t('provider')}</label>
                 <select className="form-select" value={provider} onChange={event => { setProvider(event.target.value); setModel(''); }}>
-                  <option value="">— Scegli un provider —</option>
-                  <option value="ollama">Ollama (Locale)</option>
+                  <option value="">{t('syChooseAProvider')}</option>
+                  <option value="ollama">{t('syOllamaLocal')}</option>
                   <option value="openai">OpenAI</option>
                   <option value="anthropic">Anthropic</option>
                   <option value="gemini">Google Gemini</option>
@@ -307,7 +307,7 @@ function TeamBuilder({
             <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '12px' }}>
               <Layers size={16} className="text-primary" />
               <h3 style={{ fontSize: '14.5px', fontWeight: 600, margin: 0 }}>
-                Workforce Topology Graph
+                {t('szWorkforceTopologyGraph')}
               </h3>
             </div>
             <TeamTopology agents={agents} teamName={name || 'Team'} height={150} />
@@ -319,7 +319,7 @@ function TeamBuilder({
               <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
                 <Users size={16} className="text-primary" />
                 <h3 style={{ fontSize: '14.5px', fontWeight: 600, margin: 0 }}>
-                  {t('teamMembersSection') || 'Membri della Squadra'} ({agents.length})
+                  {t('teamMembersSection') || t('syTeamMembers')} ({agents.length})
                 </h3>
               </div>
               <button
@@ -434,7 +434,7 @@ function TeamBuilder({
                         delegatesTo={agent.delegates_to}
                         onChange={newDelegates => updateAgent(index, 'delegates_to', newDelegates)}
                         label={t('delegatesTo') || 'Delega a:'}
-                        hint={t('delegatesToHint') || 'Attiva le deleghe con un click.'}
+                        hint={t('delegatesToHint') || t('syEnableDelegationsWithOneClick')}
                         disabled={saving}
                       />
                     </div>
@@ -463,7 +463,7 @@ function TeamBuilder({
                             value={agent.model ?? null}
                             teamDefaultModel={model}
                             onChange={newModel => updateAgent(index, 'model', newModel)}
-                            label={t('modelLabel') || 'Modello Dedicato per questo Agente'}
+                            label={t('modelLabel') || t('syDedicatedModelForThisAgent')}
                           />
                         </div>
                       )}
@@ -482,10 +482,10 @@ function TeamBuilder({
                   <AlertTriangle size={16} className="text-destructive" />
                   <div>
                     <strong style={{ fontSize: '13px', color: 'hsl(var(--destructive))' }}>
-                      {t('dangerZoneTitle') || 'Zona Pericolosa'}
+                      {t('dangerZoneTitle') || t('syDangerZone')}
                     </strong>
                     <div style={{ fontSize: '11.5px', color: 'hsl(var(--muted-fg))' }}>
-                      {t('deleteTeamWarning') || 'Rimuove definitivamente questa squadra dal workspace.'}
+                      {t('deleteTeamWarning') || t('syPermanentlyRemovesThisTeamFromThe')}
                     </div>
                   </div>
                 </div>
@@ -496,7 +496,7 @@ function TeamBuilder({
                   onClick={handleDeleteTeam}
                   disabled={saving || deleting}
                 >
-                  {confirmDeleteTeam ? (t('confirmDelete') || 'Conferma eliminazione') : (t('deleteTeam') || 'Elimina Team')}
+                  {confirmDeleteTeam ? (t('confirmDelete') || t('syConfirmDeletion')) : (t('deleteTeam') || t('syDeleteTeam'))}
                 </button>
               </div>
             </div>
@@ -536,11 +536,11 @@ function TeamBuilder({
             <div style={{ display: 'flex', alignItems: 'center', gap: '10px', marginBottom: '12px' }}>
               <Sparkles size={20} className="text-primary" />
               <h3 style={{ margin: 0, fontSize: '16.5px', fontWeight: 600 }}>
-                {t('teamModelChangeTitle') || 'Aggiornamento Modello Squadra'}
+                {t('teamModelChangeTitle') || t('syTeamModelUpdate')}
               </h3>
             </div>
             <p style={{ fontSize: '13px', color: 'hsl(var(--muted-fg))', marginBottom: '18px', lineHeight: 1.5 }}>
-              {t('teamModelChangePrompt') || 'Come desideri applicare il nuovo modello a questa squadra?'}
+              {t('teamModelChangePrompt') || t('syHowDoYouWantToApply')}
             </p>
 
             <div style={{ display: 'flex', flexDirection: 'column', gap: '12px', marginBottom: '20px' }}>
@@ -563,11 +563,11 @@ function TeamBuilder({
               >
                 <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
                   <strong style={{ fontSize: '13.5px', color: 'hsl(var(--fg))' }}>
-                    1. {t('applyOnlyToTeam') || 'Applica solo al Team'}
+                    1. {t('applyOnlyToTeam') || t('syApplyToTheTeamOnly')}
                   </strong>
                 </div>
                 <p style={{ margin: 0, fontSize: '12px', color: 'hsl(var(--muted-fg))', lineHeight: 1.45, whiteSpace: 'normal' }}>
-                  {t('applyOnlyToTeamDesc') || 'Gli agenti che ereditano seguiranno il nuovo modello. Gli override personalizzati resteranno invariati.'}
+                  {t('applyOnlyToTeamDesc') || t('syAgentsThatInheritWillFollowThe')}
                 </p>
               </div>
 
@@ -591,11 +591,11 @@ function TeamBuilder({
               >
                 <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
                   <strong style={{ fontSize: '13.5px', color: 'hsl(var(--primary))' }}>
-                    2. {t('applyToAllAgents') || 'Applica al Team e a tutti gli agenti'}
+                    2. {t('applyToAllAgents') || t('syApplyToTheTeamAndAll')}
                   </strong>
                 </div>
                 <p style={{ margin: 0, fontSize: '12px', color: 'hsl(var(--fg))', opacity: 0.85, lineHeight: 1.45, whiteSpace: 'normal' }}>
-                  {t('applyToAllAgentsDesc') || 'Rimuovi tutti gli override individuali e uniforma l\'intera squadra con questo modello.'}
+                  {t('applyToAllAgentsDesc') || t('syRemoveAllIndividualOverridesAndUnify')}
                 </p>
               </div>
             </div>
@@ -632,7 +632,7 @@ function PresetPickerModal({ onClose, onInstalled }: { onClose: () => void; onIn
           setSelectedId(data[0].id);
         }
       })
-      .catch(() => showToast('Unable to load presets.', 'error'));
+      .catch(() => showToast(t('szUnableToLoadPresets'), 'error'));
   }, [showToast]);
 
   const handleApply = async () => {
@@ -645,13 +645,13 @@ function PresetPickerModal({ onClose, onInstalled }: { onClose: () => void; onIn
         body: JSON.stringify({ seed_knowledge: true }),
       });
       if (!response.ok) {
-        throw await apiError(response, 'Unable to install this preset.');
+        throw await apiError(response, t('szUnableToInstallThisPreset'));
       }
-      showToast('Preset installed and activated.', 'success');
+      showToast(t('szPresetInstalledAndActivated'), 'success');
       onInstalled();
       onClose();
     } catch (error) {
-      showToast(error instanceof Error ? error.message : 'Unable to install this preset.', 'error');
+      showToast(error instanceof Error ? error.message : t('szUnableToInstallThisPreset'), 'error');
     } finally {
       setApplying(false);
     }
@@ -665,7 +665,7 @@ function PresetPickerModal({ onClose, onInstalled }: { onClose: () => void; onIn
           <div>
             <h2 style={{ fontSize: '17px', fontWeight: 600, margin: 0 }}>{t('startFromOfficialPreset')}</h2>
             <div style={{ fontSize: '12px', color: 'hsl(var(--muted-fg))', marginTop: '2px' }}>
-              Seleziona un'architettura completa pre-configurata
+              {t('sySelectACompletePreConfiguredArchitecture')}
             </div>
           </div>
           <button className="btn btn-ghost" onClick={onClose} disabled={applying}><X size={18} /></button>
@@ -742,7 +742,7 @@ export function Teams() {
         setLoading(false);
       })
       .catch(() => {
-        showToast('Unable to load teams.', 'error');
+        showToast(t('szUnableToLoadTeams'), 'error');
         setLoading(false);
       });
   }, [showToast]);
@@ -750,11 +750,11 @@ export function Teams() {
   const openEditor = async (team: any) => {
     try {
       const response = await fetch(apiUrl(`/api/teams/${encodeURIComponent(team.name)}`));
-      if (!response.ok) throw await apiError(response, 'Unable to open this team.');
+      if (!response.ok) throw await apiError(response, t('szUnableToOpenThisTeam'));
       setEditingTeam(await response.json());
       setIsBuilding(true);
     } catch (error) {
-      showToast(error instanceof Error ? error.message : 'Unable to open this team.', 'error');
+      showToast(error instanceof Error ? error.message : t('szUnableToOpenThisTeam'), 'error');
     }
   };
 
@@ -766,13 +766,13 @@ export function Teams() {
         method: 'DELETE',
       });
       if (!response.ok) {
-        throw await apiError(response, 'Impossibile eliminare questa squadra.');
+        throw await apiError(response, t('syCouldNotDeleteThisTeam'));
       }
       showToast(`Squadra "${deletingTeamName}" eliminata con successo.`, 'info');
       setDeletingTeamName(null);
       fetchTeams();
     } catch (error) {
-      showToast(error instanceof Error ? error.message : 'Impossibile eliminare questa squadra.', 'error');
+      showToast(error instanceof Error ? error.message : t('syCouldNotDeleteThisTeam'), 'error');
     } finally {
       setIsDeleting(false);
     }
@@ -800,7 +800,7 @@ export function Teams() {
                 fontWeight: 600,
               }}
             >
-              <Sparkles size={16} /> {t('designWithAi') || '✨ Progetta con l\'IA'}
+              <Sparkles size={16} /> {t('designWithAi') || t('syDesignWithAi2')}
             </button>
             <button className="btn btn-primary" onClick={() => setIsBuilding(true)}>
               <Plus size={16} /> {t('createTeam')}
@@ -847,7 +847,7 @@ export function Teams() {
                   setDeletingTeamName(team.name);
                 }}
                 disabled={teams.length <= 1}
-                title={teams.length <= 1 ? "Impossibile eliminare l'unico team rimasto" : t('deleteTeam')}
+                title={teams.length <= 1 ? t('syCannotDeleteTheOnlyRemainingTeam') : t('deleteTeam')}
               >
                 <Trash2 size={13} />
                 <span>{t('deleteTeam') || 'Elimina'}</span>
@@ -886,7 +886,7 @@ export function Teams() {
             <div style={{ display: 'flex', alignItems: 'center', gap: '10px', marginBottom: '12px', color: 'hsl(var(--destructive))' }}>
               <AlertTriangle size={20} />
               <h3 style={{ margin: 0, fontSize: '16px', fontWeight: 600 }}>
-                {t('confirmDeleteTeam') || 'Eliminare questa squadra?'}
+                {t('confirmDeleteTeam') || t('syDeleteThisTeam')}
               </h3>
             </div>
             <p style={{ fontSize: '13px', color: 'hsl(var(--muted-fg))', marginBottom: '20px', lineHeight: 1.5 }}>
@@ -907,7 +907,7 @@ export function Teams() {
                 onClick={handleDeleteTeamConfirm}
                 disabled={isDeleting}
               >
-                {isDeleting ? t('deleting') || 'Eliminazione...' : t('deleteTeam') || 'Elimina Squadra'}
+                {isDeleting ? t('deleting') || 'Eliminazione...' : t('deleteTeam') || t('syDeleteTeam2')}
               </button>
             </div>
           </div>

@@ -161,7 +161,7 @@ export function Automations({ initialAutomationId }: AutomationsProps = {}) {
     fetch(apiUrl('/api/automations/scheduler/health'))
       .then((res) => res.json())
       .then((data) => setSchedulerHealth(data))
-      .catch((err) => console.error('Failed to load scheduler health', err));
+      .catch((err) => console.error(t('sxFailedToLoadSchedulerHealth'), err));
   }, []);
 
   const fetchAutomations = useCallback(() => {
@@ -173,7 +173,7 @@ export function Automations({ initialAutomationId }: AutomationsProps = {}) {
         setLoading(false);
       })
       .catch((err) => {
-        console.error('Failed to load automations', err);
+        console.error(t('sxFailedToLoadAutomations'), err);
         setLoading(false);
       });
   }, []);
@@ -182,7 +182,7 @@ export function Automations({ initialAutomationId }: AutomationsProps = {}) {
     fetch(apiUrl('/api/automations/suggestions?status=pending'))
       .then((res) => res.json())
       .then((data) => setSuggestions(Array.isArray(data) ? data : []))
-      .catch((err) => console.error('Failed to load suggestions', err));
+      .catch((err) => console.error(t('sxFailedToLoadSuggestions'), err));
   }, []);
 
   const fetchRuns = useCallback(() => {
@@ -192,7 +192,7 @@ export function Automations({ initialAutomationId }: AutomationsProps = {}) {
         setRuns(Array.isArray(data) ? data : []);
       })
       .catch((err) => {
-        console.error('Failed to load runs history', err);
+        console.error(t('sxFailedToLoadRunsHistory'), err);
       });
   }, []);
 
@@ -232,12 +232,12 @@ export function Automations({ initialAutomationId }: AutomationsProps = {}) {
       const res = await fetch(apiUrl(`/api/automations/suggestions/${sugId}/accept`), {
         method: 'POST',
       });
-      if (!res.ok) throw await apiError(res, 'Failed to accept suggestion');
-      showToast('Automation activated!', 'success');
+      if (!res.ok) throw await apiError(res, t('sxFailedToAcceptSuggestion'));
+      showToast(t('sxAutomationActivated'), 'success');
       fetchSuggestions();
       fetchAutomations();
     } catch (err: any) {
-      showToast(err.message || 'Failed to accept suggestion', 'error');
+      showToast(err.message || t('sxFailedToAcceptSuggestion'), 'error');
     }
   };
 
@@ -246,11 +246,11 @@ export function Automations({ initialAutomationId }: AutomationsProps = {}) {
       const res = await fetch(apiUrl(`/api/automations/suggestions/${sugId}/dismiss`), {
         method: 'POST',
       });
-      if (!res.ok) throw await apiError(res, 'Failed to dismiss suggestion');
-      showToast('Suggestion dismissed', 'info');
+      if (!res.ok) throw await apiError(res, t('sxFailedToDismissSuggestion'));
+      showToast(t('sxSuggestionDismissed'), 'info');
       fetchSuggestions();
     } catch (err: any) {
-      showToast(err.message || 'Failed to dismiss suggestion', 'error');
+      showToast(err.message || t('sxFailedToDismissSuggestion'), 'error');
     }
   };
 
@@ -263,11 +263,11 @@ export function Automations({ initialAutomationId }: AutomationsProps = {}) {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ prompt: aiPrompt.trim(), save: false }),
       });
-      if (!res.ok) throw await apiError(res, 'Failed to generate automation');
+      if (!res.ok) throw await apiError(res, t('sxFailedToGenerateAutomation'));
       const data = await res.json();
       setAiProposal(data);
     } catch (err: any) {
-      showToast(err.message || 'Failed to generate automation', 'error');
+      showToast(err.message || t('sxFailedToGenerateAutomation'), 'error');
     } finally {
       setAiLoading(false);
     }
@@ -282,14 +282,14 @@ export function Automations({ initialAutomationId }: AutomationsProps = {}) {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(autoToSave),
       });
-      if (!res.ok) throw await apiError(res, 'Failed to save automation');
-      showToast(activate ? 'Automation created and activated!' : 'Draft automation created!', 'success');
+      if (!res.ok) throw await apiError(res, t('sxFailedToSaveAutomation'));
+      showToast(activate ? t('sxAutomationCreatedAndActivated') : t('sxDraftAutomationCreated'), 'success');
       setIsAiBuilderOpen(false);
       setAiPrompt('');
       setAiProposal(null);
       fetchAutomations();
     } catch (err: any) {
-      showToast(err.message || 'Failed to save automation', 'error');
+      showToast(err.message || t('sxFailedToSaveAutomation'), 'error');
     }
   };
 
@@ -306,7 +306,7 @@ export function Automations({ initialAutomationId }: AutomationsProps = {}) {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ enabled: nextEnabled }),
       });
-      if (!res.ok) throw await apiError(res, 'Failed to toggle automation');
+      if (!res.ok) throw await apiError(res, t('sxFailedToToggleAutomation'));
       showToast(
         nextEnabled ? t('statusEnabled') : t('statusDisabled'),
         'success'
@@ -316,7 +316,7 @@ export function Automations({ initialAutomationId }: AutomationsProps = {}) {
       setAutomations((prev) =>
         prev.map((a) => (a.id === auto.id ? { ...a, enabled: auto.enabled } : a))
       );
-      showToast(err.message || 'Failed to toggle automation', 'error');
+      showToast(err.message || t('sxFailedToToggleAutomation'), 'error');
     }
   };
 
@@ -330,7 +330,7 @@ export function Automations({ initialAutomationId }: AutomationsProps = {}) {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ payload: {} }),
       });
-      if (!res.ok) throw await apiError(res, 'Failed to run automation');
+      if (!res.ok) throw await apiError(res, t('sxFailedToRunAutomation'));
       const runData = await res.json();
       showToast(
         runData.status === 'completed'
@@ -341,7 +341,7 @@ export function Automations({ initialAutomationId }: AutomationsProps = {}) {
       fetchAutomations();
       fetchRuns();
     } catch (err: any) {
-      showToast(err.message || 'Failed to run automation', 'error');
+      showToast(err.message || t('sxFailedToRunAutomation'), 'error');
     } finally {
       setRunningIds((prev) => {
         const next = new Set(prev);
@@ -356,13 +356,13 @@ export function Automations({ initialAutomationId }: AutomationsProps = {}) {
       const res = await fetch(apiUrl(`/api/automations/${auto.id}`), {
         method: 'DELETE',
       });
-      if (!res.ok) throw await apiError(res, 'Failed to delete automation');
+      if (!res.ok) throw await apiError(res, t('sxFailedToDeleteAutomation'));
       showToast(t('deleteAutomation'), 'success');
       setDeletingAutomation(null);
       fetchAutomations();
       fetchRuns();
     } catch (err: any) {
-      showToast(err.message || 'Failed to delete automation', 'error');
+      showToast(err.message || t('sxFailedToDeleteAutomation'), 'error');
     }
   };
 
@@ -375,7 +375,7 @@ export function Automations({ initialAutomationId }: AutomationsProps = {}) {
         icon={Zap}
         actions={
           <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-            <Tooltip content="Refresh automations and runs">
+            <Tooltip content={t('sxRefreshAutomationsAndRuns')}>
               <button
                 className="btn btn-ghost"
                 onClick={() => {
@@ -396,7 +396,7 @@ export function Automations({ initialAutomationId }: AutomationsProps = {}) {
                 setAiProposal(null);
               }}
             >
-              <Sparkles size={15} className="text-primary" /> Create with AI
+              <Sparkles size={15} className="text-primary" /> {t('sxCreateWithAi')}
             </button>
             <button
               className="btn btn-primary"
@@ -413,7 +413,7 @@ export function Automations({ initialAutomationId }: AutomationsProps = {}) {
 
       <div style={{ maxWidth: '1100px', width: '100%', margin: '24px auto', padding: '0 32px' }}>
         {/* Metric Cards Banner */}
-        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))', gap: '16px', marginBottom: '24px' }}>
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(min(220px, 100%), 1fr))', gap: '16px', marginBottom: '24px' }}>
           <div className="card" style={{ padding: '16px 20px', display: 'flex', alignItems: 'center', gap: '14px' }}>
             <div style={{ width: '40px', height: '40px', borderRadius: '10px', backgroundColor: 'hsl(var(--primary)/0.12)', color: 'hsl(var(--primary))', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
               <Zap size={20} />
@@ -452,7 +452,7 @@ export function Automations({ initialAutomationId }: AutomationsProps = {}) {
               <Clock size={20} />
             </div>
             <div>
-              <div style={{ fontSize: '12px', color: 'hsl(var(--muted-fg))', fontWeight: 500 }}>Scheduler Engine</div>
+              <div style={{ fontSize: '12px', color: 'hsl(var(--muted-fg))', fontWeight: 500 }}>{t('sxSchedulerEngine')}</div>
               <div style={{ fontSize: '14px', fontWeight: 700, color: 'hsl(var(--fg))', display: 'flex', alignItems: 'center', gap: '6px' }}>
                 <span style={{
                   display: 'inline-block',
@@ -520,13 +520,13 @@ export function Automations({ initialAutomationId }: AutomationsProps = {}) {
                         Automations Discovered ({suggestions.length})
                       </h4>
                       <p style={{ margin: '2px 0 0', fontSize: '12px', color: 'hsl(var(--muted-fg))' }}>
-                        Aether detected repeated action patterns in your workspace and synthesized these workflow opportunities.
+                        {t('sxAetherDetectedRepeatedActionPatternsIn')}
                       </p>
                     </div>
                   </div>
                 </div>
 
-                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(320px, 1fr))', gap: '14px' }}>
+                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(min(320px, 100%), 1fr))', gap: '14px' }}>
                   {suggestions.map((sug) => {
                     const isTargeted = initialAutomationId === sug.id || initialAutomationId === sug.automation_id;
                     return (
@@ -575,7 +575,7 @@ export function Automations({ initialAutomationId }: AutomationsProps = {}) {
                             style={{ padding: '4px 10px', fontSize: '11px' }}
                             onClick={() => handleDismissSuggestion(sug.id)}
                           >
-                            Dismiss
+                            {t('uiDismiss')}
                           </button>
                           <button
                             type="button"
@@ -583,7 +583,7 @@ export function Automations({ initialAutomationId }: AutomationsProps = {}) {
                             style={{ padding: '4px 12px', fontSize: '11px', display: 'flex', alignItems: 'center', gap: '5px' }}
                             onClick={() => handleAcceptSuggestion(sug.id)}
                           >
-                            <Check size={12} /> Accept & Create
+                            <Check size={12} /> {t('sxAcceptCreate')}
                           </button>
                         </div>
                       </div>
@@ -594,7 +594,7 @@ export function Automations({ initialAutomationId }: AutomationsProps = {}) {
             )}
 
             {automations.length > 0 ? (
-              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(340px, 1fr))', gap: '20px' }}>
+              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(min(340px, 100%), 1fr))', gap: '20px' }}>
                 {automations.map((auto) => {
                   const isRunning = runningIds.has(auto.id);
                   const isTargeted = initialAutomationId === auto.id;
@@ -634,27 +634,27 @@ export function Automations({ initialAutomationId }: AutomationsProps = {}) {
                             </span>
                           ) : auto.runtime_status === 'waiting_approval' ? (
                             <span className="badge" style={{ background: 'hsl(var(--warning)/0.2)', color: 'hsl(var(--warning))', fontSize: '11px', fontWeight: 600 }}>
-                              Waiting Approval
+                              {t('sxWaitingApproval')}
                             </span>
                           ) : auto.runtime_status === 'error' ? (
                             <span className="badge" style={{ background: 'hsl(var(--error)/0.18)', color: 'hsl(var(--error))', fontSize: '11px', fontWeight: 600 }}>
-                              Error
+                              {t('uiError')}
                             </span>
                           ) : auto.is_draft ? (
                             <span className="badge" style={{ background: 'hsl(var(--warning)/0.15)', color: 'hsl(var(--warning))', fontSize: '11px', fontWeight: 600 }}>
-                              Draft
+                              {t('uiDraft')}
                             </span>
                           ) : auto.enabled ? (
                             <span className="badge badge-success" style={{ fontSize: '11px', fontWeight: 600 }}>
-                              Active
+                              {t('uiActive')}
                             </span>
                           ) : (
                             <span className="badge" style={{ background: 'hsl(var(--muted))', color: 'hsl(var(--muted-fg))', fontSize: '11px', fontWeight: 600 }}>
-                              Paused
+                              {t('uiPaused')}
                             </span>
                           )}
 
-                          <Tooltip content={auto.enabled ? 'Click to pause/disable' : 'Click to activate'}>
+                          <Tooltip content={auto.enabled ? t('sxClickToPauseDisable') : t('sxClickToActivate')}>
                             <button
                               className="btn btn-ghost"
                               style={{ padding: '2px 8px', fontSize: '11px', borderRadius: '4px' }}
@@ -692,11 +692,11 @@ export function Automations({ initialAutomationId }: AutomationsProps = {}) {
                           <span
                             className="badge"
                             style={{ fontSize: '11px', background: 'hsl(var(--muted))', cursor: 'pointer', display: 'inline-flex', alignItems: 'center', gap: '4px' }}
-                            title="Click to copy webhook endpoint path"
+                            title={t('sxClickToCopyWebhookEndpointPath')}
                             onClick={(e) => {
                               e.stopPropagation();
                               navigator.clipboard.writeText(`/api/automations/webhooks/${auto.trigger.webhook_slug || auto.id}`);
-                              showToast('Webhook path copied to clipboard', 'info');
+                              showToast(t('sxWebhookPathCopiedToClipboard'), 'info');
                             }}
                           >
                             <Globe size={11} /> Webhook <Copy size={10} />
@@ -743,13 +743,13 @@ export function Automations({ initialAutomationId }: AutomationsProps = {}) {
                           {auto.output_destination.type === 'knowledge' && (
                             <>
                               <Database size={12} className="text-primary" />
-                              <span>Output: Ingest into Knowledge Base</span>
+                              <span>{t('sxOutputIngestIntoKnowledgeBase')}</span>
                             </>
                           )}
                           {auto.output_destination.type === 'notification' && (
                             <>
                               <Bell size={12} className="text-primary" />
-                              <span>Output: System Notification</span>
+                              <span>{t('sxOutputSystemNotification')}</span>
                             </>
                           )}
                         </div>
@@ -874,8 +874,8 @@ export function Automations({ initialAutomationId }: AutomationsProps = {}) {
                       <th>Automation</th>
                       <th>Trigger</th>
                       <th>Status</th>
-                      <th>Started At</th>
-                      <th>Duration</th>
+                      <th>{t('sxStartedAt')}</th>
+                      <th>{t('uiDuration')}</th>
                       <th>Steps</th>
                       <th></th>
                     </tr>
@@ -913,7 +913,7 @@ export function Automations({ initialAutomationId }: AutomationsProps = {}) {
                             style={{ fontSize: '12px', padding: '4px 8px' }}
                             onClick={() => setSelectedRun(run)}
                           >
-                            Details
+                            {t('uiDetails')}
                           </button>
                         </td>
                       </tr>
@@ -1004,7 +1004,7 @@ export function Automations({ initialAutomationId }: AutomationsProps = {}) {
 
             {selectedRun.step_runs && selectedRun.step_runs.length > 0 && (
               <div style={{ marginBottom: '16px' }}>
-                <h4 style={{ fontSize: '13px', margin: '0 0 8px', color: 'hsl(var(--fg))' }}>Step Executions</h4>
+                <h4 style={{ fontSize: '13px', margin: '0 0 8px', color: 'hsl(var(--fg))' }}>{t('sxStepExecutions')}</h4>
                 <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
                   {selectedRun.step_runs.map((step, idx) => (
                     <div key={idx} style={{ padding: '10px 12px', borderRadius: '8px', backgroundColor: 'hsl(var(--muted)/0.4)', border: '1px solid hsl(var(--border))' }}>
@@ -1025,7 +1025,7 @@ export function Automations({ initialAutomationId }: AutomationsProps = {}) {
 
             {selectedRun.output_result && (
               <div>
-                <h4 style={{ fontSize: '13px', margin: '0 0 8px', color: 'hsl(var(--fg))' }}>Final Deliverable Output</h4>
+                <h4 style={{ fontSize: '13px', margin: '0 0 8px', color: 'hsl(var(--fg))' }}>{t('sxFinalDeliverableOutput')}</h4>
                 <pre style={{ padding: '12px', borderRadius: '8px', backgroundColor: 'hsl(var(--card))', border: '1px solid hsl(var(--border))', fontSize: '12px', whiteSpace: 'pre-wrap', maxHeight: '200px', overflowY: 'auto' }}>
                   {selectedRun.output_result}
                 </pre>
@@ -1049,9 +1049,9 @@ export function Automations({ initialAutomationId }: AutomationsProps = {}) {
                   <Sparkles size={18} />
                 </div>
                 <div>
-                  <h3 style={{ margin: 0, fontSize: '16px', fontWeight: 600 }}>Create Automation with Natural Language</h3>
+                  <h3 style={{ margin: 0, fontSize: '16px', fontWeight: 600 }}>{t('sxCreateAutomationWithNaturalLanguage')}</h3>
                   <p style={{ margin: '2px 0 0', fontSize: '12px', color: 'hsl(var(--muted-fg))' }}>
-                    Describe your desired schedule, assigned agents, and tasks in Italian or English.
+                    {t('sxDescribeYourDesiredScheduleAssignedAgents')}
                   </p>
                 </div>
               </div>
@@ -1062,7 +1062,7 @@ export function Automations({ initialAutomationId }: AutomationsProps = {}) {
 
             <div className="form-group" style={{ marginBottom: '16px' }}>
               <label className="form-label" style={{ fontWeight: 500, fontSize: '12.5px' }}>
-                Your Request
+                {t('sxYourRequest')}
               </label>
               <textarea
                 className="form-input"
@@ -1085,12 +1085,12 @@ export function Automations({ initialAutomationId }: AutomationsProps = {}) {
                 {aiLoading ? (
                   <>
                     <RefreshCw size={14} className="animate-spin" />
-                    Analyzing & Designing...
+                    {t('sxAnalyzingDesigning')}
                   </>
                 ) : (
                   <>
                     <Sparkles size={14} />
-                    Analyze & Propose
+                    {t('sxAnalyzePropose')}
                   </>
                 )}
               </button>
@@ -1132,7 +1132,7 @@ export function Automations({ initialAutomationId }: AutomationsProps = {}) {
                 {aiProposal.automation?.output_destination && (
                   <div style={{ fontSize: '11.5px', color: 'hsl(var(--muted-fg))', marginBottom: '14px', display: 'flex', alignItems: 'center', gap: '6px' }}>
                     <FileText size={12} className="text-primary" />
-                    Deliverable target: <code>{aiProposal.automation.output_destination.target_path || 'default location'}</code>
+                    {t('sxDeliverableTarget')} <code>{aiProposal.automation.output_destination.target_path || 'default location'}</code>
                   </div>
                 )}
 
@@ -1142,14 +1142,14 @@ export function Automations({ initialAutomationId }: AutomationsProps = {}) {
                     className="btn btn-secondary"
                     onClick={() => handleSaveAiAutomation(false)}
                   >
-                    Save as Draft
+                    {t('sxSaveAsDraft')}
                   </button>
                   <button
                     type="button"
                     className="btn btn-primary"
                     onClick={() => handleSaveAiAutomation(true)}
                   >
-                    Save & Activate
+                    {t('sxSaveActivate')}
                   </button>
                 </div>
               </div>
@@ -1186,7 +1186,7 @@ function AutomationBuilderModal({ initialData, teams, agents, onClose, onSaved }
   const [steps, setSteps] = useState<PipelineStep[]>(
     initialData?.steps?.length
       ? initialData.steps
-      : [{ id: 'step_1', name: 'Generate Task', agent_name: 'Manager', prompt_template: 'Process and summarize {input}' }]
+      : [{ id: 'step_1', name: t('sxGenerateTask'), agent_name: 'Manager', prompt_template: 'Process and summarize {input}' }]
   );
 
   const [outputType, setOutputType] = useState(initialData?.output_destination?.type || 'file');
@@ -1254,11 +1254,11 @@ function AutomationBuilderModal({ initialData, teams, agents, onClose, onSaved }
         body: JSON.stringify(payload),
       });
 
-      if (!res.ok) throw await apiError(res, 'Failed to save automation');
+      if (!res.ok) throw await apiError(res, t('sxFailedToSaveAutomation'));
       showToast(initialData ? t('automationUpdatedToast') : t('automationCreatedToast'), 'success');
       onSaved();
     } catch (err: any) {
-      showToast(err.message || 'Failed to save automation', 'error');
+      showToast(err.message || t('sxFailedToSaveAutomation'), 'error');
       setSaving(false);
     }
   };
@@ -1273,7 +1273,7 @@ function AutomationBuilderModal({ initialData, teams, agents, onClose, onSaved }
               {initialData ? t('editAutomation') : t('createAutomation')}
             </h2>
             <div style={{ fontSize: '12px', color: 'hsl(var(--muted-fg))', marginTop: '2px' }}>
-              {t('configureAutomationSubtitle') || 'Configura trigger, passaggi della pipeline e deliverable'}
+              {t('configureAutomationSubtitle') || t('seConfigureTheTriggerPipelineStepsAnd')}
             </div>
           </div>
           <button className="btn btn-ghost" style={{ padding: '8px' }} onClick={onClose}>
@@ -1285,7 +1285,7 @@ function AutomationBuilderModal({ initialData, teams, agents, onClose, onSaved }
           {/* SECTION 1: GENERAL */}
           <div className="card" style={{ padding: '20px', borderRadius: '12px', border: '1px solid hsl(var(--border))' }}>
             <h4 style={{ fontSize: '14px', margin: '0 0 14px', fontWeight: 600, color: 'hsl(var(--fg))' }}>
-              Informazioni Flusso
+              {t('seFlowInformation')}
             </h4>
 
             <div style={{ display: 'flex', flexDirection: 'column', gap: '14px' }}>
@@ -1295,7 +1295,7 @@ function AutomationBuilderModal({ initialData, teams, agents, onClose, onSaved }
                   className="form-input"
                   value={name}
                   onChange={(e) => setName(e.target.value)}
-                  placeholder={t('automationNamePlaceholder') || 'e.g. Weekly Market Report'}
+                  placeholder={t('automationNamePlaceholder') || t('sxEGWeeklyMarketReport')}
                 />
               </div>
 
@@ -1305,7 +1305,7 @@ function AutomationBuilderModal({ initialData, teams, agents, onClose, onSaved }
                   className="form-input"
                   value={description}
                   onChange={(e) => setDescription(e.target.value)}
-                  placeholder={t('automationDescPlaceholder') || 'e.g. Ingests competitor prices and produces markdown report'}
+                  placeholder={t('automationDescPlaceholder') || t('sxEGIngestsCompetitorPricesAnd')}
                 />
               </div>
 
@@ -1335,7 +1335,7 @@ function AutomationBuilderModal({ initialData, teams, agents, onClose, onSaved }
             <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: '8px', marginBottom: '16px' }}>
               {[
                 { id: 'schedule', label: 'Schedule', icon: Clock },
-                { id: 'file_watcher', label: 'File Watch', icon: Folder },
+                { id: 'file_watcher', label: t('sxFileWatch'), icon: Folder },
                 { id: 'webhook', label: 'Webhook', icon: Globe },
                 { id: 'manual', label: 'Manual', icon: Play },
               ].map((item) => {
@@ -1361,9 +1361,9 @@ function AutomationBuilderModal({ initialData, teams, agents, onClose, onSaved }
                 <div style={{ display: 'flex', gap: '6px', flexWrap: 'wrap' }}>
                   {[
                     { label: 'Every 15 mins', val: '*/15 * * * *' },
-                    { label: 'Every Hour', val: '0 * * * *' },
-                    { label: 'Daily at 9 AM', val: '0 9 * * *' },
-                    { label: 'Weekly Mon at 9 AM', val: '0 9 * * 1' },
+                    { label: t('sxEveryHour'), val: '0 * * * *' },
+                    { label: t('sxDailyAt9Am'), val: '0 9 * * *' },
+                    { label: t('sxWeeklyMonAt9Am'), val: '0 9 * * 1' },
                   ].map((p) => (
                     <button
                       key={p.val}
@@ -1495,7 +1495,7 @@ function AutomationBuilderModal({ initialData, teams, agents, onClose, onSaved }
                       rows={2}
                       value={step.prompt_template}
                       onChange={(e) => handleUpdateStep(idx, 'prompt_template', e.target.value)}
-                      placeholder="Prompt instructions for this step..."
+                      placeholder={t('sxPromptInstructionsForThisStep')}
                     />
                     <div style={{ display: 'flex', gap: '4px', marginTop: '6px' }}>
                       <span className="text-muted" style={{ fontSize: '11px' }}>{t('insertVariables')}</span>

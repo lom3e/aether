@@ -11,6 +11,7 @@ import {
 import { AetherOrb } from './orb/AetherOrb';
 import type { OrbState, QualityProfileKey } from './orb/OrbEngine';
 import { apiUrl } from './api';
+import { useTranslation } from './i18n';
 import { ToastContext } from './toast';
 import { submitApprovalDecision, approvalToastKind } from './canonicalNotification';
 import { MarkdownRenderer } from './MarkdownRenderer';
@@ -44,6 +45,7 @@ export function AssistantV2({
   navigate,
   onSwitchToV1,
 }: AssistantV2Props) {
+  const { t } = useTranslation();
   // Orb State
   const [orbState, setOrbState] = useState<OrbState>('idle');
   const [audioLevel, setAudioLevel] = useState<number>(0);
@@ -211,13 +213,13 @@ export function AssistantV2({
           setCodingProviders(data.providers);
         }
         const provName = data.providers?.find((p: any) => p.id === providerId)?.name || providerId;
-        showToast(`Coding agent predefinito impostato su: ${provName}`, 'success');
+        showToast(t('orbDefaultCodingAgentSet', { name: provName }), 'success');
       } else {
         const err = await res.json();
-        showToast(err.detail || 'Impossibile aggiornare la preferenza.', 'error');
+        showToast(err.detail || t('orbCouldNotUpdateThePreference'), 'error');
       }
     } catch (err: any) {
-      showToast(err.message || 'Errore di connessione.', 'error');
+      showToast(err.message || t('orbConnectionError'), 'error');
     } finally {
       setIsUpdatingPreference(false);
     }
@@ -225,17 +227,17 @@ export function AssistantV2({
 
   const handleDiagnoseProvider = async (providerId: string) => {
     try {
-      showToast('Verifica diagnostica avviata...', 'info');
+      showToast(t('orbDiagnosticCheckStarted'), 'info');
       const res = await fetch(apiUrl(`/api/coding/providers/${providerId}/diagnose`), { method: 'POST' });
       if (res.ok) {
         await fetchCodingProviders();
-        showToast('Diagnostica completata.', 'success');
+        showToast(t('orbDiagnosticsCompleted'), 'success');
       } else {
         const err = await res.json();
-        showToast(err.detail || 'Errore durante la diagnostica.', 'error');
+        showToast(err.detail || t('orbErrorDuringDiagnostics'), 'error');
       }
     } catch (err: any) {
-      showToast(err.message || 'Errore di connessione.', 'error');
+      showToast(err.message || t('orbConnectionError'), 'error');
     }
   };
 
@@ -249,15 +251,15 @@ export function AssistantV2({
         body: JSON.stringify({ confirmed: true }),
       });
       if (res.ok) {
-        showToast(`Installazione di ${installConfirmTarget.name} avviata in background.`, 'info');
+        showToast(t('orbInstallStartedInBackground', { name: installConfirmTarget.name }), 'info');
         setInstallConfirmTarget(null);
         await fetchCodingProviders();
       } else {
         const err = await res.json();
-        showToast(err.detail || 'Errore durante l\'avvio dell\'installazione.', 'error');
+        showToast(err.detail || t('orbErrorWhileStartingTheInstallation'), 'error');
       }
     } catch (err: any) {
-      showToast(err.message || 'Errore di connessione.', 'error');
+      showToast(err.message || t('orbConnectionError'), 'error');
     } finally {
       setIsInstalling(false);
     }
@@ -271,15 +273,15 @@ export function AssistantV2({
         if (Array.isArray(data.instructions) && data.instructions.length > 0) {
           setAuthInstructionsModal({ provider, instructions: data.instructions });
         } else {
-          showToast(`Verifica autenticazione per ${provider.name} completata.`, 'info');
+          showToast(t('orbAuthCheckCompleted', { name: provider.name }), 'info');
         }
         await fetchCodingProviders();
       } else {
         const err = await res.json();
-        showToast(err.detail || 'Errore durante l\'avvio dell\'autenticazione.', 'error');
+        showToast(err.detail || t('orbErrorWhileStartingAuthentication'), 'error');
       }
     } catch (err: any) {
-      showToast(err.message || 'Errore di connessione.', 'error');
+      showToast(err.message || t('orbConnectionError'), 'error');
     }
   };
 
@@ -287,11 +289,11 @@ export function AssistantV2({
     try {
       const res = await fetch(apiUrl(`/api/coding/setup-operations/${operationId}/cancel`), { method: 'POST' });
       if (res.ok) {
-        showToast('Richiesta di annullamento inviata.', 'info');
+        showToast(t('orbCancellationRequestSent'), 'info');
         await fetchCodingProviders();
       }
     } catch (err: any) {
-      showToast(err.message || 'Errore annullamento.', 'error');
+      showToast(err.message || t('orbCancellationError'), 'error');
     }
   };
 
@@ -328,15 +330,15 @@ export function AssistantV2({
               setOrbState('needs-you');
               const topApp = data.pending_approvals[0];
               setActiveWorkContext(prev => ({
-                title: topApp.action_name || 'Autorizzazione Richiesta',
-                description: topApp.target || 'Operazione sul sistema',
+                title: topApp.action_name || t('orbAuthorizationRequired'),
+                description: topApp.target || t('orbSystemOperation'),
                 steps: prev?.steps || [],
                 actionExecutionId: topApp.execution_id || topApp.id,
                 status: 'needs-you',
               }));
               addBubble({
                 id: `app-${topApp.id}`,
-                text: `Decisione richiesta: ${topApp.action_name || 'Azione da confermare'}`,
+                text: t('orbDecisionRequiredNamed', { action: topApp.action_name || t('orbActionToConfirm') }),
                 slot: 'top-right',
                 tier: 'attention',
               });
@@ -392,7 +394,7 @@ export function AssistantV2({
             if (lastAsst.metadata?.coding_result) {
               const cr = lastAsst.metadata.coding_result;
               setActiveWorkContext({
-                title: 'Attività Coding Delegata',
+                title: t('orbDelegatedCodingTask'),
                 description: cr.summary || lastAsst.content,
                 steps: lastAsst.steps || [],
                 status: classifyCodingResult(cr).workStatus,
@@ -412,7 +414,7 @@ export function AssistantV2({
   const handleSelectSession = (targetSessionId: string) => {
     restoreSession(targetSessionId);
     setIsManualDrawerOpen(false);
-    showToast('Sessione chat caricata.', 'info');
+    showToast(t('orbChatSessionLoaded'), 'info');
   };
 
   const handleNewSession = () => {
@@ -425,7 +427,7 @@ export function AssistantV2({
     setOrbState('idle');
     setIsManualDrawerOpen(false);
     fetchSessions();
-    showToast('Nuova conversazione avviata.', 'success');
+    showToast(t('orbNewConversationStarted'), 'success');
   };
 
   const handleDeleteSession = async (targetSessionId: string, e: React.MouseEvent) => {
@@ -435,7 +437,7 @@ export function AssistantV2({
         method: 'DELETE',
       });
       if (res.ok) {
-        showToast('Conversazione eliminata.', 'info');
+        showToast(t('orbConversationDeleted'), 'info');
         if (sessionId === targetSessionId) {
           handleNewSession();
         } else {
@@ -443,7 +445,7 @@ export function AssistantV2({
         }
       }
     } catch (err) {
-      showToast('Errore eliminazione sessione.', 'error');
+      showToast(t('orbErrorDeletingTheSession'), 'error');
     }
   };
 
@@ -465,15 +467,15 @@ export function AssistantV2({
 
       if (res.ok) {
         setInteractionReplyText('');
-        showToast('Risposta inviata ad Antigravity. Esecuzione ripresa...', 'success');
+        showToast(t('orbReplySentToAntigravityExecutionResumed'), 'success');
         setOrbState('working');
         fetchOverview();
       } else {
         const err = await res.json().catch(() => ({}));
-        showToast(err.detail || 'Errore durante l\'invio della risposta.', 'error');
+        showToast(err.detail || t('orbErrorWhileSendingTheReply'), 'error');
       }
     } catch (e) {
-      showToast('Impossibile comunicare con l\'agente.', 'error');
+      showToast(t('orbCouldNotCommunicateWithTheAgent'), 'error');
     } finally {
       setIsSubmittingInteraction(false);
     }
@@ -592,7 +594,7 @@ export function AssistantV2({
 
   const toggleVoiceListening = () => {
     if (!recognitionRef.current) {
-      showToast('Riconoscimento vocale non supportato in questo browser.', 'warning');
+      showToast(t('orbSpeechRecognitionIsNotSupportedIn'), 'warning');
       return;
     }
     if (isListening) {
@@ -604,7 +606,7 @@ export function AssistantV2({
         recognitionRef.current.start();
         setIsListening(true);
         setOrbState('listening');
-        showToast('In ascolto... Parla pure con Aether.', 'info');
+        showToast(t('orbListeningGoAheadAndTalkTo'), 'info');
       } catch (e) {
         console.error(e);
       }
@@ -681,7 +683,7 @@ export function AssistantV2({
         const hasRealOperationalWork = isProposal || isActionOrMission;
 
         if (hasRealOperationalWork) {
-          let cardTitle = 'Attività in corso';
+          let cardTitle = t('orbWorkInProgress');
           let cardStatus: 'working' | 'needs-you' | 'done' = 'done';
 
           if (codingRes) {
@@ -689,17 +691,17 @@ export function AssistantV2({
             cardTitle = pres.title;
             cardStatus = pres.workStatus;
           } else if (isProposal) {
-            const cleanTitle = prop?.title || 'Proposta operativa da confermare';
-            cardTitle = `Proposta: ${cleanTitle}`;
+            const cleanTitle = prop?.title || t('orbOperationalProposalToConfirm');
+            cardTitle = t('orbProposalNamed', { title: cleanTitle });
             cardStatus = 'needs-you';
           } else if (data.action_execution_id) {
-            cardTitle = 'Richiesta di approvazione';
+            cardTitle = t('orbApprovalRequest');
             cardStatus = 'needs-you';
           } else if (data.tier === 'mission' || data.tier === 'delegate' || data.mission_id) {
-            cardTitle = 'Missione operativa';
+            cardTitle = t('orbOperationalMission');
             cardStatus = data.status === 'completed' ? 'done' : 'working';
           } else if (data.tier === 'do') {
-            cardTitle = 'Operazione completata';
+            cardTitle = t('orbOperationCompleted');
             cardStatus = 'done';
           }
 
@@ -709,7 +711,7 @@ export function AssistantV2({
 
           const descText = isProposal && prop?.objective
             ? prop.objective
-            : (codingRes?.summary || (data.content ? data.content.replace(/^#+\s+.*?\n+/g, '').slice(0, 140) + '...' : 'Attività operativa in carico ad Aether'));
+            : (codingRes?.summary || (data.content ? data.content.replace(/^#+\s+.*?\n+/g, '').slice(0, 140) + '...' : t('orbOperationalTaskHandledByAether')));
 
           setActiveWorkContext({
             title: cardTitle,
@@ -741,14 +743,14 @@ export function AssistantV2({
         fetchOverview();
       } else {
         const errData = await res.json().catch(() => ({}));
-        const errMsg = errData.detail || 'Impossibile completare la richiesta.';
+        const errMsg = errData.detail || t('orbCouldNotCompleteTheRequest');
         showToast(errMsg, 'error');
-        setLastAssistantMessage(`⚠️ Non è stato possibile completare la richiesta: ${errMsg}`);
+        setLastAssistantMessage(t('orbRequestFailedWithReason', { reason: errMsg }));
         setOrbState('idle');
       }
     } catch (err: any) {
       console.error('Chat error:', err);
-      showToast('Errore di connessione con il runtime di Aether.', 'error');
+      showToast(t('orbConnectionErrorWithTheAetherRuntime'), 'error');
       setOrbState('idle');
     } finally {
       setIsSubmitting(false);
@@ -771,19 +773,19 @@ export function AssistantV2({
 
       if (!res.ok) {
         const err = await res.json().catch(() => ({}));
-        showToast(err.detail || 'Impossibile confermare la proposta.', 'error');
+        showToast(err.detail || t('orbCouldNotConfirmTheProposal'), 'error');
         setIsAcceptingProposal(false);
         return;
       }
 
       const acceptData = await res.json();
       setProposalDecisions(prev => ({ ...prev, [proposalId]: 'accepted' }));
-      showToast('Piano confermato. Aether avvia la richiesta operativa...', 'success');
+      showToast(t('orbPlanConfirmedAetherIsStartingThe'), 'success');
       setOrbState('working');
 
       addBubble({
         id: `prop-accepted-${proposalId}`,
-        text: 'Piano confermato • Avvio in corso',
+        text: t('orbPlanConfirmedStarting'),
         slot: 'top-left',
         tier: 'done',
       });
@@ -792,7 +794,7 @@ export function AssistantV2({
       const providerForTask = designatedProviderOverride || undefined;
 
       // Submit prompt with ExecutionAuthority to trigger the execution gate
-      const promptToRun = lastUserMessage || activeWorkContext?.description || 'Esegui il piano confermato';
+      const promptToRun = lastUserMessage || activeWorkContext?.description || t('orbRunTheConfirmedPlan');
       const chatRes = await fetch(apiUrl('/api/personal/chat'), {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -818,8 +820,8 @@ export function AssistantV2({
           // Entered Phase 2: HITL Execution Gate
           setOrbState('needs-you');
           setActiveWorkContext({
-            title: 'Autorizzazione Esecuzione Coding Agent',
-            description: chatData.content ? chatData.content.slice(0, 160) + '...' : 'Richiesta di autorizzazione per modifiche al progetto.',
+            title: t('orbCodingAgentExecutionAuthorization'),
+            description: chatData.content ? chatData.content.slice(0, 160) + '...' : t('orbProjectChangeAuthRequest'),
             steps: (chatData.steps || []).filter((s: any) => s.category === 'action' || s.category === 'delegation'),
             actionExecutionId: chatData.action_execution_id,
             status: 'needs-you',
@@ -841,11 +843,11 @@ export function AssistantV2({
         }
       } else {
         const errData = await chatRes.json().catch(() => ({}));
-        showToast(errData.detail || 'Errore durante l\'avvio operativo.', 'error');
+        showToast(errData.detail || t('orbErrorWhileStartingTheOperation'), 'error');
         setOrbState('idle');
       }
     } catch (err: any) {
-      showToast(err.message || 'Errore durante la conferma della proposta.', 'error');
+      showToast(err.message || t('orbErrorWhileConfirmingTheProposal'), 'error');
       setOrbState('idle');
     } finally {
       setIsAcceptingProposal(false);
@@ -862,15 +864,15 @@ export function AssistantV2({
       });
       if (!res.ok) {
         const err = await res.json().catch(() => ({}));
-        showToast(err.detail || 'Impossibile rifiutare la proposta.', 'error');
+        showToast(err.detail || t('orbCouldNotRejectTheProposal'), 'error');
         return;
       }
     } catch {
-      showToast('Impossibile rifiutare la proposta.', 'error');
+      showToast(t('orbCouldNotRejectTheProposal'), 'error');
       return;
     }
     setProposalDecisions(prev => ({ ...prev, [proposalId]: 'rejected' }));
-    showToast('Proposta rifiutata.', 'info');
+    showToast(t('orbProposalRejected'), 'info');
     setTimeout(() => {
       setActiveWorkContext(null);
       setOrbState('idle');
@@ -893,7 +895,7 @@ export function AssistantV2({
       });
       const data = await res.json().catch(() => ({} as any));
       if (!res.ok) {
-        showToast(data.detail || 'Impossibile inviare il chiarimento.', 'error');
+        showToast(data.detail || t('orbCouldNotSendTheClarification'), 'error');
         return;
       }
       const next = data.proposal;
@@ -908,9 +910,9 @@ export function AssistantV2({
         status: 'needs-you',
       } : prev);
       showToast(next?.status === 'needs_clarification'
-        ? 'Serve ancora un chiarimento.' : 'Piano aggiornato: puoi approvarlo.', 'info');
+        ? t('orbAnotherClarificationIsNeeded') : t('orbPlanUpdatedYouCanApproveIt'), 'info');
     } catch (err: any) {
-      showToast(err?.message || 'Impossibile inviare il chiarimento.', 'error');
+      showToast(err?.message || t('orbCouldNotSendTheClarification'), 'error');
     } finally {
       setIsClarifying(false);
     }
@@ -946,7 +948,7 @@ export function AssistantV2({
             }
           } else if (exec.status === 'failed' || exec.status === 'cancelled') {
             clearInterval(interval);
-            showToast(exec.error_message || 'Esecuzione non riuscita.', 'error');
+            showToast(exec.error_message || t('orbExecutionFailed'), 'error');
             setOrbState('idle');
             fetchOverview();
           }
@@ -976,13 +978,13 @@ export function AssistantV2({
       });
 
       if (res.success) {
-        showToast(res.message || 'Approvazione registrata.', approvalToastKind(res, 'approve'));
+        showToast(res.message || t('orbApprovalRecorded'), approvalToastKind(res, 'approve'));
         setPendingApprovals(prev => prev.filter(a => (a.execution_id || a.id) !== targetId));
         setOrbState('working');
 
         addBubble({
           id: `app-done-${targetId}`,
-          text: 'Decisione confermata • Esecuzione in corso',
+          text: t('orbDecisionConfirmedRunning'),
           slot: 'top-left',
           tier: 'done',
         });
@@ -1015,7 +1017,7 @@ export function AssistantV2({
         });
       }
     } catch (err: any) {
-      showToast(err.message || 'Errore durante la conferma.', 'error');
+      showToast(err.message || t('orbErrorWhileConfirming'), 'error');
       setExecutionDecisions(prev => {
         const next = { ...prev };
         delete next[targetId];
@@ -1036,12 +1038,12 @@ export function AssistantV2({
         target_type: 'action_execution',
         target_id: targetId,
         decision: 'reject',
-        reason: 'Rifiutato dall\'utente',
+        reason: t('orbRejectedByTheUser'),
         workspaceName,
       });
 
       if (res.success) {
-        showToast('Operazione annullata.', 'info');
+        showToast(t('orbOperationCancelled'), 'info');
         setPendingApprovals(prev => prev.filter(a => (a.execution_id || a.id) !== targetId));
         setTimeout(() => {
           setActiveWorkContext(null);
@@ -1057,7 +1059,7 @@ export function AssistantV2({
         });
       }
     } catch (err: any) {
-      showToast(err.message || 'Errore durante l\'annullamento.', 'error');
+      showToast(err.message || t('orbErrorWhileCancelling'), 'error');
       setExecutionDecisions(prev => {
         const next = { ...prev };
         delete next[targetId];
@@ -1088,12 +1090,12 @@ export function AssistantV2({
         <div className="header-center-status">
           <span className={`status-dot-indicator status-dot-${orbState}`} />
           <span>
-            {orbState === 'idle' && 'Disponibile'}
-            {orbState === 'listening' && 'In ascolto'}
-            {orbState === 'speaking' && 'In risposta'}
-            {orbState === 'working' && 'In attività'}
-            {orbState === 'needs-you' && 'Decisione richiesta'}
-            {orbState === 'done' && 'Completato'}
+            {orbState === 'idle' && t('orbAvailable')}
+            {orbState === 'listening' && t('orbListening')}
+            {orbState === 'speaking' && t('orbReplying')}
+            {orbState === 'working' && t('orbWorking')}
+            {orbState === 'needs-you' && t('orbDecisionRequired')}
+            {orbState === 'done' && t('orbCompleted')}
           </span>
         </div>
 
@@ -1105,7 +1107,7 @@ export function AssistantV2({
               fetchCodingProviders();
               setIsCodingModalOpen(true);
             }}
-            title="Gestisci e seleziona coding agent esterni (Google Antigravity, Claude Code, OpenAI Codex)"
+            title={t('orbManageAndSelectExternalCodingAgents')}
           >
             <Code2 size={13} color="#a78bfa" />
             <span>Coding: {codingProviders.find(p => p.id === preferredProviderId)?.name || 'Antigravity'}</span>
@@ -1124,20 +1126,20 @@ export function AssistantV2({
           <button
             className="v2-action-btn v2-switch-btn"
             onClick={onSwitchToV1}
-            title="Passa all'interfaccia completa con dashboard, sidebar e missioni"
+            title={t('orbSwitchToTheFullInterfaceWith')}
           >
             <Layers size={13} />
-            <span>Interfaccia V1 Classica</span>
+            <span>{t('orbClassicV1Interface')}</span>
           </button>
 
           {/* Manual Mode / Spazio & Strumenti */}
           <button
             className="v2-action-btn"
             onClick={() => setIsManualDrawerOpen(true)}
-            title="Accesso manuale a lavori, servizi, automazioni e impostazioni"
+            title={t('seManualAccessToJobsServicesAutomations')}
           >
             <Briefcase size={13} />
-            <span>Spazio & Strumenti</span>
+            <span>{t('orbSpaceTools')}</span>
           </button>
         </div>
       </header>
@@ -1154,7 +1156,7 @@ export function AssistantV2({
             onClick={() => {
               // Micro-reaction feedback
               if (orbState === 'idle') {
-                showToast('Aether è presente e pronto ad aiutarti.', 'info');
+                showToast(t('orbAetherIsHereAndReadyTo'), 'info');
               }
             }}
           />
@@ -1186,15 +1188,15 @@ export function AssistantV2({
                   </div>
                   <div>
                     <h3 className="field-title">
-                      {pendingApprovals[0].title || 'Autorizzazione richiesta per procedere'}
+                      {pendingApprovals[0].title || t('orbAuthorizationRequiredToProceed')}
                     </h3>
                     <p className="field-desc">
-                      {pendingApprovals[0].human_summary || pendingApprovals[0].summary || pendingApprovals[0].action_name || 'Aether richiede la tua conferma prima di applicare questa operazione.'}
+                      {pendingApprovals[0].human_summary || pendingApprovals[0].summary || pendingApprovals[0].action_name || t('orbAetherNeedsYourConfirmationBeforeApplying')}
                     </p>
                   </div>
                 </div>
                 <div className="phase-tag-badge phase-badge-execution">
-                  Fase 2 • Autorizzazione Esecuzione
+                  {t('orbStep2ExecutionAuthorization')}
                 </div>
               </div>
 
@@ -1202,33 +1204,33 @@ export function AssistantV2({
                 {executionDecisions[pendingApprovals[0].execution_id || pendingApprovals[0].id] === 'approved' ? (
                   <div className="card-decision-banner decision-banner-approved">
                     <CheckCircle2 size={14} />
-                    <span>Autorizzazione concessa • Esecuzione delegata in corso...</span>
+                    <span>{t('orbAuthorizationGrantedDelegatedExecutionInProgress')}</span>
                   </div>
                 ) : executionDecisions[pendingApprovals[0].execution_id || pendingApprovals[0].id] === 'rejected' ? (
                   <div className="card-decision-banner decision-banner-rejected">
                     <X size={14} />
-                    <span>Operazione annullata dall'utente</span>
+                    <span>{t('orbOperationCancelledByTheUser')}</span>
                   </div>
                 ) : (
                   <>
                     {/* 4 Pilastri di Decisione (Principio 4) */}
                     <div className="approval-narrative-card">
                       <div className="narrative-point">
-                        <span className="narrative-label">Perché serve il tuo consenso</span>
+                        <span className="narrative-label">{t('orbWhyYourConsentIsNeeded')}</span>
                         <span className="narrative-val">
-                          {pendingApprovals[0].reason || 'Questa operazione apporta modifiche permanenti al progetto tramite un agente di coding esterno o modifica servizi autorizzati.'}
+                          {pendingApprovals[0].reason || t('orbDefaultConsentReason')}
                         </span>
                       </div>
                       <div className="narrative-point">
-                        <span className="narrative-label">Cosa accadrà</span>
+                        <span className="narrative-label">{t('orbWhatWillHappen')}</span>
                         <span className="narrative-val">
-                          {pendingApprovals[0].consequences || 'L\'operazione verrà eseguita subito in sicurezza: i file modificati, il diff verificabile e l\'esito dei test verranno raccolti automaticamente.'}
+                          {pendingApprovals[0].consequences || t('orbTheOperationWillRunRightAway')}
                         </span>
                       </div>
                       <div className="narrative-recommendation">
                         <Sparkles size={14} color="#fbbf24" style={{ flexShrink: 0, marginTop: 1 }} />
                         <span>
-                          <strong>Raccomandazione di Aether:</strong> {pendingApprovals[0].recommendation || 'Le verifiche preliminari sono state superate. Puoi autorizzare con tranquillità.'}
+                          <strong>{t('orbAetherSRecommendation')}</strong> {pendingApprovals[0].recommendation || t('orbDefaultRecommendation')}
                         </span>
                       </div>
                     </div>
@@ -1243,13 +1245,13 @@ export function AssistantV2({
                           <div className="designated-agent-banner">
                             <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
                               <Code2 size={14} color="#a78bfa" />
-                              <span style={{ color: '#e2e8f0', fontWeight: 600 }}>Agente designato per l'esecuzione:</span>
+                              <span style={{ color: '#e2e8f0', fontWeight: 600 }}>{t('orbAgentDesignatedForExecution')}</span>
                               <span style={{ color: '#c4b5fd' }}>{prov?.name || (provId === 'antigravity' ? 'Google Antigravity' : provId)}</span>
                             </div>
                             {prov && (
                               <span className={prov.available ? 'status-badge-ready' : 'status-badge-warning'}>
                                 <span className={`coding-status-dot ${prov.available ? 'dot-ready' : 'dot-warning'}`} />
-                                {prov.available ? 'Pronto & Verificato' : 'Non pronto'}
+                                {prov.available ? t('orbReadyVerified') : t('orbNotReady')}
                               </span>
                             )}
                           </div>
@@ -1257,7 +1259,7 @@ export function AssistantV2({
                             <div className="unready-agent-warning">
                               <AlertTriangle size={15} style={{ flexShrink: 0, marginTop: 1 }} />
                               <div>
-                                <strong>Blocco sicurezza (Fail-closed):</strong> {prov.diagnostic}.
+                                <strong>{t('orbSafetyBlockFailClosed')}</strong> {prov.diagnostic}.
                                 {prov.missing_prerequisites?.length > 0 && (
                                   <div style={{ marginTop: '4px' }}>
                                     Prerequisiti mancanti: {prov.missing_prerequisites.join(', ')}
@@ -1272,12 +1274,12 @@ export function AssistantV2({
 
                     {/* Livello 4 — Dettagli tecnici completi su richiesta */}
                     <details className="technical-details-toggle">
-                      <summary>Dettagli tecnici & parametri di esecuzione</summary>
+                      <summary>{t('orbTechnicalDetailsExecutionParameters')}</summary>
                       <div className="technical-details-content">
-                        <div>Azione: <code>{pendingApprovals[0].action_id || pendingApprovals[0].action_name || 'coding.delegate'}</code></div>
-                        <div>Target: <code>{pendingApprovals[0].target || pendingApprovals[0].input_data?.project_path || 'Sistema locale'}</code></div>
-                        <div>Livello di rischio: <code>{pendingApprovals[0].risk_level || 'Tier ACT (HITL)'}</code></div>
-                        <div>ID Esecuzione: <code>{pendingApprovals[0].execution_id || pendingApprovals[0].id}</code></div>
+                        <div>{t('orbAction')} <code>{pendingApprovals[0].action_id || pendingApprovals[0].action_name || 'coding.delegate'}</code></div>
+                        <div>{t('orbTarget')} <code>{pendingApprovals[0].target || pendingApprovals[0].input_data?.project_path || t('orbLocalSystem')}</code></div>
+                        <div>{t('orbRiskLevel')} <code>{pendingApprovals[0].risk_level || t('orbActTierHumanInTheLoop')}</code></div>
+                        <div>{t('orbExecutionId')} <code>{pendingApprovals[0].execution_id || pendingApprovals[0].id}</code></div>
                       </div>
                     </details>
 
@@ -1287,7 +1289,7 @@ export function AssistantV2({
                         disabled={isDecidingApproval}
                         onClick={() => handleRejectAction(pendingApprovals[0].execution_id || pendingApprovals[0].id)}
                       >
-                        Rifiuta o modifica
+                        {t('orbRejectOrEdit')}
                       </button>
                       <button
                         className="btn-approve-amber"
@@ -1299,7 +1301,7 @@ export function AssistantV2({
                         onClick={() => handleApproveAction(pendingApprovals[0].execution_id || pendingApprovals[0].id)}
                       >
                         <CheckCircle2 size={14} />
-                        {isDecidingApproval ? 'Esecuzione in corso...' : 'Approva ed Esegui (Consigliato)'}
+                        {isDecidingApproval ? t('orbRunning') : t('orbApproveAndRunRecommended')}
                       </button>
                     </div>
                   </>
@@ -1322,7 +1324,7 @@ export function AssistantV2({
                   </div>
                 </div>
                 <div className="phase-tag-badge phase-badge-results">
-                  {codingPres.verified ? 'Fase 3 • Risultato Verificato' : `Fase 3 • ${codingPres.label}`}
+                  {codingPres.verified ? t('orbStep3VerifiedResult') : `Fase 3 • ${codingPres.label}`}
                 </div>
               </div>
 
@@ -1361,7 +1363,7 @@ export function AssistantV2({
                     <details className="diff-viewer-toggle" open>
                       <summary>
                         <ChevronRight size={13} />
-                        <span>Diff Git Verificabile ({activeWorkContext.codingResult.diff.split('\n').length} righe)</span>
+                        <span>{t('orbVerifiableGitDiff', { lines: activeWorkContext.codingResult.diff.split('\n').length })}</span>
                       </summary>
                       <pre className="diff-code-pre">{activeWorkContext.codingResult.diff}</pre>
                     </details>
@@ -1371,7 +1373,7 @@ export function AssistantV2({
                     <div style={{ marginTop: '4px' }}>
                       <div style={{ fontSize: '12px', fontWeight: 600, color: testOutcome(activeWorkContext.codingResult.test_passed) === 'passed' ? '#34d399' : testOutcome(activeWorkContext.codingResult.test_passed) === 'failed' ? '#f87171' : '#94a3b8', marginBottom: '4px', display: 'flex', alignItems: 'center', gap: '6px' }}>
                         {testOutcome(activeWorkContext.codingResult.test_passed) === 'passed' ? <CheckCircle2 size={13} /> : <AlertTriangle size={13} />}
-                        <span>Evidenza Test Automatici {testOutcome(activeWorkContext.codingResult.test_passed) === 'passed' ? '(Superati)' : testOutcome(activeWorkContext.codingResult.test_passed) === 'failed' ? '(Falliti)' : '(Esito non dichiarato)'}</span>
+                        <span>{t('orbAutomatedTestEvidence')} {testOutcome(activeWorkContext.codingResult.test_passed) === 'passed' ? `(${t('orbPassed')})` : testOutcome(activeWorkContext.codingResult.test_passed) === 'failed' ? `(${t('orbFailed')})` : t('orbOutcomeNotReported')}</span>
                       </div>
                       <pre className="test-output-box">{activeWorkContext.codingResult.test_output}</pre>
                     </div>
@@ -1384,7 +1386,7 @@ export function AssistantV2({
                     onClick={() => navigate('results')}
                     style={{ background: 'rgba(16,185,129,0.18)', borderColor: 'rgba(16,185,129,0.4)', color: '#34d399', fontWeight: 600 }}
                   >
-                    <span>Visualizza Risultati & Consegne</span>
+                    <span>{t('orbViewResultsDeliverables')}</span>
                     <ArrowRight size={13} />
                   </button>
                 </div>
@@ -1404,7 +1406,7 @@ export function AssistantV2({
                   </div>
                 </div>
                 <div className="phase-tag-badge phase-badge-proposal">
-                  Fase 1 • Conferma del Piano
+                  {t('orbStep1PlanConfirmation')}
                 </div>
               </div>
 
@@ -1412,40 +1414,40 @@ export function AssistantV2({
                 {proposalDecisions[activeWorkContext.proposalId || activeWorkContext.proposal?.id] === 'accepted' ? (
                   <div className="card-decision-banner decision-banner-accepted">
                     <CheckCircle2 size={14} />
-                    <span>Piano confermato • Avvio in corso...</span>
+                    <span>{t('orbPlanConfirmedStarting2')}</span>
                   </div>
                 ) : proposalDecisions[activeWorkContext.proposalId || activeWorkContext.proposal?.id] === 'rejected' ? (
                   <div className="card-decision-banner decision-banner-rejected">
                     <X size={14} />
-                    <span>Proposta rifiutata dall'utente</span>
+                    <span>{t('orbProposalRejectedByTheUser')}</span>
                   </div>
                 ) : (
                   <>
                     <div className="approval-narrative-card" style={{ background: 'rgba(140,92,246,0.04)', borderColor: 'rgba(140,92,246,0.2)' }}>
                       <div className="narrative-point">
-                        <span className="narrative-label" style={{ color: '#c4b5fd' }}>Perché serve la tua conferma</span>
+                        <span className="narrative-label" style={{ color: '#c4b5fd' }}>{t('orbWhyYourConfirmationIsNeeded')}</span>
                         <span className="narrative-val">
-                          Aether ha formulato un piano operativo e richiede la tua conferma sul perimetro e sugli obiettivi prima di predisporre l'agente di coding esterno.
+                          {t('orbAetherHasDraftedAnOperationalPlan')}
                         </span>
                       </div>
                       <div className="narrative-point">
-                        <span className="narrative-label" style={{ color: '#c4b5fd' }}>Cosa accadrà</span>
+                        <span className="narrative-label" style={{ color: '#c4b5fd' }}>{t('orbWhatWillHappen')}</span>
                         <span className="narrative-val">
-                          Una volta confermato il piano, Aether richiederà l'autorizzazione di esecuzione specifica (Fase 2) prima di applicare qualsiasi modifica concreta al codice.
+                          {t('orbOnceThePlanIsConfirmedAether')}
                         </span>
                       </div>
                       {activeWorkContext.proposal?.status === 'needs_clarification' ? (
                         <div className="narrative-recommendation" style={{ background: 'rgba(245,158,11,0.08)', borderLeftColor: '#fbbf24', color: '#fef3c7' }}>
                           <AlertTriangle size={14} color="#fbbf24" style={{ flexShrink: 0, marginTop: 1 }} />
                           <span>
-                            <strong>Stato di verifica:</strong> Sono necessari chiarimenti prima di procedere con l'approvazione del piano.
+                            <strong>{t('orbVerificationStatus')}</strong> {t('orbClarificationsAreNeededBeforeThePlan')}
                           </span>
                         </div>
                       ) : (
                         <div className="narrative-recommendation" style={{ background: 'rgba(140,92,246,0.08)', borderLeftColor: '#a78bfa', color: '#ede9fe' }}>
                           <Sparkles size={14} color="#c4b5fd" style={{ flexShrink: 0, marginTop: 1 }} />
                           <span>
-                            <strong>Raccomandazione di Aether:</strong> Piano verificato e strutturato. Puoi confermare per procedere alla fase di autorizzazione dell'esecuzione.
+                            <strong>{t('orbAetherSRecommendation')}</strong> {t('orbPlanVerifiedAndStructuredYouCan')}
                           </span>
                         </div>
                       )}
@@ -1461,14 +1463,14 @@ export function AssistantV2({
                           {projPath && (
                             <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: targetFiles.length > 0 ? '8px' : 0 }}>
                               <FolderGit2 size={14} color="#a78bfa" />
-                              <span style={{ color: '#94a3b8', fontSize: '12px' }}>Progetto target:</span>
+                              <span style={{ color: '#94a3b8', fontSize: '12px' }}>{t('orbTargetProject')}</span>
                               <code style={{ background: 'rgba(0,0,0,0.3)', padding: '2px 8px', borderRadius: '4px', color: '#e2e8f0', fontFamily: 'monospace', fontSize: '12px', userSelect: 'all' }}>{projPath}</code>
                             </div>
                           )}
                           {targetFiles.length > 0 && (
                             <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap' }}>
                               <FileCode size={14} color="#38bdf8" />
-                              <span style={{ color: '#94a3b8', fontSize: '12px' }}>File interessati:</span>
+                              <span style={{ color: '#94a3b8', fontSize: '12px' }}>{t('orbFilesInvolved')}</span>
                               {targetFiles.map((f: string, i: number) => (
                                 <code key={i} style={{ background: 'rgba(56,189,248,0.1)', border: '1px solid rgba(56,189,248,0.2)', padding: '2px 8px', borderRadius: '4px', color: '#7dd3fc', fontFamily: 'monospace', fontSize: '12px' }}>{f}</code>
                               ))}
@@ -1487,7 +1489,7 @@ export function AssistantV2({
                           {stepsList.map((t: any, idx: number) => (
                             <div key={t.id || idx} className="step-row">
                               <span>{t.title || t.description}</span>
-                              <span className="step-done" style={{ color: '#c4b5fd' }}>In piano</span>
+                              <span className="step-done" style={{ color: '#c4b5fd' }}>{t('orbInThePlan')}</span>
                             </div>
                           ))}
                         </div>
@@ -1498,7 +1500,7 @@ export function AssistantV2({
                     <div className="designated-agent-selector">
                       <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
                         <Code2 size={14} color="#c4b5fd" />
-                        <span style={{ color: '#e2e8f0', fontWeight: 500 }}>Coding Agent Designato:</span>
+                        <span style={{ color: '#e2e8f0', fontWeight: 500 }}>{t('orbDesignatedCodingAgent')}</span>
                       </div>
                       <select
                         className="agent-selector-select"
@@ -1507,7 +1509,7 @@ export function AssistantV2({
                       >
                         {codingProviders.map(p => (
                           <option key={p.id} value={p.id}>
-                            {p.name} {p.available ? '(Pronto)' : '(Non pronto)'}
+                            {p.name} {p.available ? `(${t('syReady')})` : t('orbNotReady2')}
                           </option>
                         ))}
                       </select>
@@ -1517,7 +1519,7 @@ export function AssistantV2({
                       <div className="clarification-warning-box" style={{ background: 'rgba(245,158,11,0.08)', border: '1px solid rgba(245,158,11,0.3)', borderRadius: '8px', padding: '12px', marginTop: '12px' }}>
                         <div style={{ display: 'flex', alignItems: 'center', gap: '8px', color: '#fbbf24', fontWeight: 600, fontSize: '0.85rem' }}>
                           <AlertTriangle size={15} />
-                          <span>La proposta richiede chiarimenti prima dell'accettazione</span>
+                          <span>{t('orbTheProposalNeedsClarificationsBeforeAcceptance')}</span>
                         </div>
                         {activeWorkContext.proposal?.clarification_requirements?.length > 0 && (
                           <ul style={{ margin: '8px 0 0 16px', color: '#fef3c7', fontSize: '0.8rem', lineHeight: '1.4' }}>
@@ -1532,21 +1534,21 @@ export function AssistantV2({
                             value={clarifyDraft}
                             onChange={(e) => setClarifyDraft(e.target.value)}
                             onKeyDown={(e) => { if (e.key === 'Enter') handleClarifyProposal(activeWorkContext.proposalId || activeWorkContext.proposal?.id); }}
-                            placeholder="Rispondi qui: Aether aggiorna il piano…"
+                            placeholder={t('orbAnswerHereAetherUpdatesThePlan')}
                             style={{ flex: 1, background: 'rgba(0,0,0,0.25)', border: '1px solid rgba(245,158,11,0.3)', borderRadius: '6px', padding: '6px 10px', color: '#f8fafc', fontSize: '0.8rem' }}
                           />
                           <button
                             className="btn-cancel-soft"
                             onClick={() => handleRejectProposal(activeWorkContext.proposalId || activeWorkContext.proposal?.id)}
                           >
-                            Rifiuta
+                            {t('orbReject')}
                           </button>
                           <button
                             className="btn-approve-purple"
                             disabled={isClarifying || !clarifyDraft.trim()}
                             onClick={() => handleClarifyProposal(activeWorkContext.proposalId || activeWorkContext.proposal?.id)}
                           >
-                            {isClarifying ? 'Invio…' : 'Invia risposta'}
+                            {isClarifying ? t('orbSending') : t('orbSendAnswer')}
                           </button>
                         </div>
                       </div>
@@ -1557,7 +1559,7 @@ export function AssistantV2({
                           disabled={isAcceptingProposal}
                           onClick={() => handleRejectProposal(activeWorkContext.proposalId || activeWorkContext.proposal?.id)}
                         >
-                          Rifiuta Proposta
+                          {t('orbRejectProposal')}
                         </button>
                         <button
                           className="btn-approve-purple"
@@ -1565,7 +1567,7 @@ export function AssistantV2({
                           onClick={() => handleAcceptProposal(activeWorkContext.proposalId || activeWorkContext.proposal?.id, activeWorkContext.proposal?.version)}
                         >
                           <CheckCircle2 size={14} />
-                          {isAcceptingProposal ? 'Conferma in corso...' : 'Conferma Piano (Consigliato)'}
+                          {isAcceptingProposal ? t('orbConfirming') : t('orbConfirmPlanRecommended')}
                         </button>
                       </div>
                     )}
@@ -1574,7 +1576,7 @@ export function AssistantV2({
               </div>
             </div>
           ) : isMinimizedCard && activeWorkContext ? (
-            <div className="field-minimized-pill" onClick={() => setIsMinimizedCard(false)} title="Clicca per espandere la scheda">
+            <div className="field-minimized-pill" onClick={() => setIsMinimizedCard(false)} title={t('orbClickToExpandTheCard')}>
               <div
                 style={{
                   width: 8,
@@ -1599,7 +1601,7 @@ export function AssistantV2({
                     <p className="field-desc">
                       {activeWorkContext.codingResult?.provider_id
                         ? (activeWorkContext.codingResult.provider_id === 'antigravity' ? 'Google Antigravity' : activeWorkContext.codingResult.provider_id)
-                        : (activeWorkContext.description ? activeWorkContext.description.slice(0, 70) : 'Attività in corso')}
+                        : (activeWorkContext.description ? activeWorkContext.description.slice(0, 70) : t('orbWorkInProgress'))}
                     </p>
                   </div>
                 </div>
@@ -1608,16 +1610,16 @@ export function AssistantV2({
                     className="v2-action-btn"
                     style={{ padding: '4px 8px', fontSize: '11px' }}
                     onClick={() => setIsMinimizedCard(true)}
-                    title="Riduci a pillola"
+                    title={t('orbMinimizeToAPill')}
                   >
                     <Minimize2 size={12} />
-                    <span>Riduci</span>
+                    <span>{t('orbMinimize')}</span>
                   </button>
                   <button
                     className="v2-action-btn"
                     style={{ padding: '4px 8px', fontSize: '11px' }}
                     onClick={() => setActiveWorkContext(null)}
-                    title="Chiudi Scheda"
+                    title={t('orbCloseCard')}
                   >
                     <X size={12} />
                   </button>
@@ -1630,14 +1632,14 @@ export function AssistantV2({
                   <div className="agent-interaction-box">
                     <div className="agent-interaction-header">
                       <Terminal size={15} />
-                      <span>Intervento Richiesto dal Coding Agent ({activeWorkContext.codingResult.provider_id || 'Antigravity'})</span>
+                      <span>{t('orbCodingAgentInterventionRequired', { agent: activeWorkContext.codingResult.provider_id || 'Antigravity' })}</span>
                     </div>
                     <div className="agent-interaction-prompt">
                       <MarkdownRenderer
                         content={
                           activeWorkContext.codingResult.interaction_prompt ||
                           activeWorkContext.description ||
-                          'L\'agente richiede chiarimenti o autorizzazioni per proseguire.'
+                          t('orbTheAgentNeedsClarificationsOrAuthorizations')
                         }
                       />
                     </div>
@@ -1658,7 +1660,7 @@ export function AssistantV2({
                       <input
                         type="text"
                         className="agent-interaction-input"
-                        placeholder="Rispondi all'agente o fornisci indicazioni..."
+                        placeholder={t('orbReplyToTheAgentOrGive')}
                         value={interactionReplyText}
                         onChange={(e) => setInteractionReplyText(e.target.value)}
                         onKeyDown={(e) => {
@@ -1674,7 +1676,7 @@ export function AssistantV2({
                         onClick={() => handleInteractCoding()}
                       >
                         <Send size={12} />
-                        <span>{isSubmittingInteraction ? 'Invio...' : 'Rispondi'}</span>
+                        <span>{isSubmittingInteraction ? t('orbSending2') : t('orbReply')}</span>
                       </button>
                     </div>
                   </div>
@@ -1685,11 +1687,11 @@ export function AssistantV2({
                   <div className="outcome-highlight-box" style={{ borderColor: 'rgba(245,158,11,0.3)', background: 'rgba(245,158,11,0.06)' }}>
                     <div className="outcome-title" style={{ color: '#fbbf24' }}>
                       <AlertTriangle size={16} />
-                      <span>Chiarimento necessario per procedere</span>
+                      <span>{t('orbClarificationNeededToProceed')}</span>
                     </div>
                     <p className="outcome-summary" style={{ color: '#e2e8f0' }}>
                       {activeWorkContext.proposal.clarification_requirements?.[0]?.question ||
-                        'Aether ha preparato il piano operativo, ma serve un chiarimento sui riferimenti del progetto prima di procedere in sicurezza.'}
+                        t('orbAetherHasPreparedTheOperationalPlan')}
                     </p>
                   </div>
                 )}
@@ -1700,7 +1702,7 @@ export function AssistantV2({
                     <div className="outcome-title" style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
                       <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
                         <CheckCircle2 size={16} color="#34d399" />
-                        <span>Risultato completato & verificato</span>
+                        <span>{t('orbResultCompletedVerified')}</span>
                       </div>
                       {activeWorkContext.codingResult?.verification_passed !== undefined && (
                         <span
@@ -1711,7 +1713,7 @@ export function AssistantV2({
                             color: activeWorkContext.codingResult.verification_passed ? '#34d399' : '#f87171',
                           }}
                         >
-                          {activeWorkContext.codingResult.verification_passed ? '✓ Gate Verificato' : '⚠ Revisione Richiesta'}
+                          {activeWorkContext.codingResult.verification_passed ? t('orbGateVerified') : t('orbReviewRequired')}
                         </span>
                       )}
                     </div>
@@ -1722,7 +1724,7 @@ export function AssistantV2({
                         content={
                           activeWorkContext.codingResult?.summary ||
                           activeWorkContext.description ||
-                          "Aether si è occupato dell'attività. Verifiche completate."
+                          t('orbAetherTookCareOfTheTask')
                         }
                       />
                     </div>
@@ -1748,7 +1750,7 @@ export function AssistantV2({
                       <details className="diff-viewer-toggle" style={{ marginTop: '8px' }}>
                         <summary>
                           <Code2 size={13} />
-                          <span>Visualizza Diff Modifiche ({activeWorkContext.codingResult.diff.split('\n').length} righe)</span>
+                          <span>{t('orbViewChangesDiff', { lines: activeWorkContext.codingResult.diff.split('\n').length })}</span>
                         </summary>
                         <pre className="diff-code-pre">{activeWorkContext.codingResult.diff}</pre>
                       </details>
@@ -1759,7 +1761,7 @@ export function AssistantV2({
                       <details className="diff-viewer-toggle" style={{ marginTop: '6px' }}>
                         <summary>
                           <Terminal size={13} />
-                          <span>Evidenza Test ({activeWorkContext.codingResult.test_passed ? 'Superati' : 'Output'})</span>
+                          <span>{t('orbTestEvidence')} ({activeWorkContext.codingResult.test_passed ? t('orbPassed') : t('orbOutput')})</span>
                         </summary>
                         <pre className="test-output-box">{activeWorkContext.codingResult.test_output}</pre>
                       </details>
@@ -1772,7 +1774,7 @@ export function AssistantV2({
                           onClick={() => navigate('results')}
                           style={{ background: 'rgba(16,185,129,0.18)', borderColor: 'rgba(16,185,129,0.4)', color: '#34d399', fontWeight: 600 }}
                         >
-                          <span>Visualizza Risultati & Consegne</span>
+                          <span>{t('orbViewResultsDeliverables')}</span>
                           <ArrowRight size={13} />
                         </button>
                       </div>
@@ -1784,12 +1786,12 @@ export function AssistantV2({
                 {activeWorkContext.steps && activeWorkContext.steps.length > 0 && (
                   activeWorkContext.status === 'done' ? (
                     <details className="technical-details-toggle" style={{ marginTop: '4px' }}>
-                      <summary>Vedi i passaggi eseguiti da Aether ({activeWorkContext.steps.length} passaggi completati)</summary>
+                      <summary>{t('orbSeeStepsDone', { count: activeWorkContext.steps.length })}</summary>
                       <div className="steps-list" style={{ marginTop: '8px' }}>
                         {activeWorkContext.steps.map(step => (
                           <div key={step.id} className="step-row">
                             <span>{step.title}</span>
-                            <span className="step-done">✓ Completato</span>
+                            <span className="step-done">{t('orbCompleted2')}</span>
                           </div>
                         ))}
                       </div>
@@ -1800,7 +1802,7 @@ export function AssistantV2({
                         <div key={step.id} className="step-row">
                           <span>{step.title}</span>
                           <span className={step.status === 'completed' ? 'step-done' : 'step-running'}>
-                            {step.status === 'completed' ? '✓ Completato' : 'In corso...'}
+                            {step.status === 'completed' ? t('orbCompleted2') : t('orbInProgress')}
                           </span>
                         </div>
                       ))}
@@ -1814,7 +1816,7 @@ export function AssistantV2({
       </main>
 
       {/* Assistant-First Dialogue & Input Dock */}
-      <section className={`v2-conversation-dock ${isFieldVisible ? 'dock-hidden' : ''}`} aria-label="Aether Dialogue">
+      <section className={`v2-conversation-dock ${isFieldVisible ? 'dock-hidden' : ''}`} aria-label={t('orbAetherDialogue')}>
         {/* Dialogue Toast Stream */}
         {lastUserMessage && !lastAssistantMessage && (
           <div className="v2-dialogue-toast" style={{ borderColor: 'rgba(255,255,255,0.08)', color: '#94a3b8' }}>
@@ -1835,33 +1837,33 @@ export function AssistantV2({
           <div className="v2-chips-row">
             <button
               className="v2-chip-btn"
-              onClick={() => handleSendPrompt("Organizzami la giornata.")}
+              onClick={() => handleSendPrompt(t('orbOrganizeMyDay'))}
             >
-              “Organizzami la giornata.”
+              {t('seOrganizeMyDay')}
             </button>
             <button
               className="v2-chip-btn"
-              onClick={() => handleSendPrompt("Sistema questo progetto.")}
+              onClick={() => handleSendPrompt(t('orbFixUpThisProject'))}
             >
-              “Sistema questo progetto.”
+              {t('seFixUpThisProject')}
             </button>
             <button
               className="v2-chip-btn"
-              onClick={() => handleSendPrompt("Occupati di questo cliente.")}
+              onClick={() => handleSendPrompt(t('orbTakeCareOfThisClient'))}
             >
-              “Occupati di questo cliente.”
+              {t('seTakeCareOfThisClient')}
             </button>
             <button
               className="v2-chip-btn"
-              onClick={() => handleSendPrompt("Preparami qualcosa da pubblicare.")}
+              onClick={() => handleSendPrompt(t('orbPrepareSomethingForMeToPublish'))}
             >
-              “Preparami qualcosa da pubblicare.”
+              {t('sePrepareSomethingForMeToPublish')}
             </button>
             <button
               className="v2-chip-btn"
-              onClick={() => handleSendPrompt("Ricordami di fare questa cosa domani.")}
+              onClick={() => handleSendPrompt(t('orbRemindMeToDoThisTomorrow'))}
             >
-              “Ricordami di fare questa cosa domani.”
+              {t('seRemindMeToDoThisTomorrow')}
             </button>
           </div>
         )}
@@ -1871,7 +1873,7 @@ export function AssistantV2({
           <input
             type="text"
             className="v2-text-input"
-            placeholder={isListening ? "In ascolto... Parla pure con Aether" : "Tu dimmi cosa vuoi ottenere. Aether si occupa del resto..."}
+            placeholder={isListening ? t('orbListeningGoAheadAndTalkTo2') : t('orbTellMeWhatYouWantTo')}
             value={promptInput}
             onChange={(e) => setPromptInput(e.target.value)}
             onKeyDown={(e) => {
@@ -1885,7 +1887,7 @@ export function AssistantV2({
           <button
             className={`v2-mic-btn ${isListening ? 'v2-mic-active' : ''}`}
             onClick={toggleVoiceListening}
-            title={isListening ? "Disattiva ascolto" : "Attiva ascolto vocale"}
+            title={isListening ? t('orbStopListening') : t('orbStartVoiceListening')}
           >
             {isListening ? <MicOff size={16} /> : <Mic size={16} />}
           </button>
@@ -1894,7 +1896,7 @@ export function AssistantV2({
             className="v2-send-btn"
             disabled={!promptInput.trim() || isSubmitting}
             onClick={() => handleSendPrompt()}
-            title="Invia ad Aether"
+            title={t('orbSendToAether')}
           >
             <Send size={15} />
           </button>
@@ -1906,29 +1908,29 @@ export function AssistantV2({
         <div className="manual-drawer-backdrop" onClick={() => setIsManualDrawerOpen(false)}>
           <aside className="manual-drawer-panel" onClick={(e) => e.stopPropagation()}>
             <div className="drawer-header">
-              <h2 className="drawer-title">Spazio & Strumenti</h2>
+              <h2 className="drawer-title">{t('orbSpaceTools')}</h2>
               <button className="v2-action-btn" onClick={() => setIsManualDrawerOpen(false)} style={{ padding: '4px 8px' }}>
                 <X size={14} />
               </button>
             </div>
 
             <p style={{ fontSize: '12px', color: '#94a3b8', lineHeight: 1.5 }}>
-              Aether gestisce il lavoro autonomamente, ma puoi sempre accedere alla cronologia e agli strumenti:
+              {t('orbAetherHandlesTheWorkOnIts')}
             </p>
 
             {/* Cronologia Chat Section (Precision 5: isolamento conversazioni e workspace) */}
             <div className="drawer-section-title">
-              <span>Cronologia Chat</span>
-              <button className="btn-new-chat" onClick={handleNewSession} title="Avvia nuova conversazione">
+              <span>{t('orbChatHistory')}</span>
+              <button className="btn-new-chat" onClick={handleNewSession} title={t('orbStartANewConversation')}>
                 <Plus size={11} />
-                <span>Nuova Chat</span>
+                <span>{t('orbNewChat')}</span>
               </button>
             </div>
 
             <div className="drawer-session-list">
               {sessions.length === 0 ? (
                 <div style={{ fontSize: '11px', color: '#64748b', padding: '6px 8px' }}>
-                  Nessuna conversazione precedente.
+                  {t('orbNoPreviousConversations')}
                 </div>
               ) : (
                 sessions.map(s => (
@@ -1943,7 +1945,7 @@ export function AssistantV2({
                     <button
                       className="btn-delete-session"
                       onClick={(e) => handleDeleteSession(s.id, e)}
-                      title="Elimina conversazione"
+                      title={t('orbDeleteConversation')}
                     >
                       <Trash2 size={12} />
                     </button>
@@ -1955,25 +1957,25 @@ export function AssistantV2({
             <nav className="drawer-nav-list">
               <button className="drawer-nav-item" onClick={() => { setIsManualDrawerOpen(false); navigate('missions'); }}>
                 <Briefcase size={16} color="#c4b5fd" />
-                <span>Missioni & Lavori</span>
+                <span>{t('orbMissionsWork')}</span>
                 <ChevronRight size={14} style={{ marginLeft: 'auto', opacity: 0.5 }} />
               </button>
 
               <button className="drawer-nav-item" onClick={() => { setIsManualDrawerOpen(false); navigate('results'); }}>
                 <FileText size={16} color="#34d399" />
-                <span>Risultati & Consegne</span>
+                <span>{t('orbResultsDeliverables')}</span>
                 <ChevronRight size={14} style={{ marginLeft: 'auto', opacity: 0.5 }} />
               </button>
 
               <button className="drawer-nav-item" onClick={() => { setIsManualDrawerOpen(false); navigate('connections'); }}>
                 <Link2 size={16} color="#38bdf8" />
-                <span>Servizi & Connessioni</span>
+                <span>{t('orbServicesConnections')}</span>
                 <ChevronRight size={14} style={{ marginLeft: 'auto', opacity: 0.5 }} />
               </button>
 
               <button className="drawer-nav-item" onClick={() => { setIsManualDrawerOpen(false); navigate('workforce'); }}>
                 <Users size={16} color="#f472b6" />
-                <span>Collaboratori & Agenti</span>
+                <span>{t('orbCollaboratorsAgents')}</span>
                 <ChevronRight size={14} style={{ marginLeft: 'auto', opacity: 0.5 }} />
               </button>
 
@@ -1986,13 +1988,13 @@ export function AssistantV2({
                 }}
               >
                 <Terminal size={16} color="#a78bfa" />
-                <span>Coding Agents Esterni</span>
+                <span>{t('orbExternalCodingAgents')}</span>
                 <ChevronRight size={14} style={{ marginLeft: 'auto', opacity: 0.5 }} />
               </button>
 
               <button className="drawer-nav-item" onClick={() => { setIsManualDrawerOpen(false); navigate('settings'); }}>
                 <Settings size={16} color="#94a3b8" />
-                <span>Impostazioni & Profilo</span>
+                <span>{t('orbSettingsProfile')}</span>
                 <ChevronRight size={14} style={{ marginLeft: 'auto', opacity: 0.5 }} />
               </button>
             </nav>
@@ -2007,7 +2009,7 @@ export function AssistantV2({
                 }}
               >
                 <Layers size={14} />
-                <span>Torna all'Interfaccia V1 Classica</span>
+                <span>{t('orbBackToTheClassicV1Interface')}</span>
               </button>
             </div>
           </aside>
@@ -2024,7 +2026,7 @@ export function AssistantV2({
                 <div>
                   <h2 className="coding-modal-title">Coding Agent Provider Manager</h2>
                   <p className="coding-modal-subtitle">
-                    Orchestrazione e selezione dei coding agent autonomi esterni
+                    {t('orbOrchestrationAndSelectionOfExternalAutonomous')}
                   </p>
                 </div>
               </div>
@@ -2040,7 +2042,7 @@ export function AssistantV2({
             <div className="coding-banner-notice">
               <ShieldCheck size={16} color="#a78bfa" style={{ flexShrink: 0, marginTop: 1 }} />
               <span>
-                Aether delega compiti di sviluppo agli agenti installati e autorizzati sul tuo sistema. Nessun fallback silenzioso: il modello AI interno non scrive mai codice al posto dei coding agent e rispetta rigorosamente i confini di sicurezza.
+                {t('orbAetherDelegatesDevelopmentTasksToThe')}
               </span>
             </div>
 
@@ -2060,7 +2062,7 @@ export function AssistantV2({
                         <Code2 size={16} color={p.available ? '#34d399' : '#a78bfa'} />
                         <span className="provider-card-title">{p.name}</span>
                         {isCurrentPref && (
-                          <span className="badge-preferred-pill">Predefinito</span>
+                          <span className="badge-preferred-pill">{t('orbDefault')}</span>
                         )}
                       </div>
 
@@ -2068,18 +2070,18 @@ export function AssistantV2({
                       <div className="badge-3d-row">
                         {/* 1. Installation Badge */}
                         <span className={`badge-3d-pill ${p.installed ? 'installed' : 'not-installed'}`}>
-                          {p.installed ? 'Installato' : 'Non installato'}
+                          {p.installed ? t('orbInstalled') : t('orbNotInstalled')}
                         </span>
 
                         {/* 2. Authentication Badge */}
                         <span className={`badge-3d-pill ${p.authenticated ? 'authenticated' : (p.authentication_state === 'interactive_login_required' ? 'auth-required' : 'not-installed')}`}>
-                          {p.authenticated ? 'Autenticato' : (p.authentication_state === 'interactive_login_required' ? 'Login richiesto' : (p.authentication_state === 'credentials_detected_unverified' ? 'Credenziali non verif.' : 'Non autenticato'))}
+                          {p.authenticated ? t('orbAuthenticated') : (p.authentication_state === 'interactive_login_required' ? t('orbLoginRequired') : (p.authentication_state === 'credentials_detected_unverified' ? t('orbCredentialsNotVerified') : t('orbNotAuthenticated')))}
                         </span>
 
                         {/* 3. Operational State Badge */}
                         <span className={`badge-3d-pill ${p.available ? 'operational-ready' : 'operational-blocked'}`}>
                           <span className={`coding-status-dot ${p.available ? 'dot-ready' : 'dot-warning'}`} />
-                          {p.available ? 'Pronto' : (p.operational_state?.replace(/_/g, ' ') || 'Non pronto')}
+                          {p.available ? t('orbReady') : (p.operational_state?.replace(/_/g, ' ') || t('orbNotReady'))}
                         </span>
                       </div>
                     </div>
@@ -2088,15 +2090,15 @@ export function AssistantV2({
 
                     <div className="provider-info-row">
                       {p.binary_path && (
-                        <div>Eseguibile: <code>{p.binary_path}</code></div>
+                        <div>{t('orbExecutable')} <code>{p.binary_path}</code></div>
                       )}
                       {p.version && (
-                        <div>Versione: <code>{p.version}</code></div>
+                        <div>{t('orbVersion')} <code>{p.version}</code></div>
                       )}
                       {p.auth_method && (
-                        <div>Metodo Auth: <code>{p.auth_method}</code></div>
+                        <div>{t('orbAuthMethod')} <code>{p.auth_method}</code></div>
                       )}
-                      <div>Diagnostica: <span style={{ color: p.available ? '#34d399' : '#fbbf24' }}>{p.diagnostic}</span></div>
+                      <div>{t('orbDiagnostics')} <span style={{ color: p.available ? '#34d399' : '#fbbf24' }}>{p.diagnostic}</span></div>
                     </div>
 
                     {/* Observable Setup Operation In Progress */}
@@ -2116,7 +2118,7 @@ export function AssistantV2({
                               onClick={() => handleCancelOperation(activeOp.id)}
                             >
                               <Square size={10} />
-                              <span>Annulla</span>
+                              <span>{t('orbCancel')}</span>
                             </button>
                           )}
                         </div>
@@ -2129,7 +2131,7 @@ export function AssistantV2({
                         </div>
 
                         <div style={{ fontSize: '11px', color: '#cbd5e1' }}>
-                          {activeOp.message || 'Elaborazione in corso...'}
+                          {activeOp.message || t('orbProcessing')}
                         </div>
 
                         {Array.isArray(activeOp.logs) && activeOp.logs.length > 0 && (
@@ -2151,7 +2153,7 @@ export function AssistantV2({
                               }}
                             >
                               <ChevronDown size={12} style={{ transform: expandedLogs[activeOp.id] ? 'rotate(180deg)' : 'none', transition: 'transform 150ms' }} />
-                              <span>Log operazione ({activeOp.logs.length} eventi)</span>
+                              <span>{t('orbOperationLog', { count: activeOp.logs.length })}</span>
                             </button>
                             {expandedLogs[activeOp.id] && (
                               <div className="setup-op-logs-box" style={{ marginTop: '6px' }}>
@@ -2167,7 +2169,7 @@ export function AssistantV2({
                       <div className="prereq-alert-box">
                         <div className="prereq-alert-title">
                           <AlertTriangle size={13} />
-                          <span>Prerequisiti richiesti:</span>
+                          <span>{t('orbRequiredPrerequisites')}</span>
                         </div>
                         {p.missing_prerequisites.map((prereq, idx) => (
                           <div key={idx} style={{ display: 'flex', flexDirection: 'column', gap: '4px' }}>
@@ -2197,7 +2199,7 @@ export function AssistantV2({
                           disabled={Boolean(isOpRunning)}
                         >
                           <LogIn size={12} />
-                          <span>Accedi / Istruzioni</span>
+                          <span>{t('orbLogInInstructions')}</span>
                         </button>
                       )}
 
@@ -2207,7 +2209,7 @@ export function AssistantV2({
                         disabled={Boolean(isOpRunning)}
                       >
                         <RotateCw size={12} />
-                        <span>Verifica</span>
+                        <span>{t('orbVerify')}</span>
                       </button>
 
                       <div style={{ marginLeft: 'auto' }}>
@@ -2219,10 +2221,10 @@ export function AssistantV2({
                           {isCurrentPref ? (
                             <>
                               <Check size={13} />
-                              <span>Predefinito</span>
+                              <span>{t('orbDefault')}</span>
                             </>
                           ) : (
-                            <span>Imposta Predefinito</span>
+                            <span>{t('orbSetAsDefault')}</span>
                           )}
                         </button>
                       </div>
@@ -2241,21 +2243,21 @@ export function AssistantV2({
           <div className="lifecycle-dialog-panel" onClick={(e) => e.stopPropagation()}>
             <h3 className="lifecycle-dialog-title">
               <Download size={18} color="#a78bfa" />
-              <span>Conferma Installazione: {installConfirmTarget.name}</span>
+              <span>{t('orbConfirmInstallation')}: {installConfirmTarget.name}</span>
             </h3>
 
             <p className="lifecycle-dialog-desc">
-              Aether eseguirà l'installazione del CLI ufficiale di <strong>{installConfirmTarget.name}</strong> nel tuo sistema.
-              Questa operazione richiede Node.js/npm e scaricherà il pacchetto CLI ufficiale in modalità verificata.
+              {t('orbInstallIntro')} <strong>{installConfirmTarget.name}</strong> {t('orbOnYourSystem')}
+              {' '}{t('orbInstallRequirements')}
             </p>
 
             <div className="prereq-alert-box" style={{ background: 'rgba(140,92,246,0.06)', borderColor: 'rgba(140,92,246,0.25)' }}>
               <div className="prereq-alert-title" style={{ color: '#c4b5fd' }}>
                 <ShieldCheck size={14} />
-                <span>Garanzie e Controlli del Runtime</span>
+                <span>{t('orbRuntimeGuaranteesAndChecks')}</span>
               </div>
               <span style={{ color: '#e2e8f0', fontSize: '12px' }}>
-                Nessuna modifica non autorizzata: al termine dell'installazione Aether verificherà che l'eseguibile sia integro, dotato di permessi adeguati e responsivo prima di dichiararlo operativo.
+                {t('orbNoUnauthorizedChangesWhenTheInstallation')}
               </span>
             </div>
 
@@ -2265,7 +2267,7 @@ export function AssistantV2({
                 onClick={() => setInstallConfirmTarget(null)}
                 disabled={isInstalling}
               >
-                Annulla
+                {t('orbCancel')}
               </button>
               <button
                 className="btn-lifecycle-action primary"
@@ -2275,12 +2277,12 @@ export function AssistantV2({
                 {isInstalling ? (
                   <>
                     <RotateCw size={12} className="spin-icon" />
-                    <span>Avvio in corso...</span>
+                    <span>{t('orbStarting')}</span>
                   </>
                 ) : (
                   <>
                     <Check size={12} />
-                    <span>Conferma e Installa</span>
+                    <span>{t('orbConfirmAndInstall')}</span>
                   </>
                 )}
               </button>
@@ -2308,7 +2310,7 @@ export function AssistantV2({
             </div>
 
             <p className="lifecycle-dialog-desc">
-              Per motivi di sicurezza e per proteggere le tue credenziali, l'autenticazione per questo agente richiede una procedura interattiva:
+              {t('orbForSecurityReasonsAndToProtect')}
             </p>
 
             <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
@@ -2324,7 +2326,7 @@ export function AssistantV2({
 
             {authInstructionsModal.provider.id === 'claude_code' && (
               <div style={{ marginTop: '6px' }}>
-                <div style={{ fontSize: '11px', color: '#94a3b8', marginBottom: '4px' }}>Comando da eseguire nel terminale:</div>
+                <div style={{ fontSize: '11px', color: '#94a3b8', marginBottom: '4px' }}>{t('orbCommandToRunInTheTerminal')}</div>
                 <div className="prereq-alert-command" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
                   <span>claude login</span>
                   <button
@@ -2332,7 +2334,7 @@ export function AssistantV2({
                     style={{ background: 'transparent', border: 'none', color: '#94a3b8', cursor: 'pointer' }}
                     onClick={() => {
                       navigator.clipboard.writeText('claude login');
-                      showToast('Comando copiato negli appunti!', 'success');
+                      showToast(t('orbCommandCopiedToTheClipboard'), 'success');
                     }}
                   >
                     <Copy size={13} />
@@ -2343,7 +2345,7 @@ export function AssistantV2({
 
             {authInstructionsModal.provider.id === 'codex' && (
               <div style={{ marginTop: '6px' }}>
-                <div style={{ fontSize: '11px', color: '#94a3b8', marginBottom: '4px' }}>Comando da eseguire nel terminale:</div>
+                <div style={{ fontSize: '11px', color: '#94a3b8', marginBottom: '4px' }}>{t('orbCommandToRunInTheTerminal')}</div>
                 <div className="prereq-alert-command" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
                   <span>codex login</span>
                   <button
@@ -2351,7 +2353,7 @@ export function AssistantV2({
                     style={{ background: 'transparent', border: 'none', color: '#94a3b8', cursor: 'pointer' }}
                     onClick={() => {
                       navigator.clipboard.writeText('codex login');
-                      showToast('Comando copiato negli appunti!', 'success');
+                      showToast(t('orbCommandCopiedToTheClipboard'), 'success');
                     }}
                   >
                     <Copy size={13} />
@@ -2369,7 +2371,7 @@ export function AssistantV2({
                 }}
               >
                 <Check size={12} />
-                <span>Ho completato l'accesso (Verifica)</span>
+                <span>{t('orbIHaveLoggedInVerify')}</span>
               </button>
             </div>
           </div>

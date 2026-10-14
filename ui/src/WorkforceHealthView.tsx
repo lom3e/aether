@@ -107,7 +107,7 @@ export const WorkforceHealthView: React.FC<WorkforceHealthViewProps> = ({
     return (
       <div style={{ padding: '48px', textAlign: 'center', color: 'hsl(var(--muted-fg))' }}>
         <RefreshCw size={24} className="animate-spin" style={{ margin: '0 auto 12px' }} />
-        <div style={{ fontSize: '13px' }}>Computing workforce health metrics...</div>
+        <div style={{ fontSize: '13px' }}>{t('sdComputingWorkforceHealthMetrics')}</div>
       </div>
     );
   }
@@ -128,7 +128,7 @@ export const WorkforceHealthView: React.FC<WorkforceHealthViewProps> = ({
       >
         <HeartPulse size={32} style={{ margin: '0 auto 12px', opacity: 0.35 }} />
         <div style={{ fontSize: '14px', fontWeight: 600, color: 'hsl(var(--foreground))' }}>
-          No health telemetry available
+          {t('sdNoHealthTelemetryAvailable')}
         </div>
       </div>
     );
@@ -227,7 +227,7 @@ export const WorkforceHealthView: React.FC<WorkforceHealthViewProps> = ({
           style={{ padding: '6px 12px', fontSize: '12px', gap: '6px' }}
         >
           <RefreshCw size={13} />
-          <span>Refresh</span>
+          <span>{t('uiRefresh')}</span>
         </button>
       </div>
 
@@ -236,7 +236,7 @@ export const WorkforceHealthView: React.FC<WorkforceHealthViewProps> = ({
         data-testid="workforce-metrics-grid"
         style={{
           display: 'grid',
-          gridTemplateColumns: 'repeat(auto-fit, minmax(170px, 1fr))',
+          gridTemplateColumns: 'repeat(auto-fit, minmax(min(170px, 100%), 1fr))',
           gap: '12px',
         }}
       >
@@ -303,7 +303,7 @@ export const WorkforceHealthView: React.FC<WorkforceHealthViewProps> = ({
             {health.tool_error_rate}%
           </div>
           <div style={{ fontSize: '11px', color: 'hsl(var(--muted-fg))', marginTop: '4px' }}>
-            {health.tool_failures} failed / {health.total_tools_executed} calls
+            {t('healthToolFailures', { failed: health.tool_failures, total: health.total_tools_executed })}
           </div>
         </div>
 
@@ -323,7 +323,7 @@ export const WorkforceHealthView: React.FC<WorkforceHealthViewProps> = ({
             {health.average_execution_duration_sec > 0 ? `${health.average_execution_duration_sec}s` : '--'}
           </div>
           <div style={{ fontSize: '11px', color: 'hsl(var(--muted-fg))', marginTop: '4px' }}>
-            Per-execution runtime
+            {t('sdPerExecutionRuntime')}
           </div>
         </div>
 
@@ -350,7 +350,7 @@ export const WorkforceHealthView: React.FC<WorkforceHealthViewProps> = ({
             {health.rework_count}
           </div>
           <div style={{ fontSize: '11px', color: 'hsl(var(--muted-fg))', marginTop: '4px' }}>
-            Quality gate corrections
+            {t('sdQualityGateCorrections')}
           </div>
         </div>
 
@@ -370,7 +370,7 @@ export const WorkforceHealthView: React.FC<WorkforceHealthViewProps> = ({
             {health.approvals_count}
           </div>
           <div style={{ fontSize: '11px', color: 'hsl(var(--muted-fg))', marginTop: '4px' }}>
-            Human oversight checkpoints
+            {t('sdHumanOversightCheckpoints')}
           </div>
         </div>
       </div>
@@ -414,7 +414,7 @@ export const WorkforceHealthView: React.FC<WorkforceHealthViewProps> = ({
                 <th style={{ padding: '8px 12px', fontWeight: 600 }}>{t('agentColTasks')}</th>
                 <th style={{ padding: '8px 12px', fontWeight: 600 }}>{t('agentColTools')}</th>
                 <th style={{ padding: '8px 12px', fontWeight: 600 }}>{t('agentColSuccess')}</th>
-                <th style={{ padding: '8px 12px', fontWeight: 600 }}>Avg Latency</th>
+                <th style={{ padding: '8px 12px', fontWeight: 600 }}>{t('sdAvgLatency')}</th>
                 <th style={{ padding: '8px 12px', fontWeight: 600 }}>{t('agentColLastActive')}</th>
               </tr>
             </thead>
@@ -521,7 +521,7 @@ export const WorkforceHealthView: React.FC<WorkforceHealthViewProps> = ({
             {t('diagnosticInsights')}
           </div>
 
-          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(280px, 1fr))', gap: '10px' }}>
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(min(280px, 100%), 1fr))', gap: '10px' }}>
             {health.insights.map((ins) => (
               <div
                 key={ins.id}

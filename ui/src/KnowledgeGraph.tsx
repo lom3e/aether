@@ -278,7 +278,7 @@ export function KnowledgeGraph() {
 
               {subgraphLoading ? (
                 <div style={{ height: '240px', display: 'flex', alignItems: 'center', justifyContent: 'center', color: 'var(--text-muted)' }}>
-                  Loading subgraph...
+                  {t('sdLoadingSubgraph')}
                 </div>
               ) : (
                 <div style={{ width: '100%', height: '260px', position: 'relative', background: 'rgba(0,0,0,0.02)', borderRadius: '8px' }}>
@@ -372,7 +372,7 @@ export function KnowledgeGraph() {
 
             {loading ? (
               <div style={{ padding: '32px', textAlign: 'center', color: 'var(--text-muted)' }}>
-                Loading knowledge graph...
+                {t('sdLoadingKnowledgeGraph')}
               </div>
             ) : nodes.length === 0 ? (
               <div className="card" style={{ padding: '32px', textAlign: 'center', background: 'var(--bg-card)' }}>
@@ -383,7 +383,7 @@ export function KnowledgeGraph() {
                 </p>
               </div>
             ) : (
-              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(280px, 1fr))', gap: '10px' }}>
+              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(min(280px, 100%), 1fr))', gap: '10px' }}>
                 {nodes.map(node => {
                   const styleInfo = NODE_TYPE_COLORS[node.node_type] || DEFAULT_COLOR;
                   const isSelected = selectedNode?.id === node.id;
@@ -524,13 +524,13 @@ export function KnowledgeGraph() {
                   <div><strong>Source:</strong> {selectedNode.provenance.source_entity}</div>
                 )}
                 {selectedNode.provenance.author_agent && (
-                  <div><strong>Author / Reviewer:</strong> {selectedNode.provenance.author_agent}</div>
+                  <div><strong>{t('sdAuthorReviewer')}</strong> {selectedNode.provenance.author_agent}</div>
                 )}
                 {selectedNode.provenance.source_mission_id && (
                   <div><strong>Mission:</strong> <code>{selectedNode.provenance.source_mission_id}</code></div>
                 )}
                 {selectedNode.provenance.source_execution_id && (
-                  <div><strong>Execution Run:</strong> <code>{selectedNode.provenance.source_execution_id}</code></div>
+                  <div><strong>{t('sdExecutionRun')}</strong> <code>{selectedNode.provenance.source_execution_id}</code></div>
                 )}
                 <div><strong>Verification:</strong> <span className="badge badge-success badge-sm" style={{ fontSize: '9px', padding: '2px 6px' }}>{selectedNode.provenance.verification_status || 'verified'}</span></div>
               </div>
@@ -543,7 +543,7 @@ export function KnowledgeGraph() {
               </span>
               <div style={{ display: 'flex', flexDirection: 'column', gap: '6px', marginTop: '6px' }}>
                 {neighbors.length === 0 ? (
-                  <span style={{ fontSize: '11px', color: 'var(--text-muted)' }}>No direct neighbors</span>
+                  <span style={{ fontSize: '11px', color: 'var(--text-muted)' }}>{t('sdNoDirectNeighbors')}</span>
                 ) : (
                   neighbors.map(({ node: nNode, edge }) => {
                     const nStyle = NODE_TYPE_COLORS[nNode.node_type] || DEFAULT_COLOR;

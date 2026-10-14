@@ -1143,6 +1143,22 @@ class MissionStore:
     # Deliverables Management & Lineage
     # ---------------------------------------------------------------------------
 
+    def _find_deliverable_file(self, path: str | None) -> Path | None:
+        """The real file behind a deliverable path (workspace files folder, workspace root or as given), if any."""
+        if not path:
+            return None
+        if self._is_memory:
+            return Path(path)       # in-memory stores (tests) have no filesystem to check
+        try:
+            fp = Path(path)
+            ws_root = Path(self.db_path).parent.parent
+            for candidate in ([fp] if fp.is_absolute() else [ws_root / "files" / fp, ws_root / fp, fp]):
+                if candidate.exists() and candidate.is_file():
+                    return candidate
+        except Exception:
+            pass
+        return None
+
     def list_deliverables(self, mission_id: str, execution_id: str | None = None) -> list[Deliverable]:
         """
         Retrieves all real deliverables registered or produced for this mission,
@@ -1173,15 +1189,11 @@ class MissionStore:
                             pass
                     sb = int(r["size_bytes"] or 0)
                     p_str = r["path"]
-                    if sb <= 0 and p_str and not self._is_memory:
+                    found = self._find_deliverable_file(p_str)
+                    if sb <= 0 and found is not None and not self._is_memory:
                         try:
-                            fp = Path(p_str)
-                            ws_root = Path(self.db_path).parent.parent
-                            for candidate in [ws_root / "files" / fp, ws_root / fp, fp]:
-                                if candidate.exists() and candidate.is_file():
-                                    sb = candidate.stat().st_size
-                                    break
-                        except Exception:
+                            sb = found.stat().st_size
+                        except OSError:
                             pass
 
                     deliverables.append(
@@ -1199,6 +1211,7 @@ class MissionStore:
                             metadata=meta,
                             created_at=r["created_at"],
                             updated_at=r["updated_at"],
+                            file_available=found is not None,
                         )
                     )
                 return deliverables
@@ -1281,15 +1294,15 @@ class MissionStore:
                         ext = Path(file_path).suffix.lower()
                         ftype = "document" if ext in (".md", ".txt", ".pdf", ".docx") else ("data" if ext in (".json", ".csv", ".tsv", ".yaml", ".yml", ".parquet") else ("code" if ext in (".py", ".ts", ".tsx", ".js", ".sh", ".rs", ".go") else "archive"))
                         size_bytes = int(meta.get("size_bytes", 0))
-                        if size_bytes <= 0 and file_path and not self._is_memory:
+                        found = self._find_deliverable_file(file_path)
+                        if found is None:
+                            # A write that left no file (refused, failed, never happened) is not a deliverable. The
+                            # attempt stays in the activity log, which is the audit trail; nothing is invented here.
+                            continue
+                        if size_bytes <= 0 and not self._is_memory:
                             try:
-                                fp = Path(file_path)
-                                ws_root = Path(self.db_path).parent.parent
-                                for candidate in [ws_root / "files" / fp, ws_root / fp, fp]:
-                                    if candidate.exists() and candidate.is_file():
-                                        size_bytes = candidate.stat().st_size
-                                        break
-                            except Exception:
+                                size_bytes = found.stat().st_size
+                            except OSError:
                                 pass
                         deliverables.append(
                             Deliverable(

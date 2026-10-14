@@ -187,11 +187,11 @@ export function Sidebar({
         setNewProjectName('');
         setIsCreatingProject(false);
         fetchProjects();
-        showToast('Project created successfully', 'success');
+        showToast(t('szProjectCreatedSuccessfully'), 'success');
       }
     } catch (err) {
-      console.error('Failed to create project', err);
-      showToast('Failed to create project', 'error');
+      console.error(t('szFailedToCreateProject'), err);
+      showToast(t('szFailedToCreateProject'), 'error');
     }
   };
 
@@ -209,13 +209,13 @@ export function Sidebar({
       if (res.ok) {
         setEditingProjectId(null);
         fetchProjects();
-        showToast('Project renamed', 'success');
+        showToast(t('szProjectRenamed'), 'success');
       } else {
-        showToast('Error updating project name', 'error');
+        showToast(t('szErrorUpdatingProjectName'), 'error');
       }
     } catch (err) {
-      console.error('Failed to rename project', err);
-      showToast('Failed to rename project', 'error');
+      console.error(t('szFailedToRenameProject'), err);
+      showToast(t('szFailedToRenameProject'), 'error');
     }
   };
 
@@ -228,13 +228,13 @@ export function Sidebar({
         if (selectedProjectId === id) setSelectedProjectId(null);
         fetchProjects();
         if (onRefreshConversations) onRefreshConversations();
-        showToast('Project deleted', 'info');
+        showToast(t('szProjectDeleted'), 'info');
       } else {
-        showToast('Failed to delete project', 'error');
+        showToast(t('szFailedToDeleteProject'), 'error');
       }
     } catch (err) {
-      console.error('Failed to delete project', err);
-      showToast('Failed to delete project', 'error');
+      console.error(t('szFailedToDeleteProject'), err);
+      showToast(t('szFailedToDeleteProject'), 'error');
     }
   };
 
@@ -268,12 +268,12 @@ export function Sidebar({
       });
       const data = await res.json();
       if (!res.ok) {
-        throw new Error(data.detail || 'Failed to connect repository.');
+        throw new Error(data.detail || t('szFailedToConnectRepository'));
       }
       setActiveGithubProject((curr: any) => curr ? { ...curr, github_repository: data.repository } : null);
       fetchProjects();
     } catch (err: any) {
-      setGithubError(err.message || 'Failed to connect repository.');
+      setGithubError(err.message || t('szFailedToConnectRepository'));
     } finally {
       setGithubLoading(false);
     }
@@ -293,7 +293,7 @@ export function Sidebar({
       });
       const data = await res.json();
       if (!res.ok) {
-        throw new Error(data.detail || 'Verification failed.');
+        throw new Error(data.detail || t('szVerificationFailed'));
       }
       setActiveGithubProject((curr: any) => curr ? {
         ...curr,
@@ -301,7 +301,7 @@ export function Sidebar({
       } : null);
       fetchProjects();
     } catch (err: any) {
-      setGithubError(err.message || 'Verification failed.');
+      setGithubError(err.message || t('szVerificationFailed'));
     } finally {
       setGithubLoading(false);
     }
@@ -317,7 +317,7 @@ export function Sidebar({
       });
       if (!res.ok) {
         const data = await res.json();
-        throw new Error(data.detail || 'Failed to disconnect repository.');
+        throw new Error(data.detail || t('szFailedToDisconnectRepository'));
       }
       setActiveGithubProject((curr: any) => curr ? { ...curr, github_repository: null } : null);
       setGithubOwner('');
@@ -325,7 +325,7 @@ export function Sidebar({
       setGithubToken('');
       fetchProjects();
     } catch (err: any) {
-      setGithubError(err.message || 'Failed to disconnect repository.');
+      setGithubError(err.message || t('szFailedToDisconnectRepository'));
     } finally {
       setGithubLoading(false);
     }
@@ -343,7 +343,7 @@ export function Sidebar({
         if (onRefreshConversations) onRefreshConversations();
       }
     } catch (err) {
-      console.error('Failed to pin conversation', err);
+      console.error(t('szFailedToPinConversation'), err);
     }
   };
 
@@ -360,7 +360,7 @@ export function Sidebar({
         if (onRefreshConversations) onRefreshConversations();
       }
     } catch (err) {
-      console.error('Failed to assign conversation to project', err);
+      console.error(t('szFailedToAssignConversationToProject'), err);
     }
   };
 
@@ -380,7 +380,7 @@ export function Sidebar({
         if (onWorkspaceSwitched) onWorkspaceSwitched();
       }
     } catch (err) {
-      console.error('Failed to switch workspace', err);
+      console.error(t('szFailedToSwitchWorkspace'), err);
     }
   };
 
@@ -400,7 +400,7 @@ export function Sidebar({
         if (onRefreshConversations) onRefreshConversations();
       }
     } catch (err) {
-      console.error('Failed to rename conversation', err);
+      console.error(t('szFailedToRenameConversation'), err);
     }
   };
 
@@ -414,7 +414,7 @@ export function Sidebar({
         if (onRefreshConversations) onRefreshConversations();
       }
     } catch (err) {
-      console.error('Failed to duplicate conversation', err);
+      console.error(t('szFailedToDuplicateConversation'), err);
     }
   };
 
@@ -431,7 +431,7 @@ export function Sidebar({
         if (onRefreshConversations) onRefreshConversations();
       }
     } catch (err) {
-      console.error('Failed to archive conversation', err);
+      console.error(t('szFailedToArchiveConversation'), err);
     }
   };
 
@@ -502,7 +502,7 @@ export function Sidebar({
                 }}>
                   <img
                     src="/brand/logo_viola.svg"
-                    alt="Aether Logo"
+                    alt={t('sdAetherLogo')}
                     width="18"
                     height="18"
                     style={{ width: '18px', height: '18px', objectFit: 'contain', display: 'block' }}
@@ -553,7 +553,7 @@ export function Sidebar({
               >
                 <img
                   src="/brand/logo_viola.svg"
-                  alt="Aether Logo"
+                  alt={t('sdAetherLogo')}
                   width="26"
                   height="26"
                   style={{
@@ -645,7 +645,7 @@ export function Sidebar({
         {/* Assistant V2 Mode Switcher & New Task */}
         <div style={{ padding: '10px 12px 6px', display: 'flex', flexDirection: 'column', gap: '6px' }}>
           {onSwitchToV2 && (
-            <Tooltip content="Passa alla modalità Assistant V2 (Esperienza con Aether Orb)" position={collapsed ? 'right' : 'top'}>
+            <Tooltip content={t('seSwitchToAssistantV2ModeAether')} position={collapsed ? 'right' : 'top'}>
               <button
                 type="button"
                 className="btn"
@@ -726,7 +726,7 @@ export function Sidebar({
                   }}
                 />
               </div>
-              <Tooltip content="Command Palette (⌘K)" position="top">
+              <Tooltip content={t('sdCommandPaletteK')} position="top">
                 <button
                   className="btn btn-ghost"
                   style={{ padding: '4px 6px', fontSize: '11px', color: 'hsl(var(--muted-fg))' }}
@@ -906,7 +906,7 @@ export function Sidebar({
                   <button data-testid="nav-learning" onClick={() => onNavigate('learning')}>Learning</button>
                   <button data-testid="nav-workflows" onClick={() => onNavigate('workflows')}>Workflows</button>
                   <button data-testid="nav-content" onClick={() => onNavigate('content')}>Content</button>
-                  <button data-testid="nav-content-social" onClick={() => onNavigate('content')}>Content & Social</button>
+                  <button data-testid="nav-content-social" onClick={() => onNavigate('content')}>{t('szContentSocial')}</button>
                   <button data-testid="nav-proactive" onClick={() => onNavigate('proactive')}>Proactive</button>
                   <button data-testid="nav-marketplace" onClick={() => onNavigate('marketplace')}>Marketplace</button>
                 </div>
@@ -919,7 +919,7 @@ export function Sidebar({
             {!collapsed && (
               <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '2px 8px', marginBottom: '4px' }}>
                 <span style={{ fontSize: '10px', fontWeight: 600, color: 'hsl(var(--muted-fg))', textTransform: 'uppercase', letterSpacing: '0.05em' }}>
-                  Projects
+                  {t('uiProjects')}
                 </span>
                 <Tooltip content={t('sidebarNewProject')} position="top">
                   <button
@@ -958,7 +958,7 @@ export function Sidebar({
                   style={{ width: '100%', justifyContent: 'space-between', padding: '5px 8px', fontSize: '11.5px', color: 'hsl(var(--primary))' }}
                   onClick={() => setSelectedProjectId(null)}
                 >
-                  <span>← Show All Conversations</span>
+                  <span>{t('szShowAllConversations')}</span>
                 </button>
               )}
 
@@ -1236,7 +1236,7 @@ export function Sidebar({
                             handlePinConversation(conv.id, conv.pinned);
                           }}
                         >
-                          <Pin size={12} /> {conv.pinned ? 'Unpin' : 'Pin to top'}
+                          <Pin size={12} /> {conv.pinned ? 'Unpin' : t('szPinToTop')}
                         </button>
                         <button
                           className="btn btn-ghost"
@@ -1265,7 +1265,7 @@ export function Sidebar({
                         {projects.length > 0 && (
                           <div style={{ borderTop: '1px solid hsl(var(--border)/0.5)', margin: '3px 0', paddingTop: '3px' }}>
                             <div style={{ fontSize: '10px', color: 'hsl(var(--muted-fg))', padding: '2px 8px' }}>
-                              Project
+                              {t('uiProject')}
                             </div>
                             {conv.project_id && (
                               <button
@@ -1276,7 +1276,7 @@ export function Sidebar({
                                   handleAssignProject(conv.id, null);
                                 }}
                               >
-                                Remove from Project
+                                {t('szRemoveFromProject')}
                               </button>
                             )}
                             {projects.map(p => (
@@ -1456,9 +1456,9 @@ export function Sidebar({
                         </span>
                       </div>
                       {activeGithubProject.github_repository.private ? (
-                        <span className="badge" style={{ fontSize: '10px' }}>Private</span>
+                        <span className="badge" style={{ fontSize: '10px' }}>{t('uiPrivate')}</span>
                       ) : (
-                        <span className="badge" style={{ fontSize: '10px' }}>Public</span>
+                        <span className="badge" style={{ fontSize: '10px' }}>{t('uiPublic')}</span>
                       )}
                     </div>
 

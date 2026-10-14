@@ -496,6 +496,8 @@
   padding: 3px;
   gap: 2px;
   box-sizing: border-box;
+  max-width: 100%;
+  overflow-x: auto;      /* a long tab row scrolls inside itself instead of widening the page */
 }
 
 .ds-segmented-item {

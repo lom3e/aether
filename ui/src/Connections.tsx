@@ -487,7 +487,7 @@ export function Connections({ initialExecutionId, initialTab }: ConnectionsProps
         }
       })
       .catch((err) => {
-        console.error('Error loading connections data', err);
+        console.error(t('szErrorLoadingConnectionsData'), err);
       })
       .finally(() => setLoading(false));
   };
@@ -535,7 +535,7 @@ export function Connections({ initialExecutionId, initialTab }: ConnectionsProps
         target_type: 'action_execution',
         target_id: executionId,
         decision: 'reject',
-        reason: 'Rifiutato dall\'utente',
+        reason: t('syRejectedByTheUser'),
       });
       if (res.success) {
         showToast(res.message || t('connUiOperationDeclined'), 'info');
@@ -1572,7 +1572,7 @@ export function Connections({ initialExecutionId, initialTab }: ConnectionsProps
                   },
                   {
                     value: 'google',
-                    label: 'Google Calendar (Cloud)',
+                    label: t('szGoogleCalendarCloud'),
                     icon: <Globe size={15} />,
                   },
                 ]}

@@ -17,6 +17,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Files**: documents created from chat go to the workspace `files/` folder (not next to its databases), are listed in Results, and can be previewed/downloaded through a path-restricted endpoint.
 - **API**: `GET /api/automations/suggestions` was shadowed by `/automations/{id}`; `/api/knowledge/search` (graph nodes) and `/api/knowledge/query` (document chunks) are documented as distinct.
 - **Server**: open SSE streams end cleanly on shutdown (no hang on SIGTERM, no `ERR_INCOMPLETE_CHUNKED_ENCODING`).
+- **Agents and documents**: repeated identical read-only tool calls are replayed instead of re-executed and force an answer after three repeats; an answer cut off by the token limit is continued (and flagged if still cut); editing a document (`aggiorna il file nota.md…`) is a document operation decided by what the verb acts on (document vs code evidence), the model sees the current content, a truncated or oversized rewrite is refused, and every overwrite keeps the previous version in `.aether-versions/`.
+- **Results**: deliverable records whose file does not exist are kept as history (`file_available: false`, shown under "attempts") and are never offered as results.
+- **UI**: Orb V2 and the secondary views are fully localized (IT/EN, `t(key, params)`); no-workspace state for workspace-dependent screens; responsive grids/tabs; language, theme and layout are covered by browser tests.
 - **UI**: responsive sidebar on narrow windows, truthful result badges, no guaranteed Google Calendar 404, more localized labels.
 
 ---

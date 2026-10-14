@@ -35,6 +35,8 @@ class Runtime:
     - TOOL: Canonical tool invocation via ToolRegistry
     """
 
+    MAX_REWRITE_CHARS = 60_000     # larger documents are not rewritten wholesale by a model
+
     def __init__(
         self,
         workspace: Any = None,
@@ -298,6 +300,19 @@ class Runtime:
                         filename = action_args.get("filename", "document")
                         shared = self.assemble_context(request, "document")
                         shared_text = (shared.rendered if shared is not None else "") or ""
+                        existing_text = ""
+                        if action_args.get("update"):
+                            # Editing: the model must see the current document, return the COMPLETE updated one, and
+                            # a missing file is stated, not silently replaced by an invented one.
+                            try:
+                                exec_ = self.action_executor
+                                import pathlib as _pl     # (a later local `from pathlib import Path` shadows Path here)
+                                base = exec_._user_files_base(exec_._get_workspace(ws_id))
+                                target = (_pl.Path(base) / filename).resolve()
+                                if _pl.Path(base).resolve() in target.parents and target.is_file():
+                                    existing_text = target.read_text(encoding="utf-8", errors="replace")
+                            except Exception:
+                                existing_text = ""
                         gen_messages = [
                             Message(role="system", content=(
                                 "You are a helpful writing assistant. Generate the content for a document "
@@ -307,13 +322,48 @@ class Runtime:
                                 + (f"\n\n{shared_text}" if shared_text else "")
                             )),
                             Message(role="user", content=(
-                                f"Create the content for a file named '{filename}'. "
-                                f"Original request: {request.instruction}"
+                                (
+                                    f"Update the file '{filename}'. Its CURRENT content is between the markers.\n"
+                                    f"<<<CURRENT\n{existing_text}\nCURRENT>>>\n"
+                                    "Apply the requested change and return the COMPLETE updated document, nothing else. "
+                                    f"Request: {request.instruction}"
+                                ) if existing_text else (
+                                    f"Create the content for a file named '{filename}'. "
+                                    + ("The file does not exist yet: write it from scratch. " if action_args.get("update") else "")
+                                    + f"Original request: {request.instruction}"
+                                )
                             )),
                         ]
+                        if action_args.get("update") and len(existing_text) > self.MAX_REWRITE_CHARS:
+                            return ExecutionResult(
+                                success=False, status=ExecutionStatus.FAILED,
+                                error=(f"'{filename}' is too large ({len(existing_text)} characters) to be rewritten safely by the "
+                                       "model: nothing was changed."),
+                                execution_id=request.id, metadata={"code": "DOCUMENT_TOO_LARGE"},
+                            )
                         gen_res = provider.generate(gen_messages)
-                        if gen_res and getattr(gen_res, "content", None) and gen_res.content.strip():
-                            action_args["content"] = gen_res.content.strip()
+                        draft_parts = [(getattr(gen_res, "content", "") or "")]
+                        continuations = 0
+                        # A draft cut off by the token limit is continued; it is NEVER written as if it were complete
+                        # (for an update that would replace the user's whole document with a fragment).
+                        while gen_res and getattr(gen_res, "finish_reason", None) == "length" and continuations < 3:
+                            continuations += 1
+                            gen_messages = gen_messages + [
+                                Message(role="assistant", content=draft_parts[-1]),
+                                Message(role="user", content="Continue exactly from where you stopped, without repeating anything."),
+                            ]
+                            gen_res = provider.generate(gen_messages)
+                            draft_parts.append(getattr(gen_res, "content", "") or "")
+                        if gen_res and getattr(gen_res, "finish_reason", None) == "length":
+                            return ExecutionResult(
+                                success=False, status=ExecutionStatus.FAILED,
+                                error=(f"The draft of '{filename}' was cut off by the model's length limit even after "
+                                       "continuing: nothing was written. Raise the token limit in Settings or shorten the request."),
+                                execution_id=request.id, metadata={"code": "DRAFT_TRUNCATED"},
+                            )
+                        joined = "".join(draft_parts)
+                        if gen_res and joined.strip():
+                            action_args["content"] = joined.strip()
                         else:
                             return ExecutionResult(
                                 success=False,
@@ -352,7 +402,12 @@ class Runtime:
                 )
 
             target = action_args.get("filename", "item")
-            output_msg = f"I've taken care of it! **{target}** has been created in your workspace."
+            from aether.core.language import looks_english
+            updated = bool(action_args.get("update"))
+            if looks_english(request.instruction or ""):
+                output_msg = f"Done! **{target}** has been {'updated' if updated else 'created'} in your workspace."
+            else:
+                output_msg = f"Fatto! **{target}** è stato {'aggiornato' if updated else 'creato'} nel tuo workspace."
 
             # Register created deliverable/artifact only if verified on disk
             artifacts = []

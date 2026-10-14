@@ -582,20 +582,43 @@ class TestGroqConnectionRetry(TestGroqRateLimitRetry):
 
 
 class TestInferredDeliverables:
-    def test_only_files_that_were_written_count_and_spellings_are_merged(self, real_workspace):
+    def test_only_files_that_exist_count_and_attempts_stay_in_the_audit_log(self, real_workspace):
         ws = real_workspace
         store = ws.missions
         mission = store.create_mission(title="T", objective="O", workspace_id=ws.id, milestones=[{"title": "S", "description": "d"}])
+        (Path(ws.files_dir) / "report.md").write_text("# Report\n\ncontenuto", encoding="utf-8")
         for i, (tool, path) in enumerate([
             ("list_directory", "."), ("list_directory", "/"), ("read_file", "report.md"),
             ("write_file", "report.md"), ("write_file", "./report.md"),
+            ("write_file", "ghost.md"),                       # attempted, refused: no file exists
         ]):
             store.log_conversation_activity(
                 mission.id, "analyst", f"Executed {tool}", activity_type="tool_called",
                 details={"tool_name": tool, "arguments": {"path": path}}, created_at=f"2026-10-14T10:00:0{i}+00:00",
             )
-        names = [d.name for d in store.list_deliverables(mission.id)]
-        assert names == ["report.md"], names
+        listed = store.list_deliverables(mission.id)
+        assert [(d.name, d.file_available) for d in listed] == [("report.md", True)]
+        assert listed[0].size_bytes > 0
+        # the failed attempt is history, not a result: it is still in the activity log
+        with store._get_connection() as conn:
+            logged = [r[0] for r in conn.execute("SELECT metadata FROM conversation_activities").fetchall()]
+        assert any("ghost.md" in m for m in logged)
+
+    def test_a_registered_record_whose_file_is_gone_is_kept_but_flagged_unavailable(self, real_workspace):
+        from aether.missions.models import Deliverable
+
+        ws = real_workspace
+        store = ws.missions
+        mission = store.create_mission(title="T", objective="O", workspace_id=ws.id, milestones=[{"title": "S", "description": "d"}])
+        real = Path(ws.files_dir) / "ok.md"
+        real.write_text("x", encoding="utf-8")
+        store.add_deliverable(mission.id, Deliverable(id="d1", mission_id=mission.id, name="ok.md", path=str(real), status="verified"))
+        store.add_deliverable(mission.id, Deliverable(id="d2", mission_id=mission.id, name="gone.md", path=str(Path(ws.files_dir) / "gone.md"), status="needs_revision"))
+        by_name = {d.name: d for d in store.list_deliverables(mission.id)}
+        assert by_name["ok.md"].file_available is True and by_name["gone.md"].file_available is False
+        assert by_name["gone.md"].to_dict()["file_available"] is False
+        assert by_name["gone.md"].status == "needs_revision"          # history untouched
+
 
 
 class TestWorkforceToolAuthority:
@@ -631,3 +654,234 @@ class TestWorkforceToolAuthority:
         from aether.tools.base import ToolClassification
 
         assert create_knowledge_tool(real_workspace.knowledge).classification == ToolClassification.READ_ONLY
+
+
+class TestRepeatedToolCalls:
+    def _run(self, monkeypatch, tool_name="search_knowledge", read_only=True, max_turns=10):
+        from aether.agents.agent import Agent
+        from aether.core.execution import AgentContext, Task, ToolCall, ToolResult
+        from aether.providers.capabilities import ProviderCapabilities
+        from aether.providers.types import Message, ProviderResponse
+
+        class Looper:
+            capabilities = ProviderCapabilities(tools=True)
+            model = "looper"
+
+            def __init__(self):
+                self.calls = 0
+                self.offered = []
+
+            def generate(self, messages, tools=None, output_schema=None):
+                self.offered.append(len(tools or []))
+                if tools:
+                    self.calls += 1
+                    call = ToolCall(call_id=f"c{self.calls}", tool_name=tool_name, arguments={"query": "stessa domanda"})
+                    return ProviderResponse(content="", model="looper", finish_reason="tool_calls", provider="l",
+                                            message=Message(role="assistant", content="", tool_calls=[call]))
+                msg = Message(role="assistant", content="Risposta finale.")
+                return ProviderResponse(content=msg.content, model="looper", finish_reason="stop", message=msg, provider="l")
+
+        executed = []
+
+        class Engine:
+            def execute_tool_calls(self, calls, ctx):
+                executed.extend(c.call_id for c in calls)
+                return [ToolResult(call_id=c.call_id, output="nessun risultato") for c in calls]
+
+        monkeypatch.setattr(Agent, "_tool_is_read_only", staticmethod(lambda ctx, name: read_only))
+        provider = Looper()
+        agent = Agent(name="a", role="r", provider=provider, max_turns=max_turns, max_tool_calls=50)
+        agent.execution_engine = Engine()
+        task = Task(instruction="x")
+        ctx = AgentContext.from_context(agent._build_context(task), messages=[Message(role="user", content="x")])
+        result = agent._run_loop(task, ctx, [{"name": tool_name, "description": "d", "parameters": {"type": "object", "properties": {}}}])
+        return result, provider, executed
+
+    def test_the_same_read_only_call_is_executed_once_and_the_model_is_then_forced_to_answer(self, monkeypatch):
+        result, provider, executed = self._run(monkeypatch)
+        assert result.success and "Risposta finale" in result.output
+        assert executed == ["c1"], "an identical read-only call must not be executed again"
+        assert provider.calls <= 5, "the model was allowed to loop long after repeating itself"
+        assert provider.offered[-1] == 0
+
+    def test_repeating_a_mutating_call_is_never_suppressed(self, monkeypatch):
+        result, provider, executed = self._run(monkeypatch, tool_name="write_file", read_only=False, max_turns=4)
+        assert len(executed) >= 3, "writes are not cached: each one runs"
+
+
+class TestTruncatedAnswers:
+    def _agent(self, parts):
+        from aether.agents.agent import Agent
+        from aether.core.execution import AgentContext, Task
+        from aether.providers.capabilities import ProviderCapabilities
+        from aether.providers.types import Message, ProviderResponse
+
+        class Chunked:
+            capabilities = ProviderCapabilities()
+            model = "chunked"
+            seen = []
+
+            def generate(self, messages, tools=None, output_schema=None):
+                self.seen.append(messages[-1].content)
+                text, reason = parts[min(len(self.seen) - 1, len(parts) - 1)]
+                return ProviderResponse(content=text, model="chunked", finish_reason=reason, provider="c",
+                                        message=Message(role="assistant", content=text))
+
+        provider = Chunked()
+        provider.seen = []
+        agent = Agent(name="a", role="r", provider=provider)
+        task = Task(instruction="x")
+        ctx = AgentContext.from_context(agent._build_context(task), messages=[Message(role="user", content="x")])
+        return agent._run_loop(task, ctx, []), provider
+
+    def test_a_cut_off_answer_is_continued_and_joined(self):
+        result, provider = self._agent([("Report: tre nomi: Alvea", "length"), ("re, Fiamma Dolce, Cera d'Oro.", "stop")])
+        assert result.success and result.output == "Report: tre nomi: Alveare, Fiamma Dolce, Cera d'Oro."
+        assert "cut off" in provider.seen[1]
+        assert not result.metadata.get("truncated")
+
+    def test_an_answer_still_cut_off_after_the_continuations_is_flagged(self):
+        result, _ = self._agent([("a", "length")])
+        assert result.success and result.metadata["truncated"] is True
+
+
+class TestDocumentVersusCode:
+    @pytest.mark.parametrize("prompt", [
+        "Leggi e aggiorna il file report_finale.md con i dati di vendita",
+        "Modifica il documento riepilogo.md aggiungendo le conclusioni",
+        "Riscrivi note.txt in modo più breve",
+        "Update the file notes.md with today's decisions",
+        "Correggi il verbale.docx: manca la data",
+    ])
+    def test_editing_a_document_is_a_document_operation(self, service, prompt):
+        intent = service.classify_intent(prompt)
+        assert intent.action_id == "files.create_document" and intent.tier == IntentTier.DO, (prompt, intent.action_id)
+        assert intent.action_args["update"] is True and intent.intent_type == "document_update"
+
+    @pytest.mark.parametrize("prompt", [
+        "Aggiorna il file parser.py per gestire None",
+        "Correggi il bug in parser.py che causa crash",
+        "Modifica il codice del modulo billing aggiungendo un test",
+        "Aggiungi una funzione calculate_total(items) in billing.py e scrivi i test",
+        "Aggiorna la funzione main in app.py",
+    ])
+    def test_editing_code_still_goes_to_the_coding_agent(self, service, prompt):
+        intent = service.classify_intent(prompt)
+        assert intent.action_id == "coding.delegate", (prompt, intent.action_id)
+
+    @pytest.mark.parametrize("prompt", [
+        "Come aggiorno il file report.md?",
+        "Come si modifica un documento in Word?",
+        "Cosa significa aggiornare un file di testo?",
+    ])
+    def test_questions_about_documents_are_answers(self, service, prompt):
+        intent = service.classify_intent(prompt)
+        assert intent.tier == IntentTier.ANSWER and intent.action_id is None, (prompt, intent.action_id)
+
+
+class TestUpdateDocumentEndToEnd:
+    def test_the_model_sees_the_current_document_and_the_updated_one_is_written(self, real_workspace):
+        from conftest import make_test_accepted_authority
+
+        ws = real_workspace
+        doc = Path(ws.files_dir) / "report_finale.md"
+        doc.write_text("# Report\n\nVendite Q1: 100\n", encoding="utf-8")
+        provider = _RecordingProvider("# Report\n\nVendite Q1: 100\nVendite Q2: 150\n")
+        ws.personal.provider = provider
+        prompt = "Leggi e aggiorna il file report_finale.md con i dati di vendita Q2: 150"
+
+        pending = ws.personal.process_prompt(workspace_id=ws.id, prompt=prompt)
+        assert pending.metadata["status"] == "proposal_pending" and doc.read_text(encoding="utf-8").count("Q2") == 0
+        _, auth = make_test_accepted_authority(ws, constraints=["allow:files.create_document"], title="Aggiorna report")
+        done = ws.personal.process_prompt(workspace_id=ws.id, prompt=prompt, authority=auth)
+
+        assert done.tier == IntentTier.DO
+        assert any("Vendite Q1: 100" in shown for shown in provider.seen), "the model did not see the current document"
+        assert doc.read_text(encoding="utf-8").strip() == "# Report\n\nVendite Q1: 100\nVendite Q2: 150"
+        assert "aggiornato" in done.content
+        assert not (Path(ws.root) / "report_finale.md").exists()
+
+
+class TestInformationRequests:
+    @pytest.mark.parametrize("prompt", [
+        "Dimmi quando riceve il report il cliente Bianchi",
+        "Spiegami come si prepara un report per il cliente",
+        "Il report del cliente Bianchi quando va inviato?",
+        "Sai dirmi chi è il referente del cliente Bianchi",
+        "Tell me when the client report is due",
+    ])
+    def test_information_requests_are_answers(self, service, prompt):
+        intent = service.classify_intent(prompt)
+        assert intent.tier == IntentTier.ANSWER, (prompt, intent.summary)
+
+    @pytest.mark.parametrize("prompt", [
+        "Puoi preparare un report su Lume & Miele?",
+        "Mi serve un'analisi di mercato per le candele",
+    ])
+    def test_work_requests_stay_missions_even_when_phrased_politely(self, service, prompt):
+        assert service.classify_intent(prompt).tier == IntentTier.DELEGATE
+
+
+class TestDocumentOverwriteSafety:
+    PROMPT = "Aggiorna il file nota.md con le conclusioni"
+
+    def _run(self, ws, provider, prompt=None):
+        from conftest import make_test_accepted_authority
+
+        ws.personal.provider = provider
+        _, auth = make_test_accepted_authority(ws, constraints=["allow:files.create_document"], title="Aggiorna")
+        return ws.personal.process_prompt(workspace_id=ws.id, prompt=prompt or self.PROMPT, authority=auth)
+
+    def _provider(self, parts):
+        from aether.providers.capabilities import ProviderCapabilities
+        from aether.providers.types import ProviderResponse
+
+        class P:
+            capabilities = ProviderCapabilities()
+            model = "p"
+
+            def __init__(self):
+                self.calls = 0
+
+            def generate(self, messages, tools=None, output_schema=None):
+                text, reason = parts[min(self.calls, len(parts) - 1)]
+                self.calls += 1
+                return ProviderResponse(content=text, model="p", finish_reason=reason, provider="p")
+
+        return P()
+
+    def test_a_truncated_draft_never_replaces_the_document(self, real_workspace):
+        ws = real_workspace
+        doc = Path(ws.files_dir) / "nota.md"
+        original = "# Nota\n\nRiga originale importante.\n"
+        doc.write_text(original, encoding="utf-8")
+        reply = self._run(ws, self._provider([("# Nota\n\nRiga origin", "length")]))
+        assert doc.read_text(encoding="utf-8") == original, "a fragment replaced the user's document"
+        assert "cut off" in reply.content or "nothing was written" in reply.content
+
+    def test_a_cut_off_draft_is_continued_and_the_old_version_is_kept(self, real_workspace):
+        ws = real_workspace
+        doc = Path(ws.files_dir) / "nota.md"
+        doc.write_text("# Nota\n\nVecchio testo.\n", encoding="utf-8")
+        self._run(ws, self._provider([("# Nota\n\nNuovo te", "length"), ("sto completo.", "stop")]))
+        assert doc.read_text(encoding="utf-8") == "# Nota\n\nNuovo testo completo."
+        versions = list((Path(ws.files_dir) / ".aether-versions").glob("nota.md.*"))
+        assert len(versions) == 1 and versions[0].read_text(encoding="utf-8") == "# Nota\n\nVecchio testo.\n"
+
+    def test_a_document_too_large_to_rewrite_is_left_untouched(self, real_workspace):
+        ws = real_workspace
+        doc = Path(ws.files_dir) / "nota.md"
+        big = "x" * 70_000
+        doc.write_text(big, encoding="utf-8")
+        reply = self._run(ws, self._provider([("breve", "stop")]))
+        assert doc.read_text(encoding="utf-8") == big and "too large" in reply.content
+
+    def test_history_folder_is_not_listed_as_a_result(self, real_workspace):
+        from aether.personal.context import collect_workspace_deliverables
+
+        ws = real_workspace
+        doc = Path(ws.files_dir) / "nota.md"
+        doc.write_text("v1", encoding="utf-8")
+        self._run(ws, self._provider([("v2", "stop")]))
+        names = [d.title for d in collect_workspace_deliverables(ws)]
+        assert names.count("nota.md") == 1 and not any(".aether-versions" in n or n.startswith("nota.md.") for n in names)

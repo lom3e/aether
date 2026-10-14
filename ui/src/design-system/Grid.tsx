@@ -15,7 +15,7 @@ export const Grid = forwardRef<HTMLDivElement, GridProps>(
     let gridTemplateColumns: string | undefined;
     if (minItemWidth) {
       const minWidth = typeof minItemWidth === 'number' ? `${minItemWidth}px` : minItemWidth;
-      gridTemplateColumns = `repeat(auto-fill, minmax(${minWidth}, 1fr))`;
+      gridTemplateColumns = `repeat(auto-fill, minmax(min(${minWidth}, 100%), 1fr))`;
     } else if (typeof cols === 'number') {
       gridTemplateColumns = `repeat(${cols}, minmax(0, 1fr))`;
     } else if (typeof cols === 'string') {

@@ -92,7 +92,7 @@ export function WorkspaceModal({
     e.preventDefault();
     if (!name.trim()) return;
     if (provider && !model.trim()) {
-      showToast('Choose a model for the selected provider, or leave the provider unset to configure it later.', 'error');
+      showToast(t('sdChooseAModelForTheSelected'), 'error');
       return;
     }
 
@@ -162,7 +162,7 @@ export function WorkspaceModal({
         body: JSON.stringify({ name: renameValue.trim() })
       });
       if (res.ok) {
-        showToast('Workspace renamed.', 'success');
+        showToast(t('sdWorkspaceRenamed'), 'success');
         setEditingWsId(null);
         fetchWorkspaces();
         onWorkspaceSwitched();
@@ -374,7 +374,7 @@ export function WorkspaceModal({
                       setIsCustomModel(false);
                     }}
                   >
-                    <option value="">— Configura più tardi —</option>
+                    <option value="">{t('seConfigureLater')}</option>
                     <option value="ollama">Ollama (Local)</option>
                     <option value="openai">OpenAI</option>
                     <option value="anthropic">Anthropic</option>
@@ -424,7 +424,7 @@ export function WorkspaceModal({
                         }
                       }}
                     >
-                      <option value="">{provider ? '— Scegli un modello —' : '— Nessun provider —'}</option>
+                      <option value="">{provider ? t('seChooseAModel') : t('seNoProvider')}</option>
                       {availableModels.map(m => (
                         <option key={m} value={m}>{m}</option>
                       ))}

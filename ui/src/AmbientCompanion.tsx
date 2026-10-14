@@ -31,6 +31,7 @@ import { apiUrl, getSessionToken } from "./api";
 import { hideCompanion, showMainWindow } from "./desktop";
 import { resolveCanonicalTarget, submitApprovalDecision, approvalToastKind } from "./canonicalNotification";
 import { ToastContext } from "./toast";
+import { useTranslation } from './i18n';
 
 interface AmbientCompanionProps {
   workspaceName?: string;
@@ -114,6 +115,7 @@ export function AmbientCompanion({
   workspaceName: propWorkspaceName,
   onOpenWorkspace,
 }: AmbientCompanionProps) {
+  const { t } = useTranslation();
   const [activeWorkspace, setActiveWorkspace] = useState<string>(propWorkspaceName || "");
   const [promptInput, setPromptInput] = useState("");
   const [isSubmitting, setIsSubmitting] = useState(false);
@@ -201,13 +203,13 @@ export function AmbientCompanion({
       if (res.ok) {
         const data = await res.json();
         setCapturedContext(data);
-        showToast(`Captured: ${data.app_name} (${data.window_title || "Active Window"})`, "info");
+        showToast(`Captured: ${data.app_name} (${data.window_title || t('szActiveWindow')})`, "info");
       } else {
-        showToast("Could not inspect desktop context.", "warning");
+        showToast(t('szCouldNotInspectDesktopContext'), "warning");
       }
     } catch (e) {
       console.warn("Context capture error:", e);
-      showToast("Context capture error.", "warning");
+      showToast(t('szContextCaptureError'), "warning");
     } finally {
       setIsCapturingContext(false);
     }
@@ -250,7 +252,7 @@ export function AmbientCompanion({
         }
       } catch (err) {
         console.error("File drop failed:", err);
-        showToast("Failed to ingest dropped file", "error");
+        showToast(t('szFailedToIngestDroppedFile'), "error");
       }
     };
     reader.readAsDataURL(file);
@@ -277,7 +279,7 @@ export function AmbientCompanion({
           await fetchDeliverables();
           setActiveTab("deliverables");
         } else if (actionId === "take_care_of_it") {
-          showToast("Autonomous loop completed: deliverable ready!", "success");
+          showToast(t('szAutonomousLoopCompletedDeliverableReady'), "success");
           await fetchDeliverables();
           fetchOverview();
         } else {
@@ -417,7 +419,7 @@ export function AmbientCompanion({
               return [
                 {
                   id: data.task_id,
-                  title: data.step_title || "Running task",
+                  title: data.step_title || t('szRunningTask'),
                   status: data.status || "running",
                   progress_pct: data.progress_pct,
                   progress_percent: data.progress_pct,
@@ -485,7 +487,7 @@ export function AmbientCompanion({
 
   const toggleVoiceListening = () => {
     if (!recognitionRef.current) {
-      showToast("Speech recognition is not supported in this environment.", "warning");
+      showToast(t('szSpeechRecognitionIsNotSupportedIn'), "warning");
       return;
     }
     if (isListening) {
@@ -503,7 +505,7 @@ export function AmbientCompanion({
 
   const speakText = (text: string) => {
     if (!("speechSynthesis" in window)) {
-      showToast("Text-to-speech not supported.", "warning");
+      showToast(t('szTextToSpeechNotSupported'), "warning");
       return;
     }
     if (isSpeaking) {
@@ -551,11 +553,11 @@ export function AmbientCompanion({
         fetchOverview();
         fetchUnreadNotifications();
       } else {
-        showToast("Error communicating with Aether.", "error");
+        showToast(t('szErrorCommunicatingWithAether'), "error");
       }
     } catch (err) {
       console.error("Companion request error:", err);
-      showToast("Network error contacting Aether Core.", "error");
+      showToast(t('szNetworkErrorContactingAetherCore'), "error");
     } finally {
       setIsSubmitting(false);
     }
@@ -582,7 +584,7 @@ export function AmbientCompanion({
         showToast(res.message, "error");
       }
     } catch (err: any) {
-      showToast(err.message || "Network error while approving action.", "error");
+      showToast(err.message || t('szNetworkErrorWhileApprovingAction'), "error");
     } finally {
       setActionLoading(null);
     }
@@ -596,7 +598,7 @@ export function AmbientCompanion({
         target_type: "action_execution",
         target_id: executionId,
         decision: "reject",
-        reason: "Declined by user via Companion",
+        reason: t('szDeclinedByUserViaCompanion'),
         workspaceName: activeWorkspace || propWorkspaceName,
       });
 
@@ -608,7 +610,7 @@ export function AmbientCompanion({
         showToast(res.message, "error");
       }
     } catch (err: any) {
-      showToast(err.message || "Network error while declining action.", "error");
+      showToast(err.message || t('szNetworkErrorWhileDecliningAction'), "error");
     } finally {
       setActionLoading(null);
     }
@@ -663,7 +665,7 @@ export function AmbientCompanion({
       <div
         data-testid="companion-floating-orb"
         onClick={() => setSurfaceMode("hud")}
-        title="Aether Companion — Click to expand (Option+Space)"
+        title={t('szAetherCompanionClickToExpandOption')}
         style={{
           width: "100vw",
           height: "100vh",
@@ -787,9 +789,9 @@ export function AmbientCompanion({
           }}
         >
           <UploadCloud size={48} className="animate-bounce" />
-          <div style={{ fontSize: "16px", fontWeight: 700 }}>Drop file to ingest into Workspace Inbox</div>
+          <div style={{ fontSize: "16px", fontWeight: 700 }}>{t('sdDropFileToIngestIntoWorkspace')}</div>
           <div style={{ fontSize: "12px", color: "rgba(255, 255, 255, 0.6)" }}>
-            Automatically parsed and attached to active Companion context
+            {t('sdAutomaticallyParsedAndAttachedToActive')}
           </div>
         </div>
       )}
@@ -884,7 +886,7 @@ export function AmbientCompanion({
           {/* Collapse to Orb */}
           <button
             onClick={() => setSurfaceMode("orb")}
-            title="Collapse to Floating Orb"
+            title={t('szCollapseToFloatingOrb')}
             style={{
               padding: "4px 6px",
               borderRadius: "6px",
@@ -900,7 +902,7 @@ export function AmbientCompanion({
           {/* Toggle Expand / Cockpit */}
           <button
             onClick={() => setSurfaceMode(prev => (prev === "expanded" ? "hud" : "expanded"))}
-            title={surfaceMode === "expanded" ? "Restore Compact HUD" : "Expand Cockpit"}
+            title={surfaceMode === "expanded" ? t('szRestoreCompactHud') : t('szExpandCockpit')}
             style={{
               padding: "4px 6px",
               borderRadius: "6px",
@@ -915,7 +917,7 @@ export function AmbientCompanion({
 
           <button
             onClick={handleOpenFullWorkspace}
-            title="Open Full Workspace (Cmd+O)"
+            title={t('szOpenFullWorkspaceCmdO')}
             data-testid="companion-open-workspace-btn"
             style={{
               display: "inline-flex",
@@ -1010,7 +1012,7 @@ export function AmbientCompanion({
           }}
         >
           <Target size={12} />
-          <span>Missions</span>
+          <span>{t('uiMissions')}</span>
           {activeMissions.length > 0 && (
             <span style={{ fontSize: "9px", backgroundColor: "#38bdf8", color: "#000", padding: "1px 5px", borderRadius: "8px", fontWeight: 700 }}>
               {activeMissions.length}
@@ -1035,7 +1037,7 @@ export function AmbientCompanion({
           }}
         >
           <Shield size={12} />
-          <span>Approvals</span>
+          <span>{t('uiApprovals')}</span>
           {pendingApprovals.length > 0 && (
             <span style={{ fontSize: "9px", backgroundColor: "#f59e0b", color: "#000", padding: "1px 5px", borderRadius: "8px", fontWeight: 700 }}>
               {pendingApprovals.length}
@@ -1091,7 +1093,7 @@ export function AmbientCompanion({
           }}
         >
           <Eye size={12} />
-          <span>Context</span>
+          <span>{t('uiContext')}</span>
           {capturedContext && (
             <span style={{ fontSize: "9px", color: "rgba(255, 255, 255, 0.5)", maxWidth: "80px", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
               {capturedContext.app_name}
@@ -1196,7 +1198,7 @@ export function AmbientCompanion({
                 handleSendPrompt();
               }
             }}
-            placeholder={isListening ? "Listening to your voice..." : "Ask Aether, execute actions, or dispatch workforce..."}
+            placeholder={isListening ? t('szListeningToYourVoice') : t('szAskAetherExecuteActionsOrDispatch')}
             disabled={isSubmitting}
             style={{
               flex: 1,
@@ -1212,7 +1214,7 @@ export function AmbientCompanion({
           {/* Voice Mic Button */}
           <button
             onClick={toggleVoiceListening}
-            title={isListening ? "Listening... click to stop (Cmd+M)" : "Voice input (Cmd+M)"}
+            title={isListening ? t('szListeningClickToStopCmdM') : t('szVoiceInputCmdM')}
             data-testid="companion-voice-btn"
             style={{
               padding: "5px",
@@ -1263,7 +1265,7 @@ export function AmbientCompanion({
               onClick={() => {
                 inputRef.current?.focus();
               }}
-              title="Chat mode"
+              title={t('szChatMode')}
               style={{
                 display: "inline-flex",
                 alignItems: "center",
@@ -1284,7 +1286,7 @@ export function AmbientCompanion({
 
             <button
               onClick={toggleVoiceListening}
-              title="Voice Push-To-Talk"
+              title={t('szVoicePushToTalk')}
               style={{
                 display: "inline-flex",
                 alignItems: "center",
@@ -1300,13 +1302,13 @@ export function AmbientCompanion({
               }}
             >
               <Mic size={11} />
-              <span>Voice</span>
+              <span>{t('uiVoice')}</span>
             </button>
 
             {/* Truthful Visual Capability Button */}
             <button
               onClick={() => setShowVisualNotice(prev => !prev)}
-              title="Visual Intelligence state"
+              title={t('szVisualIntelligenceState')}
               style={{
                 display: "inline-flex",
                 alignItems: "center",
@@ -1322,14 +1324,14 @@ export function AmbientCompanion({
               }}
             >
               <Eye size={11} />
-              <span>Visual</span>
+              <span>{t('uiVisual')}</span>
               <span style={{ fontSize: "9px", opacity: 0.6 }}>(Upcoming)</span>
             </button>
           </div>
 
           <button
             onClick={() => setShowSuggestions(prev => !prev)}
-            title="Toggle prompt suggestions"
+            title={t('szTogglePromptSuggestions')}
             style={{
               fontSize: "11px",
               padding: "2px 6px",
@@ -1340,7 +1342,7 @@ export function AmbientCompanion({
               cursor: "pointer",
             }}
           >
-            {showSuggestions ? "Hide suggestions" : "Suggestions"}
+            {showSuggestions ? t('szHideSuggestions') : "Suggestions"}
           </button>
         </div>
 
@@ -1360,7 +1362,7 @@ export function AmbientCompanion({
               whiteSpace: "nowrap",
             }}
           >
-            ⚡ Take Care of It
+            {t('sdTakeCareOfIt')}
           </button>
           <button
             onClick={() => handleQuickAction("capture_screen_context")}
@@ -1375,7 +1377,7 @@ export function AmbientCompanion({
               whiteSpace: "nowrap",
             }}
           >
-            🔍 Inspect Screen
+            {t('sdInspectScreen')}
           </button>
           <button
             onClick={() => handleQuickAction("refresh_deliverables")}
@@ -1390,7 +1392,7 @@ export function AmbientCompanion({
               whiteSpace: "nowrap",
             }}
           >
-            📁 Deliverables
+            {t('sdDeliverables')}
           </button>
           <button
             onClick={() => handleQuickAction("run_quick_audit")}
@@ -1405,7 +1407,7 @@ export function AmbientCompanion({
               whiteSpace: "nowrap",
             }}
           >
-            🛡️ Mesh Audit
+            {t('sdMeshAudit')}
           </button>
           <button
             onClick={() => handleQuickAction("check_notifications")}
@@ -1420,7 +1422,7 @@ export function AmbientCompanion({
               whiteSpace: "nowrap",
             }}
           >
-            🔔 Check Alerts
+            {t('sdCheckAlerts')}
           </button>
         </div>
 
@@ -1461,7 +1463,7 @@ export function AmbientCompanion({
                 whiteSpace: "nowrap",
               }}
             >
-              🚀 CarShine Research
+              {t('sdCarshineResearch')}
             </button>
             <button
               onClick={() => {
@@ -1479,7 +1481,7 @@ export function AmbientCompanion({
                 whiteSpace: "nowrap",
               }}
             >
-              📅 Schedule Meeting
+              {t('sdScheduleMeeting')}
             </button>
             <button
               onClick={() => {
@@ -1497,7 +1499,7 @@ export function AmbientCompanion({
                 whiteSpace: "nowrap",
               }}
             >
-              📝 Create Doc
+              {t('sdCreateDoc')}
             </button>
           </div>
         )}
@@ -1521,7 +1523,7 @@ export function AmbientCompanion({
           <div style={{ display: "flex", gap: "8px", alignItems: "flex-start" }}>
             <Info size={14} color="#38bdf8" style={{ marginTop: "2px", flexShrink: 0 }} />
             <span style={{ fontSize: "11px", color: "#e0f2fe", lineHeight: 1.4 }}>
-              <strong>Visual Intelligence</strong>: In arrivo nel prossimo aggiornamento desktop. La cattura dello schermo e della webcam è attualmente disattivata per tutelare la tua privacy.
+              <strong>{t('sdVisualIntelligence')}</strong>{t('seComingInTheNextDesktopUpdate')}
             </span>
           </div>
           <button
@@ -1562,14 +1564,14 @@ export function AmbientCompanion({
                 onClick={handleOpenFullWorkspace}
                 style={{ fontSize: "11px", background: "transparent", border: "none", color: "rgba(255,255,255,0.6)", cursor: "pointer", display: "flex", alignItems: "center", gap: "3px" }}
               >
-                <span>Full Mission Center</span>
+                <span>{t('sdFullMissionCenter')}</span>
                 <ExternalLink size={10} />
               </button>
             </div>
 
             {activeMissions.length === 0 ? (
               <div style={{ textAlign: "center", padding: "28px 14px", color: "rgba(255, 255, 255, 0.4)", fontSize: "12px" }}>
-                No active missions currently executing. Type a goal in Chat to dispatch the digital workforce.
+                {t('sdNoActiveMissionsCurrentlyExecutingType')}
               </div>
             ) : (
               activeMissions.map(m => (
@@ -1608,7 +1610,7 @@ export function AmbientCompanion({
                       onClick={handleOpenFullWorkspace}
                       style={{ fontSize: "11px", color: "#38bdf8", background: "transparent", border: "none", cursor: "pointer", display: "flex", alignItems: "center", gap: "2px" }}
                     >
-                      <span>View Graph</span>
+                      <span>{t('sdViewGraph')}</span>
                       <ArrowUpRight size={11} />
                     </button>
                   </div>
@@ -1624,11 +1626,11 @@ export function AmbientCompanion({
             <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
               <div style={{ display: "flex", alignItems: "center", gap: "6px", fontSize: "13px", fontWeight: 600, color: "#38bdf8" }}>
                 <FileText size={15} />
-                <span>Recent Deliverables & Outputs</span>
+                <span>{t('sdRecentDeliverablesOutputs')}</span>
               </div>
               <button
                 onClick={fetchDeliverables}
-                title="Refresh Deliverables"
+                title={t('sdRefreshDeliverables')}
                 style={{ background: "transparent", border: "none", color: "rgba(255, 255, 255, 0.6)", cursor: "pointer" }}
               >
                 <RefreshCw size={12} />
@@ -1637,7 +1639,7 @@ export function AmbientCompanion({
 
             {deliverables.length === 0 ? (
               <div style={{ textAlign: "center", padding: "28px 14px", color: "rgba(255, 255, 255, 0.4)", fontSize: "12px" }}>
-                No output files or deliverables recorded in this workspace yet.
+                {t('sdNoOutputFilesOrDeliverablesRecorded')}
               </div>
             ) : (
               deliverables.map(d => (
@@ -1670,16 +1672,16 @@ export function AmbientCompanion({
                     <button
                       onClick={() => {
                         navigator.clipboard?.writeText(d.file_path);
-                        showToast("File path copied to clipboard", "info");
+                        showToast(t('sdFilePathCopiedToClipboard'), "info");
                       }}
-                      title="Copy file path"
+                      title={t('sdCopyFilePath')}
                       style={{ padding: "4px 8px", borderRadius: "6px", border: "1px solid rgba(255, 255, 255, 0.1)", background: "rgba(255, 255, 255, 0.05)", color: "rgba(255, 255, 255, 0.7)", cursor: "pointer" }}
                     >
                       <Copy size={11} />
                     </button>
                     <button
                       onClick={handleOpenFullWorkspace}
-                      title="Open in Workspace"
+                      title={t('sdOpenInWorkspace')}
                       style={{ padding: "4px 8px", borderRadius: "6px", border: "none", background: "rgba(56, 189, 248, 0.2)", color: "#38bdf8", cursor: "pointer" }}
                     >
                       <ExternalLink size={11} />
@@ -1697,7 +1699,7 @@ export function AmbientCompanion({
             <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
               <div style={{ display: "flex", alignItems: "center", gap: "6px", fontSize: "13px", fontWeight: 600, color: "#c084fc" }}>
                 <Eye size={15} />
-                <span>On-Demand Desktop & Screen Context</span>
+                <span>{t('sdOnDemandDesktopScreenContext')}</span>
               </div>
               <button
                 onClick={handleCaptureContext}
@@ -1716,7 +1718,7 @@ export function AmbientCompanion({
                 }}
               >
                 <RefreshCw size={11} className={isCapturingContext ? "animate-spin" : ""} />
-                <span>{isCapturingContext ? "Probing..." : "Probe Now"}</span>
+                <span>{isCapturingContext ? "Probing..." : t('sdProbeNow')}</span>
               </button>
             </div>
 
@@ -1733,7 +1735,7 @@ export function AmbientCompanion({
                 }}
               >
                 <div>
-                  <div style={{ fontSize: "11px", color: "rgba(255, 255, 255, 0.45)", textTransform: "uppercase" }}>Active Application</div>
+                  <div style={{ fontSize: "11px", color: "rgba(255, 255, 255, 0.45)", textTransform: "uppercase" }}>{t('sdActiveApplication')}</div>
                   <div style={{ fontSize: "14px", fontWeight: 600, color: "#f8fafc", marginTop: "2px" }}>
                     {capturedContext.app_name} {capturedContext.window_title ? `— "${capturedContext.window_title}"` : ""}
                   </div>
@@ -1741,7 +1743,7 @@ export function AmbientCompanion({
 
                 {capturedContext.clipboard_text && (
                   <div>
-                    <div style={{ fontSize: "11px", color: "rgba(255, 255, 255, 0.45)", textTransform: "uppercase" }}>Clipboard Snippet</div>
+                    <div style={{ fontSize: "11px", color: "rgba(255, 255, 255, 0.45)", textTransform: "uppercase" }}>{t('sdClipboardSnippet')}</div>
                     <pre
                       style={{
                         margin: "4px 0 0 0",
@@ -1768,7 +1770,7 @@ export function AmbientCompanion({
                       setPromptInput(prev => (prev ? `${prev}\n\n${snippet}` : snippet));
                       setActiveTab("chat");
                       inputRef.current?.focus();
-                      showToast("Context appended to Chat prompt", "success");
+                      showToast(t('sdContextAppendedToChatPrompt'), "success");
                     }}
                     style={{
                       flex: 1,
@@ -1786,13 +1788,13 @@ export function AmbientCompanion({
                       gap: "6px",
                     }}
                   >
-                    <span>Insert into Chat Prompt</span>
+                    <span>{t('sdInsertIntoChatPrompt')}</span>
                   </button>
                 </div>
               </div>
             ) : (
               <div style={{ textAlign: "center", padding: "28px 14px", color: "rgba(255, 255, 255, 0.4)", fontSize: "12px" }}>
-                Click "Probe Now" to inspect the active application and clipboard.
+                Click t('sdProbeNow') to inspect the active application and clipboard.
               </div>
             )}
           </div>
@@ -1816,7 +1818,7 @@ export function AmbientCompanion({
             <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
               <Shield size={16} color="#f59e0b" />
               <span style={{ fontSize: "12px", fontWeight: 600, color: "#fbbf24" }}>
-                Approval Required
+                {t('sdApprovalRequired')}
               </span>
             </div>
 
@@ -1847,7 +1849,7 @@ export function AmbientCompanion({
                     Aether wants to {friendlyAction.toLowerCase()}{targetDetail ? `: "${targetDetail}"` : "."}
                   </div>
                   <div style={{ fontSize: "11px", color: "rgba(255, 255, 255, 0.55)" }}>
-                    This will safely update your calendar or external account. Review and confirm to proceed.
+                    {t('sdThisWillSafelyUpdateYourCalendar')}
                   </div>
 
                   <div style={{ display: "flex", gap: "8px", marginTop: "4px" }}>
@@ -1895,7 +1897,7 @@ export function AmbientCompanion({
                         opacity: actionLoading === approvalId ? 0.6 : 1,
                       }}
                     >
-                      {actionLoading === approvalId ? "..." : "Not now"}
+                      {actionLoading === approvalId ? "..." : t('sdNotNow')}
                     </button>
                   </div>
                 </div>
@@ -1950,7 +1952,7 @@ export function AmbientCompanion({
                   </div>
                   <button
                     onClick={() => speakText(latestResponse.content)}
-                    title={isSpeaking ? "Stop speaking" : "Listen to response"}
+                    title={isSpeaking ? t('sdStopSpeaking') : t('sdListenToResponse')}
                     style={{
                       padding: "3px",
                       background: "transparent",
@@ -2092,10 +2094,10 @@ export function AmbientCompanion({
             </div>
             <div style={{ display: "flex", flexDirection: "column", gap: "4px" }}>
               <span style={{ fontSize: "14px", fontWeight: 600, color: "#f8fafc" }}>
-                Aether Ambient Presence
+                {t('sdAetherAmbientPresence')}
               </span>
               <span style={{ fontSize: "12px", color: "rgba(255, 255, 255, 0.5)", maxWidth: "260px" }}>
-                Evocato vicino al tuo cursore. Chiedi, dialoga o assegna compiti operativi alla workforce.
+                {t('seSummonedNextToYourCursorAsk')}
               </span>
             </div>
           </div>
@@ -2168,7 +2170,7 @@ export function AmbientCompanion({
               whiteSpace: "nowrap",
             }}
           >
-            Open in Aether ↗
+            {t('sdOpenInAether')}
           </button>
         </div>
       )}

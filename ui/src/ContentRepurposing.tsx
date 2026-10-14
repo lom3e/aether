@@ -199,11 +199,11 @@ By standardizing on self-healing execution and strict safety policies, engineeri
         }
       } else {
         const err = await res.json().catch(() => ({}));
-        showToast(err.detail || 'Failed to load campaigns', 'error');
+        showToast(err.detail || t('szFailedToLoadCampaigns'), 'error');
       }
     } catch (err: any) {
       console.error('Failed to load campaigns:', err);
-      showToast(err?.message || 'Error loading campaigns', 'error');
+      showToast(err?.message || t('szErrorLoadingCampaigns'), 'error');
     }
   };
 
@@ -215,11 +215,11 @@ By standardizing on self-healing execution and strict safety policies, engineeri
         setClients(data);
       } else {
         const err = await res.json().catch(() => ({}));
-        showToast(err.detail || 'Failed to load clients', 'error');
+        showToast(err.detail || t('szFailedToLoadClients'), 'error');
       }
     } catch (err: any) {
       console.error('Failed to load clients:', err);
-      showToast(err?.message || 'Error loading clients', 'error');
+      showToast(err?.message || t('szErrorLoadingClients'), 'error');
     }
   };
 
@@ -233,11 +233,11 @@ By standardizing on self-healing execution and strict safety policies, engineeri
         setBiData(data);
       } else {
         const err = await res.json().catch(() => ({}));
-        showToast(err.detail || 'Failed to load BI analytics', 'error');
+        showToast(err.detail || t('szFailedToLoadBiAnalytics'), 'error');
       }
     } catch (err: any) {
       console.error('Failed to load BI data:', err);
-      showToast(err?.message || 'Error loading BI analytics', 'error');
+      showToast(err?.message || t('szErrorLoadingBiAnalytics'), 'error');
     } finally {
       setBiLoading(false);
     }
@@ -262,7 +262,7 @@ By standardizing on self-healing execution and strict safety policies, engineeri
       });
       if (!res.ok) {
         const err = await res.json();
-        throw new Error(err.detail || 'Repurposing failed');
+        throw new Error(err.detail || t('szRepurposingFailed'));
       }
       const data = await res.json();
       setVariants(data.variants || []);
@@ -270,7 +270,7 @@ By standardizing on self-healing execution and strict safety policies, engineeri
         setActivePlatformTab(data.variants[0].platform);
       }
     } catch (err: any) {
-      setError(err.message || 'Failed to repurpose content');
+      setError(err.message || t('szFailedToRepurposeContent'));
     } finally {
       setLoading(false);
     }
@@ -294,14 +294,14 @@ By standardizing on self-healing execution and strict safety policies, engineeri
         const updated = await res.json();
         setVariants((prev) => prev.map((v) => (v.id === updated.id ? updated : v)));
         setScheduleVariantId(null);
-        showToast('Variant scheduled successfully', 'success');
+        showToast(t('szVariantScheduledSuccessfully'), 'success');
       } else {
         const err = await res.json().catch(() => ({}));
-        showToast(err.detail || 'Failed to schedule variant', 'error');
+        showToast(err.detail || t('szFailedToScheduleVariant'), 'error');
       }
     } catch (err: any) {
       console.error('Failed to schedule:', err);
-      showToast(err?.message || 'Error scheduling variant', 'error');
+      showToast(err?.message || t('szErrorSchedulingVariant'), 'error');
     }
   };
 
@@ -313,14 +313,14 @@ By standardizing on self-healing execution and strict safety policies, engineeri
       if (res.ok) {
         const updated = await res.json();
         setVariants((prev) => prev.map((v) => (v.id === updated.id ? updated : v)));
-        showToast('Variant approved and published', 'success');
+        showToast(t('szVariantApprovedAndPublished'), 'success');
       } else {
         const errData = await res.json().catch(() => ({}));
-        showToast(`Failed to approve variant: ${errData.detail || 'Server error'}`, 'error');
+        showToast(`Failed to approve variant: ${errData.detail || t('szServerError')}`, 'error');
       }
     } catch (err: any) {
       console.error('Failed to approve variant:', err);
-      showToast(err?.message || 'Network error approving variant.', 'error');
+      showToast(err?.message || t('szNetworkErrorApprovingVariant'), 'error');
     }
   };
 
@@ -345,14 +345,14 @@ By standardizing on self-healing execution and strict safety policies, engineeri
         setShowCampaignModal(false);
         setNewCampName('');
         setNewCampDesc('');
-        showToast('Campaign created successfully', 'success');
+        showToast(t('szCampaignCreatedSuccessfully'), 'success');
       } else {
         const err = await res.json().catch(() => ({}));
-        showToast(err.detail || 'Failed to create campaign', 'error');
+        showToast(err.detail || t('szFailedToCreateCampaign'), 'error');
       }
     } catch (err: any) {
       console.error('Failed to create campaign:', err);
-      showToast(err?.message || 'Error creating campaign', 'error');
+      showToast(err?.message || t('szErrorCreatingCampaign'), 'error');
     }
   };
 
@@ -378,14 +378,14 @@ By standardizing on self-healing execution and strict safety policies, engineeri
         setNewClientName('');
         setNewClientDomain('');
         setNewClientEmail('');
-        showToast('Client created successfully', 'success');
+        showToast(t('szClientCreatedSuccessfully'), 'success');
       } else {
         const err = await res.json().catch(() => ({}));
-        showToast(err.detail || 'Failed to create client', 'error');
+        showToast(err.detail || t('szFailedToCreateClient'), 'error');
       }
     } catch (err: any) {
       console.error('Failed to create client:', err);
-      showToast(err?.message || 'Error creating client', 'error');
+      showToast(err?.message || t('szErrorCreatingClient'), 'error');
     }
   };
 
@@ -399,11 +399,11 @@ By standardizing on self-healing execution and strict safety policies, engineeri
         setReportModalContent(data.report_markdown);
       } else {
         const err = await res.json().catch(() => ({}));
-        showToast(err.detail || 'Failed to generate report', 'error');
+        showToast(err.detail || t('szFailedToGenerateReport'), 'error');
       }
     } catch (err: any) {
       console.error('Failed to generate report:', err);
-      showToast(err?.message || 'Error generating report', 'error');
+      showToast(err?.message || t('szErrorGeneratingReport'), 'error');
     }
   };
 
@@ -423,14 +423,14 @@ By standardizing on self-healing execution and strict safety policies, engineeri
         const created = await res.json();
         setReviews((prev) => [created, ...prev]);
         handleCopy(created.token, `token-${created.id}`);
-        showToast('Review link created and copied', 'success');
+        showToast(t('szReviewLinkCreatedAndCopied'), 'success');
       } else {
         const err = await res.json().catch(() => ({}));
-        showToast(err.detail || 'Failed to create review link', 'error');
+        showToast(err.detail || t('szFailedToCreateReviewLink'), 'error');
       }
     } catch (err: any) {
       console.error('Failed to create review link:', err);
-      showToast(err?.message || 'Error creating review link', 'error');
+      showToast(err?.message || t('szErrorCreatingReviewLink'), 'error');
     }
   };
 
@@ -461,7 +461,7 @@ By standardizing on self-healing execution and strict safety policies, engineeri
                   color: 'hsl(var(--primary))',
                 }}
               >
-                Autonomous Engine
+                {t('szAutonomousEngine')}
               </span>
             </div>
             <p style={{ fontSize: '13px', color: 'hsl(var(--muted-fg))', margin: 0 }}>
@@ -475,7 +475,7 @@ By standardizing on self-healing execution and strict safety policies, engineeri
               onClick={() => navigate('missions')}
               style={{ fontSize: '13px' }}
             >
-              Missions
+              {t('uiMissions')}
             </button>
             <button
               className="btn btn-secondary"
@@ -483,7 +483,7 @@ By standardizing on self-healing execution and strict safety policies, engineeri
               style={{ display: 'flex', alignItems: 'center', gap: '6px', fontSize: '13px' }}
             >
               <Plus size={15} />
-              New Campaign
+              {t('szNewCampaign')}
             </button>
             <button
               className="btn btn-primary"
@@ -491,7 +491,7 @@ By standardizing on self-healing execution and strict safety policies, engineeri
               style={{ display: 'flex', alignItems: 'center', gap: '6px', fontSize: '13px' }}
             >
               <Users size={15} />
-              New Client
+              {t('szNewClient')}
             </button>
           </div>
         </div>
@@ -622,7 +622,7 @@ By standardizing on self-healing execution and strict safety policies, engineeri
                   style={{ width: '100%', fontSize: '13px', lineHeight: 1.5, resize: 'vertical' }}
                   value={sourceText}
                   onChange={(e) => setSourceText(e.target.value)}
-                  placeholder="Paste blog post, mission deliverable, architecture spec, or release notes..."
+                  placeholder={t('szPasteBlogPostMissionDeliverableArchitecture')}
                 />
               </div>
 
@@ -809,7 +809,7 @@ By standardizing on self-healing execution and strict safety policies, engineeri
                         {v.platform === 'linkedin' && 'LinkedIn'}
                         {v.platform === 'twitter_thread' && `Twitter Thread (${v.thread_tweets.length})`}
                         {v.platform === 'newsletter' && 'Newsletter'}
-                        {v.platform === 'video_script' && 'Video Script'}
+                        {v.platform === 'video_script' && t('szVideoScript')}
                       </span>
                     </button>
                   ))}
@@ -870,7 +870,7 @@ By standardizing on self-healing execution and strict safety policies, engineeri
                           </span>
                         ) : (
                           <span style={{ fontSize: '11px', color: '#ef4444', display: 'flex', alignItems: 'center', gap: '3px' }}>
-                            <AlertCircle size={12} /> Limit exceeded
+                            <AlertCircle size={12} /> {t('szLimitExceeded')}
                           </span>
                         )}
                       </div>
@@ -896,7 +896,7 @@ By standardizing on self-healing execution and strict safety policies, engineeri
                               }}
                             >
                               <Calendar size={13} />
-                              Schedule
+                              {t('uiSchedule')}
                             </button>
 
                             <button
@@ -905,7 +905,7 @@ By standardizing on self-healing execution and strict safety policies, engineeri
                               onClick={() => handlePublish(currentVariant.id)}
                             >
                               <Send size={13} />
-                              Approve for Manual Publish
+                              {t('szApproveForManualPublish')}
                             </button>
                           </>
                         )}
@@ -992,7 +992,7 @@ By standardizing on self-healing execution and strict safety policies, engineeri
           >
             <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
               <Target size={18} style={{ color: 'hsl(var(--primary))' }} />
-              <span style={{ fontSize: '14px', fontWeight: 600 }}>Active Campaign Analysis:</span>
+              <span style={{ fontSize: '14px', fontWeight: 600 }}>{t('szActiveCampaignAnalysis')}</span>
               <select
                 className="input"
                 style={{ fontSize: '13px', minWidth: '240px' }}
@@ -1016,7 +1016,7 @@ By standardizing on self-healing execution and strict safety policies, engineeri
               onClick={() => fetchBI(selectedCampaignId)}
               disabled={biLoading}
             >
-              {biLoading ? 'Computing BI...' : 'Refresh Analytics'}
+              {biLoading ? t('szComputingBi') : t('szRefreshAnalytics')}
             </button>
           </div>
 
@@ -1024,7 +1024,7 @@ By standardizing on self-healing execution and strict safety policies, engineeri
           {biData && (
             <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: '16px' }}>
               <div style={{ padding: '16px', borderRadius: '8px', border: '1px solid hsl(var(--border))', backgroundColor: 'hsl(var(--card))' }}>
-                <div style={{ fontSize: '12px', color: 'hsl(var(--muted-fg))', marginBottom: '6px' }}>Estimated Impressions</div>
+                <div style={{ fontSize: '12px', color: 'hsl(var(--muted-fg))', marginBottom: '6px' }}>{t('szEstimatedImpressions')}</div>
                 <div style={{ fontSize: '24px', fontWeight: 700, color: 'hsl(var(--primary))' }}>
                   {biData.estimated_impressions.toLocaleString()}
                 </div>
@@ -1034,17 +1034,17 @@ By standardizing on self-healing execution and strict safety policies, engineeri
               </div>
 
               <div style={{ padding: '16px', borderRadius: '8px', border: '1px solid hsl(var(--border))', backgroundColor: 'hsl(var(--card))' }}>
-                <div style={{ fontSize: '12px', color: 'hsl(var(--muted-fg))', marginBottom: '6px' }}>Estimated ROI Multiplier</div>
+                <div style={{ fontSize: '12px', color: 'hsl(var(--muted-fg))', marginBottom: '6px' }}>{t('szEstimatedRoiMultiplier')}</div>
                 <div style={{ fontSize: '24px', fontWeight: 700, color: '#16a34a' }}>
                   {biData.estimated_roi_multiplier.toFixed(2)}x
                 </div>
                 <div style={{ fontSize: '11px', color: 'hsl(var(--muted-fg))', marginTop: '4px' }}>
-                  On workforce token allocation
+                  {t('szOnWorkforceTokenAllocation')}
                 </div>
               </div>
 
               <div style={{ padding: '16px', borderRadius: '8px', border: '1px solid hsl(var(--border))', backgroundColor: 'hsl(var(--card))' }}>
-                <div style={{ fontSize: '12px', color: 'hsl(var(--muted-fg))', marginBottom: '6px' }}>Average Engagement</div>
+                <div style={{ fontSize: '12px', color: 'hsl(var(--muted-fg))', marginBottom: '6px' }}>{t('szAverageEngagement')}</div>
                 <div style={{ fontSize: '24px', fontWeight: 700 }}>
                   {biData.avg_engagement_score.toFixed(1)}/100
                 </div>
@@ -1054,7 +1054,7 @@ By standardizing on self-healing execution and strict safety policies, engineeri
               </div>
 
               <div style={{ padding: '16px', borderRadius: '8px', border: '1px solid hsl(var(--border))', backgroundColor: 'hsl(var(--card))' }}>
-                <div style={{ fontSize: '12px', color: 'hsl(var(--muted-fg))', marginBottom: '6px' }}>Pipeline Status</div>
+                <div style={{ fontSize: '12px', color: 'hsl(var(--muted-fg))', marginBottom: '6px' }}>{t('szPipelineStatus')}</div>
                 <div style={{ fontSize: '24px', fontWeight: 700 }}>
                   {biData.published_assets} / {biData.total_assets}
                 </div>
@@ -1069,14 +1069,14 @@ By standardizing on self-healing execution and strict safety policies, engineeri
           {biData && (
             <div style={{ display: 'grid', gridTemplateColumns: '1.4fr 1fr', gap: '20px' }}>
               <div style={{ padding: '20px', borderRadius: '8px', border: '1px solid hsl(var(--border))', backgroundColor: 'hsl(var(--card))' }}>
-                <h3 style={{ fontSize: '15px', fontWeight: 600, marginBottom: '12px' }}>Workforce Executive Analysis</h3>
+                <h3 style={{ fontSize: '15px', fontWeight: 600, marginBottom: '12px' }}>{t('szWorkforceExecutiveAnalysis')}</h3>
                 <div style={{ fontSize: '13px', lineHeight: 1.6, whiteSpace: 'pre-wrap' }}>
                   {biData.executive_summary}
                 </div>
               </div>
 
               <div style={{ padding: '20px', borderRadius: '8px', border: '1px solid hsl(var(--border))', backgroundColor: 'hsl(var(--card))' }}>
-                <h3 style={{ fontSize: '15px', fontWeight: 600, marginBottom: '12px' }}>High Resonance Topics</h3>
+                <h3 style={{ fontSize: '15px', fontWeight: 600, marginBottom: '12px' }}>{t('szHighResonanceTopics')}</h3>
                 <div style={{ display: 'flex', flexWrap: 'wrap', gap: '8px', marginBottom: '16px' }}>
                   {biData.top_performing_topics.map((t, idx) => (
                     <span
@@ -1095,7 +1095,7 @@ By standardizing on self-healing execution and strict safety policies, engineeri
                   ))}
                 </div>
 
-                <h4 style={{ fontSize: '13px', fontWeight: 600, marginBottom: '8px' }}>Channel Breakdown</h4>
+                <h4 style={{ fontSize: '13px', fontWeight: 600, marginBottom: '8px' }}>{t('szChannelBreakdown')}</h4>
                 <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
                   {Object.entries(biData.channel_breakdown).map(([ch, count]) => (
                     <div key={ch} style={{ display: 'flex', justifyContent: 'space-between', fontSize: '12px' }}>
@@ -1113,7 +1113,7 @@ By standardizing on self-healing execution and strict safety policies, engineeri
       {/* TAB 3: Client Accounts & Review Gates */}
       {activeMainTab === 'clients' && (
         <div style={{ display: 'flex', flexDirection: 'column', gap: '20px' }}>
-          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(360px, 1fr))', gap: '20px' }}>
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(min(360px, 100%), 1fr))', gap: '20px' }}>
             {clients.map((c) => (
               <div
                 key={c.id}
@@ -1154,7 +1154,7 @@ By standardizing on self-healing execution and strict safety policies, engineeri
 
                   <div style={{ marginBottom: '16px' }}>
                     <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '11px', color: 'hsl(var(--muted-fg))', marginBottom: '4px' }}>
-                      <span>Token Allocation</span>
+                      <span>{t('szTokenAllocation')}</span>
                       <span>{c.used_budget_tokens.toLocaleString()} / {c.monthly_budget_tokens.toLocaleString()}</span>
                     </div>
                     <div style={{ height: '6px', backgroundColor: 'hsl(var(--muted)/0.3)', borderRadius: '3px', overflow: 'hidden' }}>
@@ -1176,7 +1176,7 @@ By standardizing on self-healing execution and strict safety policies, engineeri
                     onClick={() => handleCreateReview(c.id)}
                   >
                     <ExternalLink size={13} />
-                    New Review Link
+                    {t('szNewReviewLink')}
                   </button>
                   <button
                     className="btn btn-primary"
@@ -1184,7 +1184,7 @@ By standardizing on self-healing execution and strict safety policies, engineeri
                     onClick={() => handleGenerateReport(c.id)}
                   >
                     <FileText size={13} />
-                    Exec Report
+                    {t('szExecReport')}
                   </button>
                 </div>
               </div>
@@ -1202,7 +1202,7 @@ By standardizing on self-healing execution and strict safety policies, engineeri
                 backgroundColor: 'hsl(var(--card))',
               }}
             >
-              <h3 style={{ fontSize: '15px', fontWeight: 600, marginBottom: '12px' }}>Recent Client Review Portals</h3>
+              <h3 style={{ fontSize: '15px', fontWeight: 600, marginBottom: '12px' }}>{t('szRecentClientReviewPortals')}</h3>
               <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
                 {reviews.map((r) => (
                   <div
@@ -1289,17 +1289,17 @@ By standardizing on self-healing execution and strict safety policies, engineeri
               maxWidth: '90%',
             }}
           >
-            <h3 style={{ fontSize: '16px', fontWeight: 600, margin: '0 0 16px 0' }}>Create Content Campaign</h3>
+            <h3 style={{ fontSize: '16px', fontWeight: 600, margin: '0 0 16px 0' }}>{t('szCreateContentCampaign')}</h3>
 
             <div style={{ marginBottom: '12px' }}>
-              <label style={{ fontSize: '12px', fontWeight: 500, display: 'block', marginBottom: '4px' }}>Campaign Name</label>
+              <label style={{ fontSize: '12px', fontWeight: 500, display: 'block', marginBottom: '4px' }}>{t('szCampaignName')}</label>
               <input
                 type="text"
                 className="input"
                 style={{ width: '100%', fontSize: '13px' }}
                 value={newCampName}
                 onChange={(e) => setNewCampName(e.target.value)}
-                placeholder="e.g. Q4 Autonomous Workforce Launch"
+                placeholder={t('szEGQ4AutonomousWorkforceLaunch')}
               />
             </div>
 
@@ -1311,12 +1311,12 @@ By standardizing on self-healing execution and strict safety policies, engineeri
                 style={{ width: '100%', fontSize: '13px' }}
                 value={newCampDesc}
                 onChange={(e) => setNewCampDesc(e.target.value)}
-                placeholder="Target goals, cross-channel reach..."
+                placeholder={t('szTargetGoalsCrossChannelReach')}
               />
             </div>
 
             <div style={{ marginBottom: '12px' }}>
-              <label style={{ fontSize: '12px', fontWeight: 500, display: 'block', marginBottom: '4px' }}>Target Audience</label>
+              <label style={{ fontSize: '12px', fontWeight: 500, display: 'block', marginBottom: '4px' }}>{t('szTargetAudience')}</label>
               <input
                 type="text"
                 className="input"
@@ -1327,7 +1327,7 @@ By standardizing on self-healing execution and strict safety policies, engineeri
             </div>
 
             <div style={{ marginBottom: '12px' }}>
-              <label style={{ fontSize: '12px', fontWeight: 500, display: 'block', marginBottom: '4px' }}>Objectives (comma separated)</label>
+              <label style={{ fontSize: '12px', fontWeight: 500, display: 'block', marginBottom: '4px' }}>{t('szObjectivesCommaSeparated')}</label>
               <input
                 type="text"
                 className="input"
@@ -1338,7 +1338,7 @@ By standardizing on self-healing execution and strict safety policies, engineeri
             </div>
 
             <div style={{ marginBottom: '20px' }}>
-              <label style={{ fontSize: '12px', fontWeight: 500, display: 'block', marginBottom: '4px' }}>Tags (comma separated)</label>
+              <label style={{ fontSize: '12px', fontWeight: 500, display: 'block', marginBottom: '4px' }}>{t('szTagsCommaSeparated')}</label>
               <input
                 type="text"
                 className="input"
@@ -1350,10 +1350,10 @@ By standardizing on self-healing execution and strict safety policies, engineeri
 
             <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '8px' }}>
               <button className="btn btn-secondary" onClick={() => setShowCampaignModal(false)}>
-                Cancel
+                {t('uiCancel')}
               </button>
               <button className="btn btn-primary" onClick={handleCreateCampaign} disabled={!newCampName.trim()}>
-                Create Campaign
+                {t('szCreateCampaign')}
               </button>
             </div>
           </div>
@@ -1386,17 +1386,17 @@ By standardizing on self-healing execution and strict safety policies, engineeri
               maxWidth: '90%',
             }}
           >
-            <h3 style={{ fontSize: '16px', fontWeight: 600, margin: '0 0 16px 0' }}>Add Managed Client Account</h3>
+            <h3 style={{ fontSize: '16px', fontWeight: 600, margin: '0 0 16px 0' }}>{t('szAddManagedClientAccount')}</h3>
 
             <div style={{ marginBottom: '12px' }}>
-              <label style={{ fontSize: '12px', fontWeight: 500, display: 'block', marginBottom: '4px' }}>Client Organization Name</label>
+              <label style={{ fontSize: '12px', fontWeight: 500, display: 'block', marginBottom: '4px' }}>{t('szClientOrganizationName')}</label>
               <input
                 type="text"
                 className="input"
                 style={{ width: '100%', fontSize: '13px' }}
                 value={newClientName}
                 onChange={(e) => setNewClientName(e.target.value)}
-                placeholder="e.g. Apex Global Systems"
+                placeholder={t('szEGApexGlobalSystems')}
               />
             </div>
 
@@ -1413,7 +1413,7 @@ By standardizing on self-healing execution and strict safety policies, engineeri
             </div>
 
             <div style={{ marginBottom: '12px' }}>
-              <label style={{ fontSize: '12px', fontWeight: 500, display: 'block', marginBottom: '4px' }}>Contact Email</label>
+              <label style={{ fontSize: '12px', fontWeight: 500, display: 'block', marginBottom: '4px' }}>{t('szContactEmail')}</label>
               <input
                 type="email"
                 className="input"
@@ -1425,22 +1425,22 @@ By standardizing on self-healing execution and strict safety policies, engineeri
             </div>
 
             <div style={{ marginBottom: '12px' }}>
-              <label style={{ fontSize: '12px', fontWeight: 500, display: 'block', marginBottom: '4px' }}>Brand Voice Tone</label>
+              <label style={{ fontSize: '12px', fontWeight: 500, display: 'block', marginBottom: '4px' }}>{t('szBrandVoiceTone')}</label>
               <select
                 className="input"
                 style={{ width: '100%', fontSize: '13px' }}
                 value={newClientTone}
                 onChange={(e) => setNewClientTone(e.target.value)}
               >
-                <option value="professional">Professional & Authoritative</option>
-                <option value="bold">Bold & High Contrast</option>
-                <option value="technical">Technical Deep Dive</option>
-                <option value="conversational">Conversational & Accessible</option>
+                <option value="professional">{t('szProfessionalAuthoritative')}</option>
+                <option value="bold">{t('szBoldHighContrast')}</option>
+                <option value="technical">{t('szTechnicalDeepDive')}</option>
+                <option value="conversational">{t('szConversationalAccessible')}</option>
               </select>
             </div>
 
             <div style={{ marginBottom: '20px' }}>
-              <label style={{ fontSize: '12px', fontWeight: 500, display: 'block', marginBottom: '4px' }}>Target Audience</label>
+              <label style={{ fontSize: '12px', fontWeight: 500, display: 'block', marginBottom: '4px' }}>{t('szTargetAudience')}</label>
               <input
                 type="text"
                 className="input"
@@ -1452,10 +1452,10 @@ By standardizing on self-healing execution and strict safety policies, engineeri
 
             <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '8px' }}>
               <button className="btn btn-secondary" onClick={() => setShowClientModal(false)}>
-                Cancel
+                {t('uiCancel')}
               </button>
               <button className="btn btn-primary" onClick={handleCreateClient} disabled={!newClientName.trim()}>
-                Create Client Profile
+                {t('szCreateClientProfile')}
               </button>
             </div>
           </div>
@@ -1492,13 +1492,13 @@ By standardizing on self-healing execution and strict safety policies, engineeri
             }}
           >
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '16px' }}>
-              <h3 style={{ fontSize: '16px', fontWeight: 600, margin: 0 }}>Executive Client Progress Report</h3>
+              <h3 style={{ fontSize: '16px', fontWeight: 600, margin: 0 }}>{t('szExecutiveClientProgressReport')}</h3>
               <button
                 className="btn btn-secondary"
                 style={{ fontSize: '12px' }}
                 onClick={() => handleCopy(reportModalContent, 'full-report')}
               >
-                {copiedId === 'full-report' ? 'Copied Markdown' : 'Copy Report'}
+                {copiedId === 'full-report' ? t('szCopiedMarkdown') : t('szCopyReport')}
               </button>
             </div>
 
@@ -1521,7 +1521,7 @@ By standardizing on self-healing execution and strict safety policies, engineeri
 
             <div style={{ display: 'flex', justifyContent: 'flex-end' }}>
               <button className="btn btn-primary" onClick={() => setReportModalContent(null)}>
-                Close
+                {t('uiClose')}
               </button>
             </div>
           </div>
@@ -1553,9 +1553,9 @@ By standardizing on self-healing execution and strict safety policies, engineeri
               width: '380px',
             }}
           >
-            <h3 style={{ fontSize: '15px', fontWeight: 600, margin: '0 0 12px 0' }}>Schedule Publication</h3>
+            <h3 style={{ fontSize: '15px', fontWeight: 600, margin: '0 0 12px 0' }}>{t('szSchedulePublication')}</h3>
             <p style={{ fontSize: '12px', color: 'hsl(var(--muted-fg))', margin: '0 0 14px 0' }}>
-              Select target publication date and time:
+              {t('szSelectTargetPublicationDateAndTime')}
             </p>
             <input
               type="datetime-local"
@@ -1566,10 +1566,10 @@ By standardizing on self-healing execution and strict safety policies, engineeri
             />
             <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '8px' }}>
               <button className="btn btn-secondary" onClick={() => setScheduleVariantId(null)}>
-                Cancel
+                {t('uiCancel')}
               </button>
               <button className="btn btn-primary" onClick={handleScheduleSubmit}>
-                Confirm Schedule
+                {t('szConfirmSchedule')}
               </button>
             </div>
           </div>

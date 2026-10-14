@@ -11,6 +11,7 @@ import pytest
 from playwright.sync_api import expect, sync_playwright
 
 from test_personal_agent_ui import _ensure_workspace
+from ui_isolation import clear_pending_work
 
 _state: dict = {}
 
@@ -47,7 +48,7 @@ def test_rejecting_a_proposal_is_stored_by_the_server(browser_context):
     import test_personal_agent_ui as base
     base._state.update(_state)
     page = browser_context.new_page()
-    _ensure_workspace(page)
+    _ensure_workspace(page); clear_pending_work(_state['base_url'], _state['token'])
     _send(page, "Create a document named qa_reject_check.md with key milestones")
     page.wait_for_selector("text=Confirmation Required", timeout=15000)
     page.locator("button:has-text('Reject')").first.click()
@@ -61,7 +62,8 @@ def test_a_clarification_is_answered_in_the_card_and_the_request_resumes(browser
     import test_personal_agent_ui as base
     base._state.update(_state)
     page = browser_context.new_page()
-    _ensure_workspace(page)
+    _ensure_workspace(page); clear_pending_work(_state['base_url'], _state['token'])
+    page.reload(); page.wait_for_selector('.sidebar')
     _send(page, "Leggi e aggiorna il file qa_missing_report_zz.md con i dati di vendita")
     card = page.locator("[data-testid='proposal-clarification']").first
     expect(card).to_be_visible(timeout=15000)

@@ -31,7 +31,7 @@ from aether.core.execution import (
 )
 from aether.missions.models import Deliverable, MilestoneStatus, MissionStatus
 from aether.personal.events import PersonalEventHub, get_personal_event_hub
-from aether.personal.intent_rules import assess_coding_prompt, extract_project_path_mention
+from aether.personal.intent_rules import assess_document_operation, assess_coding_prompt, extract_project_path_mention
 from aether.personal.models import (
     IntentTier,
     PendingApproval,
@@ -334,7 +334,9 @@ def generate_executive_mandate(instruction: str, proposal: Any | None = None) ->
 _INTERROGATIVE_START_RE = re.compile(
     r"^\s*(?:(?:in|a|di|da|con|per|su)\s+(?:che|quale|quali|quanto|quanti|quando|chi)\b|"
     r"(?:chi|che|cosa|quando|dove|come|quanto|quanti|quanta|quante|quale|quali|perch[eé]|"
-    r"who|what|when|where|how|which|why|whose)\b)",
+    r"who|what|when|where|how|which|why|whose)\b|"
+    r"(?:dimmi|dimmelo|spiegami|sai\s+dirmi|sapresti|ti\s+ricordi|ricordi|tell\s+me|do\s+you\s+(?:know|remember)|"
+    r"let\s+me\s+know)\b)",
     re.IGNORECASE,
 )
 _POLITE_REQUEST_RE = re.compile(
@@ -802,7 +804,8 @@ class PersonalAgentService:
             stages.append({"title": tmpl.title if tmpl else em.milestone_id, "status": getattr(em.status, "value", str(em.status)),
                            "error": em.error})
         deliverables = self.mission_store.list_deliverables(mission_id)
-        verified = [d for d in deliverables if d.status == "verified"]
+        deliverables = [d for d in deliverables if getattr(d, "file_available", True)] or deliverables
+        verified = [d for d in deliverables if d.status == "verified" and getattr(d, "file_available", True)]
         m_status = getattr(getattr(mission, "status", None), "value", "unknown")
         e_status = getattr(getattr(execution, "status", None), "value", "not_started")
         done = sum(1 for s_ in stages if s_["status"] == "completed")
@@ -1024,7 +1027,13 @@ class PersonalAgentService:
         documents, status) are ANSWER-tier already and are left untouched.
         """
         intent = self._classify_intent_rules(prompt, recent_history=recent_history)
-        if intent.tier in (IntentTier.DO, IntentTier.ACT, IntentTier.DELEGATE) and _INTERROGATIVE_START_RE.match(prompt or ""):
+        asks_information = bool(_INTERROGATIVE_START_RE.match(prompt or "")) or (
+            # A question that does not open with an interrogative ("Il report del cliente Bianchi quando va inviato?") is
+            # still a question; only missions are downgraded on that evidence, because a wrongly dropped mission costs
+            # one rephrasing while the same guess on a mutating action would be a silent miss.
+            intent.tier == IntentTier.DELEGATE and is_information_question(prompt)
+        )
+        if intent.tier in (IntentTier.DO, IntentTier.ACT, IntentTier.DELEGATE) and asks_information:
             return UserIntent(
                 raw_prompt=prompt,
                 tier=IntentTier.ANSWER,
@@ -1267,6 +1276,23 @@ class PersonalAgentService:
                 summary=f"Read workspace document: {filename}",
                 action_id="files.read_document",
                 action_args={"filename": filename},
+            )
+
+        # 3b2. Editing an existing document ("aggiorna il file report.md con…"): a document operation, not coding.
+        # Decided by what the verb acts on (a document file, no code evidence), not by one more list of verbs.
+        doc_op = assess_document_operation(prompt)
+        if doc_op is not None and not is_information_question(prompt):
+            return UserIntent(
+                raw_prompt=effective_prompt,
+                tier=IntentTier.DO,
+                summary=f"Update document: {doc_op.filename}",
+                action_id="files.create_document",
+                action_args={
+                    "filename": doc_op.filename,
+                    "update": True,
+                    "content": f"# Document created by Aether\n\nPrompt: {prompt}",
+                },
+                intent_type="document_update",
             )
 
         # 3c. Email send (ACT tier - requires safety confirmation)

@@ -96,7 +96,7 @@ export function MessageItem({
             </span>
             {!isUser && (
               <span className="badge" style={{ fontSize: '10px', background: 'hsl(var(--primary)/0.1)', color: 'hsl(var(--primary))' }}>
-                AI Workforce
+                {t('sdAiWorkforce')}
               </span>
             )}
             {!isUser && message.metadata?.model && (

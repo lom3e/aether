@@ -317,7 +317,7 @@ export function Home({
         }]);
       }
     } catch (err: any) {
-      console.error('Chat error', err);
+      console.error(t('sdChatError'), err);
       const errMsg = err?.message || t('homeUiNetworkErrorWhileContactingAether');
       showToast(errMsg, 'error');
       setMessages(prev => [...prev, {
@@ -411,7 +411,7 @@ export function Home({
         target_type: 'action_execution',
         target_id: executionId,
         decision: 'reject',
-        reason: 'Declined by user',
+        reason: t('sdDeclinedByUser'),
         workspaceName,
       });
 
@@ -1179,7 +1179,7 @@ export function Home({
                 {t('homeUiOpenInResults')}
               </button>
             </div>
-            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(280px, 1fr))', gap: '12px' }}>
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(min(280px, 100%), 1fr))', gap: '12px' }}>
               {overview.recent_deliverables.map((deliv: any) => (
                 <div
                   key={deliv.id || deliv.file_path}
@@ -1213,7 +1213,7 @@ export function Home({
                   <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginTop: '4px', fontSize: '11px', color: 'hsl(var(--muted-fg))' }}>
                     <span>{deliv.created_at ? new Date(deliv.created_at).toLocaleDateString([], { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' }) : ''}</span>
                     <span style={{ color: 'hsl(var(--primary))', display: 'inline-flex', alignItems: 'center', gap: '3px' }}>
-                      Visualizza risultato <ArrowRight size={10} />
+                      {t('syViewResult')} <ArrowRight size={10} />
                     </span>
                   </div>
                 </div>
@@ -1223,7 +1223,7 @@ export function Home({
         )}
 
         {/* 5. HUB SHORTCUTS: Lavori, Connessioni, Automazioni, Attività */}
-        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))', gap: '16px', marginBottom: '28px' }}>
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(min(220px, 100%), 1fr))', gap: '16px', marginBottom: '28px' }}>
           {/* Lavori */}
           <div
             className="card"

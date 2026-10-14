@@ -47,23 +47,23 @@ interface AutoArchitectModalProps {
 const QUICK_GOAL_SUGGESTIONS = [
   {
     icon: Compass,
-    label: 'E-Commerce Competitor Intelligence',
-    goal: 'Voglio monitorare i competitor e-commerce, estrarre variazioni di prezzo e cataloghi, e generare un report settimanale di intelligence competitiva.',
+    labelKey: 'syEcommerceCompetitorIntelligence' as const,
+    goalKey: 'syIWantToMonitorECommerce' as const,
   },
   {
     icon: Code,
-    label: 'Code Review & Automated QA',
-    goal: 'Voglio una squadra per analizzare il codice sorgente, rilevare vulnerabilità di sicurezza, verificare standard di qualità e scrivere test automatici.',
+    labelKey: 'syCodeReviewAutomatedQa' as const,
+    goalKey: 'syIWantATeamToAnalyze' as const,
   },
   {
     icon: Brain,
-    label: 'Financial Balance Sheet & KPI Auditor',
-    goal: 'Voglio estrarre dati contabili e bilanci da documenti PDF, calcolare metriche finanziarie (EBITDA, margini) e redigere executive brief per il board.',
+    labelKey: 'syFinancialBalanceSheetKpiAuditor' as const,
+    goalKey: 'syIWantToExtractAccountingData' as const,
   },
   {
     icon: Zap,
-    label: 'Content Strategy & SEO Growth',
-    goal: 'Voglio un team che effettui keyword research, rediga articoli tecnici ottimizzati SEO e crei post per LinkedIn e Twitter.',
+    labelKey: 'syContentStrategySeoGrowth' as const,
+    goalKey: 'syIWantATeamThatDoes' as const,
   },
 ];
 
@@ -96,10 +96,10 @@ export function AutoArchitectModal({ isOpen, onClose, onSuccess }: AutoArchitect
   }, []);
 
   const loadingMessages = [
-    t('architectStep1') || 'Analisi semantica del tuo obiettivo...',
-    t('architectStep2') || 'Progettazione dei ruoli e gerarchia della squadra...',
-    t('architectStep3') || 'Generazione dei prompt di sistema con guardrail...',
-    t('architectStep4') || 'Configurazione della topologia e strumenti...',
+    t('architectStep1') || t('syAnalyzingTheMeaningOfYourGoal'),
+    t('architectStep2') || t('syDesigningTheRolesAndHierarchyOf'),
+    t('architectStep3') || t('syGeneratingSystemPromptsWithGuardrails'),
+    t('architectStep4') || t('sySettingUpTopologyAndTools'),
   ];
 
   useEffect(() => {
@@ -118,12 +118,12 @@ export function AutoArchitectModal({ isOpen, onClose, onSuccess }: AutoArchitect
   const handleGenerate = async (overrideGoal?: string) => {
     const targetGoal = overrideGoal || goal;
     if (!targetGoal.trim()) {
-      showToast(t('enterGoalPrompt') || 'Inserisci un obiettivo per la tua squadra', 'error');
+      showToast(t('enterGoalPrompt') || t('syEnterAGoalForYourTeam'), 'error');
       return;
     }
 
     if (!workspaceProvider || !workspaceModel) {
-      showToast('Configura prima un provider e un modello nelle Impostazioni: Aether non ne sceglie uno per te.', 'error');
+      showToast(t('syFirstConfigureAProviderAndA'), 'error');
       return;
     }
 
@@ -141,7 +141,7 @@ export function AutoArchitectModal({ isOpen, onClose, onSuccess }: AutoArchitect
 
       if (!res.ok) {
         const errData = await res.json().catch(() => ({}));
-        throw new Error(errData.detail || 'Failed to generate workforce architecture');
+        throw new Error(errData.detail || t('szFailedToGenerateWorkforceArchitecture'));
       }
 
       const data: ArchitectBlueprint = await res.json();
@@ -157,10 +157,10 @@ export function AutoArchitectModal({ isOpen, onClose, onSuccess }: AutoArchitect
       setExpandedAgentIndexes([]); // Collapsed by default
       setOpenAgentOverrides({});
       setStep('preview');
-      showToast(t('workforceGeneratedSuccess') || 'Squadra progettata con successo!', 'success');
+      showToast(t('workforceGeneratedSuccess') || t('syTeamDesignedSuccessfully'), 'success');
     } catch (err: any) {
       console.error('Architect generation failed', err);
-      showToast(err?.message || t('architectError') || 'Errore nella generazione della squadra. Riprova.', 'error');
+      showToast(err?.message || t('architectError') || t('syErrorGeneratingTheTeamTryAgain'), 'error');
       setStep('input');
     }
   };
@@ -190,11 +190,11 @@ export function AutoArchitectModal({ isOpen, onClose, onSuccess }: AutoArchitect
         const updatedAgents = [...blueprint.agents];
         updatedAgents[index] = { ...agent, system_prompt: data.enhanced_prompt };
         setBlueprint({ ...blueprint, agents: updatedAgents });
-        showToast(t('promptEnhancedSuccess') || 'Prompt ottimizzato con successo!', 'success');
+        showToast(t('promptEnhancedSuccess') || t('syPromptImprovedSuccessfully'), 'success');
       }
     } catch (err) {
       console.error('Enhance prompt failed', err);
-      showToast(t('promptEnhanceError') || 'Impossibile ottimizzare il prompt', 'error');
+      showToast(t('promptEnhanceError') || t('syCouldNotImproveThePrompt'), 'error');
     } finally {
       setEnhancingIndex(null);
     }
@@ -203,12 +203,12 @@ export function AutoArchitectModal({ isOpen, onClose, onSuccess }: AutoArchitect
   const handleApply = async () => {
     if (!blueprint || !blueprint.team_name.trim()) return;
     if (blueprint.agents.length === 0) {
-      showToast(t('minOneAgentRequired') || 'La squadra deve avere almeno un agente.', 'error');
+      showToast(t('minOneAgentRequired') || t('syTheTeamMustHaveAtLeast'), 'error');
       return;
     }
 
     if (!(blueprint.default_provider || workspaceProvider) || !(blueprint.default_model || workspaceModel)) {
-      showToast('Scegli un provider e un modello per la squadra prima di applicarla.', 'error');
+      showToast(t('syChooseAProviderAndAModel'), 'error');
       return;
     }
 
@@ -243,12 +243,12 @@ export function AutoArchitectModal({ isOpen, onClose, onSuccess }: AutoArchitect
         throw new Error(errData.detail || 'Failed to save workforce');
       }
 
-      showToast(t('teamCreatedSuccess') || 'Squadra creata e attivata con successo!', 'success');
+      showToast(t('teamCreatedSuccess') || t('syTeamCreatedAndActivatedSuccessfully'), 'success');
       if (onSuccess) onSuccess(blueprint.team_name.trim());
       onClose();
     } catch (err: any) {
       console.error('Failed to apply architect workforce', err);
-      showToast(err.message || 'Errore durante il salvataggio della squadra', 'error');
+      showToast(err.message || t('syErrorWhileSavingTheTeam'), 'error');
     } finally {
       setIsApplying(false);
     }
@@ -257,7 +257,7 @@ export function AutoArchitectModal({ isOpen, onClose, onSuccess }: AutoArchitect
   const handleRemoveAgent = (index: number) => {
     if (!blueprint) return;
     if (blueprint.agents.length <= 1) {
-      showToast(t('minOneAgentRequired') || 'La squadra deve avere almeno un agente.', 'error');
+      showToast(t('minOneAgentRequired') || t('syTheTeamMustHaveAtLeast'), 'error');
       return;
     }
     const removedName = blueprint.agents[index].name;
@@ -277,7 +277,7 @@ export function AutoArchitectModal({ isOpen, onClose, onSuccess }: AutoArchitect
     const newName = `Specialist ${newIdx + 1}`;
     const newAgent: ArchitectAgent = {
       name: newName,
-      role: 'Domain Specialist',
+      role: t('szDomainSpecialist'),
       system_prompt: `You are ${newName}. Execute assigned tasks with high accuracy.`,
       icon: 'Bot',
       color: 'violet',
@@ -339,12 +339,12 @@ export function AutoArchitectModal({ isOpen, onClose, onSuccess }: AutoArchitect
             </div>
             <div>
               <h3 style={{ margin: 0, fontSize: '16.5px', fontWeight: 600, color: 'hsl(var(--fg))' }}>
-                {t('autoArchitectTitle') || 'Auto-Architect AI Workforce'}
+                {t('autoArchitectTitle') || t('sdAutoArchitectAiWorkforce')}
               </h3>
               <p style={{ margin: '2px 0 0', fontSize: '12px', color: 'hsl(var(--muted-fg))' }}>
                 {step === 'preview'
-                  ? (t('reviewAndApplyWorkforce') || 'Personalizza e attiva la tua squadra')
-                  : (t('autoArchitectSubtitle') || 'Descrivi il tuo obiettivo in linguaggio naturale')}
+                  ? (t('reviewAndApplyWorkforce') || t('syCustomizeAndActivateYourTeam'))
+                  : (t('autoArchitectSubtitle') || t('syDescribeYourGoalInNaturalLanguage'))}
               </p>
             </div>
           </div>
@@ -373,14 +373,14 @@ export function AutoArchitectModal({ isOpen, onClose, onSuccess }: AutoArchitect
             <div style={{ display: 'flex', flexDirection: 'column', gap: '20px' }}>
               <div>
                 <label className="form-label" style={{ fontSize: '14px', marginBottom: '8px', display: 'block' }}>
-                  {t('whatDoYouWantYourWorkforceToDo') || 'Cosa vorresti che facesse la tua squadra Aether?'}
+                  {t('whatDoYouWantYourWorkforceToDo') || t('syWhatWouldYouLikeYourAether')}
                 </label>
                 <textarea
                   className="form-textarea"
                   rows={4}
                   value={goal}
                   onChange={e => setGoal(e.target.value)}
-                  placeholder={t('architectGoalPlaceholder') || 'Es. Voglio monitorare i competitor, estrarre variazioni di prezzo e cataloghi da e-commerce e ricevere un report settimanale dettagliato in formato markdown...'}
+                  placeholder={t('architectGoalPlaceholder') || t('syEGIWantToMonitor')}
                   style={{
                     fontSize: '13.5px',
                     lineHeight: 1.5,
@@ -394,7 +394,7 @@ export function AutoArchitectModal({ isOpen, onClose, onSuccess }: AutoArchitect
               {/* Quick Template Chips */}
               <div>
                 <div style={{ fontSize: '12px', fontWeight: 600, color: 'hsl(var(--muted-fg))', marginBottom: '10px', textTransform: 'uppercase', letterSpacing: '0.05em' }}>
-                  {t('orPickSuggestedArchitecture') || 'Oppure scegli un obiettivo suggerito:'}
+                  {t('orPickSuggestedArchitecture') || t('syOrPickASuggestedGoal')}
                 </div>
                 <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '10px' }}>
                   {QUICK_GOAL_SUGGESTIONS.map((sug, i) => {
@@ -404,8 +404,8 @@ export function AutoArchitectModal({ isOpen, onClose, onSuccess }: AutoArchitect
                         key={i}
                         className="card card-interactive"
                         onClick={() => {
-                          setGoal(sug.goal);
-                          handleGenerate(sug.goal);
+                          setGoal(t(sug.goalKey));
+                          handleGenerate(t(sug.goalKey));
                         }}
                         style={{
                           padding: '12px 14px',
@@ -437,10 +437,10 @@ export function AutoArchitectModal({ isOpen, onClose, onSuccess }: AutoArchitect
                         </div>
                         <div style={{ flex: 1, minWidth: 0 }}>
                           <strong style={{ fontSize: '13px', display: 'block', color: 'hsl(var(--fg))', marginBottom: '2px' }}>
-                            {sug.label}
+                            {t(sug.labelKey)}
                           </strong>
                           <p style={{ margin: 0, fontSize: '11.5px', color: 'hsl(var(--muted-fg))', lineHeight: 1.35, display: '-webkit-box', WebkitLineClamp: 2, WebkitBoxOrient: 'vertical', overflow: 'hidden' }}>
-                            {sug.goal}
+                            {t(sug.goalKey)}
                           </p>
                         </div>
                       </div>
@@ -481,7 +481,7 @@ export function AutoArchitectModal({ isOpen, onClose, onSuccess }: AutoArchitect
               </div>
 
               <h4 style={{ margin: '0 0 8px', fontSize: '17px', fontWeight: 600 }}>
-                {t('designingWorkforce') || 'Progettazione della Workforce in corso...'}
+                {t('designingWorkforce') || t('syDesigningTheWorkforce')}
               </h4>
               <p
                 className="text-primary"
@@ -513,7 +513,7 @@ export function AutoArchitectModal({ isOpen, onClose, onSuccess }: AutoArchitect
               >
                 <div className="form-row" style={{ marginBottom: '12px' }}>
                   <div className="form-group" style={{ marginBottom: 0 }}>
-                    <label className="form-label">{t('teamName') || 'Nome della Squadra'}</label>
+                    <label className="form-label">{t('teamName') || t('syTeamName')}</label>
                     <input
                       type="text"
                       className="form-input"
@@ -527,18 +527,18 @@ export function AutoArchitectModal({ isOpen, onClose, onSuccess }: AutoArchitect
                     <VisualIconSelect
                       value={blueprint.icon}
                       onChange={i => setBlueprint({ ...blueprint, icon: i })}
-                      label="Team Icon"
+                      label={t('szTeamIcon')}
                     />
                     <VisualColorSelect
                       value={blueprint.color}
                       onChange={c => setBlueprint({ ...blueprint, color: c })}
-                      label="Team Color"
+                      label={t('szTeamColor')}
                     />
                   </div>
                 </div>
 
                 <div className="form-group" style={{ marginBottom: 0 }}>
-                  <label className="form-label">{t('teamDescription') || 'Descrizione Missione'}</label>
+                  <label className="form-label">{t('teamDescription') || t('syMissionDescription')}</label>
                   <input
                     type="text"
                     className="form-input"
@@ -562,7 +562,7 @@ export function AutoArchitectModal({ isOpen, onClose, onSuccess }: AutoArchitect
                 <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '12px' }}>
                   <Sparkles size={16} className="text-primary" />
                   <h4 style={{ fontSize: '14px', fontWeight: 600, margin: 0 }}>
-                    {t('teamModelSection') || 'Provider e Modello IA della Squadra'}
+                    {t('teamModelSection') || t('syTeamAiProviderAndModel')}
                   </h4>
                 </div>
 
@@ -574,8 +574,8 @@ export function AutoArchitectModal({ isOpen, onClose, onSuccess }: AutoArchitect
                       value={blueprint.default_provider || workspaceProvider}
                       onChange={e => setBlueprint({ ...blueprint, default_provider: e.target.value, default_model: '' })}
                     >
-                      <option value="">— Scegli un provider —</option>
-                      <option value="ollama">Ollama (Locale)</option>
+                      <option value="">{t('syChooseAProvider')}</option>
+                      <option value="ollama">{t('syOllamaLocal')}</option>
                       <option value="openai">OpenAI</option>
                       <option value="anthropic">Anthropic</option>
                       <option value="gemini">Google Gemini</option>
@@ -606,7 +606,7 @@ export function AutoArchitectModal({ isOpen, onClose, onSuccess }: AutoArchitect
                     onClick={() => setActiveTab('agents')}
                   >
                     <Bot size={14} style={{ marginRight: '6px' }} />
-                    <span>{t('members') || 'Agenti Specializzati'} ({blueprint.agents.length})</span>
+                    <span>{t('members') || t('sySpecializedAgents')} ({blueprint.agents.length})</span>
                   </button>
                   <button
                     type="button"
@@ -615,7 +615,7 @@ export function AutoArchitectModal({ isOpen, onClose, onSuccess }: AutoArchitect
                     onClick={() => setActiveTab('topology')}
                   >
                     <Layers size={14} style={{ marginRight: '6px' }} />
-                    <span>{t('topologyGraph') || 'Grafo di Topologia'}</span>
+                    <span>{t('topologyGraph') || t('syTopologyGraph')}</span>
                   </button>
                 </div>
 
@@ -634,8 +634,8 @@ export function AutoArchitectModal({ isOpen, onClose, onSuccess }: AutoArchitect
                       }}
                     >
                       {expandedAgentIndexes.length === blueprint.agents.length
-                        ? (t('collapseAll') || 'Comprimi tutti')
-                        : (t('expandAll') || 'Espandi tutti')}
+                        ? (t('collapseAll') || t('syCollapseAll'))
+                        : (t('expandAll') || t('syExpandAll'))}
                     </button>
                     <button
                       type="button"
@@ -644,7 +644,7 @@ export function AutoArchitectModal({ isOpen, onClose, onSuccess }: AutoArchitect
                       onClick={handleAddAgent}
                     >
                       <Plus size={14} />
-                      <span>{t('addAgent') || 'Aggiungi Agente'}</span>
+                      <span>{t('addAgent') || t('syAddAgent')}</span>
                     </button>
                   </div>
                 )}
@@ -730,7 +730,7 @@ export function AutoArchitectModal({ isOpen, onClose, onSuccess }: AutoArchitect
                                   e.stopPropagation();
                                   handleRemoveAgent(idx);
                                 }}
-                                title={t('removeAgent') || 'Rimuovi Agente'}
+                                title={t('removeAgent') || t('syRemoveAgent')}
                               >
                                 <Trash2 size={14} />
                               </button>
@@ -757,7 +757,7 @@ export function AutoArchitectModal({ isOpen, onClose, onSuccess }: AutoArchitect
                           <div style={{ padding: '14px 16px', display: 'flex', flexDirection: 'column', gap: '12px' }}>
                             <div className="form-row" style={{ marginBottom: 0 }}>
                               <div className="form-group" style={{ marginBottom: 0 }}>
-                                <label className="form-label">{t('name') || 'Nome Agente'}</label>
+                                <label className="form-label">{t('name') || t('syAgentName')}</label>
                                 <input
                                   type="text"
                                   className="form-input"
@@ -767,7 +767,7 @@ export function AutoArchitectModal({ isOpen, onClose, onSuccess }: AutoArchitect
                                     next[idx].name = e.target.value;
                                     setBlueprint({ ...blueprint, agents: next });
                                   }}
-                                  placeholder="Nome Agente"
+                                  placeholder={t('syAgentName')}
                                   style={{ fontWeight: 600 }}
                                 />
                               </div>
@@ -782,7 +782,7 @@ export function AutoArchitectModal({ isOpen, onClose, onSuccess }: AutoArchitect
                                     next[idx].role = e.target.value;
                                     setBlueprint({ ...blueprint, agents: next });
                                   }}
-                                  placeholder="Ruolo Agente"
+                                  placeholder={t('syAgentRole')}
                                 />
                               </div>
                             </div>
@@ -812,7 +812,7 @@ export function AutoArchitectModal({ isOpen, onClose, onSuccess }: AutoArchitect
                             <div className="form-group" style={{ marginBottom: 0 }}>
                               <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '4px' }}>
                                 <label className="form-label" style={{ marginBottom: 0 }}>
-                                  {t('systemInstructions') || 'Istruzioni di Sistema (Prompt)'}
+                                  {t('systemInstructions') || t('sySystemInstructionsPrompt')}
                                 </label>
                                 <button
                                   type="button"
@@ -826,7 +826,7 @@ export function AutoArchitectModal({ isOpen, onClose, onSuccess }: AutoArchitect
                                   ) : (
                                     <Sparkles size={11} />
                                   )}
-                                  <span>{isEnhancing ? t('enhancing') || 'Ottimizzazione...' : t('magicEnhance') || '✨ Migliora con l\'IA'}</span>
+                                  <span>{isEnhancing ? t('enhancing') || 'Ottimizzazione...' : t('magicEnhance') || t('syImproveWithAi')}</span>
                                 </button>
                               </div>
                               <textarea
@@ -862,7 +862,7 @@ export function AutoArchitectModal({ isOpen, onClose, onSuccess }: AutoArchitect
                                 setBlueprint({ ...blueprint, agents: next });
                               }}
                               label={t('delegatesTo') || 'Delega a:'}
-                              hint={t('delegatesToHint') || 'Attiva le deleghe con un click.'}
+                              hint={t('delegatesToHint') || t('syEnableDelegationsWithOneClick')}
                             />
 
                             {/* Collapsible Model Override */}
@@ -893,7 +893,7 @@ export function AutoArchitectModal({ isOpen, onClose, onSuccess }: AutoArchitect
                                       next[idx].model = newModel;
                                       setBlueprint({ ...blueprint, agents: next });
                                     }}
-                                    label={t('modelLabel') || 'Modello Dedicato per questo Agente'}
+                                    label={t('modelLabel') || t('syDedicatedModelForThisAgent')}
                                   />
                                 </div>
                               )}
@@ -934,7 +934,7 @@ export function AutoArchitectModal({ isOpen, onClose, onSuccess }: AutoArchitect
                     height={220}
                   />
                   <p style={{ fontSize: '12px', color: 'hsl(var(--muted-fg))', margin: '14px 0 0', textAlign: 'center' }}>
-                    {t('topologyExplanation') || 'Il grafo illustra le gerarchie di delega tra gli agenti generati.'}
+                    {t('topologyExplanation') || t('syTheGraphShowsTheDelegationHierarchy')}
                   </p>
                 </div>
               )}
@@ -970,7 +970,7 @@ export function AutoArchitectModal({ isOpen, onClose, onSuccess }: AutoArchitect
                 style={{ padding: '8px 20px', display: 'inline-flex', alignItems: 'center', gap: '8px' }}
               >
                 <Sparkles size={16} />
-                <span>{t('generateWorkforce') || 'Progetta con l\'IA'}</span>
+                <span>{t('generateWorkforce') || t('syDesignWithAi')}</span>
               </button>
             </>
           )}
@@ -978,7 +978,7 @@ export function AutoArchitectModal({ isOpen, onClose, onSuccess }: AutoArchitect
           {step === 'generating' && (
             <div style={{ width: '100%', textAlign: 'center' }}>
               <span className="text-muted" style={{ fontSize: '13px' }}>
-                {t('pleaseWaitGenerating') || 'Attendere, generazione della squadra in corso...'}
+                {t('pleaseWaitGenerating') || t('syPleaseWaitGeneratingTheTeam')}
               </span>
             </div>
           )}
@@ -1016,7 +1016,7 @@ export function AutoArchitectModal({ isOpen, onClose, onSuccess }: AutoArchitect
                     </>
                   ) : (
                     <>
-                      <span>{t('applyAndActivateWorkforce') || 'Salva & Attiva Squadra'}</span>
+                      <span>{t('applyAndActivateWorkforce') || t('sySaveActivateTeam')}</span>
                       <ArrowRight size={16} />
                     </>
                   )}

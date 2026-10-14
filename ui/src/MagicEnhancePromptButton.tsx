@@ -27,7 +27,7 @@ export function MagicEnhancePromptButton({
 
   const handleEnhance = async () => {
     if (!prompt || !prompt.trim()) {
-      showToast(t('enterPromptFirst') || 'Scrivi prima una bozza di istruzioni da ottimizzare', 'info');
+      showToast(t('enterPromptFirst') || t('seFirstWriteADraftOfThe'), 'info');
       return;
     }
 
@@ -51,11 +51,11 @@ export function MagicEnhancePromptButton({
       const data = await res.json();
       if (data.enhanced_prompt) {
         onEnhanced(data.enhanced_prompt);
-        showToast(t('promptEnhancedSuccess') || 'Prompt ottimizzato con successo!', 'success');
+        showToast(t('promptEnhancedSuccess') || t('sePromptImprovedSuccessfully'), 'success');
       }
     } catch (err) {
       console.error('Enhance prompt error', err);
-      showToast(t('promptEnhanceError') || 'Impossibile ottimizzare il prompt', 'error');
+      showToast(t('promptEnhanceError') || t('seCouldNotImproveThePrompt'), 'error');
     } finally {
       setIsEnhancing(false);
     }
@@ -83,7 +83,7 @@ export function MagicEnhancePromptButton({
       ) : (
         <Sparkles size={12} />
       )}
-      <span>{isEnhancing ? (t('enhancing') || 'Ottimizzazione...') : (t('magicEnhance') || '✨ Migliora con l\'IA')}</span>
+      <span>{isEnhancing ? (t('enhancing') || 'Ottimizzazione...') : (t('magicEnhance') || t('seImproveWithAi'))}</span>
     </button>
   );
 }

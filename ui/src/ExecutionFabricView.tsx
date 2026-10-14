@@ -22,7 +22,8 @@ import { apiUrl } from './api';
 import { useTranslation } from './i18n';
 
 function formatOsName(os?: string): string {
-  if (!os) return 'Computer locale';
+  const { t } = useTranslation();
+  if (!os) return t('syLocalComputer');
   const l = os.toLowerCase();
   if (l.includes('darwin') || l.includes('mac')) return 'macOS';
   if (l.includes('linux')) return 'Linux';
@@ -31,7 +32,8 @@ function formatOsName(os?: string): string {
 }
 
 function formatArch(arch?: string, os?: string): string {
-  if (!arch) return 'Architettura nativa';
+  const { t } = useTranslation();
+  if (!arch) return t('syNativeArchitecture');
   if (arch === 'arm64' && (os?.toLowerCase().includes('darwin') || os?.toLowerCase().includes('mac'))) {
     return 'Apple Silicon (arm64)';
   }
@@ -164,7 +166,7 @@ export default function ExecutionFabricView() {
       checkAiEngine();
     } catch (err: any) {
       console.error('Failed to load fabric data:', err);
-      setError(err?.message || 'Failed to connect to execution fabric');
+      setError(err?.message || t('szFailedToConnectToExecutionFabric'));
     } finally {
       setLoading(false);
       if (isManual) setRefreshing(false);
@@ -199,7 +201,7 @@ export default function ExecutionFabricView() {
         await fetchFabricData();
       }
     } catch (err: any) {
-      console.error('Routing failed:', err);
+      console.error(t('szRoutingFailed'), err);
     } finally {
       setRoutingLoading(false);
     }
@@ -243,7 +245,7 @@ export default function ExecutionFabricView() {
   };
 
   const handleDeleteNode = async (nodeId: string) => {
-    if (!confirm('Are you sure you want to disconnect this compute node?')) return;
+    if (!confirm(t('szAreYouSureYouWantTo'))) return;
     try {
       const res = await fetch(apiUrl(`/fabric/nodes/${nodeId}`), {
         method: 'DELETE',
@@ -329,7 +331,7 @@ export default function ExecutionFabricView() {
         )}
 
         {/* 5 Primary Hardware Resource Cards */}
-        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(210px, 1fr))', gap: '16px' }}>
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(min(210px, 100%), 1fr))', gap: '16px' }}>
           {/* Card 1: Dispositivo */}
           <div className="card" style={{ padding: '18px', display: 'flex', flexDirection: 'column', gap: '8px' }}>
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', color: 'hsl(var(--muted-fg))' }}>
@@ -347,21 +349,21 @@ export default function ExecutionFabricView() {
           {/* Card 2: Processore (CPU) */}
           <div className="card" style={{ padding: '18px', display: 'flex', flexDirection: 'column', gap: '8px' }}>
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', color: 'hsl(var(--muted-fg))' }}>
-              <span style={{ fontSize: '12px', fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.04em' }}>Processore (CPU)</span>
+              <span style={{ fontSize: '12px', fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.04em' }}>{t('syProcessorCpu')}</span>
               <Cpu size={18} className="text-primary" />
             </div>
             <div style={{ fontSize: '20px', fontWeight: 700, color: 'hsl(var(--fg))' }}>
               {caps?.cpu_cores || telemetry?.total_cores || 8} Core
             </div>
             <span className="text-muted" style={{ fontSize: '12px', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
-              {caps?.cpu_brand || 'CPU nativa di sistema'}
+              {caps?.cpu_brand || t('syNativeSystemCpu')}
             </span>
           </div>
 
           {/* Card 3: Memoria di Sistema (RAM) */}
           <div className="card" style={{ padding: '18px', display: 'flex', flexDirection: 'column', gap: '8px' }}>
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', color: 'hsl(var(--muted-fg))' }}>
-              <span style={{ fontSize: '12px', fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.04em' }}>Memoria (RAM)</span>
+              <span style={{ fontSize: '12px', fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.04em' }}>{t('syMemoryRam')}</span>
               <HardDrive size={18} className="text-primary" />
             </div>
             <div style={{ fontSize: '20px', fontWeight: 700, color: 'hsl(var(--fg))' }}>
@@ -375,21 +377,21 @@ export default function ExecutionFabricView() {
           {/* Card 4: Scheda Grafica / GPU */}
           <div className="card" style={{ padding: '18px', display: 'flex', flexDirection: 'column', gap: '8px' }}>
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', color: 'hsl(var(--muted-fg))' }}>
-              <span style={{ fontSize: '12px', fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.04em' }}>Scheda Grafica (GPU)</span>
+              <span style={{ fontSize: '12px', fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.04em' }}>{t('syGraphicsCardGpu')}</span>
               <Zap size={18} className="text-primary" />
             </div>
             <div style={{ fontSize: '20px', fontWeight: 700, color: 'hsl(var(--fg))' }}>
               {(caps?.gpu_vram_gb || telemetry?.total_vram_gb || 0).toFixed(1)} GB VRAM
             </div>
             <span className="text-muted" style={{ fontSize: '12px', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
-              {caps?.gpu_name || 'Acceleratore grafico integrato'}
+              {caps?.gpu_name || t('syIntegratedGraphicsAccelerator')}
             </span>
           </div>
 
           {/* Card 5: Motore AI Locale */}
           <div className="card" style={{ padding: '18px', display: 'flex', flexDirection: 'column', gap: '8px' }}>
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', color: 'hsl(var(--muted-fg))' }}>
-              <span style={{ fontSize: '12px', fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.04em' }}>Motore AI Locale</span>
+              <span style={{ fontSize: '12px', fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.04em' }}>{t('syLocalAiEngine')}</span>
               <Sparkles size={18} className="text-primary" />
             </div>
             <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginTop: '2px' }}>
@@ -401,11 +403,11 @@ export default function ExecutionFabricView() {
                 display: 'inline-block'
               }} />
               <span style={{ fontSize: '16px', fontWeight: 700, color: 'hsl(var(--fg))' }}>
-                {aiEngineActive ? 'Attivo' : 'Non attivo'}
+                {aiEngineActive ? t('statusActive') : t('syInactive')}
               </span>
             </div>
             <span className="text-muted" style={{ fontSize: '12px' }}>
-              {aiEngineActive ? 'Modelli eseguibili offline sul dispositivo' : 'Ollama non rilevato in background'}
+              {aiEngineActive ? t('syModelsThatRunOfflineOnThe') : t('syOllamaNotDetectedInTheBackground')}
             </span>
           </div>
         </div>
@@ -435,10 +437,10 @@ export default function ExecutionFabricView() {
           </div>
           <div>
             <div style={{ fontWeight: 600, fontSize: '14px', color: 'hsl(var(--fg))' }}>
-              Esecuzione Locale e Riservata
+              {t('syLocalAndPrivateExecution')}
             </div>
             <p className="text-muted" style={{ fontSize: '13px', margin: '2px 0 0 0', lineHeight: 1.4 }}>
-              Aether privilegia l'esecuzione direttamente sul tuo computer per proteggere la tua privacy e garantire risposte a bassa latenza senza dipendere da server esterni.
+              {t('syAetherPrefersRunningDirectlyOnYour')}
             </p>
           </div>
         </div>
@@ -465,10 +467,10 @@ export default function ExecutionFabricView() {
               <Server size={18} className="text-primary" />
               <div>
                 <div style={{ fontWeight: 600, fontSize: '14px' }}>
-                  Opzioni avanzate e nodi remoti
+                  {t('syAdvancedOptionsAndRemoteNodes')}
                 </div>
                 <div className="text-muted" style={{ fontSize: '12px', marginTop: '2px' }}>
-                  Gestione cluster multi-macchina, workstation esterne e router di allocazione carichi
+                  {t('syMultiMachineClusterManagementExternalWorkstations')}
                 </div>
               </div>
             </div>
@@ -484,7 +486,7 @@ export default function ExecutionFabricView() {
             <div style={{ padding: '0 20px 20px 20px', display: 'flex', flexDirection: 'column', gap: '20px', borderTop: '1px solid hsl(var(--border))', paddingTop: '16px' }}>
               <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '8px' }}>
                 <span className="text-muted" style={{ fontSize: '13px' }}>
-                  Collega computer ausiliari o server GPU sulla rete locale per scaricare i task più complessi.
+                  {t('syConnectAuxiliaryComputersOrGpuServers')}
                 </span>
                 <button
                   className="btn btn-primary"
@@ -510,13 +512,13 @@ export default function ExecutionFabricView() {
                   gap: '6px'
                 }}>
                   <Server size={24} className="text-muted" style={{ opacity: 0.6 }} />
-                  <div style={{ fontWeight: 600, fontSize: '13px' }}>Nessun nodo remoto registrato</div>
+                  <div style={{ fontWeight: 600, fontSize: '13px' }}>{t('syNoRemoteNodeRegistered')}</div>
                   <p className="text-muted" style={{ fontSize: '12px', margin: 0 }}>
-                    Tutti i compiti vengono elaborati al 100% dalla macchina locale.
+                    {t('syAllTasksAreProcessed100By')}
                   </p>
                 </div>
               ) : (
-                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(320px, 1fr))', gap: '14px' }}>
+                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(min(320px, 100%), 1fr))', gap: '14px' }}>
                   {remoteNodes.map(node => (
                     <div
                       key={node.id}
@@ -599,7 +601,7 @@ export default function ExecutionFabricView() {
               )}
 
               {/* Workload Router Tester & Allocator */}
-              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(360px, 1fr))', gap: '16px', marginTop: '10px' }}>
+              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(min(360px, 100%), 1fr))', gap: '16px', marginTop: '10px' }}>
                 <div className="card" style={{ padding: '16px', display: 'flex', flexDirection: 'column', gap: '12px' }}>
                   <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
                     <Zap size={16} className="text-primary" />

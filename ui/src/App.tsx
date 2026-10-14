@@ -28,9 +28,11 @@ import { ProactiveWatchersView } from './ProactiveWatchersView';
 import ExecutionFabricView from './ExecutionFabricView';
 import { ResultsView } from './ResultsView';
 import { AssistantV2 } from './AssistantV2';
+import { useTranslation } from './i18n';
 
 
 function MainApp() {
+  const { t } = useTranslation();
   // Experience Mode: 'v2' (Assistant-First with Living Orb) or 'v1' (Classic Multi-Tab Workspace)
   const [experienceMode, setExperienceMode] = useState<'v1' | 'v2'>(() => {
     if (typeof window !== 'undefined') {
@@ -376,7 +378,7 @@ function MainApp() {
             setCurrentView('home');
           }
         }
-        showToast('Conversation deleted.', 'info');
+        showToast(t('sdConversationDeleted'), 'info');
       }
     } catch (err) {
       console.error('Failed to delete conversation', err);
@@ -398,7 +400,7 @@ function MainApp() {
   if (isInitialized === null) {
     return (
       <div className="app-container" style={{ display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-        <div style={{ fontSize: '14px', color: 'hsl(var(--muted-fg))' }}>Loading Aether...</div>
+        <div style={{ fontSize: '14px', color: 'hsl(var(--muted-fg))' }}>{t('sdLoadingAether')}</div>
       </div>
     );
   }
@@ -459,6 +461,16 @@ function MainApp() {
       />
 
       <div className="main-content">
+        {!hasWorkspace && currentView !== 'home' && currentView !== 'marketplace' ? (
+          // Every other screen reads the workspace: without one they would only show raw server errors.
+          <div data-testid="no-workspace-notice" style={{ flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '40px 24px' }}>
+            <div className="card" style={{ maxWidth: '480px', width: '100%', padding: '36px', textAlign: 'center' }}>
+              <h2 style={{ fontSize: '20px', fontWeight: 700, marginBottom: '10px' }}>{t('createFirstWorkspace')}</h2>
+              <p className="text-muted" style={{ fontSize: '14px', lineHeight: 1.6, marginBottom: '22px' }}>{t('noActiveWorkspaceDesc')}</p>
+              <button className="btn btn-primary" onClick={() => handleOpenWorkspaceModal('create')}>{t('createWorkspaceBtn')}</button>
+            </div>
+          </div>
+        ) : null}
         {currentView === 'home' && (
           <Home
             navigate={navigate}
@@ -470,22 +482,22 @@ function MainApp() {
             onOpenWorkspaceModal={() => handleOpenWorkspaceModal('create')}
           />
         )}
-        {(currentView === 'missions' || currentView === 'work') && (
+        {hasWorkspace && (currentView === 'missions' || currentView === 'work') && (
           <Missions navigate={navigate} initialMissionId={viewParams} />
         )}
-        {currentView === 'workforce' && <WorkforceHub navigate={navigate} />}
-        {currentView === 'connections' && (
+        {hasWorkspace && currentView === 'workforce' && <WorkforceHub navigate={navigate} />}
+        {hasWorkspace && currentView === 'connections' && (
           <Connections
             navigate={navigate}
             initialExecutionId={viewParams}
             initialTab={viewParams ? 'actions' : undefined}
           />
         )}
-        {(currentView === 'results' || currentView === 'deliverables') && (
+        {hasWorkspace && (currentView === 'results' || currentView === 'deliverables') && (
           <ResultsView navigate={navigate} />
         )}
-        {currentView === 'activity' && <ActivityFeed navigate={navigate} />}
-        {currentView === 'chat' && (
+        {hasWorkspace && currentView === 'activity' && <ActivityFeed navigate={navigate} />}
+        {hasWorkspace && currentView === 'chat' && (
           <Chat
             conversationId={activeConversationId}
             onNewConversation={handleNewConversation}
@@ -495,19 +507,19 @@ function MainApp() {
             onOpenWorkspaceModal={() => handleOpenWorkspaceModal('create')}
           />
         )}
-        {currentView === 'agents' && <WorkforceHub initialTab="agents" navigate={navigate} />}
-        {currentView === 'agent' && <AgentProfile name={viewParams} navigate={navigate} />}
-        {currentView === 'teams' && <WorkforceHub initialTab="teams" navigate={navigate} />}
-        {currentView === 'knowledge' && <Knowledge />}
-        {currentView === 'memory' && <WorkforceHub initialTab="memory" navigate={navigate} />}
-        {currentView === 'learning' && <WorkforceHub initialTab="learning" navigate={navigate} />}
-        {currentView === 'automations' && <Automations initialAutomationId={viewParams} />}
-        {currentView === 'workflows' && <WorkflowBuilder navigate={navigate} />}
-        {currentView === 'skills' && <WorkforceHub initialTab="skills" navigate={navigate} />}
-        {currentView === 'content' && <ContentRepurposing navigate={navigate} />}
-        {currentView === 'proactive' && <ProactiveWatchersView />}
-        {currentView === 'fabric' && <ExecutionFabricView />}
-        {currentView === 'settings' && <Settings onWorkspaceSwitched={handleWorkspaceSwitched} />}
+        {hasWorkspace && currentView === 'agents' && <WorkforceHub initialTab="agents" navigate={navigate} />}
+        {hasWorkspace && currentView === 'agent' && <AgentProfile name={viewParams} navigate={navigate} />}
+        {hasWorkspace && currentView === 'teams' && <WorkforceHub initialTab="teams" navigate={navigate} />}
+        {hasWorkspace && currentView === 'knowledge' && <Knowledge />}
+        {hasWorkspace && currentView === 'memory' && <WorkforceHub initialTab="memory" navigate={navigate} />}
+        {hasWorkspace && currentView === 'learning' && <WorkforceHub initialTab="learning" navigate={navigate} />}
+        {hasWorkspace && currentView === 'automations' && <Automations initialAutomationId={viewParams} />}
+        {hasWorkspace && currentView === 'workflows' && <WorkflowBuilder navigate={navigate} />}
+        {hasWorkspace && currentView === 'skills' && <WorkforceHub initialTab="skills" navigate={navigate} />}
+        {hasWorkspace && currentView === 'content' && <ContentRepurposing navigate={navigate} />}
+        {hasWorkspace && currentView === 'proactive' && <ProactiveWatchersView />}
+        {hasWorkspace && currentView === 'fabric' && <ExecutionFabricView />}
+        {hasWorkspace && currentView === 'settings' && <Settings onWorkspaceSwitched={handleWorkspaceSwitched} />}
         {currentView === 'marketplace' && <Marketplace />}
       </div>
 

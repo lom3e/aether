@@ -373,7 +373,11 @@ def test_m_voice_truthfulness():
     # Verifies standard Web Speech API detection without fake backend models
     assert "SpeechRecognition" in code
     assert "speechSynthesis" in code
-    assert "Speech recognition is not supported in this environment" in code
+    # The honest "not supported" message is shown through the i18n table (both languages), never faked away.
+    i18n = (repo_root / "ui" / "src" / "i18n.tsx").read_text(encoding="utf-8")
+    assert "Speech recognition is not supported in this environment" in i18n
+    assert "Il riconoscimento vocale non è supportato in questo ambiente" in i18n
+    assert "t('szSpeechRecognitionIsNotSupportedIn')" in code
 
 
 # ---------------------------------------------------------------------------

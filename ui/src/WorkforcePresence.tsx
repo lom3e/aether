@@ -63,7 +63,7 @@ export function WorkforcePresence({
           <Cpu size={15} className="text-primary" />
           {availableTeams && availableTeams.length > 1 && onSelectTeam ? (
             <select
-              aria-label="Select workforce team"
+              aria-label={t('sdSelectWorkforceTeam')}
               value={teamName || ''}
               onChange={e => onSelectTeam(e.target.value)}
               style={{

@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import json
+
 from dataclasses import replace
 from typing import Any
 from uuid import uuid4
@@ -435,6 +437,18 @@ class Agent:
                 metadata=metadata,
             )
 
+    MAX_REPEATED_CALLS = 3
+    MAX_CONTINUATIONS = 3
+
+    @staticmethod
+    def _tool_is_read_only(agent_context: AgentContext, tool_name: str) -> bool:
+        try:
+            from aether.tools.base import ToolClassification
+            registry = agent_context.tool_registry
+            return registry is not None and registry.get(tool_name).classification == ToolClassification.READ_ONLY
+        except Exception:
+            return False
+
     def _run_loop(
         self,
         task: Task,
@@ -449,6 +463,15 @@ class Agent:
         metadata = self._build_metadata(task, agent_context)
         tool_calls_count = 0
         cancellation_token = agent_context.metadata.get("cancellation_token")
+        # Loop guard: a model that re-issues the same read-only call gets the earlier result back instead of a new
+        # execution, and after MAX_REPEATED_CALLS such repeats it must answer (no tools) with what it has.
+        seen_calls: dict[str, str] = {}
+        repeated_calls = 0
+        force_answer = False
+        # An answer cut off by the token limit ("length") is asked to continue, a bounded number of times, and the parts
+        # are joined; otherwise a report ending mid-word is delivered as if it were finished.
+        continuations = 0
+        answer_parts: list[str] = []
 
         while True:
             # Cancellation check
@@ -488,14 +511,17 @@ class Agent:
 
             # Generate provider response (with streaming chunk emission if supported)
             step_tools = tools_schema
-            if tools_schema and agent_context.current_turn >= self.max_turns - 1:
-                # Last turn: a model that keeps searching never answers. Take the tools away and ask for the answer,
-                # so the work done so far ends as a result instead of as "Max turns reached".
+            if tools_schema and (force_answer or agent_context.current_turn >= self.max_turns - 1):
+                # Last turn, or the model is going in circles: a model that keeps searching never answers. Take the
+                # tools away and ask for the answer, so the work done so far ends as a result instead of as
+                # "Max turns reached".
                 step_tools = []
+                force_answer = True
                 agent_context.messages.append(Message(
                     role="user",
-                    content="[Aether] The tool budget is used up. Reply now with your final answer using what you already "
-                            "have, without calling any tool. If something is missing, say what, but still answer.",
+                    content="[Aether] The tool budget is used up or you are repeating yourself. Reply now with your final "
+                            "answer using what you already have, without calling any tool. If something is missing, say "
+                            "what, but still answer.",
                 ))
             response = self._generate_step(agent_context.messages, step_tools, task)
 
@@ -606,7 +632,36 @@ class Agent:
                     )
 
                 try:
-                    tool_results = self.execution_engine.execute_tool_calls(calls_to_execute, agent_context)
+                    fresh_calls, replayed = [], {}
+                    for call in calls_to_execute:
+                        signature = f"{call.tool_name}:{json.dumps(call.arguments, sort_keys=True, default=str)}"
+                        if signature in seen_calls:
+                            repeated_calls += 1
+                            replayed[call.call_id] = (
+                                "[Aether] You already ran this exact call; it is not executed again. Its result was:\n"
+                                + seen_calls[signature][:1500]
+                                + "\nUse it, change the arguments, or answer now."
+                            )
+                        else:
+                            fresh_calls.append((call, signature))
+                    executed = self.execution_engine.execute_tool_calls([c for c, _ in fresh_calls], agent_context) if fresh_calls else []
+                    by_id = {r.call_id: r for r in executed}
+                    for call, signature in fresh_calls:
+                        res = by_id.get(call.call_id)
+                        if res is None:
+                            continue
+                        if self._tool_is_read_only(agent_context, call.tool_name):
+                            if res.success:
+                                seen_calls[signature] = str(res.output)
+                        else:
+                            seen_calls.clear()      # a mutation can change what a read returns: reads may repeat again
+                    if repeated_calls >= self.MAX_REPEATED_CALLS:
+                        force_answer = True
+                    from aether.core.execution import ToolResult as _ToolResult
+                    tool_results = [
+                        _ToolResult(call_id=c.call_id, output=replayed[c.call_id]) if c.call_id in replayed else by_id[c.call_id]
+                        for c in calls_to_execute if c.call_id in replayed or c.call_id in by_id
+                    ]
                 except AgentInterrupt as interrupt:
                     # Persist the in-flight ReAct context. The interrupting
                     # tool is not retried automatically; its human response is
@@ -688,6 +743,16 @@ class Agent:
                     ))
                     continue
 
+                if response.finish_reason == "length" and continuations < self.MAX_CONTINUATIONS:
+                    continuations += 1
+                    answer_parts.append(response.content or "")
+                    agent_context.messages.append(Message(
+                        role="user",
+                        content="[Aether] Your answer was cut off by the length limit. Continue exactly from where you "
+                                "stopped, without repeating what you already wrote.",
+                    ))
+                    continue
+
                 break
 
         metadata = self._build_metadata(task, agent_context)
@@ -696,7 +761,9 @@ class Agent:
         metadata["provider_finish_reason"] = response.finish_reason
         metadata["turns"] = agent_context.current_turn
         metadata["tool_calls"] = tool_calls_count
-        output = response.content
+        output = "".join(answer_parts) + (response.content or "") if answer_parts else response.content
+        if response.finish_reason == "length":
+            metadata["truncated"] = True      # still cut off after the continuations: say so, do not hide it
 
         # Persist memory on success
         if self.memory_manager is not None:

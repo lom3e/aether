@@ -3,6 +3,7 @@ import {
   ZoomIn, ZoomOut, Maximize2, RotateCcw, Bot, Crown
 } from 'lucide-react';
 import { getIdentityColor, RenderIcon } from './identity';
+import { useTranslation } from './i18n';
 
 export interface TopologyAgent {
   name: string;
@@ -55,6 +56,7 @@ export function TeamTopology({
   className = '',
   interactive = true,
 }: TeamTopologyProps) {
+  const { t } = useTranslation();
   const containerRef = useRef<HTMLDivElement>(null);
   const [hoveredNode, setHoveredNode] = useState<string | null>(null);
 
@@ -361,7 +363,7 @@ export function TeamTopology({
         }}
       >
         <Bot size={22} className="text-muted" />
-        <span>Nessun agente configurato nella squadra</span>
+        <span>{t('syNoAgentsConfiguredInTheTeam')}</span>
       </div>
     );
   }
@@ -413,7 +415,7 @@ export function TeamTopology({
             className="btn btn-ghost"
             style={{ padding: '4px', height: '24px', width: '24px', borderRadius: '4px' }}
             onClick={handleZoomIn}
-            title="Zoom In (+)"
+            title={t('sdZoomIn')}
           >
             <ZoomIn size={13} />
           </button>
@@ -422,7 +424,7 @@ export function TeamTopology({
             className="btn btn-ghost"
             style={{ padding: '4px', height: '24px', width: '24px', borderRadius: '4px' }}
             onClick={handleZoomOut}
-            title="Zoom Out (-)"
+            title={t('sdZoomOut')}
           >
             <ZoomOut size={13} />
           </button>
@@ -431,7 +433,7 @@ export function TeamTopology({
             className="btn btn-ghost"
             style={{ padding: '4px', height: '24px', width: '24px', borderRadius: '4px' }}
             onClick={handleFitToView}
-            title="Adatta alla vista (Fit to View)"
+            title={t('syFitToView')}
           >
             <Maximize2 size={13} />
           </button>

@@ -242,10 +242,10 @@ export function Chat({
             const action = data.action || 'modified';
             const path = data.path || '';
             const actionLabel = action === 'created'
-              ? (language === 'it' ? 'Ha creato il file' : 'Created file')
+              ? (language === 'it' ? t('seCreatedTheFile') : t('sdCreatedFile'))
               : (action === 'modified'
-                ? (language === 'it' ? 'Ha modificato il file' : 'Modified file')
-                : (language === 'it' ? 'Ha eliminato il file' : 'Deleted file'));
+                ? (language === 'it' ? t('seModifiedTheFile') : t('sdModifiedFile'))
+                : (language === 'it' ? t('seDeletedTheFile') : t('sdDeletedFile')));
             const newAct: ActivityItem = {
               id: String(Date.now() + Math.random()),
               agent: data.agent || 'Workforce',
@@ -323,7 +323,7 @@ export function Chat({
                   return filtered;
                 });
               } else {
-                const errorDetails = data.error_details || { message: data.error || 'Task failed.' };
+                const errorDetails = data.error_details || { message: data.error || t('sdTaskFailed') };
                 setMessages(prev => {
                   const filtered = prev.filter(m => m.id !== streamId);
                   const errorMsg: ChatMessage = {
@@ -366,7 +366,7 @@ export function Chat({
             setActiveAgents([]);
             setWaitingAgent(null);
             setAgentStatus(null);
-            showToast('Task execution stopped by user.', 'info');
+            showToast(t('sdTaskExecutionStoppedByUser'), 'info');
             const targetId = data.session_id || currentSession;
             if (targetId) {
               fetch(apiUrl(`/api/conversations/${targetId}`))
@@ -386,7 +386,7 @@ export function Chat({
             setActiveAgents([]);
             setWaitingAgent(null);
             setAgentStatus(null);
-            const errMsg = data.message || 'Task encountered an error.';
+            const errMsg = data.message || t('sdTaskEncounteredAnError');
             showToast(errMsg, 'error');
             const targetId = data.session_id || currentSession;
             if (targetId) {
@@ -496,7 +496,7 @@ export function Chat({
         onConversationUpdated();
         showToast?.(`Switched workforce to ${newTeam}`, 'success');
       } catch (err: any) {
-        showToast?.(err.message || 'Error updating team', 'error');
+        showToast?.(err.message || t('sdErrorUpdatingTeam'), 'error');
       }
     }
   };
@@ -598,7 +598,7 @@ export function Chat({
     setActiveAgents([]);
     setWaitingAgent(null);
     setAgentStatus(null);
-    showToast('Task execution stopped by user.', 'info');
+    showToast(t('sdTaskExecutionStoppedByUser'), 'info');
   };
 
   const handleInterruptResponse = (response: string) => {
@@ -689,7 +689,7 @@ export function Chat({
           setMessages(updatedConv.messages);
         }
         onConversationUpdated();
-        showToast('Message deleted.', 'info');
+        showToast(t('sdMessageDeleted'), 'info');
       }
     } catch (err) {
       console.error('Failed to delete message', err);
@@ -857,7 +857,7 @@ export function Chat({
               onClick={onOpenWorkspaceModal}
             >
               <Plus size={16} />
-              <span>{language === 'it' ? '+ Crea workspace' : '+ Create workspace'}</span>
+              <span>{language === 'it' ? '+ Crea workspace' : t('sdCreateWorkspace')}</span>
             </button>
           </div>
         ) : !hasMessages ? (
@@ -992,7 +992,7 @@ export function Chat({
               padding: '4px'
             }}>
               <div style={{ padding: '4px 8px', fontSize: '10px', fontWeight: 600, color: 'hsl(var(--muted-fg))', textTransform: 'uppercase', letterSpacing: '0.05em', borderBottom: '1px solid hsl(var(--border)/0.4)' }}>
-                Commands
+                {t('uiCommands')}
               </div>
               {matchingCommands.map((cmd, idx) => {
                 const isSelected = idx === selectedCommandIndex;

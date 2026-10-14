@@ -23,128 +23,133 @@ interface SkillItem {
   author?: string;
 }
 
-const INITIAL_SKILLS: SkillItem[] = [
+const buildInitialSkills = (t: (key: any) => string): SkillItem[] => [
   {
     id: 'web_search',
-    name: 'Web Search',
+    name: t('sdWebSearch'),
     category: 'native',
     descriptionKey: 'skillWebSearchDesc',
-    descriptionDefault: 'Search live information across the web using DuckDuckGo to augment model knowledge with real-time data.',
+    descriptionDefault: t('sdSearchLiveInformationAcrossTheWeb'),
     icon: Globe,
     enabled: true,
     permissions: ['net:http', 'search:duckduckgo'],
     version: '1.5.0',
-    author: 'Aether Core',
+    author: t('sdAetherCore'),
   },
   {
     id: 'search_knowledge',
-    name: 'Knowledge Retrieval',
+    name: t('sdKnowledgeRetrieval'),
     category: 'native',
     descriptionKey: 'skillKnowledgeDesc',
-    descriptionDefault: 'Perform semantic and lexical search across indexed workspace and system knowledge documents.',
+    descriptionDefault: t('sdPerformSemanticAndLexicalSearchAcross'),
     icon: Database,
     enabled: true,
     permissions: ['kb:read', 'vectors:query'],
     version: '1.5.0',
-    author: 'Aether Core',
+    author: t('sdAetherCore'),
   },
   {
     id: 'filesystem_tools',
-    name: 'Filesystem Tools',
+    name: t('sdFilesystemTools'),
     category: 'native',
     descriptionKey: 'skillFilesystemDesc',
-    descriptionDefault: 'Inspect directories, read project files, patch source code, and create workspace deliverables.',
+    descriptionDefault: t('sdInspectDirectoriesReadProjectFilesPatch'),
     icon: FileText,
     enabled: true,
     permissions: ['fs:read', 'fs:write', 'fs:patch'],
     version: '1.5.0',
-    author: 'Aether Core',
+    author: t('sdAetherCore'),
   },
   {
     id: 'terminal_sandbox',
-    name: 'Terminal & Command Sandbox',
+    name: t('sdTerminalCommandSandbox'),
     category: 'native',
     descriptionKey: 'skillTerminalDesc',
-    descriptionDefault: 'Execute shell commands, run tests, compile builds, and verify code execution in a secure sandbox.',
+    descriptionDefault: t('sdExecuteShellCommandsRunTestsCompile'),
     icon: Terminal,
     enabled: true,
     permissions: ['exec:shell', 'sandbox:isolated'],
     version: '1.5.0',
-    author: 'Aether Core',
+    author: t('sdAetherCore'),
   },
   {
     id: 'gmail_integration',
-    name: 'Google Workspace / Gmail',
+    name: t('sdGoogleWorkspaceGmail'),
     category: 'integration',
     descriptionKey: 'skillGmailDesc',
-    descriptionDefault: 'Read, search, draft, and organize emails and thread communications through Google Workspace APIs.',
+    descriptionDefault: t('sdReadSearchDraftAndOrganizeEmails'),
     icon: Mail,
     enabled: false,
     requiresConfig: true,
     configFields: [
-      { key: 'client_id', label: 'OAuth Client ID', type: 'text', placeholder: 'xxxx.apps.googleusercontent.com' },
-      { key: 'api_key', label: 'Service Account / API Key', type: 'password', placeholder: 'AIzaSy...' }
+      { key: 'client_id', label: t('sdOauthClientId'), type: 'text', placeholder: 'xxxx.apps.googleusercontent.com' },
+      { key: 'api_key', label: t('sdServiceAccountApiKey'), type: 'password', placeholder: 'AIzaSy...' }
     ],
     permissions: ['email:read', 'email:draft', 'email:send'],
     version: '1.0.0',
-    author: 'Google Cloud Ecosystem',
+    author: t('sdGoogleCloudEcosystem'),
   },
   {
     id: 'github_tools',
-    name: 'GitHub Repository Manager',
+    name: t('sdGithubRepositoryManager'),
     category: 'integration',
     descriptionKey: 'skillGithubDesc',
-    descriptionDefault: 'Connect private repositories, create pull requests, review issues, and synchronize project trees.',
+    descriptionDefault: t('sdConnectPrivateRepositoriesCreatePullRequests'),
     icon: GitBranch,
     enabled: true,
     requiresConfig: true,
     configFields: [
-      { key: 'token', label: 'Personal Access Token', type: 'password', placeholder: 'ghp_xxxxxxxxxxxxxxxxxxxx' }
+      { key: 'token', label: t('sdPersonalAccessToken'), type: 'password', placeholder: 'ghp_xxxxxxxxxxxxxxxxxxxx' }
     ],
     permissions: ['git:clone', 'git:read', 'git:commit'],
     version: '1.2.0',
-    author: 'GitHub Connect',
+    author: t('sdGithubConnect'),
   },
   {
     id: 'slack_notifications',
-    name: 'Slack Team Relay',
+    name: t('sdSlackTeamRelay'),
     category: 'integration',
     descriptionKey: 'skillSlackDesc',
-    descriptionDefault: 'Broadcast task updates, human-in-the-loop approvals, and workflow notifications to Slack channels.',
+    descriptionDefault: t('sdBroadcastTaskUpdatesHumanInThe'),
     icon: MessageSquare,
     enabled: false,
     requiresConfig: true,
     configFields: [
-      { key: 'webhook_url', label: 'Incoming Webhook URL', type: 'text', placeholder: 'https://hooks.slack.com/services/...' },
-      { key: 'bot_token', label: 'Bot User OAuth Token', type: 'password', placeholder: 'xoxb-...' }
+      { key: 'webhook_url', label: t('sdIncomingWebhookUrl'), type: 'text', placeholder: 'https://hooks.slack.com/services/...' },
+      { key: 'bot_token', label: t('sdBotUserOauthToken'), type: 'password', placeholder: 'xoxb-...' }
     ],
     permissions: ['chat:write', 'channels:read'],
     version: '1.0.0',
-    author: 'Slack Ecosystem',
+    author: t('sdSlackEcosystem'),
   },
   {
     id: 'mcp_bridge',
-    name: 'Model Context Protocol (MCP) Bridge',
+    name: t('sdModelContextProtocolMcpBridge'),
     category: 'mcp',
     descriptionKey: 'skillMcpDesc',
-    descriptionDefault: 'Connect standard Model Context Protocol servers to dynamically load external developer tools.',
+    descriptionDefault: t('sdConnectStandardModelContextProtocolServers'),
     icon: Sparkles,
     enabled: false,
     requiresConfig: true,
     configFields: [
-      { key: 'server_url', label: 'MCP Server Endpoint / Command', type: 'text', placeholder: 'npx -y @modelcontextprotocol/server-...' }
+      { key: 'server_url', label: t('sdMcpServerEndpointCommand'), type: 'text', placeholder: 'npx -y @modelcontextprotocol/server-...' }
     ],
     permissions: ['mcp:stdio', 'mcp:call'],
     version: '1.0.0',
-    author: 'Anthropic MCP Standard',
+    author: t('sdAnthropicMcpStandard'),
   },
 ];
 
 export function Skills({ navigate }: { navigate?: (view: string) => void } = {}) {
-  const { t } = useTranslation();
+  const { t, language } = useTranslation();
   const showToast = useContext(ToastContext);
 
-  const [skills, setSkills] = useState<SkillItem[]>(INITIAL_SKILLS);
+  const [skills, setSkills] = useState<SkillItem[]>(() => buildInitialSkills(t));
+  // Re-translate the built-in catalog when the language changes, keeping each skill's enabled state.
+  useEffect(() => {
+    setSkills((prev) => buildInitialSkills(t).map((fresh) => ({ ...fresh, enabled: prev.find((p) => p.id === fresh.id)?.enabled ?? fresh.enabled })));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [language]);
   const [agents, setAgents] = useState<any[]>([]);
   const [selectedAgent, setSelectedAgent] = useState<string>('all');
   const [filterCategory, setFilterCategory] = useState<'all' | 'native' | 'integration' | 'mcp'>('all');
@@ -261,7 +266,7 @@ export function Skills({ navigate }: { navigate?: (view: string) => void } = {})
   return (
     <div style={{ flex: 1, display: 'flex', flexDirection: 'column', height: '100%', overflowY: 'auto' }}>
       <TopHeader
-        title={t('skillsTitle') || 'Skills & Tools Hub'}
+        title={t('skillsTitle') || t('sdSkillsToolsHub')}
         icon={Puzzle}
         actions={
           <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
@@ -275,17 +280,17 @@ export function Skills({ navigate }: { navigate?: (view: string) => void } = {})
 
       <div style={{ maxWidth: '1100px', width: '100%', margin: '24px auto', padding: '0 32px' }}>
         <p className="text-muted" style={{ fontSize: '14.5px', marginBottom: '24px', lineHeight: 1.5 }}>
-          {t('skillsSubtitle') || 'Showcase, enable, and configure native tools, workspace capabilities, and third-party integrations available to your AI workforce.'}
+          {t('skillsSubtitle') || t('sdShowcaseEnableAndConfigureNativeTools')}
         </p>
 
         {/* Filter Bar & Search */}
         <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '16px', flexWrap: 'wrap', marginBottom: '24px' }}>
           <div style={{ display: 'flex', gap: '6px', backgroundColor: 'hsl(var(--card))', padding: '4px', borderRadius: '8px', border: '1px solid hsl(var(--border))' }}>
             {[
-              { id: 'all', label: t('allSkills') || 'All Capabilities' },
-              { id: 'native', label: t('nativeTools') || 'Native Tools' },
+              { id: 'all', label: t('allSkills') || t('sdAllCapabilities') },
+              { id: 'native', label: t('nativeTools') || t('sdNativeTools') },
               { id: 'integration', label: t('integrations') || 'Integrations' },
-              { id: 'mcp', label: 'MCP Servers' },
+              { id: 'mcp', label: t('sdMcpServers') },
             ].map(tab => (
               <button
                 key={tab.id}
@@ -315,7 +320,7 @@ export function Skills({ navigate }: { navigate?: (view: string) => void } = {})
                   className="form-select"
                   style={{ height: '36px', fontSize: '12.5px', padding: '0 28px 0 10px', minWidth: '160px' }}
                 >
-                  <option value="all">Assign To: All Agents</option>
+                  <option value="all">{t('sdAssignToAllAgents')}</option>
                   {agents.map(a => (
                     <option key={a.name} value={a.name}>{a.name} ({a.role || 'Agent'})</option>
                   ))}
@@ -329,7 +334,7 @@ export function Skills({ navigate }: { navigate?: (view: string) => void } = {})
                 className="form-input"
                 value={searchQuery}
                 onChange={e => setSearchQuery(e.target.value)}
-                placeholder={t('searchSkills') || 'Search tools & skills...'}
+                placeholder={t('searchSkills') || t('sdSearchToolsSkills')}
                 style={{ paddingLeft: '32px', height: '36px', fontSize: '13px' }}
               />
             </div>
@@ -337,7 +342,7 @@ export function Skills({ navigate }: { navigate?: (view: string) => void } = {})
         </div>
 
         {/* Grid of Skills */}
-        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(330px, 1fr))', gap: '18px', marginBottom: '40px' }}>
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(min(330px, 100%), 1fr))', gap: '18px', marginBottom: '40px' }}>
           {filteredSkills.map(skill => {
             const IconComp = skill.icon;
             return (
@@ -474,10 +479,10 @@ export function Skills({ navigate }: { navigate?: (view: string) => void } = {})
             </div>
             <div>
               <h4 style={{ margin: 0, fontSize: '15px', fontWeight: 600 }}>
-                {t('exploreMoreSkillsMarketplace') || 'Discover more Skills & Toolpacks in the Marketplace'}
+                {t('exploreMoreSkillsMarketplace') || t('sdDiscoverMoreSkillsToolpacksInThe')}
               </h4>
               <p className="text-muted" style={{ margin: '3px 0 0', fontSize: '13px' }}>
-                {t('marketplaceSkillsBannerDesc') || 'Explore community-curated integrations, domain workflows, and official workforce packs.'}
+                {t('marketplaceSkillsBannerDesc') || t('sdExploreCommunityCuratedIntegrationsDomainWorkflows')}
               </p>
             </div>
           </div>
@@ -489,7 +494,7 @@ export function Skills({ navigate }: { navigate?: (view: string) => void } = {})
               style={{ padding: '8px 16px', fontSize: '13px', display: 'flex', alignItems: 'center', gap: '6px' }}
               onClick={() => navigate('marketplace')}
             >
-              <span>{t('goToMarketplace') || 'Open Marketplace'}</span>
+              <span>{t('goToMarketplace') || t('sdOpenMarketplace')}</span>
               <ArrowRight size={15} />
             </button>
           )}
@@ -515,7 +520,7 @@ export function Skills({ navigate }: { navigate?: (view: string) => void } = {})
             </div>
 
             <p style={{ fontSize: '13px', color: 'hsl(var(--muted-fg))', marginBottom: '20px' }}>
-              {t('configureSkillDesc') || 'Set connection credentials and environment parameters for this integration.'}
+              {t('configureSkillDesc') || t('sdSetConnectionCredentialsAndEnvironmentParameters')}
             </p>
 
             <div style={{ display: 'flex', flexDirection: 'column', gap: '14px', marginBottom: '20px' }}>

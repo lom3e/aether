@@ -69,7 +69,9 @@ class TestCodingStatusClassifier:
 def test_assistant_card_no_longer_derives_success_from_not_failed():
     src = (UI / "AssistantV2.tsx").read_text()
     assert "=== 'failed' ? 'status-failed' : 'status-completed'" not in src
-    assert "Fase 3 • Risultato Verificato" in src and "codingPres.verified ?" in src      # only claimed when verified
+    i18n = (UI / "i18n.tsx").read_text()
+    assert "'Fase 3 • Risultato Verificato'" in i18n and "'Step 3 • Verified Result'" in i18n
+    assert "t('orbStep3VerifiedResult')" in src and "codingPres.verified ?" in src         # only claimed when verified
     assert "test_passed !== false" not in src                                             # undefined is not "passed"
     # every place that used to turn "action succeeded" into "done" now asks the classifier
     assert src.count("classifyCodingResult(") >= 6

@@ -28,16 +28,18 @@ import {
   LoadingSpinner,
   Modal,
 } from './design-system';
+import { useTranslation } from './i18n';
 
-// What the badge says must be what the backend knows: only a verified deliverable is "Verificato"; a record whose file
+// What the badge says must be what the backend knows: only a verified deliverable is "Verified"; a record whose file
 // is empty or missing is never shown as ready.
-function resultBadge(item: { status?: string; size_bytes: number; mission_id?: string }): { status: string; label: string } {
+function resultBadge(item: { status?: string; size_bytes: number; mission_id?: string; file_available?: boolean }, t: (key: any) => string): { status: string; label: string } {
   const st = (item.status || '').toLowerCase();
-  if (st === 'verified') return { status: 'verified', label: 'Verificato' };
-  if (st === 'needs_revision') return { status: 'configured', label: 'Da rivedere' };
-  if (item.mission_id && !item.size_bytes) return { status: 'error', label: 'File non disponibile' };
-  if (st === 'draft') return { status: 'connecting', label: 'Bozza' };
-  return { status: 'connected', label: 'Pronto' };   // a file Aether produced outside a mission
+  if (item.file_available === false) return { status: 'error', label: t('syFileUnavailable') };
+  if (st === 'verified') return { status: 'verified', label: t('syVerified') };
+  if (st === 'needs_revision') return { status: 'configured', label: t('syToReview') };
+  if (item.mission_id && !item.size_bytes) return { status: 'error', label: t('syFileUnavailable') };
+  if (st === 'draft') return { status: 'connecting', label: t('syDraft') };
+  return { status: 'connected', label: t('syReady') };   // a file Aether produced outside a mission
 }
 
 export interface ResultItem {
@@ -51,6 +53,7 @@ export interface ResultItem {
   created_at?: string;
   mission_title?: string;
   preview_content?: string;
+  file_available?: boolean;
 }
 
 interface ResultsViewProps {
@@ -58,7 +61,10 @@ interface ResultsViewProps {
 }
 
 export function ResultsView({ navigate }: ResultsViewProps) {
+  const { t } = useTranslation();
   const [results, setResults] = useState<ResultItem[]>([]);
+  // Records of attempts that left no file: kept as history, never offered as results.
+  const [attempts, setAttempts] = useState<ResultItem[]>([]);
   const [loading, setLoading] = useState(true);
   const [searchQuery, setSearchQuery] = useState('');
   const [categoryFilter, setCategoryFilter] = useState<'all' | 'documents' | 'code' | 'data' | 'other'>('all');
@@ -125,7 +131,8 @@ export function ResultsView({ navigate }: ResultsViewProps) {
       }
 
       items.sort((x, y) => String(y.created_at || '').localeCompare(String(x.created_at || '')));
-      setResults(items);
+      setResults(items.filter((i) => i.file_available !== false));
+      setAttempts(items.filter((i) => i.file_available === false));
     } catch (err) {
       console.error('Failed to load results', err);
     } finally {
@@ -148,16 +155,16 @@ export function ResultsView({ navigate }: ResultsViewProps) {
           const data = await res.json();
           setPreviewData(data);
         } else {
-          setPreviewData({ message: 'Anteprima non disponibile per questo formato di file.' });
+          setPreviewData({ message: t('syPreviewNotAvailableForThisFile') });
         }
       } else if (item.path) {
         const res = await fetch(apiUrl(`/api/personal/companion/file/preview?path=${encodeURIComponent(item.path)}`));
-        setPreviewData(res.ok ? await res.json() : { message: 'Anteprima non disponibile per questo file.' });
+        setPreviewData(res.ok ? await res.json() : { message: t('syPreviewNotAvailableForThisFile2') });
       } else {
-        setPreviewData({ message: 'Anteprima non disponibile per questo file.' });
+        setPreviewData({ message: t('syPreviewNotAvailableForThisFile2') });
       }
     } catch {
-      setPreviewData({ message: 'Impossibile caricare l’anteprima.' });
+      setPreviewData({ message: t('syCouldNotLoadThePreview') });
     } finally {
       setPreviewLoading(false);
     }
@@ -171,12 +178,12 @@ export function ResultsView({ navigate }: ResultsViewProps) {
         method: 'POST',
       });
       if (res.ok) {
-        showToast?.('File aperto nel sistema.', 'success');
+        showToast?.(t('syFileOpenedOnYourSystem'), 'success');
       } else {
-        showToast?.('Impossibile aprire il file con l’applicazione predefinita.', 'warning');
+        showToast?.(t('syCouldNotOpenTheFileWith'), 'warning');
       }
     } catch {
-      showToast?.('Errore durante l’apertura del file.', 'error');
+      showToast?.(t('syErrorWhileOpeningTheFile'), 'error');
     } finally {
       setOpeningId(null);
     }
@@ -256,10 +263,10 @@ export function ResultsView({ navigate }: ResultsViewProps) {
         title={
           <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
             <FileCheck size={26} color="hsl(var(--primary))" />
-            <Heading level={1}>Risultati & Documenti</Heading>
+            <Heading level={1}>{t('syResultsDocuments')}</Heading>
           </div>
         }
-        description="Tutto ciò che Aether ha prodotto per te: documenti, sintesi, report, codice e file pronti per essere utilizzati."
+        description={t('syEverythingAetherProducedForYouDocuments')}
         actions={
           <Button
             variant="secondary"
@@ -268,7 +275,7 @@ export function ResultsView({ navigate }: ResultsViewProps) {
             disabled={loading}
             leftIcon={<RefreshCw size={14} className={loading ? 'animate-spin' : ''} />}
           >
-            Aggiorna
+            {t('resultsRefresh')}
           </Button>
         }
       />
@@ -280,16 +287,16 @@ export function ResultsView({ navigate }: ResultsViewProps) {
             value={categoryFilter}
             onChange={(val) => setCategoryFilter(val as any)}
             options={[
-              { value: 'all', label: 'Tutti i risultati' },
-              { value: 'documents', label: 'Documenti & Report' },
-              { value: 'code', label: 'Codice & Script' },
-              { value: 'data', label: 'Tabelle & Dati' },
+              { value: 'all', label: t('syAllResults') },
+              { value: 'documents', label: t('syDocumentsReports') },
+              { value: 'code', label: t('syCodeScripts') },
+              { value: 'data', label: t('syTablesData') },
             ]}
           />
 
           <div style={{ minWidth: '240px', flex: '1', maxWidth: '340px' }}>
             <AetherInput
-              placeholder="Cerca per nome o lavoro…"
+              placeholder={t('sySearchByNameOrJob')}
               value={searchQuery}
               onChange={(e) => setSearchQuery(e.target.value)}
             />
@@ -302,22 +309,22 @@ export function ResultsView({ navigate }: ResultsViewProps) {
         <Panel variant="default" style={{ padding: '48px', textAlign: 'center' }}>
           <Stack align="center" justify="center" gap="sm">
             <LoadingSpinner size="lg" />
-            <span style={{ fontSize: '13px', color: 'hsl(var(--muted-fg))' }}>Caricamento dei risultati in corso…</span>
+            <span style={{ fontSize: '13px', color: 'hsl(var(--muted-fg))' }}>{t('syLoadingResults')}</span>
           </Stack>
         </Panel>
       ) : filteredResults.length === 0 ? (
         <EmptyState
           icon={<FileText size={36} />}
-          title={searchQuery ? 'Nessun risultato trovato' : 'Nessun documento prodotto finora'}
+          title={searchQuery ? t('syNoResultsFound') : t('syNoDocumentsProducedYet')}
           description={
             searchQuery
-              ? 'Prova a cercare un altro termine o seleziona una categoria diversa.'
-              : 'Quando Aether completa un lavoro, un’analisi o una scrittura per te, i file e i report appariranno qui.'
+              ? t('syTryAnotherSearchTermOrPick')
+              : t('syWhenAetherCompletesAJobAn')
           }
           action={
             navigate ? (
               <Button variant="primary" onClick={() => navigate('home')}>
-                Chiedi ad Aether di preparare un documento
+                {t('syAskAetherToPrepareADocument')}
               </Button>
             ) : undefined
           }
@@ -371,7 +378,7 @@ export function ResultsView({ navigate }: ResultsViewProps) {
                       </div>
                     </div>
                   </div>
-                  <StatusBadge {...resultBadge(item)} />
+                  <StatusBadge {...resultBadge(item, t)} />
                 </div>
 
                 {item.mission_title && (
@@ -391,7 +398,7 @@ export function ResultsView({ navigate }: ResultsViewProps) {
                   >
                     <Sparkles size={12} color="hsl(var(--primary))" />
                     <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                      Generato per: <strong>{item.mission_title}</strong>
+                      {t('syGeneratedFor')} <strong>{item.mission_title}</strong>
                     </span>
                   </div>
                 )}
@@ -415,7 +422,7 @@ export function ResultsView({ navigate }: ResultsViewProps) {
                   leftIcon={<Eye size={13} />}
                   style={{ flex: 1 }}
                 >
-                  Anteprima
+                  {t('syPreview')}
                 </Button>
 
                 {!item.mission_id && item.path && (
@@ -423,10 +430,10 @@ export function ResultsView({ navigate }: ResultsViewProps) {
                     href={apiUrl(`/api/personal/companion/file/download?path=${encodeURIComponent(item.path)}`)}
                     download={item.name}
                     style={{ textDecoration: 'none' }}
-                    title="Scarica file sul tuo computer"
+                    title={t('syDownloadTheFileToYourComputer')}
                   >
                     <Button variant="ghost" size="sm" leftIcon={<Download size={13} />}>
-                      Scarica
+                      {t('syDownload')}
                     </Button>
                   </a>
                 )}
@@ -437,19 +444,19 @@ export function ResultsView({ navigate }: ResultsViewProps) {
                       size="sm"
                       onClick={() => handleOpenFile(item)}
                       disabled={openingId === item.id}
-                      title="Apri nel sistema operativo"
+                      title={t('syOpenInTheOperatingSystem')}
                       leftIcon={<FolderOpen size={13} />}
                     >
-                      Apri
+                      {t('syOpen')}
                     </Button>
                     <a
                       href={apiUrl(`/api/missions/${item.mission_id}/deliverables/${item.id}/download`)}
                       download={item.name}
                       style={{ textDecoration: 'none' }}
-                      title="Scarica file sul tuo computer"
+                      title={t('syDownloadTheFileToYourComputer')}
                     >
                       <Button variant="ghost" size="sm" leftIcon={<Download size={13} />}>
-                        Scarica
+                        {t('syDownload')}
                       </Button>
                     </a>
                   </>
@@ -458,6 +465,19 @@ export function ResultsView({ navigate }: ResultsViewProps) {
             </Panel>
           ))}
         </Grid>
+      )}
+
+      {attempts.length > 0 && (
+        <details data-testid="result-attempts" style={{ marginTop: '20px', fontSize: '13px', color: 'hsl(var(--muted-fg))' }}>
+          <summary style={{ cursor: 'pointer' }}>{t('resultsAttemptsSummary', { count: attempts.length })}</summary>
+          <ul style={{ margin: '8px 0 0 18px' }}>
+            {attempts.map((a) => (
+              <li key={a.id}>
+                {a.name || a.path} · {resultBadge(a, t).label}{a.mission_title ? ` · ${a.mission_title}` : ''}{a.created_at ? ` · ${formatDate(a.created_at)}` : ''}
+              </li>
+            ))}
+          </ul>
+        </details>
       )}
 
       {/* Preview Modal */}
@@ -469,7 +489,7 @@ export function ResultsView({ navigate }: ResultsViewProps) {
           description={
             previewItem.mission_title
               ? `Generato da Aether per: ${previewItem.mission_title}`
-              : 'Anteprima del contenuto prodotto'
+              : t('syPreviewOfTheProducedContent')
           }
           size="lg"
           footer={
@@ -481,12 +501,12 @@ export function ResultsView({ navigate }: ResultsViewProps) {
                   style={{ textDecoration: 'none' }}
                 >
                   <Button variant="secondary" size="sm" leftIcon={<Download size={14} />}>
-                    Scarica file
+                    {t('syDownloadFile')}
                   </Button>
                 </a>
               )}
               <Button variant="primary" size="sm" onClick={() => setPreviewItem(null)}>
-                Chiudi
+                {t('syClose')}
               </Button>
             </Stack>
           }
@@ -495,7 +515,7 @@ export function ResultsView({ navigate }: ResultsViewProps) {
             <div style={{ padding: '36px', textAlign: 'center' }}>
               <Stack align="center" justify="center" gap="sm">
                 <LoadingSpinner size="md" />
-                <span style={{ fontSize: '13px', color: 'hsl(var(--muted-fg))' }}>Caricamento dell&apos;anteprima…</span>
+                <span style={{ fontSize: '13px', color: 'hsl(var(--muted-fg))' }}>{t('syLoadingThePreview')}</span>
               </Stack>
             </div>
           ) : previewData?.content ? (
@@ -518,7 +538,7 @@ export function ResultsView({ navigate }: ResultsViewProps) {
             </div>
           ) : (
             <div style={{ padding: '24px 0', textAlign: 'center', color: 'hsl(var(--muted-fg))', fontSize: '13px' }}>
-              {previewData?.message || 'Nessuna anteprima visualizzabile nel browser. Puoi scaricare il file per aprirlo.'}
+              {previewData?.message || t('syNoPreviewCanBeShownIn')}
             </div>
           )}
         </Modal>

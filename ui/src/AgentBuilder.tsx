@@ -102,7 +102,7 @@ export function AgentBuilder({
         }),
       });
       if (!response.ok) {
-        throw await apiError(response, 'Impossibile generare la bozza dell\'agente.');
+        throw await apiError(response, t('syCouldNotGenerateTheAgentDraft'));
       }
       const draft = await response.json();
       if (draft.name) setName(draft.name);
@@ -114,10 +114,10 @@ export function AgentBuilder({
       if (Array.isArray(draft.delegates_to)) setDelegatesList(draft.delegates_to);
       setModel(null); // Explicitly inherit from team
 
-      showToast('✨ Bozza generata con successo! Puoi rifinire qualsiasi campo qui sotto.', 'success');
+      showToast(t('syDraftGeneratedYouCanRefineAny'), 'success');
       setCreationMode('manual');
     } catch (err) {
-      showToast(err instanceof Error ? err.message : 'Errore durante la generazione della bozza', 'error');
+      showToast(err instanceof Error ? err.message : t('syErrorWhileGeneratingTheDraft'), 'error');
     } finally {
       setIsGeneratingDraft(false);
     }
@@ -150,14 +150,14 @@ export function AgentBuilder({
         }),
       });
       if (!res.ok) {
-        throw await apiError(res, 'Unable to save this agent.');
+        throw await apiError(res, t('szUnableToSaveThisAgent'));
       } else {
         showToast(initialData ? t('agentUpdated') : t('agentCreated'), 'success');
         onSave();
         onClose();
       }
     } catch (error) {
-      showToast(error instanceof Error ? error.message : 'Unable to save this agent.', 'error');
+      showToast(error instanceof Error ? error.message : t('szUnableToSaveThisAgent'), 'error');
     } finally {
       setSaving(false);
     }
@@ -177,10 +177,10 @@ export function AgentBuilder({
         onSave();
         onClose();
       } else {
-        throw await apiError(res, 'Unable to delete this agent.');
+        throw await apiError(res, t('szUnableToDeleteThisAgent'));
       }
     } catch (error) {
-      showToast(error instanceof Error ? error.message : 'Unable to delete this agent.', 'error');
+      showToast(error instanceof Error ? error.message : t('szUnableToDeleteThisAgent'), 'error');
     } finally {
       setSaving(false);
     }
@@ -207,7 +207,7 @@ export function AgentBuilder({
                 {initialData ? t('editAgent') : t('createAgent')}
               </h2>
               <div style={{ fontSize: '12px', color: 'hsl(var(--muted-fg))', marginTop: '2px' }}>
-                {name ? `${name} · ${role || 'Agente autonomo'}` : 'Configura identità, prompt e competenze'}
+                {name ? `${name} · ${role || t('syAutonomousAgent')}` : t('syConfigureIdentityPromptAndSkills')}
               </div>
             </div>
           </div>
@@ -238,7 +238,7 @@ export function AgentBuilder({
                 onClick={() => setCreationMode('manual')}
               >
                 <PenLine size={14} style={{ marginRight: '6px' }} />
-                <span>✍️ {t('manualConfig') || 'Configurazione Manuale'}</span>
+                <span>✍️ {t('manualConfig') || t('syManualSetup')}</span>
               </button>
               <button
                 type="button"
@@ -247,7 +247,7 @@ export function AgentBuilder({
                 onClick={() => setCreationMode('ai')}
               >
                 <Sparkles size={14} style={{ marginRight: '6px' }} />
-                <span>✨ {t('createWithAi') || 'Crea con l\'IA'}</span>
+                <span>✨ {t('createWithAi') || t('syCreateWithAi')}</span>
               </button>
             </div>
           )}
@@ -266,11 +266,11 @@ export function AgentBuilder({
               <div style={{ display: 'flex', alignItems: 'center', gap: '10px', marginBottom: '10px' }}>
                 <Wand2 size={18} className="text-primary" />
                 <h3 style={{ fontSize: '14.5px', fontWeight: 600, margin: 0 }}>
-                  {t('aiAgentArchitectTitle') || 'Descrivi l\'Agente da costruire'}
+                  {t('aiAgentArchitectTitle') || t('syDescribeTheAgentToBuild')}
                 </h3>
               </div>
               <p style={{ fontSize: '12px', color: 'hsl(var(--muted-fg))', margin: '0 0 14px 0', lineHeight: 1.5 }}>
-                {t('aiAgentArchitectDesc') || 'L\'IA progetterà istantaneamente nome, ruolo, istruzioni, competenze e deleghe ideali. Potrai poi perfezionare ogni singolo dettaglio.'}
+                {t('aiAgentArchitectDesc') || t('syTheAiWillInstantlyDesignThe')}
               </p>
 
               <textarea
@@ -278,7 +278,7 @@ export function AgentBuilder({
                 rows={3}
                 value={aiGoal}
                 onChange={e => setAiGoal(e.target.value)}
-                placeholder="es. Voglio un analista finanziario che legga bilanci PDF, cerchi notizie su Google e rediga report esecutivi in markdown."
+                placeholder={t('syEGIWantAFinancial')}
                 style={{ marginBottom: '14px', fontSize: '13px', lineHeight: 1.5 }}
                 disabled={isGeneratingDraft}
               />
@@ -294,12 +294,12 @@ export function AgentBuilder({
                   {isGeneratingDraft ? (
                     <>
                       <RefreshCw size={14} className="animate-spin" />
-                      <span>{t('generating') || 'Generazione in corso...'}</span>
+                      <span>{t('generating') || t('syGenerating')}</span>
                     </>
                   ) : (
                     <>
                       <Sparkles size={14} />
-                      <span>{t('generateAgentDraft') || '✨ Genera Bozza Agente'}</span>
+                      <span>{t('generateAgentDraft') || t('syGenerateAgentDraft')}</span>
                     </>
                   )}
                 </button>
@@ -312,7 +312,7 @@ export function AgentBuilder({
             <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '16px' }}>
               <Bot size={16} className="text-primary" />
               <h3 style={{ fontSize: '14.5px', fontWeight: 600, margin: 0 }}>
-                {t('agentIdentitySection') || 'Identità Agente'}
+                {t('agentIdentitySection') || t('syAgentIdentity')}
               </h3>
             </div>
 
@@ -324,7 +324,7 @@ export function AgentBuilder({
                     className="form-input"
                     value={name}
                     onChange={e => setName(e.target.value)}
-                    placeholder="e.g. Market Analyst"
+                    placeholder={t('sdEGMarketAnalyst')}
                   />
                 </div>
                 <div className="form-group" style={{ marginBottom: 0 }}>
@@ -333,7 +333,7 @@ export function AgentBuilder({
                     className="form-input"
                     value={role}
                     onChange={e => setRole(e.target.value)}
-                    placeholder="e.g. Competitive Intelligence"
+                    placeholder={t('sdEGCompetitiveIntelligence')}
                   />
                 </div>
               </div>
@@ -342,13 +342,13 @@ export function AgentBuilder({
                 <VisualIconSelect
                   value={icon}
                   onChange={setIcon}
-                  label="Icona Agente"
+                  label={t('syAgentIcon')}
                   disabled={saving}
                 />
                 <VisualColorSelect
                   value={color}
                   onChange={setColor}
-                  label="Colore Agente"
+                  label={t('syAgentColor')}
                   disabled={saving}
                 />
               </div>
@@ -356,9 +356,9 @@ export function AgentBuilder({
               {/* Architecture Selector */}
               <div style={{ marginTop: '4px', paddingTop: '14px', borderTop: '1px solid hsl(var(--border)/0.5)' }}>
                 <label className="form-label" style={{ marginBottom: '8px', display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
-                  <span>Tipo Agente / Esecutore</span>
+                  <span>{t('syAgentTypeExecutor')}</span>
                   <span style={{ fontSize: '11px', color: 'hsl(var(--muted-fg))', fontWeight: 'normal' }}>
-                    {agentType === 'local' ? 'Eseguito da provider IA' : 'Worker / bridge di terze parti'}
+                    {agentType === 'local' ? t('syRunByAnAiProvider') : t('syThirdPartyWorkerBridge')}
                   </span>
                 </label>
                 <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '8px', marginBottom: '12px' }}>
@@ -368,7 +368,7 @@ export function AgentBuilder({
                     onClick={() => setAgentType('local')}
                     style={{ fontSize: '12px', padding: '8px 12px', justifyContent: 'center' }}
                   >
-                    Standard (LLM Core)
+                    {t('syStandardLlmCore')}
                   </button>
                   <button
                     type="button"
@@ -376,21 +376,21 @@ export function AgentBuilder({
                     onClick={() => setAgentType('external')}
                     style={{ fontSize: '12px', padding: '8px 12px', justifyContent: 'center' }}
                   >
-                    Worker Esterno (HTTP / CLI / MCP)
+                    {t('syExternalWorkerHttpCliMcp')}
                   </button>
                 </div>
 
                 {agentType === 'external' && (
                   <div style={{ display: 'flex', flexDirection: 'column', gap: '10px', padding: '12px', background: 'hsl(var(--muted)/0.3)', borderRadius: '8px', border: '1px solid hsl(var(--border)/0.5)' }}>
                     <div className="form-group" style={{ marginBottom: 0 }}>
-                      <label className="form-label" style={{ fontSize: '11.5px' }}>Protocollo Worker</label>
+                      <label className="form-label" style={{ fontSize: '11.5px' }}>{t('syWorkerProtocol')}</label>
                       <select
                         className="form-input"
                         value={protocol}
                         onChange={e => setProtocol(e.target.value as any)}
                         style={{ fontSize: '12.5px' }}
                       >
-                        <option value="http">HTTP / REST API (POST JSON)</option>
+                        <option value="http">{t('sdHttpRestApiPostJson')}</option>
                         <option value="command">CLI Subprocess (stdin/stdout)</option>
                         <option value="mcp">Model Context Protocol (MCP)</option>
                       </select>
@@ -398,7 +398,7 @@ export function AgentBuilder({
 
                     {(protocol === 'http' || protocol === 'mcp') && (
                       <div className="form-group" style={{ marginBottom: 0 }}>
-                        <label className="form-label" style={{ fontSize: '11.5px' }}>Endpoint URL</label>
+                        <label className="form-label" style={{ fontSize: '11.5px' }}>{t('sdEndpointUrl')}</label>
                         <input
                           className="form-input"
                           value={endpointUrl}
@@ -411,7 +411,7 @@ export function AgentBuilder({
 
                     {(protocol === 'command' || protocol === 'mcp') && (
                       <div className="form-group" style={{ marginBottom: 0 }}>
-                        <label className="form-label" style={{ fontSize: '11.5px' }}>Comando Subprocess / Script</label>
+                        <label className="form-label" style={{ fontSize: '11.5px' }}>{t('sySubprocessCommandScript')}</label>
                         <input
                           className="form-input"
                           value={commandStr}
@@ -433,7 +433,7 @@ export function AgentBuilder({
               <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
                 <Sparkles size={16} className="text-primary" />
                 <h3 style={{ fontSize: '14.5px', fontWeight: 600, margin: 0 }}>
-                  {t('agentPromptSection') || 'Istruzioni e Prompt di Sistema'}
+                  {t('agentPromptSection') || t('syInstructionsAndSystemPrompt')}
                 </h3>
               </div>
               <MagicEnhancePromptButton
@@ -451,11 +451,11 @@ export function AgentBuilder({
                 rows={6}
                 value={instructions}
                 onChange={e => setInstructions(e.target.value)}
-                placeholder="Fornisci istruzioni dettagliate su ruolo, workflow, formato di risposta e vincoli..."
+                placeholder={t('syGiveDetailedInstructionsAboutRoleWorkflow')}
                 style={{ fontFamily: 'var(--font-mono, monospace)', fontSize: '12.5px', lineHeight: 1.5 }}
               />
               <div style={{ fontSize: '11px', color: 'hsl(var(--muted-fg))', marginTop: '6px' }}>
-                💡 {t('promptTip') || 'Puoi cliccare "✨ Migliora con l\'IA" in qualsiasi momento per strutturare il prompt in sezioni professionali.'}
+                💡 {t('promptTip') || t('syYouCanClickImproveWithAi')}
               </div>
             </div>
           </div>
@@ -514,7 +514,7 @@ export function AgentBuilder({
                 delegatesTo={delegatesList}
                 onChange={setDelegatesList}
                 label={t('delegatesTo') || 'Delega a:'}
-                hint={t('delegatesToHint') || 'Clicca sugli agenti a cui questo agente può delegare compiti.'}
+                hint={t('delegatesToHint') || t('syClickTheAgentsThisAgentCan')}
                 disabled={saving}
               />
             </div>
@@ -530,7 +530,7 @@ export function AgentBuilder({
                 <ShieldCheck size={16} className={model ? 'text-primary' : 'text-muted'} />
                 <div>
                   <strong style={{ fontSize: '13.5px' }}>
-                    {t('advancedModelOptions') || 'Opzioni Avanzate (Modello & Provider)'}
+                    {t('advancedModelOptions') || t('syAdvancedOptionsModelProvider')}
                   </strong>
                   <div style={{ fontSize: '11.5px', color: 'hsl(var(--muted-fg))', marginTop: '2px' }}>
                     {model
@@ -547,7 +547,7 @@ export function AgentBuilder({
             {showAdvancedModel && (
               <div style={{ marginTop: '16px', paddingTop: '16px', borderTop: '1px solid hsl(var(--border)/0.5)', display: 'flex', flexDirection: 'column', gap: '14px' }}>
                 <p style={{ fontSize: '12px', color: 'hsl(var(--muted-fg))', margin: 0 }}>
-                  {t('advancedModelDesc') || 'Di default, questo agente eredita il modello della Squadra. Seleziona un modello dedicato solo se necessiti di un override specifico.'}
+                  {t('advancedModelDesc') || t('syByDefaultThisAgentInheritsThe')}
                 </p>
 
                 <div className="form-row" style={{ marginBottom: 0 }}>
@@ -558,8 +558,8 @@ export function AgentBuilder({
                       value={provider}
                       onChange={e => setProvider(e.target.value)}
                     >
-                      <option value="">{t('inheritFromTeam') || 'Eredita dal Team'} ({teamProvider || 'non configurato'})</option>
-                      <option value="ollama">Ollama (Locale)</option>
+                      <option value="">{t('inheritFromTeam') || t('syInheritFromTheTeam')} ({teamProvider || t('syNotConfigured')})</option>
+                      <option value="ollama">{t('syOllamaLocal')}</option>
                       <option value="openai">OpenAI</option>
                       <option value="anthropic">Anthropic</option>
                       <option value="gemini">Google Gemini</option>
@@ -573,7 +573,7 @@ export function AgentBuilder({
                       value={model}
                       teamDefaultModel={teamDefaultModel}
                       onChange={newModel => setModel(newModel)}
-                      label={t('modelOptional') || 'Modello IA'}
+                      label={t('modelOptional') || t('syAiModel')}
                     />
                   </div>
                 </div>
@@ -585,7 +585,7 @@ export function AgentBuilder({
                     style={{ fontSize: '12px', alignSelf: 'flex-start', padding: '4px 8px', color: 'hsl(var(--primary))' }}
                     onClick={() => setModel(null)}
                   >
-                    ↺ {t('resetToTeamDefault') || 'Ripristina predefinito del Team'}
+                    ↺ {t('resetToTeamDefault') || t('syRestoreTheTeamDefault')}
                   </button>
                 )}
               </div>
@@ -600,10 +600,10 @@ export function AgentBuilder({
                   <AlertTriangle size={16} className="text-destructive" />
                   <div>
                     <strong style={{ fontSize: '13px', color: 'hsl(var(--destructive))' }}>
-                      {t('dangerZoneTitle') || 'Zona Pericolosa'}
+                      {t('dangerZoneTitle') || t('syDangerZone')}
                     </strong>
                     <div style={{ fontSize: '11.5px', color: 'hsl(var(--muted-fg))' }}>
-                      {t('deleteAgentWarning') || 'Rimuove definitivamente questo agente dalla squadra.'}
+                      {t('deleteAgentWarning') || t('syPermanentlyRemovesThisAgentFromThe')}
                     </div>
                   </div>
                 </div>
@@ -614,7 +614,7 @@ export function AgentBuilder({
                   onClick={handleDelete}
                   disabled={saving}
                 >
-                  {confirmDelete ? (t('confirmDelete') || 'Conferma eliminazione') : (t('deleteAgent') || 'Elimina Agente')}
+                  {confirmDelete ? (t('confirmDelete') || t('syConfirmDeletion')) : (t('deleteAgent') || t('syDeleteAgent'))}
                 </button>
               </div>
             </div>

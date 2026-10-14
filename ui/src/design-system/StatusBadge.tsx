@@ -1,3 +1,5 @@
+import { useTranslation } from '../i18n';
+
 export type ConnectionStatusType =
   | 'CONNECTED'
   | 'CONNECTING'
@@ -26,34 +28,35 @@ export interface StatusBadgeProps {
 
 interface StatusConfig {
   variant: 'connected' | 'connecting' | 'setup_required' | 'not_configured' | 'expired' | 'error';
-  defaultLabel: string;
+  defaultLabel: string;   // an i18n key
 }
 
 function resolveStatus(status: string): StatusConfig {
   const s = status.toLowerCase();
 
   if (s === 'connected' || s === 'verified') {
-    return { variant: 'connected', defaultLabel: 'Collegato e attivo' };
+    return { variant: 'connected', defaultLabel: 'badgeConnectedActive' };
   }
   if (s === 'connecting') {
-    return { variant: 'connecting', defaultLabel: 'Connessione in corso…' };
+    return { variant: 'connecting', defaultLabel: 'badgeConnecting' };
   }
   if (s === 'setup_required' || s === 'configured' || s === 'verification_required') {
-    return { variant: 'setup_required', defaultLabel: 'Configurazione richiesta' };
+    return { variant: 'setup_required', defaultLabel: 'badgeSetupRequired' };
   }
   if (s === 'expired' || s === 'needs_auth') {
-    return { variant: 'expired', defaultLabel: 'Accesso scaduto' };
+    return { variant: 'expired', defaultLabel: 'badgeAccessExpired' };
   }
   if (s === 'error' || s === 'verification_failed') {
-    return { variant: 'error', defaultLabel: 'Errore di collegamento' };
+    return { variant: 'error', defaultLabel: 'badgeConnectionError' };
   }
   // Default fallback
-  return { variant: 'not_configured', defaultLabel: 'Non collegato' };
+  return { variant: 'not_configured', defaultLabel: 'badgeNotConnected' };
 }
 
 export function StatusBadge({ status, label, className = '' }: StatusBadgeProps) {
+  const { t } = useTranslation();
   const config = resolveStatus(status);
-  const displayLabel = label || config.defaultLabel;
+  const displayLabel = label || t(config.defaultLabel as any);
 
   return (
     <span

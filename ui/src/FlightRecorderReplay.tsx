@@ -70,7 +70,7 @@ export const FlightRecorderReplay: React.FC<FlightRecorderReplayProps> = ({
       setLoading(true);
       const q = executionId ? `?execution_id=${encodeURIComponent(executionId)}` : '';
       const res = await fetch(apiUrl(`/api/missions/${missionId}/replay${q}`));
-      if (!res.ok) throw new Error('Failed to load replay timeline');
+      if (!res.ok) throw new Error(t('sxFailedToLoadReplayTimeline'));
       const data: ReplayTimelineData = await res.json();
       setTimeline(data);
       if (data.events && data.events.length > 0) {
@@ -169,7 +169,7 @@ export const FlightRecorderReplay: React.FC<FlightRecorderReplayProps> = ({
     try {
       const q = executionId ? `?execution_id=${encodeURIComponent(executionId)}&format=${format}` : `?format=${format}`;
       const res = await fetch(apiUrl(`/api/missions/${missionId}/timeline/export${q}`));
-      if (!res.ok) throw new Error('Failed to export timeline');
+      if (!res.ok) throw new Error(t('sxFailedToExportTimeline'));
       if (format === 'markdown') {
         const text = await res.text();
         const blob = new Blob([text], { type: 'text/markdown;charset=utf-8;' });
@@ -221,7 +221,7 @@ export const FlightRecorderReplay: React.FC<FlightRecorderReplayProps> = ({
     return (
       <div style={{ padding: '48px', textAlign: 'center', color: 'hsl(var(--muted-fg))' }}>
         <RefreshCw size={24} className="animate-spin" style={{ margin: '0 auto 12px' }} />
-        <div style={{ fontSize: '13px' }}>Loading flight recorder timeline...</div>
+        <div style={{ fontSize: '13px' }}>{t('sxLoadingFlightRecorderTimeline')}</div>
       </div>
     );
   }
@@ -321,7 +321,7 @@ export const FlightRecorderReplay: React.FC<FlightRecorderReplayProps> = ({
             </span>
             <button
               onClick={() => handleExportTimeline('markdown')}
-              title="Export flight recorder timeline report as Markdown"
+              title={t('sxExportFlightRecorderTimelineReportAs')}
               style={{
                 display: 'flex',
                 alignItems: 'center',
@@ -338,7 +338,7 @@ export const FlightRecorderReplay: React.FC<FlightRecorderReplayProps> = ({
               }}
             >
               <Download size={13} color="hsl(var(--primary))" />
-              <span>Export Report</span>
+              <span>{t('sxExportReport')}</span>
             </button>
           </div>
         </div>
@@ -708,40 +708,40 @@ export const FlightRecorderReplay: React.FC<FlightRecorderReplayProps> = ({
                 }}
               >
                 <div style={{ display: 'flex', justifyContent: 'space-between' }}>
-                  <span style={{ color: 'hsl(var(--muted-fg))' }}>Timestamp</span>
+                  <span style={{ color: 'hsl(var(--muted-fg))' }}>{t('uiTimestamp')}</span>
                   <span style={{ fontFamily: 'monospace', fontWeight: 600 }}>{selectedEvent.timestamp}</span>
                 </div>
                 <div style={{ display: 'flex', justifyContent: 'space-between' }}>
-                  <span style={{ color: 'hsl(var(--muted-fg))' }}>Event Type</span>
+                  <span style={{ color: 'hsl(var(--muted-fg))' }}>{t('sxEventType')}</span>
                   <span style={{ fontFamily: 'monospace' }}>{selectedEvent.event_type}</span>
                 </div>
                 {selectedEvent.stage_name && (
                   <div style={{ display: 'flex', justifyContent: 'space-between' }}>
-                    <span style={{ color: 'hsl(var(--muted-fg))' }}>Stage</span>
+                    <span style={{ color: 'hsl(var(--muted-fg))' }}>{t('uiStage')}</span>
                     <span style={{ fontWeight: 500 }}>{selectedEvent.stage_name}</span>
                   </div>
                 )}
                 {selectedEvent.agent && (
                   <div style={{ display: 'flex', justifyContent: 'space-between' }}>
-                    <span style={{ color: 'hsl(var(--muted-fg))' }}>Agent</span>
+                    <span style={{ color: 'hsl(var(--muted-fg))' }}>{t('uiAgent')}</span>
                     <span style={{ fontWeight: 600, color: 'hsl(var(--primary))' }}>@{selectedEvent.agent}</span>
                   </div>
                 )}
                 {selectedEvent.tool_name && (
                   <div style={{ display: 'flex', justifyContent: 'space-between' }}>
-                    <span style={{ color: 'hsl(var(--muted-fg))' }}>Tool</span>
+                    <span style={{ color: 'hsl(var(--muted-fg))' }}>{t('uiTool')}</span>
                     <span style={{ fontFamily: 'monospace', color: '#0284c7' }}>{selectedEvent.tool_name}</span>
                   </div>
                 )}
                 {selectedEvent.duration_ms != null && (
                   <div style={{ display: 'flex', justifyContent: 'space-between' }}>
-                    <span style={{ color: 'hsl(var(--muted-fg))' }}>Duration</span>
+                    <span style={{ color: 'hsl(var(--muted-fg))' }}>{t('uiDuration')}</span>
                     <span>{selectedEvent.duration_ms.toFixed(1)} ms</span>
                   </div>
                 )}
                 {selectedEvent.graph_node_id && (
                   <div style={{ display: 'flex', justifyContent: 'space-between' }}>
-                    <span style={{ color: 'hsl(var(--muted-fg))' }}>Graph Node ID</span>
+                    <span style={{ color: 'hsl(var(--muted-fg))' }}>{t('sxGraphNodeId')}</span>
                     <span style={{ fontFamily: 'monospace', fontSize: '11px' }}>{selectedEvent.graph_node_id}</span>
                   </div>
                 )}
@@ -751,7 +751,7 @@ export const FlightRecorderReplay: React.FC<FlightRecorderReplayProps> = ({
               {selectedEvent.details && Object.keys(selectedEvent.details).length > 0 && (
                 <div>
                   <div style={{ fontSize: '11px', fontWeight: 600, color: 'hsl(var(--muted-fg))', marginBottom: '6px', textTransform: 'uppercase' }}>
-                    Observable Parameters
+                    {t('sxObservableParameters')}
                   </div>
                   <pre
                     style={{
@@ -775,7 +775,7 @@ export const FlightRecorderReplay: React.FC<FlightRecorderReplayProps> = ({
             </div>
           ) : (
             <div style={{ color: 'hsl(var(--muted-fg))', fontSize: '12px', textAlign: 'center', padding: '32px 0' }}>
-              Select an event from the timeline stream to inspect observable facts.
+              {t('sxSelectAnEventFromTheTimeline')}
             </div>
           )}
         </div>

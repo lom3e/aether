@@ -86,7 +86,7 @@ export function Settings({ onWorkspaceSwitched }: SettingsProps) {
 
   const handleSaveProvider = async () => {
     if (!provider || !model.trim()) {
-      showToast('Choose a provider and a model before saving.', 'error');
+      showToast(t('szChooseAProviderAndAModel2'), 'error');
       return;
     }
     setSaving(true);
@@ -107,12 +107,12 @@ export function Settings({ onWorkspaceSwitched }: SettingsProps) {
           setStatus({ ...status, [provider]: true });
           setApiKey('');
         }
-        showToast('Provider settings saved successfully.', 'success');
+        showToast(t('szProviderSettingsSavedSuccessfully'), 'success');
       } else {
-        showToast((await apiError(res, 'Unable to save provider settings.')).message, 'error');
+        showToast((await apiError(res, t('szUnableToSaveProviderSettings'))).message, 'error');
       }
     } catch (e) {
-      showToast(e instanceof Error ? e.message : 'Unable to save provider settings.', 'error');
+      showToast(e instanceof Error ? e.message : t('szUnableToSaveProviderSettings'), 'error');
     } finally {
       setSaving(false);
     }
@@ -120,7 +120,7 @@ export function Settings({ onWorkspaceSwitched }: SettingsProps) {
 
   const handleTestProvider = async () => {
     if (!provider || !model.trim()) {
-      showToast('Choose a provider and a model before testing.', 'error');
+      showToast(t('szChooseAProviderAndAModel3'), 'error');
       return;
     }
     setTesting(true);
@@ -135,12 +135,12 @@ export function Settings({ onWorkspaceSwitched }: SettingsProps) {
         })
       });
       if (res.ok) {
-        showToast('Provider connection successful!', 'success');
+        showToast(t('szProviderConnectionSuccessful'), 'success');
       } else {
-        showToast((await apiError(res, 'Provider test failed.')).message, 'error');
+        showToast((await apiError(res, t('szProviderTestFailed'))).message, 'error');
       }
     } catch (e) {
-      showToast(e instanceof Error ? e.message : 'Provider test failed.', 'error');
+      showToast(e instanceof Error ? e.message : t('szProviderTestFailed'), 'error');
     } finally {
       setTesting(false);
     }
@@ -153,7 +153,7 @@ export function Settings({ onWorkspaceSwitched }: SettingsProps) {
       const wsListRes = await fetch(apiUrl('/api/workspaces'));
       const wsList = await wsListRes.json();
       const current = wsList.find((w: any) => w.is_active);
-      if (!current) throw new Error('Active workspace not found');
+      if (!current) throw new Error(t('szActiveWorkspaceNotFound'));
 
       const res = await fetch(apiUrl(`/api/workspaces/${current.id}`), {
         method: 'PATCH',
@@ -162,15 +162,15 @@ export function Settings({ onWorkspaceSwitched }: SettingsProps) {
       });
 
       if (res.ok) {
-        showToast('Workspace name updated.', 'success');
+        showToast(t('szWorkspaceNameUpdated'), 'success');
         fetchWorkspaceData();
         if (onWorkspaceSwitched) onWorkspaceSwitched();
       } else {
-        const err = await apiError(res, 'Failed to update workspace name.');
+        const err = await apiError(res, t('szFailedToUpdateWorkspaceName'));
         showToast(err.message, 'error');
       }
     } catch (err: any) {
-      showToast(err.message || 'Failed to update workspace', 'error');
+      showToast(err.message || t('szFailedToUpdateWorkspace'), 'error');
     } finally {
       setSavingWs(false);
     }
@@ -182,15 +182,15 @@ export function Settings({ onWorkspaceSwitched }: SettingsProps) {
         method: 'POST'
       });
       if (res.ok) {
-        showToast('Workspace knowledge cleared.', 'info');
+        showToast(t('szWorkspaceKnowledgeCleared'), 'info');
         fetchWorkspaceData();
       } else {
-        const err = await apiError(res, 'Failed to clear knowledge.');
+        const err = await apiError(res, t('szFailedToClearKnowledge'));
         showToast(err.message, 'error');
       }
     } catch (err: any) {
       console.error(err);
-      showToast(err?.message || 'Error clearing knowledge.', 'error');
+      showToast(err?.message || t('szErrorClearingKnowledge'), 'error');
     }
   };
 
@@ -200,16 +200,16 @@ export function Settings({ onWorkspaceSwitched }: SettingsProps) {
         method: 'POST'
       });
       if (res.ok) {
-        showToast('Workspace reset to initial clean state.', 'info');
+        showToast(t('szWorkspaceResetToInitialCleanState'), 'info');
         fetchWorkspaceData();
         if (onWorkspaceSwitched) onWorkspaceSwitched();
       } else {
-        const err = await apiError(res, 'Failed to reset workspace.');
+        const err = await apiError(res, t('szFailedToResetWorkspace'));
         showToast(err.message, 'error');
       }
     } catch (err: any) {
       console.error(err);
-      showToast(err?.message || 'Error resetting workspace.', 'error');
+      showToast(err?.message || t('szErrorResettingWorkspace'), 'error');
     }
   };
 
@@ -231,11 +231,11 @@ export function Settings({ onWorkspaceSwitched }: SettingsProps) {
         setIsEditingProject(false);
         fetchWorkspaceData();
       } else {
-        const err = await apiError(res, 'Failed to connect project.');
+        const err = await apiError(res, t('szFailedToConnectProject'));
         showToast(err.message, 'error');
       }
     } catch (err: any) {
-      showToast(err?.message || 'Failed to connect project.', 'error');
+      showToast(err?.message || t('szFailedToConnectProject'), 'error');
     } finally {
       setSavingProject(false);
     }
@@ -251,11 +251,11 @@ export function Settings({ onWorkspaceSwitched }: SettingsProps) {
         fetchWorkspaceData();
         setIsEditingProject(false);
       } else {
-        const err = await apiError(res, 'Failed to disconnect project.');
+        const err = await apiError(res, t('szFailedToDisconnectProject'));
         showToast(err.message, 'error');
       }
     } catch (err: any) {
-      showToast(err?.message || 'Failed to disconnect project.', 'error');
+      showToast(err?.message || t('szFailedToDisconnectProject'), 'error');
     }
   };
 
@@ -265,7 +265,7 @@ export function Settings({ onWorkspaceSwitched }: SettingsProps) {
       const wsList = await wsListRes.json();
       const current = Array.isArray(wsList) ? (wsList.find((w: any) => w.is_active) || wsList[0]) : null;
       if (!current) {
-        showToast('No workspace found to delete.', 'error');
+        showToast(t('szNoWorkspaceFoundToDelete'), 'error');
         setIsDeletingWs(false);
         return;
       }
@@ -278,12 +278,12 @@ export function Settings({ onWorkspaceSwitched }: SettingsProps) {
         setIsDeletingWs(false);
         if (onWorkspaceSwitched) onWorkspaceSwitched();
       } else {
-        const err = await apiError(res, 'Failed to delete workspace.');
+        const err = await apiError(res, t('szFailedToDeleteWorkspace'));
         showToast(err.message, 'error');
       }
     } catch (err: any) {
-      console.error('Failed to delete workspace', err);
-      showToast(err?.message || 'Failed to delete workspace.', 'error');
+      console.error(t('szFailedToDeleteWorkspace2'), err);
+      showToast(err?.message || t('szFailedToDeleteWorkspace'), 'error');
     }
   };
 
@@ -634,7 +634,7 @@ export function Settings({ onWorkspaceSwitched }: SettingsProps) {
         <div style={{ display: 'flex', flexDirection: 'column', gap: '20px' }}>
           <div className="card" style={{ padding: '24px' }}>
             <h3 style={{ fontSize: '16px', fontWeight: 600, marginBottom: '16px' }}>{t('localPersistenceMetrics')}</h3>
-            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))', gap: '16px' }}>
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(min(200px, 100%), 1fr))', gap: '16px' }}>
               <div style={{ padding: '16px', backgroundColor: 'hsl(var(--bg))', borderRadius: '8px', border: '1px solid hsl(var(--border))' }}>
                 <div style={{ fontSize: '12px', color: 'hsl(var(--muted-fg))', marginBottom: '4px' }}>{t('conversationsDb')}</div>
                 <div style={{ fontSize: '20px', fontWeight: 700 }}>{workspaceStats?.conversations_count || 0} {t('navConversations').toLowerCase()}</div>
@@ -726,7 +726,7 @@ export function Settings({ onWorkspaceSwitched }: SettingsProps) {
                 </div>
               </div>
               <button className="btn btn-secondary" onClick={openShortcutsModal} style={{ fontSize: '12.5px' }}>
-                Open Quick Help (⌘/)
+                {t('szOpenQuickHelp')}
               </button>
             </div>
 

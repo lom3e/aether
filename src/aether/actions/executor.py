@@ -1026,12 +1026,27 @@ class ActionExecutor:
             try:
                 target_path = sandbox.resolve(filename)
                 target_path.parent.mkdir(parents=True, exist_ok=True)
+                backup_path = None
+                if target_path.is_file():
+                    try:
+                        previous = target_path.read_text(encoding="utf-8", errors="replace")
+                    except OSError:
+                        previous = None
+                    if previous is not None and previous != content:
+                        # Overwriting is never silent loss: the previous version is kept in a hidden history folder.
+                        import datetime as _dt     # (a local `from datetime import datetime` would shadow the module-level name)
+                        stamp = _dt.datetime.now(_dt.timezone.utc).strftime("%Y%m%dT%H%M%S%fZ")
+                        history = base_dir / ".aether-versions"
+                        history.mkdir(parents=True, exist_ok=True)
+                        backup_path = history / f"{target_path.name}.{stamp}"
+                        backup_path.write_text(previous, encoding="utf-8")
                 target_path.write_text(content, encoding="utf-8")
                 return {
                     "path": str(target_path),
                     "filename": filename,
                     "bytes": len(content.encode("utf-8")),
-                    "status": "created",
+                    "status": "updated" if backup_path else "created",
+                    **({"previous_version": str(backup_path)} if backup_path else {}),
                 }
             except Exception as e:
                 logger.error(f"Failed to write file {filename}: {e}")

@@ -6,6 +6,7 @@ import {
 import { TopHeader } from './TopHeader';
 import { ToastContext } from './toast';
 import { apiUrl, apiError } from './api';
+import { useTranslation } from './i18n';
 
 export type NodeType = 'trigger' | 'agent' | 'tool' | 'approval' | 'deliverable';
 
@@ -40,6 +41,7 @@ interface WorkflowBuilderProps {
 }
 
 export function WorkflowBuilder({ navigate }: WorkflowBuilderProps) {
+  const { t } = useTranslation();
   const showToast = useContext(ToastContext);
 
   const [workflows, setWorkflows] = useState<WorkflowData[]>([]);
@@ -62,7 +64,7 @@ export function WorkflowBuilder({ navigate }: WorkflowBuilderProps) {
         }
       }
     } catch (err: any) {
-      console.error('Failed to fetch workflows', err);
+      console.error(t('szFailedToFetchWorkflows'), err);
     } finally {
       setLoading(false);
     }
@@ -75,8 +77,8 @@ export function WorkflowBuilder({ navigate }: WorkflowBuilderProps) {
   const handleCreateNew = () => {
     const newWf: WorkflowData = {
       id: `wf_${Date.now().toString(36)}`,
-      name: 'New Operational Workflow',
-      description: 'Trigger -> Agent -> Approval -> Deliverable pipeline',
+      name: t('szNewOperationalWorkflow'),
+      description: t('szTriggerAgentApprovalDeliverablePipeline'),
       graph: {
         nodes: [
           {
@@ -163,13 +165,13 @@ export function WorkflowBuilder({ navigate }: WorkflowBuilderProps) {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(activeWorkflow),
       });
-      if (!res.ok) throw await apiError(res, 'Failed to save workflow');
+      if (!res.ok) throw await apiError(res, t('szFailedToSaveWorkflow'));
       const saved = await res.json();
       setActiveWorkflow(saved);
-      showToast('Workflow saved successfully', 'success');
+      showToast(t('szWorkflowSavedSuccessfully'), 'success');
       fetchWorkflows();
     } catch (err: any) {
-      showToast(err.message || 'Failed to save workflow', 'error');
+      showToast(err.message || t('szFailedToSaveWorkflow'), 'error');
     }
   };
 
@@ -190,14 +192,14 @@ export function WorkflowBuilder({ navigate }: WorkflowBuilderProps) {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ params: {} }),
       });
-      if (!res.ok) throw await apiError(res, 'Failed to compile and run workflow');
+      if (!res.ok) throw await apiError(res, t('szFailedToCompileAndRunWorkflow'));
       const missionData = await res.json();
       showToast(`Workflow compiled into Mission '${missionData.title}'!`, 'success');
       if (navigate) {
         navigate('missions', missionData.mission_id);
       }
     } catch (err: any) {
-      showToast(err.message || 'Workflow execution error', 'error');
+      showToast(err.message || t('szWorkflowExecutionError'), 'error');
     } finally {
       setCompiling(false);
     }
@@ -206,7 +208,7 @@ export function WorkflowBuilder({ navigate }: WorkflowBuilderProps) {
   const handleConnectClick = (nodeId: string) => {
     if (!connectingSource) {
       setConnectingSource(nodeId);
-      showToast('Select target node to connect', 'info');
+      showToast(t('szSelectTargetNodeToConnect'), 'info');
     } else {
       if (connectingSource === nodeId) {
         setConnectingSource(null);
@@ -226,7 +228,7 @@ export function WorkflowBuilder({ navigate }: WorkflowBuilderProps) {
             edges: [...activeWorkflow.graph.edges, newEdge],
           },
         });
-        showToast('Connection established', 'success');
+        showToast(t('szConnectionEstablished'), 'success');
       }
       setConnectingSource(null);
     }
@@ -259,15 +261,15 @@ export function WorkflowBuilder({ navigate }: WorkflowBuilderProps) {
   return (
     <div style={{ flex: 1, display: 'flex', flexDirection: 'column', height: '100%', overflow: 'hidden' }}>
       <TopHeader
-        title="Visual Workflow Builder"
+        title={t('szVisualWorkflowBuilder')}
         icon={WorkflowIcon}
         actions={
           <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
             <button className="btn btn-secondary" onClick={handleCreateNew}>
-              <Plus size={15} /> New Workflow
+              <Plus size={15} /> {t('szNewWorkflow')}
             </button>
             <button className="btn btn-secondary" onClick={handleSaveWorkflow} disabled={!activeWorkflow}>
-              <Save size={15} /> Save Blueprint
+              <Save size={15} /> {t('szSaveBlueprint')}
             </button>
             <button
               className="btn btn-primary"
@@ -296,28 +298,28 @@ export function WorkflowBuilder({ navigate }: WorkflowBuilderProps) {
           overflowY: 'auto',
         }}>
           <div style={{ fontSize: '11px', fontWeight: 600, color: 'hsl(var(--muted-fg))', textTransform: 'uppercase' }}>
-            Workflow Nodes
+            {t('szWorkflowNodes')}
           </div>
           <button className="btn btn-ghost" style={{ justifyContent: 'flex-start', gap: '8px', padding: '8px' }} onClick={() => handleAddNode('trigger')}>
-            <Clock size={16} className="text-amber-500" /> + Trigger Node
+            <Clock size={16} className="text-amber-500" /> {t('szTriggerNode')}
           </button>
           <button className="btn btn-ghost" style={{ justifyContent: 'flex-start', gap: '8px', padding: '8px' }} onClick={() => handleAddNode('agent')}>
-            <Bot size={16} className="text-indigo-500" /> + Agent Worker
+            <Bot size={16} className="text-indigo-500" /> {t('szAgentWorker')}
           </button>
           <button className="btn btn-ghost" style={{ justifyContent: 'flex-start', gap: '8px', padding: '8px' }} onClick={() => handleAddNode('tool')}>
-            <Wrench size={16} className="text-emerald-500" /> + Action / Tool
+            <Wrench size={16} className="text-emerald-500" /> {t('szActionTool')}
           </button>
           <button className="btn btn-ghost" style={{ justifyContent: 'flex-start', gap: '8px', padding: '8px' }} onClick={() => handleAddNode('approval')}>
-            <ShieldCheck size={16} className="text-rose-500" /> + Human Approval
+            <ShieldCheck size={16} className="text-rose-500" /> {t('szHumanApproval')}
           </button>
           <button className="btn btn-ghost" style={{ justifyContent: 'flex-start', gap: '8px', padding: '8px' }} onClick={() => handleAddNode('deliverable')}>
-            <FileCheck size={16} className="text-sky-500" /> + Deliverable Output
+            <FileCheck size={16} className="text-sky-500" /> {t('szDeliverableOutput')}
           </button>
 
           <hr style={{ borderColor: 'hsl(var(--border))', margin: '8px 0' }} />
 
           <div style={{ fontSize: '11px', fontWeight: 600, color: 'hsl(var(--muted-fg))', textTransform: 'uppercase' }}>
-            Saved Blueprints
+            {t('szSavedBlueprints')}
           </div>
           {workflows.map(w => (
             <div
@@ -350,12 +352,12 @@ export function WorkflowBuilder({ navigate }: WorkflowBuilderProps) {
           {!activeWorkflow ? (
             <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', height: '100%' }}>
               <WorkflowIcon size={48} className="text-muted" style={{ marginBottom: '16px' }} />
-              <div style={{ fontSize: '16px', fontWeight: 600 }}>No Workflow Selected</div>
+              <div style={{ fontSize: '16px', fontWeight: 600 }}>{t('szNoWorkflowSelected')}</div>
               <p style={{ color: 'hsl(var(--muted-fg))', fontSize: '13px', marginTop: '4px' }}>
-                Select an existing blueprint or create a new visual DAG workflow.
+                {t('szSelectAnExistingBlueprintOrCreate')}
               </p>
               <button className="btn btn-primary" onClick={handleCreateNew} style={{ marginTop: '16px' }}>
-                <Plus size={15} /> Create First Workflow
+                <Plus size={15} /> {t('szCreateFirstWorkflow')}
               </button>
             </div>
           ) : (
@@ -503,7 +505,7 @@ export function WorkflowBuilder({ navigate }: WorkflowBuilderProps) {
             {selectedNode.type === 'agent' && (
               <>
                 <div>
-                  <label style={{ fontSize: '12px', fontWeight: 600, display: 'block', marginBottom: '4px' }}>Agent Name / Role</label>
+                  <label style={{ fontSize: '12px', fontWeight: 600, display: 'block', marginBottom: '4px' }}>{t('szAgentNameRole')}</label>
                   <input
                     className="form-input"
                     style={{ width: '100%', padding: '6px 8px', fontSize: '13px' }}
@@ -521,7 +523,7 @@ export function WorkflowBuilder({ navigate }: WorkflowBuilderProps) {
                   />
                 </div>
                 <div>
-                  <label style={{ fontSize: '12px', fontWeight: 600, display: 'block', marginBottom: '4px' }}>Prompt / Directive</label>
+                  <label style={{ fontSize: '12px', fontWeight: 600, display: 'block', marginBottom: '4px' }}>{t('szPromptDirective')}</label>
                   <textarea
                     className="form-input"
                     rows={4}
@@ -545,7 +547,7 @@ export function WorkflowBuilder({ navigate }: WorkflowBuilderProps) {
             {selectedNode.type === 'trigger' && (
               <>
                 <div>
-                  <label style={{ fontSize: '12px', fontWeight: 600, display: 'block', marginBottom: '4px' }}>Trigger Type</label>
+                  <label style={{ fontSize: '12px', fontWeight: 600, display: 'block', marginBottom: '4px' }}>{t('szTriggerType')}</label>
                   <select
                     className="form-input"
                     style={{ width: '100%', padding: '6px 8px', fontSize: '13px' }}
@@ -561,15 +563,15 @@ export function WorkflowBuilder({ navigate }: WorkflowBuilderProps) {
                       }) : null);
                     }}
                   >
-                    <option value="manual">Manual Execution</option>
-                    <option value="schedule">Schedule (Cron)</option>
-                    <option value="file_watcher">File Watcher</option>
+                    <option value="manual">{t('szManualExecution')}</option>
+                    <option value="schedule">{t('szScheduleCron')}</option>
+                    <option value="file_watcher">{t('szFileWatcher')}</option>
                     <option value="webhook">Webhook</option>
                   </select>
                 </div>
                 {selectedNode.config.type === 'schedule' && (
                   <div>
-                    <label style={{ fontSize: '12px', fontWeight: 600, display: 'block', marginBottom: '4px' }}>Cron Expression</label>
+                    <label style={{ fontSize: '12px', fontWeight: 600, display: 'block', marginBottom: '4px' }}>{t('szCronExpression')}</label>
                     <input
                       className="form-input"
                       style={{ width: '100%', padding: '6px 8px', fontSize: '13px' }}
@@ -592,7 +594,7 @@ export function WorkflowBuilder({ navigate }: WorkflowBuilderProps) {
 
             {selectedNode.type === 'approval' && (
               <div>
-                <label style={{ fontSize: '12px', fontWeight: 600, display: 'block', marginBottom: '4px' }}>Autopilot Clearance Tier</label>
+                <label style={{ fontSize: '12px', fontWeight: 600, display: 'block', marginBottom: '4px' }}>{t('szAutopilotClearanceTier')}</label>
                 <select
                   className="form-input"
                   style={{ width: '100%', padding: '6px 8px', fontSize: '13px' }}
@@ -608,16 +610,16 @@ export function WorkflowBuilder({ navigate }: WorkflowBuilderProps) {
                     }) : null);
                   }}
                 >
-                  <option value="supervised">Tier 2: Supervised Checkpoint</option>
-                  <option value="manual">Tier 0: Mandatory Manual Approval</option>
-                  <option value="assisted">Tier 1: Assisted Clearance</option>
+                  <option value="supervised">{t('szTier2SupervisedCheckpoint')}</option>
+                  <option value="manual">{t('szTier0MandatoryManualApproval')}</option>
+                  <option value="assisted">{t('szTier1AssistedClearance')}</option>
                 </select>
               </div>
             )}
 
             {selectedNode.type === 'deliverable' && (
               <div>
-                <label style={{ fontSize: '12px', fontWeight: 600, display: 'block', marginBottom: '4px' }}>Target Artifact Path</label>
+                <label style={{ fontSize: '12px', fontWeight: 600, display: 'block', marginBottom: '4px' }}>{t('szTargetArtifactPath')}</label>
                 <input
                   className="form-input"
                   style={{ width: '100%', padding: '6px 8px', fontSize: '13px' }}

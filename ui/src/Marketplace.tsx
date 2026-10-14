@@ -129,22 +129,22 @@ export function Marketplace() {
   const getRiskBadge = (risk: string) => {
     switch (risk) {
       case 'low':
-        return <span className="badge badge-success" style={{ display: 'inline-flex', alignItems: 'center', gap: '3px' }}><ShieldCheck size={11} /> Low Risk</span>;
+        return <span className="badge badge-success" style={{ display: 'inline-flex', alignItems: 'center', gap: '3px' }}><ShieldCheck size={11} /> {t('sdLowRisk')}</span>;
       case 'medium':
-        return <span className="badge badge-warning" style={{ display: 'inline-flex', alignItems: 'center', gap: '3px' }}><ShieldAlert size={11} /> Medium Risk</span>;
+        return <span className="badge badge-warning" style={{ display: 'inline-flex', alignItems: 'center', gap: '3px' }}><ShieldAlert size={11} /> {t('sdMediumRisk')}</span>;
       default:
-        return <span className="badge badge-danger" style={{ display: 'inline-flex', alignItems: 'center', gap: '3px' }}><ShieldAlert size={11} /> High Risk</span>;
+        return <span className="badge badge-danger" style={{ display: 'inline-flex', alignItems: 'center', gap: '3px' }}><ShieldAlert size={11} /> {t('sdHighRisk')}</span>;
     }
   };
 
   return (
     <div style={{ flex: 1, overflowY: 'auto' }}>
       <TopHeader
-        title={t('marketplaceTitle') || 'Ecosystem Marketplace'}
+        title={t('marketplaceTitle') || t('sdEcosystemMarketplace')}
         icon={ShoppingBag}
         actions={
           <span className="badge badge-primary" style={{ fontSize: '11px', padding: '4px 10px' }}>
-            Verified Ecosystem Catalog
+            {t('sdVerifiedEcosystemCatalog')}
           </span>
         }
       />
@@ -156,12 +156,12 @@ export function Marketplace() {
           <div style={{ display: 'flex', gap: '6px', overflowX: 'auto', paddingBottom: '4px' }}>
             {(
               [
-                { id: 'all', label: 'All Catalog' },
+                { id: 'all', label: t('sdAllCatalog') },
                 { id: 'workforce', label: 'Workforces' },
                 { id: 'skill', label: 'Skills' },
                 { id: 'tool', label: 'Tools' },
                 { id: 'connector', label: 'Connectors' },
-                { id: 'workflow_template', label: 'Workflow DAGs' },
+                { id: 'workflow_template', label: t('sdWorkflowDags') },
               ] as const
             ).map(tab => (
               <button
@@ -197,7 +197,7 @@ export function Marketplace() {
         </div>
 
         {/* Package Grid */}
-        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(320px, 1fr))', gap: '16px', marginBottom: '40px' }}>
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(min(320px, 100%), 1fr))', gap: '16px', marginBottom: '40px' }}>
           {packages.map(pkg => (
             <div
               key={pkg.id}
@@ -277,7 +277,7 @@ export function Marketplace() {
                     style={{ padding: '2px 4px', fontSize: '11px', textDecoration: 'underline', color: 'hsl(var(--primary))' }}
                     onClick={() => setInspectingPackage(pkg)}
                   >
-                    <Info size={11} /> Security details
+                    <Info size={11} /> {t('sdSecurityDetails')}
                   </button>
                 </div>
               </div>
@@ -311,7 +311,7 @@ export function Marketplace() {
                     disabled={actionLoadingId === pkg.id}
                   >
                     <Download size={14} />
-                    {actionLoadingId === pkg.id ? 'Installing...' : 'Install Package'}
+                    {actionLoadingId === pkg.id ? 'Installing...' : t('sdInstallPackage')}
                   </button>
                 )}
               </div>
@@ -356,7 +356,7 @@ export function Marketplace() {
               <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
                 <ShieldCheck size={20} className="text-primary" />
                 <h3 style={{ margin: 0, fontSize: '17px', fontWeight: 600 }}>
-                  Security & Permission Audit
+                  {t('sdSecurityPermissionAudit')}
                 </h3>
               </div>
               <button
@@ -374,14 +374,14 @@ export function Marketplace() {
 
             <div style={{ marginBottom: '16px' }}>
               <div style={{ fontSize: '12px', fontWeight: 600, color: 'hsl(var(--muted-fg))', marginBottom: '4px' }}>
-                RISK CLASSIFICATION
+                {t('sdRiskClassification')}
               </div>
               <div>{getRiskBadge(inspectingPackage.security_summary.risk_level)}</div>
             </div>
 
             <div style={{ marginBottom: '16px' }}>
               <div style={{ fontSize: '12px', fontWeight: 600, color: 'hsl(var(--muted-fg))', marginBottom: '6px' }}>
-                REQUESTED PERMISSIONS
+                {t('sdRequestedPermissions')}
               </div>
               {inspectingPackage.security_summary.permissions.length === 0 ? (
                 <div style={{ fontSize: '12px', color: 'hsl(var(--muted-fg))' }}>{t('marketplaceNoPermissions')}</div>
@@ -408,7 +408,7 @@ export function Marketplace() {
             {inspectingPackage.security_summary.network_domains.length > 0 && (
               <div style={{ marginBottom: '16px' }}>
                 <div style={{ fontSize: '12px', fontWeight: 600, color: 'hsl(var(--muted-fg))', marginBottom: '4px' }}>
-                  EXTERNAL NETWORK DOMAINS
+                  {t('sdExternalNetworkDomains')}
                 </div>
                 <div style={{ display: 'flex', flexWrap: 'wrap', gap: '4px' }}>
                   {inspectingPackage.security_summary.network_domains.map(dom => (
@@ -423,7 +423,7 @@ export function Marketplace() {
             {inspectingPackage.security_summary.audit_notes.length > 0 && (
               <div style={{ marginBottom: '20px' }}>
                 <div style={{ fontSize: '12px', fontWeight: 600, color: 'hsl(var(--muted-fg))', marginBottom: '4px' }}>
-                  SECURITY AUDIT NOTES
+                  {t('sdSecurityAuditNotes')}
                 </div>
                 <ul style={{ margin: 0, paddingLeft: '18px', fontSize: '12px', color: 'hsl(var(--muted-fg))' }}>
                   {inspectingPackage.security_summary.audit_notes.map((note, idx) => (
@@ -438,7 +438,7 @@ export function Marketplace() {
                 className="btn btn-secondary"
                 onClick={() => setInspectingPackage(null)}
               >
-                Close
+                {t('uiClose')}
               </button>
             </div>
           </div>

@@ -178,7 +178,7 @@ export const DeliverableDossierViewerModal: React.FC<DeliverablesViewerProps> = 
       })
       .catch(err => {
         if (isMounted) {
-          setPreviewError(err.message || 'Failed to load preview');
+          setPreviewError(err.message || t('sxFailedToLoadPreview'));
           setLoadingPreview(false);
         }
       });
@@ -211,7 +211,7 @@ export const DeliverableDossierViewerModal: React.FC<DeliverablesViewerProps> = 
       })
       .catch(err => {
         if (isMounted) {
-          setExplainError(err.message || 'Failed to load explanation');
+          setExplainError(err.message || t('sxFailedToLoadExplanation'));
           setLoadingExplain(false);
         }
       });
@@ -462,7 +462,7 @@ export const DeliverableDossierViewerModal: React.FC<DeliverablesViewerProps> = 
             <button
               onClick={onClose}
               className="btn btn-ghost"
-              aria-label="Close Preview"
+              aria-label={t('sxClosePreview')}
               data-testid="close-preview-modal-btn"
               style={{ padding: '6px' }}
             >
@@ -859,9 +859,10 @@ const JsonViewer: React.FC<{ content: string }> = ({ content }) => {
 };
 
 const CsvViewer: React.FC<{ content: string }> = ({ content }) => {
+  const { t } = useTranslation();
   const lines = content.trim().split('\n').filter(l => l.trim().length > 0);
   if (lines.length === 0) {
-    return <div style={{ color: 'hsl(var(--muted-fg))', fontSize: '12px' }}>Empty CSV file.</div>;
+    return <div style={{ color: 'hsl(var(--muted-fg))', fontSize: '12px' }}>{t('sxEmptyCsvFile')}</div>;
   }
 
   const parseRow = (line: string) => {
@@ -1044,7 +1045,7 @@ const DeliverableExplainCardView: React.FC<ExplainCardProps> = ({
         }}
       >
         <AlertTriangle size={24} style={{ margin: '0 auto 8px' }} />
-        <div style={{ fontWeight: 600, fontSize: '14px' }}>{error || 'Explanation unavailable'}</div>
+        <div style={{ fontWeight: 600, fontSize: '14px' }}>{error || t('sxExplanationUnavailable')}</div>
       </div>
     );
   }
@@ -1351,7 +1352,7 @@ export const MissionExplainModal: React.FC<MissionExplainModalProps> = ({
       })
       .catch(err => {
         if (isMounted) {
-          setError(err.message || 'Failed to load mission explanation');
+          setError(err.message || t('sxFailedToLoadMissionExplanation'));
           setLoading(false);
         }
       });
@@ -1418,7 +1419,7 @@ export const MissionExplainModal: React.FC<MissionExplainModalProps> = ({
           <button
             onClick={onClose}
             className="btn btn-ghost"
-            aria-label="Close Preview"
+            aria-label={t('sxClosePreview')}
             data-testid="close-mission-explain-btn"
             style={{ padding: '6px' }}
           >
@@ -1445,7 +1446,7 @@ export const MissionExplainModal: React.FC<MissionExplainModalProps> = ({
               }}
             >
               <AlertTriangle size={24} style={{ margin: '0 auto 8px' }} />
-              <div style={{ fontWeight: 600, fontSize: '14px' }}>{error || 'Explanation unavailable'}</div>
+              <div style={{ fontWeight: 600, fontSize: '14px' }}>{error || t('sxExplanationUnavailable')}</div>
             </div>
           ) : (
             <div style={{ display: 'flex', flexDirection: 'column', gap: '18px' }}>

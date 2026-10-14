@@ -16,6 +16,7 @@ import {
   Volume2,
 } from 'lucide-react';
 import { apiUrl } from './api';
+import { useTranslation } from './i18n';
 
 export interface ChannelConfig {
   id: string;
@@ -62,6 +63,7 @@ export function NotificationFabricModal({
   isOpen,
   onClose,
 }: NotificationFabricModalProps) {
+  const { t } = useTranslation();
   const [activeTab, setActiveTab] = useState<'channels' | 'rules' | 'history' | 'briefing'>('channels');
   const [channels, setChannels] = useState<ChannelConfig[]>([]);
   const [rules, setRules] = useState<RoutingRule[]>([]);
@@ -145,7 +147,7 @@ export function NotificationFabricModal({
         setChannels(prev => prev.map(c => (c.channel_type === channel.channel_type ? { ...c, enabled: updated } : c)));
       }
     } catch (err) {
-      console.error('Failed to toggle channel', err);
+      console.error(t('sxFailedToToggleChannel'), err);
     }
   };
 
@@ -201,7 +203,7 @@ export function NotificationFabricModal({
         setEditingChannel(null);
       }
     } catch (err) {
-      console.error('Failed to update channel config', err);
+      console.error(t('sxFailedToUpdateChannelConfig'), err);
     }
   };
 
@@ -318,10 +320,10 @@ export function NotificationFabricModal({
             </div>
             <div>
               <h2 style={{ fontSize: '17px', fontWeight: 600, margin: 0 }}>
-                Universal Notification Fabric
+                {t('sxUniversalNotificationFabric')}
               </h2>
               <p style={{ fontSize: '12px', color: 'hsl(var(--muted-foreground))', margin: '2px 0 0' }}>
-                Multi-channel delivery, automated briefings, and quiet hour routing rules
+                {t('sxMultiChannelDeliveryAutomatedBriefingsAnd')}
               </p>
             </div>
           </div>
@@ -351,10 +353,10 @@ export function NotificationFabricModal({
           }}
         >
           {[
-            { id: 'channels', label: 'Delivery Channels', icon: Radio },
+            { id: 'channels', label: t('sxDeliveryChannels'), icon: Radio },
             { id: 'rules', label: 'Routing & Rules', icon: Sliders },
-            { id: 'briefing', label: 'Dispatch Briefing', icon: Send },
-            { id: 'history', label: 'Delivery History', icon: Clock },
+            { id: 'briefing', label: t('sxDispatchBriefing'), icon: Send },
+            { id: 'history', label: t('sxDeliveryHistory'), icon: Clock },
           ].map(tab => {
             const Icon = tab.icon;
             const isActive = activeTab === tab.id;
@@ -413,7 +415,7 @@ export function NotificationFabricModal({
               onClick={() => setTestResult(null)}
               style={{ background: 'none', border: 'none', cursor: 'pointer', fontSize: '11px', color: 'hsl(var(--muted-foreground))' }}
             >
-              Dismiss
+              {t('uiDismiss')}
             </button>
           </div>
         )}
@@ -423,12 +425,12 @@ export function NotificationFabricModal({
           {loading ? (
             <div style={{ textAlign: 'center', padding: '40px', color: 'hsl(var(--muted-foreground))' }}>
               <RefreshCw className="spin" size={24} style={{ margin: '0 auto 12px' }} />
-              <div>Loading Notification Fabric state...</div>
+              <div>{t('sxLoadingNotificationFabricState')}</div>
             </div>
           ) : activeTab === 'channels' ? (
             <div style={{ display: 'flex', flexDirection: 'column', gap: '14px' }}>
               <div style={{ fontSize: '13px', color: 'hsl(var(--muted-foreground))', marginBottom: '4px' }}>
-                Aether dispatches real system banners, Telegram messages, outgoing HTTP webhooks, and in-app alerts.
+                {t('sxAetherDispatchesRealSystemBannersTelegram')}
               </div>
 
               {channels.map(channel => {
@@ -483,7 +485,7 @@ export function NotificationFabricModal({
                             cursor: 'pointer',
                           }}
                         >
-                          {testingChannel === channel.channel_type ? 'Testing...' : 'Test Channel'}
+                          {testingChannel === channel.channel_type ? 'Testing...' : t('sxTestChannel')}
                         </button>
 
                         <button
@@ -506,7 +508,7 @@ export function NotificationFabricModal({
                             cursor: 'pointer',
                           }}
                         >
-                          Configure
+                          {t('uiConfigure')}
                         </button>
 
                         <button
@@ -544,7 +546,7 @@ export function NotificationFabricModal({
                         {channel.channel_type === 'webhook' && (
                           <div>
                             <label style={{ fontSize: '12px', fontWeight: 500, display: 'block', marginBottom: '4px' }}>
-                              Webhook Endpoint URL (Slack / Discord / Custom POST)
+                              {t('sxWebhookEndpointUrlSlackDiscordCustom')}
                             </label>
                             <input
                               type="text"
@@ -574,7 +576,7 @@ export function NotificationFabricModal({
                                 onChange={e => setEditSound(e.target.checked)}
                                 style={{ marginRight: '6px' }}
                               />
-                              Play system notification sound (macOS "Glass")
+                              {t('sdPlaySystemNotificationSoundMacosGlass')}
                             </label>
                           </div>
                         )}
@@ -592,7 +594,7 @@ export function NotificationFabricModal({
                               cursor: 'pointer',
                             }}
                           >
-                            Cancel
+                            {t('uiCancel')}
                           </button>
                           <button
                             type="button"
@@ -608,7 +610,7 @@ export function NotificationFabricModal({
                               cursor: 'pointer',
                             }}
                           >
-                            Save Settings
+                            {t('sxSaveSettings')}
                           </button>
                         </div>
                       </div>
@@ -620,7 +622,7 @@ export function NotificationFabricModal({
           ) : activeTab === 'rules' ? (
             <div style={{ display: 'flex', flexDirection: 'column', gap: '14px' }}>
               <div style={{ fontSize: '13px', color: 'hsl(var(--muted-foreground))' }}>
-                Routing rules decide which events trigger multi-channel alerts and apply quiet hours filters.
+                {t('sdRoutingRulesDecideWhichEventsTrigger')}
               </div>
 
               {rules.map(rule => (
@@ -654,7 +656,7 @@ export function NotificationFabricModal({
                   </div>
 
                   <div style={{ display: 'flex', alignItems: 'center', gap: '6px', flexWrap: 'wrap', marginTop: '4px' }}>
-                    <span style={{ fontSize: '12px', color: 'hsl(var(--muted-foreground))' }}>Target Channels:</span>
+                    <span style={{ fontSize: '12px', color: 'hsl(var(--muted-foreground))' }}>{t('sxTargetChannels')}</span>
                     {rule.channels.map(ch => (
                       <span
                         key={ch}
@@ -687,7 +689,7 @@ export function NotificationFabricModal({
 
               <div>
                 <label style={{ fontSize: '12px', fontWeight: 500, display: 'block', marginBottom: '4px' }}>
-                  Briefing Title
+                  {t('sxBriefingTitle')}
                 </label>
                 <input
                   type="text"
@@ -707,7 +709,7 @@ export function NotificationFabricModal({
 
               <div>
                 <label style={{ fontSize: '12px', fontWeight: 500, display: 'block', marginBottom: '4px' }}>
-                  Executive Summary
+                  {t('sxExecutiveSummary')}
                 </label>
                 <textarea
                   rows={3}
@@ -727,7 +729,7 @@ export function NotificationFabricModal({
 
               <div>
                 <label style={{ fontSize: '12px', fontWeight: 500, display: 'block', marginBottom: '4px' }}>
-                  Key Highlights (one per line)
+                  {t('sxKeyHighlightsOnePerLine')}
                 </label>
                 <textarea
                   rows={4}
@@ -765,19 +767,19 @@ export function NotificationFabricModal({
                   }}
                 >
                   <Send size={16} />
-                  {dispatchingBriefing ? 'Dispatching...' : 'Dispatch Executive Briefing'}
+                  {dispatchingBriefing ? 'Dispatching...' : t('sxDispatchExecutiveBriefing')}
                 </button>
               </div>
             </div>
           ) : (
             <div style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
               <div style={{ fontSize: '13px', color: 'hsl(var(--muted-foreground))', marginBottom: '6px' }}>
-                Recent delivery receipts recorded by the notification dispatcher.
+                {t('sxRecentDeliveryReceiptsRecordedByThe')}
               </div>
 
               {receipts.length === 0 ? (
                 <div style={{ textAlign: 'center', padding: '30px', color: 'hsl(var(--muted-foreground))' }}>
-                  No delivery receipts recorded yet.
+                  {t('sxNoDeliveryReceiptsRecordedYet')}
                 </div>
               ) : (
                 <div style={{ border: '1px solid hsl(var(--border))', borderRadius: '10px', overflow: 'hidden' }}>

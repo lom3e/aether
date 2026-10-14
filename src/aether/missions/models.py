@@ -466,6 +466,9 @@ class Deliverable:
     metadata: dict[str, Any] = field(default_factory=dict)
     created_at: str = field(default_factory=lambda: datetime.now(timezone.utc).isoformat())
     updated_at: str = field(default_factory=lambda: datetime.now(timezone.utc).isoformat())
+    # Computed when read (never stored): is there a real file behind this record right now? A record without one is
+    # history of an attempt (kept for audit), not a result the user can open.
+    file_available: bool = True
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -473,6 +476,7 @@ class Deliverable:
             "mission_id": self.mission_id,
             "execution_id": self.execution_id,
             "milestone_id": self.milestone_id,
+            "file_available": self.file_available,
             "name": self.name,
             "path": self.path,
             "type": self.type,

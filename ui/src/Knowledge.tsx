@@ -55,7 +55,7 @@ export function Knowledge() {
       })
       .catch(err => {
         console.error('Error fetching knowledge files:', err);
-        showToast(err instanceof Error ? err.message : 'Error loading knowledge files', 'error');
+        showToast(err instanceof Error ? err.message : t('sdErrorLoadingKnowledgeFiles'), 'error');
         setLoading(false);
       });
 
@@ -123,7 +123,7 @@ export function Knowledge() {
         setProgress(prev => ({
           ...prev,
           percent: 100,
-          statusText: 'Ingestion completed.',
+          statusText: t('sdIngestionCompleted'),
         }));
 
         if (data.status === 'ok') {
@@ -132,15 +132,15 @@ export function Knowledge() {
         } else if (data.status === 'partial') {
           showToast(`Uploaded ${data.succeeded} document(s), ${data.failed} failed.`, 'warning');
         } else {
-          showToast(`Upload failed: ${data.documents?.[0]?.error || 'Unknown error'}`, 'error');
+          showToast(`Upload failed: ${data.documents?.[0]?.error || t('sdUnknownError')}`, 'error');
         }
         fetchStatus();
       } else {
-        const error = await apiError(res, 'Unable to upload documents.');
+        const error = await apiError(res, t('sdUnableToUploadDocuments'));
         showToast(error.message, 'error');
       }
     } catch (error) {
-      showToast(error instanceof Error ? error.message : 'Unable to upload documents.', 'error');
+      showToast(error instanceof Error ? error.message : t('sdUnableToUploadDocuments'), 'error');
     } finally {
       setTimeout(() => {
         setProgress({
@@ -189,7 +189,7 @@ export function Knowledge() {
       setIngestUrlTitle('');
       fetchStatus();
     } catch (err: any) {
-      showToast(err.message || 'Could not ingest URL', 'error');
+      showToast(err.message || t('sdCouldNotIngestUrl'), 'error');
     } finally {
       setIngestingUrl(false);
     }
@@ -233,7 +233,7 @@ export function Knowledge() {
 
   const handleDelete = async (doc: any) => {
     if (doc.scope === 'system') {
-      showToast('System knowledge documents are built-in and read-only.', 'info');
+      showToast(t('sdSystemKnowledgeDocumentsAreBuiltIn'), 'info');
       return;
     }
 
@@ -242,13 +242,13 @@ export function Knowledge() {
         method: 'DELETE',
       });
       if (res.ok) {
-        showToast('Document deleted.', 'success');
+        showToast(t('sdDocumentDeleted'), 'success');
         fetchStatus();
       } else {
-        throw await apiError(res, 'Unable to delete this document.');
+        throw await apiError(res, t('sdUnableToDeleteThisDocument'));
       }
     } catch (error) {
-      showToast(error instanceof Error ? error.message : 'Unable to delete this document.', 'error');
+      showToast(error instanceof Error ? error.message : t('sdUnableToDeleteThisDocument'), 'error');
     }
   };
 
@@ -370,7 +370,7 @@ export function Knowledge() {
               onClick={() => setIsUrlModalOpen(true)}
               style={{ display: 'inline-flex', alignItems: 'center', gap: '6px' }}
             >
-              <Globe size={15} /> Ingest URL
+              <Globe size={15} /> {t('sdIngestUrl')}
             </button>
             <input
               type="file"
@@ -680,7 +680,7 @@ export function Knowledge() {
               <div style={{ display: 'flex', flexDirection: 'column', gap: '14px' }}>
                 <div>
                   <label style={{ fontSize: '12px', fontWeight: 600, display: 'block', marginBottom: '4px' }}>
-                    Web URL <span style={{ color: 'hsl(var(--destructive))' }}>*</span>
+                    {t('sdWebUrl')} <span style={{ color: 'hsl(var(--destructive))' }}>*</span>
                   </label>
                   <input
                     type="url"
@@ -696,12 +696,12 @@ export function Knowledge() {
 
                 <div>
                   <label style={{ fontSize: '12px', fontWeight: 600, display: 'block', marginBottom: '4px' }}>
-                    Document Label (Optional)
+                    {t('sdDocumentLabelOptional')}
                   </label>
                   <input
                     type="text"
                     className="input"
-                    placeholder="e.g. Acme API Documentation"
+                    placeholder={t('sdEGAcmeApiDocumentation')}
                     value={ingestUrlTitle}
                     onChange={e => setIngestUrlTitle(e.target.value)}
                     style={{ width: '100%' }}
@@ -711,7 +711,7 @@ export function Knowledge() {
                 {projectInfo && (
                   <div>
                     <label style={{ fontSize: '12px', fontWeight: 600, display: 'block', marginBottom: '4px' }}>
-                      Scope Destination
+                      {t('sdScopeDestination')}
                     </label>
                     <select
                       className="input"
@@ -719,7 +719,7 @@ export function Knowledge() {
                       onChange={e => setUploadScope(e.target.value as 'workspace' | 'project')}
                       style={{ width: '100%' }}
                     >
-                      <option value="workspace">Workspace Knowledge (Global)</option>
+                      <option value="workspace">{t('sdWorkspaceKnowledgeGlobal')}</option>
                       <option value="project">Project Knowledge ({projectInfo.name})</option>
                     </select>
                   </div>
@@ -732,7 +732,7 @@ export function Knowledge() {
                     onClick={() => setIsUrlModalOpen(false)}
                     disabled={ingestingUrl}
                   >
-                    Cancel
+                    {t('uiCancel')}
                   </button>
                   <button
                     type="submit"
@@ -741,10 +741,10 @@ export function Knowledge() {
                     style={{ display: 'inline-flex', alignItems: 'center', gap: '6px' }}
                   >
                     {ingestingUrl ? (
-                      <>Fetching & Indexing...</>
+                      <>{t('sdFetchingIndexing')}</>
                     ) : (
                       <>
-                        <Link2 size={15} /> Ingest Web Page
+                        <Link2 size={15} /> {t('sdIngestWebPage')}
                       </>
                     )}
                   </button>

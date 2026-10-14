@@ -848,7 +848,7 @@ class ProviderSettings(BaseModel):
 async def get_provider_settings(request: Request):
     ws = request.app.state.workspace
     if not ws:
-        raise HTTPException(status_code=500, detail="Workspace not initialized")
+        raise HTTPException(status_code=503, detail="Workspace not initialized")   # a missing workspace is not a server fault
 
     s_store = getattr(ws, "secret_store", None)
     has_openai = bool((s_store and s_store.has_secret("provider_api_key:openai")) or os.environ.get("OPENAI_API_KEY"))

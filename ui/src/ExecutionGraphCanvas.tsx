@@ -4,6 +4,7 @@ import {
   Target, Play, Layers, Bot, Terminal, Wrench, FileText,
   ArrowRight, X, Info, Copy, Check, RefreshCw
 } from 'lucide-react';
+import { useTranslation } from './i18n';
 
 export interface GraphNode {
   id: string;
@@ -76,6 +77,7 @@ export function ExecutionGraphCanvas({
   onNodeClick,
   highlightedNodeId = null,
 }: ExecutionGraphCanvasProps) {
+  const { t } = useTranslation();
   const containerRef = useRef<HTMLDivElement>(null);
 
   // Pan & Zoom State
@@ -527,7 +529,7 @@ export function ExecutionGraphCanvas({
         borderRadius: '8px',
         border: '1px solid hsl(var(--border))',
       }}
-      aria-label="Interactive Execution Graph Canvas"
+      aria-label={t('sxInteractiveExecutionGraphCanvas')}
     >
       {/* Background Dot Grid */}
       <svg
@@ -601,7 +603,7 @@ export function ExecutionGraphCanvas({
             </div>
           ) : (
             <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
-              <span style={{ fontWeight: 600, color: 'hsl(var(--fg))' }}>Blueprint Specification</span>
+              <span style={{ fontWeight: 600, color: 'hsl(var(--fg))' }}>{t('sxBlueprintSpecification')}</span>
               <span
                 style={{
                   fontSize: '10px',
@@ -612,7 +614,7 @@ export function ExecutionGraphCanvas({
                   color: 'hsl(var(--muted-fg))',
                 }}
               >
-                Template
+                {t('uiTemplate')}
               </span>
             </div>
           )}
@@ -642,8 +644,8 @@ export function ExecutionGraphCanvas({
             onClick={handleZoomIn}
             className="btn btn-ghost"
             style={{ padding: '4px 6px', height: '26px' }}
-            title="Zoom In (+)"
-            aria-label="Zoom In"
+            title={t('sxZoomIn')}
+            aria-label={t('sxZoomIn2')}
           >
             <ZoomIn size={14} />
           </button>
@@ -663,8 +665,8 @@ export function ExecutionGraphCanvas({
             onClick={handleZoomOut}
             className="btn btn-ghost"
             style={{ padding: '4px 6px', height: '26px' }}
-            title="Zoom Out (-)"
-            aria-label="Zoom Out"
+            title={t('sxZoomOut')}
+            aria-label={t('sxZoomOut2')}
           >
             <ZoomOut size={14} />
           </button>
@@ -673,8 +675,8 @@ export function ExecutionGraphCanvas({
             onClick={handleFitToView}
             className="btn btn-ghost"
             style={{ padding: '4px 6px', height: '26px' }}
-            title="Fit to View"
-            aria-label="Fit to View"
+            title={t('sxFitToView')}
+            aria-label={t('sxFitToView')}
           >
             <Maximize2 size={13} />
           </button>
@@ -683,7 +685,7 @@ export function ExecutionGraphCanvas({
             className="btn btn-ghost"
             style={{ padding: '4px 6px', height: '26px' }}
             title="Reset (1:1)"
-            aria-label="Reset View"
+            aria-label={t('sxResetView')}
           >
             <RotateCcw size={13} />
           </button>
@@ -692,8 +694,8 @@ export function ExecutionGraphCanvas({
             onClick={() => setShowLegend(prev => !prev)}
             className={`btn btn-ghost ${showLegend ? 'text-primary' : ''}`}
             style={{ padding: '4px 6px', height: '26px' }}
-            title={showLegend ? "Hide Legend" : "Show Legend"}
-            aria-label="Toggle Legend"
+            title={showLegend ? t('sxHideLegend') : t('sxShowLegend')}
+            aria-label={t('sxToggleLegend')}
           >
             <Info size={13} />
           </button>
@@ -716,7 +718,7 @@ export function ExecutionGraphCanvas({
           }}
         >
           <RefreshCw size={24} className="animate-spin text-primary" />
-          <span>Compiling live execution graph...</span>
+          <span>{t('sxCompilingLiveExecutionGraph')}</span>
         </div>
       ) : !graph || nodePositions.length === 0 ? (
         <div
@@ -733,9 +735,9 @@ export function ExecutionGraphCanvas({
           }}
         >
           <Layers size={32} style={{ opacity: 0.3, marginBottom: '6px' }} />
-          <div style={{ fontWeight: 600, color: 'hsl(var(--fg))' }}>No execution nodes registered yet</div>
+          <div style={{ fontWeight: 600, color: 'hsl(var(--fg))' }}>{t('sxNoExecutionNodesRegisteredYet')}</div>
           <p style={{ fontSize: '12px', maxWidth: '340px', textAlign: 'center', margin: 0 }}>
-            Start the mission or trigger a step to compile real-time DAG nodes and relationships.
+            {t('sxStartTheMissionOrTriggerA')}
           </p>
         </div>
       ) : (
@@ -988,27 +990,27 @@ export function ExecutionGraphCanvas({
         >
           <div style={{ display: 'flex', alignItems: 'center', gap: '5px' }}>
             <span style={{ width: '8px', height: '8px', borderRadius: '50%', backgroundColor: '#6366f1' }} />
-            <span>Mission</span>
+            <span>{t('uiMission')}</span>
           </div>
           <div style={{ display: 'flex', alignItems: 'center', gap: '5px' }}>
             <span style={{ width: '8px', height: '8px', borderRadius: '50%', backgroundColor: '#a855f7' }} />
-            <span>Execution</span>
+            <span>{t('uiExecution')}</span>
           </div>
           <div style={{ display: 'flex', alignItems: 'center', gap: '5px' }}>
             <span style={{ width: '8px', height: '8px', borderRadius: '50%', backgroundColor: '#3b82f6' }} />
-            <span>Milestone</span>
+            <span>{t('uiMilestone')}</span>
           </div>
           <div style={{ display: 'flex', alignItems: 'center', gap: '5px' }}>
             <span style={{ width: '8px', height: '8px', borderRadius: '50%', backgroundColor: '#06b6d4' }} />
-            <span>Agent</span>
+            <span>{t('uiAgent')}</span>
           </div>
           <div style={{ display: 'flex', alignItems: 'center', gap: '5px' }}>
             <span style={{ width: '8px', height: '8px', borderRadius: '50%', backgroundColor: '#f59e0b' }} />
-            <span>Task</span>
+            <span>{t('uiTask')}</span>
           </div>
           <div style={{ display: 'flex', alignItems: 'center', gap: '5px' }}>
             <span style={{ width: '8px', height: '8px', borderRadius: '50%', backgroundColor: '#71717a' }} />
-            <span>Tool</span>
+            <span>{t('uiTool')}</span>
           </div>
           <div style={{ display: 'flex', alignItems: 'center', gap: '5px' }}>
             <span style={{ width: '8px', height: '8px', borderRadius: '50%', backgroundColor: '#10b981' }} />
@@ -1083,8 +1085,8 @@ export function ExecutionGraphCanvas({
               }}
               className="btn btn-ghost"
               style={{ padding: '4px' }}
-              title="Close Details"
-              aria-label="Close Node Details"
+              title={t('sxCloseDetails')}
+              aria-label={t('sxCloseNodeDetails')}
               data-testid="close-node-drawer-btn"
             >
               <X size={14} />
@@ -1114,7 +1116,7 @@ export function ExecutionGraphCanvas({
                   onClick={() => handleCopyId(selectedNodeObj.id)}
                   className="btn btn-ghost"
                   style={{ padding: '2px 4px', fontSize: '10px', display: 'inline-flex', alignItems: 'center', gap: '3px' }}
-                  title="Copy ID"
+                  title={t('sxCopyId')}
                 >
                   {copiedId ? <Check size={11} className="text-emerald-500" /> : <Copy size={11} />}
                 </button>
@@ -1129,7 +1131,7 @@ export function ExecutionGraphCanvas({
 
               {connectedEdges.inbound.length === 0 && connectedEdges.outbound.length === 0 ? (
                 <div style={{ fontSize: '11px', color: 'hsl(var(--muted-fg))', fontStyle: 'italic', padding: '6px 0' }}>
-                  No connected edges.
+                  {t('sxNoConnectedEdges')}
                 </div>
               ) : (
                 <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
@@ -1204,7 +1206,7 @@ export function ExecutionGraphCanvas({
             {selectedNodeObj.metadata && Object.keys(selectedNodeObj.metadata).length > 0 && (
               <div>
                 <div style={{ fontSize: '11px', fontWeight: 600, color: 'hsl(var(--muted-fg))', textTransform: 'uppercase', marginBottom: '6px' }}>
-                  Operational Telemetry
+                  {t('sxOperationalTelemetry')}
                 </div>
                 <pre
                   style={{

@@ -125,10 +125,10 @@ export function Learning() {
       if (!res.ok) {
         throw await apiError(res, 'Failed to verify correction');
       }
-      showToast('Correction verified and distilled into persistent lesson', 'success');
+      showToast(t('sdCorrectionVerifiedAndDistilledIntoPersistent'), 'success');
       fetchData();
     } catch (err: any) {
-      showToast(err.message || 'Verification failed', 'error');
+      showToast(err.message || t('sdVerificationFailed'), 'error');
     }
   };
 
@@ -140,10 +140,10 @@ export function Learning() {
       if (!res.ok) {
         throw await apiError(res, 'Failed to reject correction');
       }
-      showToast('Correction rejected', 'success');
+      showToast(t('sdCorrectionRejected'), 'success');
       fetchData();
     } catch (err: any) {
-      showToast(err.message || 'Rejection failed', 'error');
+      showToast(err.message || t('sdRejectionFailed'), 'error');
     }
   };
 
@@ -229,7 +229,7 @@ export function Learning() {
           data-testid="refresh-learning-btn"
         >
           <RefreshCw size={14} className={loading ? 'spin' : ''} style={{ marginRight: '6px' }} />
-          Refresh
+          {t('uiRefresh')}
         </button>
       </TopHeader>
 
@@ -237,7 +237,7 @@ export function Learning() {
         {/* Metric Summary Cards */}
         <div style={{
           display: 'grid',
-          gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))',
+          gridTemplateColumns: 'repeat(auto-fit, minmax(min(200px, 100%), 1fr))',
           gap: '16px',
           marginBottom: '24px'
         }} data-testid="learning-summary-banner">
@@ -405,7 +405,7 @@ export function Learning() {
               style={{ height: '36px', fontSize: '13px', padding: '0 8px' }}
               data-testid="learning-scope-filter"
             >
-              <option value="all">All Scopes</option>
+              <option value="all">{t('sdAllScopes')}</option>
               <option value="agent">{t('learningScopeAgent')}</option>
               <option value="team">{t('learningScopeTeam')}</option>
               <option value="project">{t('learningScopeProject')}</option>
@@ -454,7 +454,7 @@ export function Learning() {
                       display: 'flex', alignItems: 'center', gap: '4px'
                     }}>
                       <ShieldCheck size={12} />
-                      Verified Lesson
+                      {t('sdVerifiedLesson')}
                     </div>
 
                     <div style={{
@@ -517,12 +517,12 @@ export function Learning() {
                     )}
                     {lesson.memory_id && (
                       <span style={{ display: 'flex', alignItems: 'center', gap: '4px', color: '#10b981' }}>
-                        <Brain size={13} /> Linked in Memory
+                        <Brain size={13} /> {t('sdLinkedInMemory')}
                       </span>
                     )}
                     {lesson.node_id && (
                       <span style={{ display: 'flex', alignItems: 'center', gap: '4px', color: '#6366f1' }}>
-                        <Database size={13} /> Linked in Graph
+                        <Database size={13} /> {t('sdLinkedInGraph')}
                       </span>
                     )}
                   </div>
@@ -533,7 +533,7 @@ export function Learning() {
                     onClick={() => setSelectedEvidence({ title: lesson.title, type: 'lesson', item: lesson })}
                     data-testid={`view-evidence-lesson-${lesson.id}`}
                   >
-                    View Evidence
+                    {t('sdViewEvidence')}
                   </button>
                 </div>
               </div>
@@ -541,8 +541,8 @@ export function Learning() {
 
             {/* Corrections */}
             {(activeTab === 'all' || activeTab === 'corrections' || activeTab === 'regressions') && filteredCorrections.map((corr) => {
-              const problemText = corr.problem || 'Observed failure under evaluation';
-              const fixText = corr.correction || 'Proposed correction fix';
+              const problemText = corr.problem || t('sdObservedFailureUnderEvaluation');
+              const fixText = corr.correction || t('sdProposedCorrectionFix');
               const targetScope = corr.target_scope || 'workspace';
               const targetId = corr.target_identifier || 'workspace';
               const missionId = corr.source_mission_id;
@@ -591,7 +591,7 @@ export function Learning() {
                   <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '12px', marginTop: '4px' }}>
                     <div style={{ backgroundColor: 'rgba(244, 63, 94, 0.05)', padding: '10px 12px', borderRadius: '6px', border: '1px solid rgba(244, 63, 94, 0.15)' }}>
                       <div style={{ fontSize: '11px', fontWeight: 600, color: '#f43f5e', marginBottom: '4px' }}>
-                        Observed Problem
+                        {t('sdObservedProblem')}
                       </div>
                       <div style={{ fontSize: '12px', color: 'hsl(var(--fg))' }}>
                         {problemText}
@@ -600,7 +600,7 @@ export function Learning() {
 
                     <div style={{ backgroundColor: 'rgba(16, 185, 129, 0.05)', padding: '10px 12px', borderRadius: '6px', border: '1px solid rgba(16, 185, 129, 0.15)' }}>
                       <div style={{ fontSize: '11px', fontWeight: 600, color: '#10b981', marginBottom: '4px' }}>
-                        Proposed Correction
+                        {t('sdProposedCorrection')}
                       </div>
                       <div style={{ fontSize: '12px', color: 'hsl(var(--fg))' }}>
                         {fixText}
@@ -633,7 +633,7 @@ export function Learning() {
                         onClick={() => setSelectedEvidence({ title: `Correction ${corr.id}`, type: 'correction', item: corr })}
                         data-testid={`view-evidence-correction-${corr.id}`}
                       >
-                        View Evidence
+                        {t('sdViewEvidence')}
                       </button>
 
                       {corr.verification_status === 'proposed' && (
@@ -645,7 +645,7 @@ export function Learning() {
                             data-testid={`verify-correction-${corr.id}`}
                           >
                             <CheckCircle2 size={13} style={{ marginRight: '4px' }} />
-                            Verify
+                            {t('uiVerify')}
                           </button>
                           <button
                             className="btn btn-ghost"
@@ -654,7 +654,7 @@ export function Learning() {
                             data-testid={`reject-correction-${corr.id}`}
                           >
                             <XCircle size={13} style={{ marginRight: '4px' }} />
-                            Reject
+                            {t('uiReject')}
                           </button>
                         </>
                       )}
@@ -764,7 +764,7 @@ export function Learning() {
             <div style={{ padding: '20px', overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: '16px' }}>
               <div>
                 <div style={{ fontSize: '11px', fontWeight: 600, color: 'hsl(var(--muted-fg))', marginBottom: '4px', textTransform: 'uppercase' }}>
-                  Entity Identifiers
+                  {t('sdEntityIdentifiers')}
                 </div>
                 <div style={{
                   backgroundColor: 'hsl(var(--muted))',
@@ -790,7 +790,7 @@ export function Learning() {
               {(selectedEvidence.item.problem || selectedEvidence.item.observed_behavior) && (
                 <div>
                   <div style={{ fontSize: '11px', fontWeight: 600, color: '#f43f5e', marginBottom: '4px', textTransform: 'uppercase' }}>
-                    Observed Problem / Failure
+                    {t('sdObservedProblemFailure')}
                   </div>
                   <div style={{ backgroundColor: 'rgba(244, 63, 94, 0.05)', padding: '10px', borderRadius: '6px', fontSize: '13px' }}>
                     {selectedEvidence.item.problem || selectedEvidence.item.observed_behavior}
@@ -801,7 +801,7 @@ export function Learning() {
               {(selectedEvidence.item.correction || selectedEvidence.item.rationale) && (
                 <div>
                   <div style={{ fontSize: '11px', fontWeight: 600, color: '#10b981', marginBottom: '4px', textTransform: 'uppercase' }}>
-                    Proposed Correction / Rationale
+                    {t('sdProposedCorrectionRationale')}
                   </div>
                   <div style={{ backgroundColor: 'rgba(16, 185, 129, 0.05)', padding: '10px', borderRadius: '6px', fontSize: '13px' }}>
                     {selectedEvidence.item.correction || selectedEvidence.item.rationale}
@@ -812,7 +812,7 @@ export function Learning() {
               {selectedEvidence.item.lesson_text && (
                 <div>
                   <div style={{ fontSize: '11px', fontWeight: 600, color: '#3b82f6', marginBottom: '4px', textTransform: 'uppercase' }}>
-                    Verified Lesson Knowledge
+                    {t('sdVerifiedLessonKnowledge')}
                   </div>
                   <div style={{ backgroundColor: 'rgba(59, 130, 246, 0.05)', padding: '10px', borderRadius: '6px', fontSize: '13px' }}>
                     {selectedEvidence.item.lesson_text}
@@ -823,7 +823,7 @@ export function Learning() {
               {selectedEvidence.item.evidence && Object.keys(selectedEvidence.item.evidence).length > 0 && (
                 <div>
                   <div style={{ fontSize: '11px', fontWeight: 600, color: 'hsl(var(--muted-fg))', marginBottom: '4px', textTransform: 'uppercase' }}>
-                    Raw Evidence Data
+                    {t('sdRawEvidenceData')}
                   </div>
                   <pre style={{
                     backgroundColor: 'hsl(var(--muted))',
@@ -852,7 +852,7 @@ export function Learning() {
                 style={{ padding: '6px 16px', fontSize: '13px' }}
                 onClick={() => setSelectedEvidence(null)}
               >
-                Done
+                {t('uiDone')}
               </button>
             </div>
           </div>

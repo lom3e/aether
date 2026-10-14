@@ -155,17 +155,17 @@ export function ModelSelector({
               style={{ padding: '2px 6px', height: 'auto', display: 'inline-flex', alignItems: 'center', gap: '4px', fontSize: '11px', color: 'hsl(var(--muted-fg))' }}
               onClick={() => provider && loadModels(provider, apiKey)}
               disabled={loadingModels}
-              title={loadingModels ? 'Caricamento modelli in corso...' : 'Ricarica lista modelli live'}
+              title={loadingModels ? t('syLoadingModels') : t('syReloadTheLiveModelList')}
             >
               <RotateCw size={12} className={loadingModels ? 'animate-spin' : ''} />
               {loadingModels ? 'Aggiornamento...' : 'Ricarica'}
             </button>
             {!loadingModels && modelsSource !== 'live' && (
               <span
-                title={modelsError || 'Elenco predefinito: non verificato con il provider'}
+                title={modelsError || t('syDefaultListNotVerifiedWithThe')}
                 style={{ fontSize: '10px', color: 'hsl(var(--muted-fg))' }}
               >
-                {modelsError ? 'elenco non verificato: ' + modelsError.slice(0, 60) : 'elenco predefinito (non verificato)'}
+                {modelsError ? t('syUnverifiedList') + modelsError.slice(0, 60) : t('syDefaultListUnverified')}
               </span>
             )}
           </div>
@@ -239,18 +239,18 @@ export function ModelSelector({
         >
           {isTeamLevel && (
             // Without this the browser shows the first model as if it were selected while nothing is chosen.
-            <option value="" disabled>{provider ? '— Scegli un modello —' : '— Scegli prima un provider —'}</option>
+            <option value="" disabled>{provider ? t('syChooseAModel') : t('syChooseAProviderFirst')}</option>
           )}
           {!isTeamLevel && (
             <option value="__inherit__">
-              ✨ {t('inheritFromTeam') || 'Eredita dal Team'} ({teamDefaultModel || 'Default'})
+              ✨ {t('inheritFromTeam') || t('syInheritFromTheTeam')} ({teamDefaultModel || 'Default'})
             </option>
           )}
 
           {isGroq ? (
             <>
               {groqFeatured.length > 0 && (
-                <optgroup label="Modelli Groq in Evidenza">
+                <optgroup label={t('syFeaturedGroqModels')}>
                   {groqFeatured.map(m => (
                     <option key={m} value={m}>
                       {m === 'llama-3.3-70b-versatile'
@@ -258,32 +258,32 @@ export function ModelSelector({
                         : m === 'llama-3.1-8b-instant'
                         ? '⚡ llama-3.1-8b-instant (Ultra-Veloce)'
                         : m}
-                      {m === teamDefaultModel && !isTeamLevel ? ' (Uguale al Team)' : ''}
+                      {m === teamDefaultModel && !isTeamLevel ? t('sySameAsTheTeam') : ''}
                     </option>
                   ))}
                 </optgroup>
               )}
               {groqOthers.length > 0 && (
-                <optgroup label="Altri Modelli Groq Disponibili">
+                <optgroup label={t('syOtherAvailableGroqModels')}>
                   {groqOthers.map(m => (
                     <option key={m} value={m}>
-                      {m} {m === teamDefaultModel && !isTeamLevel ? ' (Uguale al Team)' : ''}
+                      {m} {m === teamDefaultModel && !isTeamLevel ? t('sySameAsTheTeam') : ''}
                     </option>
                   ))}
                 </optgroup>
               )}
             </>
           ) : (
-            <optgroup label="Modelli Disponibili">
+            <optgroup label={t('syAvailableModels')}>
               {displayList.map(m => (
                 <option key={m} value={m}>
-                  {m} {m === teamDefaultModel && !isTeamLevel ? ' (Uguale al Team)' : ''}
+                  {m} {m === teamDefaultModel && !isTeamLevel ? t('sySameAsTheTeam') : ''}
                 </option>
               ))}
             </optgroup>
           )}
 
-          <option value="__custom__">➕ Altro modello personalizzato (digita o incolla)...</option>
+          <option value="__custom__">{t('syOtherCustomModelTypeOrPaste')}</option>
         </select>
       )}
 
@@ -305,12 +305,12 @@ export function ModelSelector({
             {isInheriting ? (
               <>
                 <Sparkles size={10} />
-                {t('inheritedFromTeamBadge') || 'Ereditato dal Team'}: {teamDefaultModel || 'Default'}
+                {t('inheritedFromTeamBadge') || t('syInheritedFromTheTeam')}: {teamDefaultModel || 'Default'}
               </>
             ) : (
               <>
                 <Sliders size={10} />
-                {t('customOverrideBadge') || 'Override Esplicito'}: {value}
+                {t('customOverrideBadge') || t('syExplicitOverride')}: {value}
               </>
             )}
           </span>

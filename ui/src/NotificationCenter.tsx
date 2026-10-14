@@ -202,7 +202,7 @@ export function NotificationCenter({ workspaceName, onNavigate }: NotificationCe
         target_id: targetId,
         notification_id: notif.id,
         decision: 'reject',
-        reason: 'Declined from Notification Center',
+        reason: t('sdDeclinedFromNotificationCenter'),
         workspaceName,
         endpoint: customEndpoint,
       });
@@ -325,7 +325,7 @@ export function NotificationCenter({ workspaceName, onNavigate }: NotificationCe
             }}
           >
             <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-              <span style={{ fontWeight: 600, fontSize: '14px' }}>Notifications</span>
+              <span style={{ fontWeight: 600, fontSize: '14px' }}>{t('uiNotifications')}</span>
               {unreadCount > 0 && (
                 <span className="badge badge-primary" style={{ fontSize: '11px', padding: '1px 6px' }}>
                   {unreadCount} new
@@ -347,12 +347,12 @@ export function NotificationCenter({ workspaceName, onNavigate }: NotificationCe
                     padding: 0,
                   }}
                 >
-                  Mark all read
+                  {t('sdMarkAllRead')}
                 </button>
               )}
               <button
                 type="button"
-                title="Notification Fabric Channels & Rules"
+                title={t('sdNotificationFabricChannelsRules')}
                 onClick={() => setFabricModalOpen(true)}
                 style={{
                   background: 'none',
@@ -373,7 +373,7 @@ export function NotificationCenter({ workspaceName, onNavigate }: NotificationCe
           <div style={{ flex: 1, overflowY: 'auto', padding: '8px 0' }}>
             {loading && notifications.length === 0 ? (
               <div style={{ padding: '32px', textAlign: 'center', color: 'hsl(var(--muted-fg))', fontSize: '13px' }}>
-                Loading notifications...
+                {t('sdLoadingNotifications')}
               </div>
             ) : notifications.length === 0 ? (
               <div style={{ padding: '40px 20px', textAlign: 'center', color: 'hsl(var(--muted-fg))' }}>

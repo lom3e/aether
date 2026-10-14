@@ -7,6 +7,7 @@ import { Learning } from './Learning';
 import { WorkforceHealthView } from './WorkforceHealthView';
 import { Skills } from './Skills';
 import { BenchmarkingView } from './BenchmarkingView';
+import { useTranslation } from './i18n';
 
 
 
@@ -16,6 +17,7 @@ interface WorkforceHubProps {
 }
 
 export function WorkforceHub({ initialTab = 'agents', navigate = () => {} }: WorkforceHubProps) {
+  const { t } = useTranslation();
   const [currentTab, setCurrentTab] = useState<string>(initialTab);
 
   useEffect(() => {
@@ -34,6 +36,8 @@ export function WorkforceHub({ initialTab = 'agents', navigate = () => {} }: Wor
         padding: '12px 24px 0',
         backgroundColor: 'hsl(var(--card))',
         borderBottom: '1px solid hsl(var(--border))',
+        overflowX: 'auto',      // seven tabs do not fit a phone: the row scrolls inside itself
+        flexShrink: 0,
       }}>
         <button
           className={`btn btn-ghost ${currentTab === 'teams' ? 'active' : ''}`}
@@ -44,12 +48,14 @@ export function WorkforceHub({ initialTab = 'agents', navigate = () => {} }: Wor
             padding: '8px 14px',
             fontSize: '13px',
             fontWeight: 600,
+            whiteSpace: 'nowrap',
+            flexShrink: 0,
             display: 'flex',
             alignItems: 'center',
             gap: '6px',
           }}
         >
-          <Users size={15} /> Team e Ruoli
+          <Users size={15} /> {t('seTeamsRoles')}
         </button>
 
         <button
@@ -61,12 +67,14 @@ export function WorkforceHub({ initialTab = 'agents', navigate = () => {} }: Wor
             padding: '8px 14px',
             fontSize: '13px',
             fontWeight: 600,
+            whiteSpace: 'nowrap',
+            flexShrink: 0,
             display: 'flex',
             alignItems: 'center',
             gap: '6px',
           }}
         >
-          <Bot size={15} /> Assistenti e Agenti
+          <Bot size={15} /> {t('seAssistantsAgents')}
         </button>
 
         <button
@@ -78,12 +86,14 @@ export function WorkforceHub({ initialTab = 'agents', navigate = () => {} }: Wor
             padding: '8px 14px',
             fontSize: '13px',
             fontWeight: 600,
+            whiteSpace: 'nowrap',
+            flexShrink: 0,
             display: 'flex',
             alignItems: 'center',
             gap: '6px',
           }}
         >
-          <Puzzle size={15} /> Competenze & Abilità
+          <Puzzle size={15} /> {t('seSkillsAbilities')}
         </button>
 
         <button
@@ -96,12 +106,14 @@ export function WorkforceHub({ initialTab = 'agents', navigate = () => {} }: Wor
             padding: '8px 14px',
             fontSize: '13px',
             fontWeight: 600,
+            whiteSpace: 'nowrap',
+            flexShrink: 0,
             display: 'flex',
             alignItems: 'center',
             gap: '6px',
           }}
         >
-          <Brain size={15} /> Memoria Condivisa
+          <Brain size={15} /> {t('seSharedMemory')}
         </button>
 
         <button
@@ -114,12 +126,14 @@ export function WorkforceHub({ initialTab = 'agents', navigate = () => {} }: Wor
             padding: '8px 14px',
             fontSize: '13px',
             fontWeight: 600,
+            whiteSpace: 'nowrap',
+            flexShrink: 0,
             display: 'flex',
             alignItems: 'center',
             gap: '6px',
           }}
         >
-          <GraduationCap size={15} /> Apprendimento e Feedback
+          <GraduationCap size={15} /> {t('seLearningFeedback')}
         </button>
 
         <button
@@ -131,12 +145,14 @@ export function WorkforceHub({ initialTab = 'agents', navigate = () => {} }: Wor
             padding: '8px 14px',
             fontSize: '13px',
             fontWeight: 600,
+            whiteSpace: 'nowrap',
+            flexShrink: 0,
             display: 'flex',
             alignItems: 'center',
             gap: '6px',
           }}
         >
-          <Activity size={15} /> Stato Operativo
+          <Activity size={15} /> {t('seOperationalStatus')}
         </button>
 
         <button
@@ -149,12 +165,14 @@ export function WorkforceHub({ initialTab = 'agents', navigate = () => {} }: Wor
             padding: '8px 14px',
             fontSize: '13px',
             fontWeight: 600,
+            whiteSpace: 'nowrap',
+            flexShrink: 0,
             display: 'flex',
             alignItems: 'center',
             gap: '6px',
           }}
         >
-          <Award size={15} /> Valutazione Prestazioni
+          <Award size={15} /> {t('sePerformanceEvaluation')}
         </button>
       </div>
 

@@ -1,5 +1,6 @@
 import React, { createContext, useContext, useState, useCallback, useRef, useEffect } from 'react';
 import { CheckCircle2, AlertCircle, AlertTriangle, Info, X } from 'lucide-react';
+import { useTranslation } from './i18n';
 
 export type ToastType = 'success' | 'error' | 'warning' | 'info';
 
@@ -28,6 +29,7 @@ interface SingleToastProps {
 }
 
 function SingleToast({ toast, onDismiss }: SingleToastProps) {
+  const { t } = useTranslation();
   const [isPaused, setIsPaused] = useState(false);
   const [isExiting, setIsExiting] = useState(false);
   const startTimeRef = useRef<number>(Date.now());
@@ -85,7 +87,7 @@ function SingleToast({ toast, onDismiss }: SingleToastProps) {
         <button
           className="aether-toast-close"
           onClick={handleDismiss}
-          aria-label="Close notification"
+          aria-label={t('sdCloseNotification')}
         >
           <X size={14} />
         </button>

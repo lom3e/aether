@@ -358,7 +358,7 @@ export function Missions({ navigate, initialMissionId }: MissionsProps) {
     try {
       setLoading(true);
       const res = await fetch(apiUrl('/api/missions'));
-      if (!res.ok) throw new Error('Failed to load missions');
+      if (!res.ok) throw new Error(t('sxFailedToLoadMissions'));
       const data = await res.json();
       setMissions(data);
 
@@ -371,7 +371,7 @@ export function Missions({ navigate, initialMissionId }: MissionsProps) {
       }
     } catch (err: any) {
       console.error(err);
-      showToast?.('Error loading missions', 'error');
+      showToast?.(t('sxErrorLoadingMissions'), 'error');
     } finally {
       setLoading(false);
     }
@@ -406,7 +406,7 @@ export function Missions({ navigate, initialMissionId }: MissionsProps) {
       setLoadingGraph(true);
       const q = executionId ? `?execution_id=${encodeURIComponent(executionId)}` : '';
       const res = await fetch(apiUrl(`/api/missions/${missionId}/graph${q}`));
-      if (!res.ok) throw new Error('Failed to load graph');
+      if (!res.ok) throw new Error(t('sxFailedToLoadGraph'));
       const data = await res.json();
       setGraphData(data);
     } catch (err) {
@@ -678,7 +678,7 @@ export function Missions({ navigate, initialMissionId }: MissionsProps) {
       });
       if (!res.ok) {
         const err = await res.json().catch(() => ({}));
-        throw new Error(err.detail || 'Failed to execute mission dry-run');
+        throw new Error(err.detail || t('sxFailedToExecuteMissionDryRun'));
       }
       const data = await res.json();
       setDryRunReport(data);
@@ -693,7 +693,7 @@ export function Missions({ navigate, initialMissionId }: MissionsProps) {
   const handleCreateMission = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!newTitle.trim() || !newObjective.trim()) {
-      showToast?.('Title and objective are required.', 'error');
+      showToast?.(t('sxTitleAndObjectiveAreRequired'), 'error');
       return;
     }
 
@@ -723,11 +723,11 @@ export function Missions({ navigate, initialMissionId }: MissionsProps) {
 
       if (!res.ok) {
         const errData = await res.json().catch(() => ({}));
-        throw new Error(errData.detail || 'Failed to create mission');
+        throw new Error(errData.detail || t('sxFailedToCreateMission'));
       }
 
       const created = await res.json();
-      showToast?.('Mission created successfully.', 'success');
+      showToast?.(t('sxMissionCreatedSuccessfully'), 'success');
       setIsCreateOpen(false);
       setNewTitle('');
       setNewObjective('');
@@ -736,8 +736,8 @@ export function Missions({ navigate, initialMissionId }: MissionsProps) {
       await fetchMissions();
     } catch (err: any) {
       const msg = err?.message === 'Load failed'
-        ? 'Unable to connect to local Aether backend. Please verify that the runtime is running.'
-        : (err?.message || 'Failed to create mission');
+        ? t('sxUnableToConnectToLocalAether')
+        : (err?.message || t('sxFailedToCreateMission'));
       showToast?.(msg, 'error');
     } finally {
       setCreating(false);
@@ -789,7 +789,7 @@ export function Missions({ navigate, initialMissionId }: MissionsProps) {
       });
       if (!res.ok) {
         const errData = await res.json().catch(() => ({}));
-        throw new Error(errData.detail || 'Failed to instantiate playbook');
+        throw new Error(errData.detail || t('sxFailedToInstantiatePlaybook'));
       }
       const newMission = await res.json();
       showToast?.(`Playbook instantiated into mission "${newMission.title}"`, 'success');
@@ -798,7 +798,7 @@ export function Missions({ navigate, initialMissionId }: MissionsProps) {
       await fetchMissions();
       setSelectedMission(newMission);
     } catch (err: any) {
-      showToast?.(err.message || 'Error instantiating playbook', 'error');
+      showToast?.(err.message || t('sxErrorInstantiatingPlaybook'), 'error');
     } finally {
       setInstantiatingPlaybook(false);
     }
@@ -812,11 +812,11 @@ export function Missions({ navigate, initialMissionId }: MissionsProps) {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ team_name: teamName }),
       });
-      if (!res.ok) throw new Error('Failed to update workforce');
+      if (!res.ok) throw new Error(t('sxFailedToUpdateWorkforce'));
       const updated = await res.json();
       setSelectedMission(updated);
       setMissions(prev => prev.map(m => m.id === updated.id ? updated : m));
-      showToast?.('Workforce team assigned', 'success');
+      showToast?.(t('sxWorkforceTeamAssigned'), 'success');
       loadGraph(updated.id);
     } catch (err: any) {
       showToast?.(err.message, 'error');
@@ -893,8 +893,8 @@ export function Missions({ navigate, initialMissionId }: MissionsProps) {
       const res = await fetch(apiUrl(`/api/missions/${missionToDelete}`), {
         method: 'DELETE',
       });
-      if (!res.ok) throw new Error('Failed to delete mission');
-      showToast?.('Mission deleted', 'success');
+      if (!res.ok) throw new Error(t('sxFailedToDeleteMission'));
+      showToast?.(t('sxMissionDeleted'), 'success');
       if (selectedMission?.id === missionToDelete) {
         setSelectedMission(null);
       }
@@ -914,7 +914,7 @@ export function Missions({ navigate, initialMissionId }: MissionsProps) {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ status: newStatus }),
       });
-      if (!res.ok) throw new Error('Failed to toggle milestone');
+      if (!res.ok) throw new Error(t('sxFailedToToggleMilestone'));
       const updatedMilestone = await res.json();
 
       const updatedMilestones = selectedMission.milestones.map(item =>
@@ -942,7 +942,7 @@ export function Missions({ navigate, initialMissionId }: MissionsProps) {
           description: newMDesc.trim(),
         }),
       });
-      if (!res.ok) throw new Error('Failed to add milestone');
+      if (!res.ok) throw new Error(t('sxFailedToAddMilestone'));
       const createdMilestone = await res.json();
 
       const updatedMilestones = [...selectedMission.milestones, createdMilestone];
@@ -953,7 +953,7 @@ export function Missions({ navigate, initialMissionId }: MissionsProps) {
       setNewMDesc('');
       setIsAddingMilestone(false);
       loadGraph(selectedMission.id, selectedExecutionId);
-      showToast?.('Milestone added', 'success');
+      showToast?.(t('sxMilestoneAdded'), 'success');
     } catch (err: any) {
       showToast?.(err.message, 'error');
     }
@@ -965,14 +965,14 @@ export function Missions({ navigate, initialMissionId }: MissionsProps) {
       const res = await fetch(apiUrl(`/api/missions/${selectedMission.id}/milestones/${milestoneToDelete}`), {
         method: 'DELETE',
       });
-      if (!res.ok) throw new Error('Failed to delete milestone');
+      if (!res.ok) throw new Error(t('sxFailedToDeleteMilestone'));
       const updatedMilestones = selectedMission.milestones.filter(m => m.id !== milestoneToDelete);
       const updatedMission = { ...selectedMission, milestones: updatedMilestones };
       setSelectedMission(updatedMission);
       setMissions(prev => prev.map(mis => mis.id === updatedMission.id ? updatedMission : mis));
       setMilestoneToDelete(null);
       loadGraph(selectedMission.id, selectedExecutionId);
-      showToast?.('Milestone removed', 'success');
+      showToast?.(t('sxMilestoneRemoved'), 'success');
     } catch (err: any) {
       showToast?.(err.message, 'error');
     }
@@ -1054,7 +1054,7 @@ export function Missions({ navigate, initialMissionId }: MissionsProps) {
       default:
         return (
           <span className="badge" style={{ display: 'inline-flex', alignItems: 'center', gap: '5px', background: 'hsl(var(--muted))', color: 'hsl(var(--muted-fg))', fontWeight: 600 }}>
-            Draft
+            {t('uiDraft')}
           </span>
         );
     }
@@ -1319,7 +1319,7 @@ export function Missions({ navigate, initialMissionId }: MissionsProps) {
             onClick={handleOpenPlaybooks}
           >
             <Sparkles size={15} color="hsl(var(--primary))" />
-            <span>Playbooks & Templates</span>
+            <span>{t('sxPlaybooksTemplates')}</span>
           </button>
           <button
             className="btn btn-primary"
@@ -1414,7 +1414,7 @@ export function Missions({ navigate, initialMissionId }: MissionsProps) {
               {loading ? (
                 <div style={{ padding: '40px', textAlign: 'center', color: 'hsl(var(--muted-fg))', fontSize: '13px' }}>
                   <RefreshCw size={22} className="animate-spin" style={{ margin: '0 auto 10px', opacity: 0.6 }} />
-                  Loading missions...
+                  {t('sxLoadingMissions')}
                 </div>
               ) : missions.length === 0 ? (
                 <div style={{
@@ -1442,7 +1442,7 @@ export function Missions({ navigate, initialMissionId }: MissionsProps) {
               ) : filter !== 'all' ? (
                 filteredMissions.length === 0 ? (
                   <div style={{ padding: '32px 16px', textAlign: 'center', color: 'hsl(var(--muted-fg))', fontSize: '13px' }}>
-                    No missions matching this filter.
+                    {t('sxNoMissionsMatchingThisFilter')}
                   </div>
                 ) : (
                   filteredMissions.map(m => renderMissionCard(m))
@@ -1716,10 +1716,10 @@ export function Missions({ navigate, initialMissionId }: MissionsProps) {
                       disabled={dryRunLoading}
                       className="btn btn-secondary"
                       style={{ display: 'flex', alignItems: 'center', gap: '6px', fontSize: '13px' }}
-                      title="Pre-flight verification & risk analysis without side-effects"
+                      title={t('sxPreFlightVerificationRiskAnalysisWithout')}
                     >
                       <ShieldAlert size={14} className="text-amber-500" />
-                      <span>{dryRunLoading ? 'Inspecting...' : 'Pre-flight Dry Run'}</span>
+                      <span>{dryRunLoading ? 'Inspecting...' : t('sxPreFlightDryRun')}</span>
                     </button>
                   )}
 
@@ -2238,7 +2238,7 @@ export function Missions({ navigate, initialMissionId }: MissionsProps) {
                         gap: '6px',
                         cursor: 'pointer'
                       }}
-                      title="Inspect Workforce Health metrics and diagnostics"
+                      title={t('sxInspectWorkforceHealthMetricsAndDiagnostics')}
                     >
                       <HeartPulse size={13} className="text-primary" />
                       <span>{t('workforceHealthBtn')}</span>
@@ -2375,7 +2375,7 @@ export function Missions({ navigate, initialMissionId }: MissionsProps) {
                         className="form-input"
                         style={{ fontSize: '12px', padding: '4px 8px', maxWidth: '220px' }}
                       >
-                        <option value="" disabled>Assign workforce team...</option>
+                        <option value="" disabled>{t('sxAssignWorkforceTeam')}</option>
                         {availableTeams.map(tm => (
                           <option key={tm} value={tm}>{tm}</option>
                         ))}
@@ -2477,14 +2477,14 @@ export function Missions({ navigate, initialMissionId }: MissionsProps) {
                         className="btn btn-ghost"
                         style={{ fontSize: '12px', padding: '4px 10px' }}
                       >
-                        Cancel
+                        {t('uiCancel')}
                       </button>
                       <button
                         type="submit"
                         className="btn btn-primary"
                         style={{ fontSize: '12px', padding: '4px 12px' }}
                       >
-                        Add
+                        {t('uiAdd')}
                       </button>
                     </div>
                   </form>
@@ -2501,7 +2501,7 @@ export function Missions({ navigate, initialMissionId }: MissionsProps) {
                       border: '1px dashed hsl(var(--border))',
                       borderRadius: '8px'
                     }}>
-                      No stages defined yet. Add steps to establish verifiable execution boundaries.
+                      {t('sxNoStagesDefinedYetAddSteps')}
                     </div>
                   ) : (
                     (() => {
@@ -2548,7 +2548,7 @@ export function Missions({ navigate, initialMissionId }: MissionsProps) {
                               {/* Status Clickable Checkbox/Action */}
                               <button
                                 onClick={() => handleToggleMilestone(m)}
-                                title="Toggle stage state"
+                                title={t('sxToggleStageState')}
                                 style={{
                                   background: 'none',
                                   border: 'none',
@@ -2650,7 +2650,7 @@ export function Missions({ navigate, initialMissionId }: MissionsProps) {
                                         onClick={() => setMilestoneToDelete(m.id)}
                                         className="btn btn-ghost text-muted-fg hover:text-rose-500"
                                         style={{ padding: '2px 4px', borderRadius: '4px' }}
-                                        title="Delete milestone"
+                                        title={t('sxDeleteMilestone')}
                                       >
                                         <Trash2 size={13} />
                                       </button>
@@ -3163,9 +3163,9 @@ export function Missions({ navigate, initialMissionId }: MissionsProps) {
                   </p>
                 </div>
               </div>
-              <button onClick={() => setIsInspectorOpen(false)} className="btn btn-ghost" aria-label="Close Inspector" data-testid="close-inspector-btn" style={{ padding: '4px' }}>
+              <button onClick={() => setIsInspectorOpen(false)} className="btn btn-ghost" aria-label={t('sxCloseInspector')} data-testid="close-inspector-btn" style={{ padding: '4px' }}>
                 <X size={18} />
-                <span className="sr-only">Close Inspector</span>
+                <span className="sr-only">{t('sxCloseInspector')}</span>
               </button>
             </div>
 
@@ -3394,7 +3394,7 @@ export function Missions({ navigate, initialMissionId }: MissionsProps) {
                   {loadingActivities ? (
                     <div style={{ padding: '32px', textAlign: 'center', color: 'hsl(var(--muted-fg))', fontSize: '13px' }}>
                       <RefreshCw size={20} className="animate-spin" style={{ margin: '0 auto 8px' }} />
-                      Loading activity trace...
+                      {t('sxLoadingActivityTrace')}
                     </div>
                   ) : activities.length === 0 ? (
                     <div style={{
@@ -3470,7 +3470,7 @@ export function Missions({ navigate, initialMissionId }: MissionsProps) {
                   {loadingIntelligence ? (
                     <div style={{ padding: '32px', textAlign: 'center', color: 'hsl(var(--muted-fg))', fontSize: '13px' }}>
                       <RefreshCw size={20} className="animate-spin" style={{ margin: '0 auto 8px' }} />
-                      Loading unified intelligence context...
+                      {t('sxLoadingUnifiedIntelligenceContext')}
                     </div>
                   ) : !intelligenceData || intelligenceData.evidence.length === 0 ? (
                     <div style={{
@@ -3558,7 +3558,7 @@ export function Missions({ navigate, initialMissionId }: MissionsProps) {
                         }} data-testid="intelligence-metrics">
                           <div style={{
                             display: 'grid',
-                            gridTemplateColumns: 'repeat(auto-fit, minmax(120px, 1fr))',
+                            gridTemplateColumns: 'repeat(auto-fit, minmax(min(120px, 100%), 1fr))',
                             gap: '10px',
                             fontSize: '11px'
                           }}>
@@ -3588,7 +3588,7 @@ export function Missions({ navigate, initialMissionId }: MissionsProps) {
                                 {Math.round((intelligenceData.injected_char_count / 2200) * 100)}%
                               </div>
                               <div style={{ fontSize: '10px', color: 'hsl(var(--muted-fg))' }}>
-                                max 2200 chars
+                                {t('sxMax2200Chars')}
                               </div>
                             </div>
                           </div>
@@ -4001,7 +4001,7 @@ export function Missions({ navigate, initialMissionId }: MissionsProps) {
                 className="btn btn-ghost"
                 style={{ fontSize: '13px' }}
               >
-                Cancel
+                {t('uiCancel')}
               </button>
               <button
                 onClick={confirmDeleteMission}
@@ -4048,14 +4048,14 @@ export function Missions({ navigate, initialMissionId }: MissionsProps) {
                 className="btn btn-ghost"
                 style={{ fontSize: '12px' }}
               >
-                Cancel
+                {t('uiCancel')}
               </button>
               <button
                 onClick={confirmDeleteMilestone}
                 className="btn btn-primary"
                 style={{ fontSize: '12px', backgroundColor: '#e11d48' }}
               >
-                Delete Step
+                {t('sxDeleteStep')}
               </button>
             </div>
           </div>
@@ -4110,10 +4110,10 @@ export function Missions({ navigate, initialMissionId }: MissionsProps) {
                 </div>
                 <div>
                   <h3 style={{ fontSize: '16px', fontWeight: 600, margin: 0, color: 'hsl(var(--fg))' }}>
-                    Mission Playbooks & Reusable Templates
+                    {t('sxMissionPlaybooksReusableTemplates')}
                   </h3>
                   <p style={{ fontSize: '12px', color: 'hsl(var(--muted-fg))', margin: '2px 0 0' }}>
-                    Select an operational archetype with battle-tested milestone sequences and quality gates.
+                    {t('sxSelectAnOperationalArchetypeWithBattle')}
                   </p>
                 </div>
               </div>
@@ -4151,7 +4151,7 @@ export function Missions({ navigate, initialMissionId }: MissionsProps) {
               {loadingPlaybooks ? (
                 <div style={{ padding: '40px', textAlign: 'center', color: 'hsl(var(--muted-fg))' }}>
                   <RefreshCw size={24} className="animate-spin" style={{ margin: '0 auto 10px' }} />
-                  <div>Loading Playbooks...</div>
+                  <div>{t('sxLoadingPlaybooks')}</div>
                 </div>
               ) : selectedPlaybook ? (
                 /* Instantiation Form for Selected Playbook */
@@ -4208,7 +4208,7 @@ export function Missions({ navigate, initialMissionId }: MissionsProps) {
                   {selectedPlaybook.parameter_schema && selectedPlaybook.parameter_schema.length > 0 && (
                     <div>
                       <label style={{ display: 'block', fontSize: '12px', fontWeight: 600, marginBottom: '8px', color: 'hsl(var(--foreground))' }}>
-                        Parameters & Target Scope
+                        {t('sxParametersTargetScope')}
                       </label>
                       <div style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
                         {selectedPlaybook.parameter_schema.map((p) => (
@@ -4236,7 +4236,7 @@ export function Missions({ navigate, initialMissionId }: MissionsProps) {
                       className="btn btn-ghost"
                       style={{ fontSize: '13px' }}
                     >
-                      Back to Gallery
+                      {t('sxBackToGallery')}
                     </button>
                     <button
                       onClick={handleInstantiatePlaybook}
@@ -4252,7 +4252,7 @@ export function Missions({ navigate, initialMissionId }: MissionsProps) {
                       ) : (
                         <>
                           <Play size={14} />
-                          <span>Instantiate Mission</span>
+                          <span>{t('sxInstantiateMission')}</span>
                         </>
                       )}
                     </button>
@@ -4260,7 +4260,7 @@ export function Missions({ navigate, initialMissionId }: MissionsProps) {
                 </div>
               ) : (
                 /* Playbook Gallery Cards */
-                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(360px, 1fr))', gap: '14px' }}>
+                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(min(360px, 100%), 1fr))', gap: '14px' }}>
                   {playbooks
                     .filter(p => playbookCategoryFilter === 'all' || p.category.toLowerCase() === playbookCategoryFilter.toLowerCase())
                     .map((pb) => (
@@ -4309,7 +4309,7 @@ export function Missions({ navigate, initialMissionId }: MissionsProps) {
                             {pb.milestones.length} Milestones
                           </span>
                           <span style={{ fontSize: '11px', fontWeight: 600, color: 'hsl(var(--primary))', display: 'flex', alignItems: 'center', gap: '3px' }}>
-                            Use Template →
+                            {t('sxUseTemplate')}
                           </span>
                         </div>
                       </div>
@@ -4359,7 +4359,7 @@ export function Missions({ navigate, initialMissionId }: MissionsProps) {
                 </label>
                 <input
                   type="text"
-                  placeholder="e.g., Conduct Competitor Benchmark & Architecture Audit"
+                  placeholder={t('sxEGConductCompetitorBenchmarkArchitecture')}
                   value={newTitle}
                   onChange={(e) => setNewTitle(e.target.value)}
                   className="form-input"
@@ -4373,7 +4373,7 @@ export function Missions({ navigate, initialMissionId }: MissionsProps) {
                   {t('missionObjective')} *
                 </label>
                 <textarea
-                  placeholder="Clearly state what outcome or verified deliverables must be produced..."
+                  placeholder={t('sxClearlyStateWhatOutcomeOrVerified')}
                   value={newObjective}
                   onChange={(e) => setNewObjective(e.target.value)}
                   className="form-input"
@@ -4394,7 +4394,7 @@ export function Missions({ navigate, initialMissionId }: MissionsProps) {
                   style={{ width: '100%', fontSize: '13px' }}
                 >
                   {availableTeams.length === 0 ? (
-                    <option value="">Default Workforce</option>
+                    <option value="">{t('sxDefaultWorkforce')}</option>
                   ) : (
                     availableTeams.map(tm => <option key={tm} value={tm}>{tm}</option>)
                   )}
@@ -4405,7 +4405,7 @@ export function Missions({ navigate, initialMissionId }: MissionsProps) {
               <div>
                 <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '6px' }}>
                   <label style={{ fontSize: '12px', fontWeight: 500, color: 'hsl(var(--fg))' }}>
-                    Initial Milestones (optional)
+                    {t('sxInitialMilestonesOptional')}
                   </label>
                   <button
                     type="button"
@@ -4413,7 +4413,7 @@ export function Missions({ navigate, initialMissionId }: MissionsProps) {
                     className="btn btn-ghost"
                     style={{ fontSize: '11px', padding: '2px 6px' }}
                   >
-                    + Add Step
+                    {t('sxAddStep')}
                   </button>
                 </div>
 
@@ -4455,7 +4455,7 @@ export function Missions({ navigate, initialMissionId }: MissionsProps) {
                   className="btn btn-ghost"
                   style={{ fontSize: '13px' }}
                 >
-                  Cancel
+                  {t('uiCancel')}
                 </button>
                 <button
                   type="submit"
@@ -4627,7 +4627,7 @@ export function Missions({ navigate, initialMissionId }: MissionsProps) {
                     Pre-flight Inspection: {dryRunReport.title}
                   </h3>
                   <div style={{ fontSize: '11.5px', color: 'hsl(var(--muted-fg))', marginTop: '2px' }}>
-                    Static verification and risk assessment before runtime launch
+                    {t('sxStaticVerificationAndRiskAssessmentBefore')}
                   </div>
                 </div>
               </div>
@@ -4680,7 +4680,7 @@ export function Missions({ navigate, initialMissionId }: MissionsProps) {
             {dryRunReport.required_connectors && dryRunReport.required_connectors.length > 0 && (
               <div style={{ padding: '12px 14px', borderRadius: '8px', backgroundColor: 'hsl(var(--muted)/0.3)', border: '1px solid hsl(var(--border)/0.6)' }}>
                 <div style={{ fontSize: '11.5px', fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.05em', color: 'hsl(var(--muted-fg))', marginBottom: '8px' }}>
-                  Required External Connectors
+                  {t('sxRequiredExternalConnectors')}
                 </div>
                 <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap' }}>
                   {dryRunReport.required_connectors.map((c, idx) => (
@@ -4732,7 +4732,7 @@ export function Missions({ navigate, initialMissionId }: MissionsProps) {
                       <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
                         {m.requires_approval && (
                           <span style={{ fontSize: '10px', padding: '2px 6px', borderRadius: '4px', backgroundColor: 'rgba(245, 158, 11, 0.15)', color: '#f59e0b', fontWeight: 700 }}>
-                            Safety Gate
+                            {t('sxSafetyGate')}
                           </span>
                         )}
                         <span style={{ fontSize: '11px', color: 'hsl(var(--muted-fg))' }}>
@@ -4741,7 +4741,7 @@ export function Missions({ navigate, initialMissionId }: MissionsProps) {
                       </div>
                     </div>
                     <div style={{ fontSize: '11.5px', color: 'hsl(var(--muted-fg))' }}>
-                      Assigned: <strong>{m.assigned_agent || 'Workforce Coordinator'}</strong> ({m.agent_status})
+                      Assigned: <strong>{m.assigned_agent || t('sxWorkforceCoordinator')}</strong> ({m.agent_status})
                       {m.required_tools.length > 0 && ` · Tools: ${m.required_tools.join(', ')}`}
                     </div>
                     {m.predicted_deliverables.length > 0 && (
@@ -4758,7 +4758,7 @@ export function Missions({ navigate, initialMissionId }: MissionsProps) {
             {(dryRunReport.warnings.length > 0 || dryRunReport.recommendations.length > 0) && (
               <div style={{ padding: '12px 14px', borderRadius: '8px', backgroundColor: 'hsl(var(--muted)/0.3)', border: '1px solid hsl(var(--border))' }}>
                 <div style={{ fontSize: '11.5px', fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.05em', color: 'hsl(var(--muted-fg))', marginBottom: '6px' }}>
-                  Safety Recommendations & Notes
+                  {t('sxSafetyRecommendationsNotes')}
                 </div>
                 <ul style={{ margin: 0, paddingLeft: '18px', fontSize: '12px', color: 'hsl(var(--muted-fg))' }}>
                   {dryRunReport.warnings.map((w, idx) => (
@@ -4778,7 +4778,7 @@ export function Missions({ navigate, initialMissionId }: MissionsProps) {
                 className="btn btn-secondary"
                 onClick={() => setIsDryRunModalOpen(false)}
               >
-                Close
+                {t('uiClose')}
               </button>
               {selectedMission?.status === 'draft' && (
                 <button
@@ -4791,7 +4791,7 @@ export function Missions({ navigate, initialMissionId }: MissionsProps) {
                   }}
                 >
                   <Play size={14} fill="currentColor" />
-                  <span>Launch Mission</span>
+                  <span>{t('sxLaunchMission')}</span>
                 </button>
               )}
             </div>

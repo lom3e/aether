@@ -58,6 +58,10 @@ const CATEGORIES: CategoryDef[] = [
 
 export function Memory() {
   const { t } = useTranslation();
+  const categoryLabel = (key: string, fallback: string) => {
+    const keys: Record<string, any> = { all: 'sxAllCategories', fact: 'memCategoryFact', preference: 'memCategoryPreference', decision: 'memCategoryDecision', process: 'memCategoryProcess', person: 'memCategoryPerson', project: 'memCategoryProject', outcome: 'memCategoryOutcome', lesson: 'memCategoryLesson' };
+    return keys[key] ? t(keys[key]) : fallback;
+  };
   const showToast = useContext(ToastContext);
 
   const [memories, setMemories] = useState<WorkforceMemory[]>([]);
@@ -93,13 +97,13 @@ export function Memory() {
 
       const res = await fetch(apiUrl(`/api/memories?${params.toString()}`));
       if (!res.ok) {
-        throw await apiError(res, 'Failed to fetch workforce memories');
+        throw await apiError(res, t('sxFailedToFetchWorkforceMemories'));
       }
       const data = await res.json();
       setMemories(Array.isArray(data) ? data : []);
     } catch (err: any) {
       console.error('Failed to fetch workforce memories:', err);
-      showToast(err.message || 'Failed to load workforce memories', 'error');
+      showToast(err.message || t('sxFailedToLoadWorkforceMemories'), 'error');
     } finally {
       setLoading(false);
     }
@@ -115,7 +119,7 @@ export function Memory() {
   const handleCreateMemory = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!newSummary.trim() || !newContent.trim()) {
-      showToast('Summary and content are required', 'warning');
+      showToast(t('sxSummaryAndContentAreRequired'), 'warning');
       return;
     }
 
@@ -141,11 +145,11 @@ export function Memory() {
       });
 
       if (!res.ok) {
-        throw await apiError(res, 'Failed to record memory');
+        throw await apiError(res, t('sxFailedToRecordMemory'));
       }
 
       const created = await res.json();
-      showToast('Memory successfully recorded', 'success');
+      showToast(t('sxMemorySuccessfullyRecorded'), 'success');
       setIsCreating(false);
       setNewSummary('');
       setNewContent('');
@@ -153,7 +157,7 @@ export function Memory() {
       setNewConfidence(0.9);
       setMemories(prev => [created, ...prev]);
     } catch (err: any) {
-      showToast(err.message || 'Failed to record memory', 'error');
+      showToast(err.message || t('sxFailedToRecordMemory'), 'error');
     } finally {
       setSubmitting(false);
     }
@@ -165,15 +169,15 @@ export function Memory() {
       const res = await fetch(apiUrl(`/api/memories/${mem.id}/archive?archived=${newArchived}`), {
         method: 'POST',
       });
-      if (!res.ok) throw await apiError(res, 'Failed to update archive state');
+      if (!res.ok) throw await apiError(res, t('sxFailedToUpdateArchiveState'));
       const updated = await res.json();
-      showToast(newArchived ? 'Memory archived' : 'Memory unarchived', 'info');
+      showToast(newArchived ? t('sxMemoryArchived') : t('sxMemoryUnarchived'), 'info');
       setMemories(prev => prev.map(m => (m.id === mem.id ? updated : m)));
       if (activeMemory?.id === mem.id) {
         setActiveMemory(updated);
       }
     } catch (err: any) {
-      showToast(err.message || 'Archive toggle failed', 'error');
+      showToast(err.message || t('sxArchiveToggleFailed'), 'error');
     }
   };
 
@@ -183,14 +187,14 @@ export function Memory() {
       const res = await fetch(apiUrl(`/api/memories/${mem.id}`), {
         method: 'DELETE',
       });
-      if (!res.ok) throw await apiError(res, 'Failed to delete memory');
-      showToast('Memory record deleted', 'info');
+      if (!res.ok) throw await apiError(res, t('sxFailedToDeleteMemory'));
+      showToast(t('sxMemoryRecordDeleted'), 'info');
       setMemories(prev => prev.filter(m => m.id !== mem.id));
       if (activeMemory?.id === mem.id) {
         setActiveMemory(null);
       }
     } catch (err: any) {
-      showToast(err.message || 'Delete failed', 'error');
+      showToast(err.message || t('sxDeleteFailed'), 'error');
     }
   };
 
@@ -266,7 +270,7 @@ export function Memory() {
             </div>
 
             <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-              <Tooltip content="Refresh memories">
+              <Tooltip content={t('sxRefreshMemories')}>
                 <button
                   className="btn btn-ghost"
                   onClick={fetchMemories}
@@ -401,7 +405,7 @@ export function Memory() {
                 }}
                 onClick={() => setStatusFilter('all')}
               >
-                All
+                {t('uiAll')}
               </button>
             </div>
           </div>
@@ -450,7 +454,7 @@ export function Memory() {
                       backgroundColor: cat.color,
                     }}
                   />
-                  <span>{cat.label}</span>
+                  <span>{categoryLabel(cat.key, cat.label)}</span>
                   <span
                     style={{
                       fontSize: '11px',
@@ -521,7 +525,7 @@ export function Memory() {
             <div
               style={{
                 display: 'grid',
-                gridTemplateColumns: 'repeat(auto-fill, minmax(360px, 1fr))',
+                gridTemplateColumns: 'repeat(auto-fill, minmax(min(360px, 100%), 1fr))',
                 gap: '16px',
               }}
             >
@@ -576,7 +580,7 @@ export function Memory() {
                                 color: 'hsl(var(--muted-fg))',
                               }}
                             >
-                              Archived
+                              {t('uiArchived')}
                             </span>
                           )}
                         </div>
@@ -811,7 +815,7 @@ export function Memory() {
                   }}
                 >
                   <ShieldCheck size={14} style={{ color: '#10b981' }} />
-                  Provenance & Attribution
+                  {t('sxProvenanceAttribution')}
                 </h4>
 
                 <div
@@ -827,13 +831,13 @@ export function Memory() {
                   }}
                 >
                   <div style={{ display: 'flex', justifyContent: 'space-between' }}>
-                    <span style={{ color: 'hsl(var(--muted-fg))' }}>Source Entity:</span>
+                    <span style={{ color: 'hsl(var(--muted-fg))' }}>{t('sxSourceEntity')}</span>
                     <span style={{ fontWeight: 500 }}>{activeMemory.provenance.source_entity}</span>
                   </div>
 
                   {activeMemory.provenance.author_agent && (
                     <div style={{ display: 'flex', justifyContent: 'space-between' }}>
-                      <span style={{ color: 'hsl(var(--muted-fg))' }}>Author Agent:</span>
+                      <span style={{ color: 'hsl(var(--muted-fg))' }}>{t('sxAuthorAgent')}</span>
                       <span style={{ fontWeight: 500, display: 'flex', alignItems: 'center', gap: '4px' }}>
                         <Bot size={12} />
                         {activeMemory.provenance.author_agent}
@@ -843,7 +847,7 @@ export function Memory() {
 
                   {activeMemory.provenance.source_mission_id && (
                     <div style={{ display: 'flex', justifyContent: 'space-between' }}>
-                      <span style={{ color: 'hsl(var(--muted-fg))' }}>Mission ID:</span>
+                      <span style={{ color: 'hsl(var(--muted-fg))' }}>{t('sxMissionId')}</span>
                       <span style={{ fontFamily: 'monospace', fontSize: '11px' }}>
                         {activeMemory.provenance.source_mission_id}
                       </span>
@@ -852,7 +856,7 @@ export function Memory() {
 
                   {activeMemory.provenance.source_execution_id && (
                     <div style={{ display: 'flex', justifyContent: 'space-between' }}>
-                      <span style={{ color: 'hsl(var(--muted-fg))' }}>Execution ID:</span>
+                      <span style={{ color: 'hsl(var(--muted-fg))' }}>{t('sxExecutionId')}</span>
                       <span style={{ fontFamily: 'monospace', fontSize: '11px' }}>
                         {activeMemory.provenance.source_execution_id}
                       </span>
@@ -881,7 +885,7 @@ export function Memory() {
                   </div>
 
                   <div style={{ display: 'flex', justifyContent: 'space-between' }}>
-                    <span style={{ color: 'hsl(var(--muted-fg))' }}>Recorded At:</span>
+                    <span style={{ color: 'hsl(var(--muted-fg))' }}>{t('sxRecordedAt')}</span>
                     <span>{new Date(activeMemory.created_at).toLocaleString()}</span>
                   </div>
                 </div>
@@ -899,7 +903,7 @@ export function Memory() {
                     margin: '0 0 10px 0',
                   }}
                 >
-                  Tags
+                  {t('uiTags')}
                 </h4>
                 <div style={{ display: 'flex', gap: '6px', flexWrap: 'wrap' }}>
                   {activeMemory.tags.map((tag, idx) => (
@@ -922,7 +926,7 @@ export function Memory() {
                   ))}
                   {activeMemory.tags.length === 0 && (
                     <span style={{ fontSize: '12px', color: 'hsl(var(--muted-fg))', fontStyle: 'italic' }}>
-                      No tags assigned
+                      {t('sxNoTagsAssigned')}
                     </span>
                   )}
                 </div>
@@ -954,7 +958,7 @@ export function Memory() {
                 style={{ fontSize: '12px', color: '#f43f5e', display: 'flex', alignItems: 'center', gap: '6px' }}
               >
                 <Trash2 size={14} />
-                Delete
+                {t('uiDelete')}
               </button>
             </div>
           </div>
@@ -1032,7 +1036,7 @@ export function Memory() {
                   >
                     {CATEGORIES.filter(c => c.key !== 'all').map(c => (
                       <option key={c.key} value={c.key}>
-                        {c.label}
+                        {categoryLabel(c.key, c.label)}
                       </option>
                     ))}
                   </select>
@@ -1045,7 +1049,7 @@ export function Memory() {
                   <input
                     type="text"
                     required
-                    placeholder="Brief statement or finding..."
+                    placeholder={t('sxBriefStatementOrFinding')}
                     value={newSummary}
                     onChange={e => setNewSummary(e.target.value)}
                     style={{
@@ -1067,7 +1071,7 @@ export function Memory() {
                   <textarea
                     required
                     rows={4}
-                    placeholder="Detailed explanation, constraints, decisions, or verified facts..."
+                    placeholder={t('sxDetailedExplanationConstraintsDecisionsOrVerified')}
                     value={newContent}
                     onChange={e => setNewContent(e.target.value)}
                     style={{
@@ -1131,7 +1135,7 @@ export function Memory() {
                     onClick={() => setIsCreating(false)}
                     style={{ padding: '8px 14px', fontSize: '13px', borderRadius: '6px' }}
                   >
-                    Cancel
+                    {t('uiCancel')}
                   </button>
                   <button
                     type="submit"
@@ -1139,7 +1143,7 @@ export function Memory() {
                     disabled={submitting}
                     style={{ padding: '8px 16px', fontSize: '13px', borderRadius: '6px' }}
                   >
-                    {submitting ? 'Recording...' : 'Save Memory'}
+                    {submitting ? 'Recording...' : t('sxSaveMemory')}
                   </button>
                 </div>
               </form>

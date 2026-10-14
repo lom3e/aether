@@ -328,3 +328,14 @@ def test_agents_of_an_accepted_delegation_can_write_their_report_file(stack):
     assert names == ["sintesi_rossi.md"], names
     written = next(Path(d.path) for d in ws.missions.list_deliverables(mission_id))
     assert written.is_file() and "Sintesi Rossi" in written.read_text(encoding="utf-8")
+
+    # ...and it is visible the way the UI reads it: listed by the missions API, verified, and previewable.
+    import asyncio
+    from types import SimpleNamespace
+    from aether.server.routes import get_deliverable_preview, list_mission_deliverables
+    req = SimpleNamespace(app=SimpleNamespace(state=SimpleNamespace(workspace=ws)))
+    listed = asyncio.run(list_mission_deliverables(req, mission_id))
+    assert [(d["name"], d["status"]) for d in listed] == [("sintesi_rossi.md", "verified")]
+    assert listed[0]["size_bytes"] > 0
+    preview = asyncio.run(get_deliverable_preview(req, mission_id, listed[0]["id"]))
+    assert preview["preview_available"] and "Sintesi Rossi" in preview["content"]

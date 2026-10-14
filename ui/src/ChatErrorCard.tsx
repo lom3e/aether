@@ -23,10 +23,10 @@ export function ChatErrorCard({ error, onRetry, onOpenSettings }: ChatErrorCardP
 
   const structured: StructuredError = typeof error === 'string'
     ? { message: error, retryable: true, code: 'TASK_FAILED' }
-    : (error || { message: 'Task encountered an error.', retryable: true, code: 'TASK_FAILED' });
+    : (error || { message: t('sdTaskEncounteredAnError'), retryable: true, code: 'TASK_FAILED' });
 
   const title = t('taskFailedTitle');
-  const userMessage = structured.message || 'The request could not be completed.';
+  const userMessage = structured.message || t('sdTheRequestCouldNotBeCompleted');
   const isRetryable = structured.retryable !== false;
   const techDetails = structured.technical_details;
 
