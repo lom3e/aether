@@ -16,6 +16,7 @@ import argparse
 import json
 import os
 import platform as _platform
+import shutil
 import subprocess
 import sys
 from pathlib import Path
@@ -39,6 +40,10 @@ def app_version(app: Path) -> str:
     return out.stdout.strip()
 
 
+def tauri_conf_version() -> str:
+    return json.loads((ROOT / "src-tauri" / "tauri.conf.json").read_text())["version"]
+
+
 def make_archive(app: Path, dest: Path) -> None:
     env = dict(os.environ, COPYFILE_DISABLE="1")  # no AppleDouble files in the archive
     subprocess.run(["tar", "-czf", str(dest), "-C", str(app.parent), app.name], check=True, env=env)
@@ -50,7 +55,7 @@ def sign(archive: Path, key_file: Path, password: str | None, version: str) -> s
     env["TAURI_SIGNING_PRIVATE_KEY_PATH"] = str(key_file)
     if password is not None:
         env["TAURI_SIGNING_PRIVATE_KEY_PASSWORD"] = password
-    cli = ROOT / "ui" / "node_modules" / ".bin" / "tauri"
+    cli = ROOT / "ui" / "node_modules" / ".bin" / ("tauri.cmd" if sys.platform == "win32" else "tauri")
     # Output is captured so nothing from the signer can end up in logs.
     # --app-version binds the signature to the release, so a manifest cannot pair a newer version number with an older package.
     r = subprocess.run([str(cli), "signer", "sign", "--app-version", version, str(archive)], env=env, capture_output=True, text=True)
@@ -63,6 +68,7 @@ def sign(archive: Path, key_file: Path, password: str | None, version: str) -> s
 def main() -> int:
     ap = argparse.ArgumentParser()
     ap.add_argument("--app", default=str(ROOT / "build" / "Aether.app"))
+    ap.add_argument("--installer", help="Windows: the NSIS installer (.exe) is itself the update package; implies --platform windows-x86_64")
     ap.add_argument("--out-dir", default=str(ROOT / "build" / "updates"))
     ap.add_argument("--base-url", required=True, help="Directory URL where the archive will be hosted (https)")
     ap.add_argument("--local-test-url", action="store_true", help="allow an http://127.0.0.1 base URL (tests only)")
@@ -75,11 +81,16 @@ def main() -> int:
 
     app = Path(a.app)
     key = Path(a.key_file)
-    if not app.exists():
+    installer = Path(a.installer) if a.installer else None
+    if installer is not None:
+        if not installer.is_file():
+            raise SystemExit(f"installer not found: {installer}")
+        a.platform = "windows-x86_64"
+    elif not app.exists():
         raise SystemExit(f"app bundle not found: {app}")
     if not key.exists():
         raise SystemExit(f"signing key not found: {key} (generate one with `tauri signer generate`; keep it outside the repository)")
-    version = a.version or app_version(app)
+    version = a.version or (tauri_conf_version() if installer is not None else app_version(app))
     password = os.environ.get("TAURI_SIGNING_PRIVATE_KEY_PASSWORD")
     if password is None and a.password_file:
         password = Path(a.password_file).read_text()
@@ -88,9 +99,13 @@ def main() -> int:
 
     out = Path(a.out_dir)
     out.mkdir(parents=True, exist_ok=True)
-    arch = "aarch64" if a.platform.endswith("aarch64") else "x86_64"
-    archive = out / f"Aether_{version}_{arch}.app.tar.gz"
-    make_archive(app, archive)
+    if installer is not None:
+        archive = out / f"Aether_{version}_x64-setup.exe"
+        shutil.copy2(installer, archive)
+    else:
+        arch = "aarch64" if a.platform.endswith("aarch64") else "x86_64"
+        archive = out / f"Aether_{version}_{arch}.app.tar.gz"
+        make_archive(app, archive)
     signature = sign(archive, key, password, version)
     url = a.base_url.rstrip("/") + "/" + archive.name
     manifest_path = out / "latest.json"

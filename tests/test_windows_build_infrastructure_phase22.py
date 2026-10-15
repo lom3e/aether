@@ -107,3 +107,22 @@ def test_windows_packaging_documentation():
     assert "NSIS" in content
     assert "build_distribution_windows.py" in content
     assert "GitHub Actions" in content
+
+
+def test_windows_pipeline_builds_the_ui_without_macos_packaging():
+    """Regression (found on the real Windows runner): `npm run build` also runs package_after_build.py (python3 + macOS DMG)."""
+    import json
+
+    script = (Path(__file__).resolve().parent.parent / "scripts" / "build_distribution_windows.py").read_text()
+    assert '"run", "build:ui"' in script and '"run", "build"]' not in script
+    pkg = json.loads((Path(__file__).resolve().parent.parent / "ui" / "package.json").read_text())
+    assert "package_after_build" in pkg["scripts"]["build"], "the full build script is macOS-only"
+    assert "package_after_build" not in pkg["scripts"]["build:ui"]
+
+
+def test_macos_only_tauri_events_are_cfg_gated():
+    """Regression (found on the real Windows runner): `RunEvent::Reopen` only exists on macOS, so the arm must be gated."""
+    import re
+
+    rs = (Path(__file__).resolve().parent.parent / "src-tauri" / "src" / "main.rs").read_text()
+    assert re.search(r'#\[cfg\(target_os = "macos"\)\]\s*\n\s*RunEvent::Reopen', rs)

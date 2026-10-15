@@ -53,7 +53,7 @@ jobs:
 
       - name: Run Windows Build Infrastructure & Unit Tests
         run: |
-          python -m pytest tests/test_windows_build_infrastructure_phase22.py -v
+          python -m pytest tests/test_windows_build_infrastructure_phase22.py tests/test_m1a_sidecar_lifecycle.py tests/test_m1a_release_tooling.py tests/test_m1a_no_provider_i18n.py -v
 
       - name: Build Windows Desktop Distribution (UI + PyInstaller + Tauri NSIS)
         run: |
@@ -68,3 +68,22 @@ jobs:
             src-tauri/target/release/bundle/nsis/*.exe
           if-no-files-found: warn
           retention-days: 14
+
+      - name: Verify updater configuration and artifact signing (throwaway key)
+        if: always()
+        run: |
+          python scripts/verify_windows_update_artifacts.py --installer build/Aether-x64-setup.exe
+
+      - name: Windows smoke test (install, launch, sidecar, window, workspace, shutdown, uninstall)
+        if: always()
+        run: |
+          python scripts/smoke_desktop_windows.py --installer build/Aether-x64-setup.exe --work-dir "${{ runner.temp }}\\aether_smoke" --keep
+
+      - name: Upload smoke-test logs
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: aether-windows-smoke-logs
+          path: ${{ runner.temp }}/aether_smoke/*.log
+          if-no-files-found: ignore
+          retention-days: 7

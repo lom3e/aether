@@ -64,7 +64,8 @@ def build_windows_distribution(skip_tauri_on_non_windows: bool = True) -> Path |
 
     # 2. Build React UI
     print("\n--- 2. Building React Frontend UI Bundle ---")
-    run_command(["npm", "--prefix", "ui", "run", "build"])
+    # `build:ui` only (tsc + vite). The plain `build` script also runs the macOS packaging pipeline (python3 + hdiutil).
+    run_command(["npm", "--prefix", "ui", "run", "build:ui"])
 
     # Synchronize built UI to Python backend static directory
     ui_dist_dir = REPO_ROOT / "ui" / "dist"

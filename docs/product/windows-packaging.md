@@ -91,3 +91,22 @@ Il workflow di Continuous Integration su runner `windows-latest`:
 | **Dati Utente** | `~/Library/Application Support/Aether/` | `%APPDATA%\Aether\` |
 | **Icone** | `icon.icns` (Apple ICNS) | `icon.ico` (Windows ICO multi-size) |
 | **Separatore Dati PyInstaller** | `:` | `;` (`os.pathsep`) |
+
+---
+
+## 7. Verifica reale su Windows (M1b, 2026-10-15)
+
+Eseguita sul runner GitHub `windows-latest` (workflow `windows-build.yml`, avviato con `workflow_dispatch`); una compilazione su macOS non è prova per Windows. Nessuna VM Windows locale era disponibile.
+
+**Difetti trovati dal runner e corretti** (con test di regressione in `tests/test_windows_build_infrastructure_phase22.py`):
+1. `scripts/build_distribution_windows.py` usava `npm run build`, che dal packaging macOS esegue anche `python3 package_after_build.py` (DMG/hdiutil): ora usa `build:ui`.
+2. `src-tauri/src/main.rs`: `RunEvent::Reopen` esiste solo su macOS e impediva la compilazione su Windows: ora è `#[cfg(target_os = "macos")]`.
+3. Test del ciclo di vita: la pulizia usava `os.kill(pid, 9)` e `ProcessLookupError` (su Windows l'errore è `OSError` WinError 87).
+
+**Sidecar orfano su Windows:** il watchdog non può usare `os.getppid()` (su Windows non cambia dopo la morte del padre). Usa un handle sul processo padre e `WaitForSingleObject`; verificato con processi reali sul runner (kill forzato del desktop → il sidecar si ferma da solo).
+
+**Smoke test installato:** `scripts/smoke_desktop_windows.py` (29 controlli, tutti superati sul runner): installazione silenziosa NSIS, layout (exe, sidecar, preset), avvio con APPDATA/LOCALAPPDATA/USERPROFILE isolati, sidecar in ascolto, `/api/health`, finestra nativa "Aether", WebView2 connesso al runtime, dati in `%APPDATA%\Aether`, kill forzato senza orfani, runtime diretto (token, UI, creazione workspace con percorso Windows, chat senza provider in it/en, shutdown), disinstallazione che **mantiene i dati utente**, nessun processo residuo.
+
+**Auto-update su Windows:** `scripts/verify_windows_update_artifacts.py` (10 controlli superati): target NSIS, chiave pubblica, `requireSignedVersion`, firma dell'installer con chiave **usa e getta** legata alla versione, voce `windows-x86_64` nel manifest (il pacchetto di aggiornamento è l'installer `-setup.exe`). **Non verificato:** l'installazione reale di un aggiornamento su Windows (resta il test end-to-end già fatto su macOS), la firma Authenticode e il comportamento di SmartScreen.
+
+Esecuzione ripetibile: `gh workflow run windows-build.yml --ref <branch>`; su una macchina Windows `python scripts/smoke_desktop_windows.py --installer build/Aether-x64-setup.exe`.

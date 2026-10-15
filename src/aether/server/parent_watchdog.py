@@ -10,6 +10,7 @@ Only the exact PID given by the supervisor is watched; no other process is ever 
 from __future__ import annotations
 
 import os
+import sys
 import threading
 import time
 from typing import Any, Callable
@@ -17,12 +18,38 @@ from typing import Any, Callable
 PARENT_PID_ENV = "AETHER_PARENT_PID"
 
 
+_WIN_SYNCHRONIZE = 0x00100000
+_WIN_WAIT_TIMEOUT = 0x00000102
+_win_handles: dict[int, int] = {}
+
+
+def _parent_gone_windows(expected_parent_pid: int, kernel32: Any = None) -> bool:
+    """Windows has no re-parenting: ``os.getppid()`` keeps returning the dead parent's PID forever.
+
+    Instead a handle to the parent is opened once (a handle also keeps the PID from being reused) and polled:
+    the process object becomes signalled when the parent exits.
+    """
+    if kernel32 is None:
+        import ctypes
+
+        kernel32 = ctypes.windll.kernel32  # type: ignore[attr-defined]
+    handle = _win_handles.get(expected_parent_pid)
+    if handle is None:
+        handle = kernel32.OpenProcess(_WIN_SYNCHRONIZE, False, expected_parent_pid)
+        if not handle:
+            return True  # cannot be opened: it no longer exists
+        _win_handles[expected_parent_pid] = handle
+    return kernel32.WaitForSingleObject(handle, 0) != _WIN_WAIT_TIMEOUT
+
+
 def parent_is_gone(expected_parent_pid: int) -> bool:
     """True when this process is no longer a child of ``expected_parent_pid``.
 
-    An orphaned process is re-parented (to launchd/init), so ``getppid()`` changes; comparing it
-    with the expected PID is immune to PID reuse after the supervisor died.
+    POSIX: an orphaned process is re-parented (to launchd/init), so ``getppid()`` changes; comparing it with the
+    expected PID is immune to PID reuse after the supervisor died. Windows: see ``_parent_gone_windows``.
     """
+    if sys.platform == "win32":
+        return _parent_gone_windows(expected_parent_pid)
     return os.getppid() != expected_parent_pid
 
 

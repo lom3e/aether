@@ -1002,6 +1002,8 @@ fn main() {
         .expect("Error building Tauri application");
 
     app.run(move |app_handle, event| match event {
+        // `Reopen` (dock icon click) exists only in tauri's macOS RunEvent.
+        #[cfg(target_os = "macos")]
         RunEvent::Reopen { has_visible_windows, .. } => {
             println!("[Aether Desktop] macOS Reopen event (has_visible_windows={}). Focusing main window...", has_visible_windows);
             show_main_window_action(&app_handle);

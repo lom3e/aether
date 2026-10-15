@@ -10,6 +10,7 @@ from types import SimpleNamespace
 
 import pytest
 
+from aether.server import parent_watchdog
 from aether.server.parent_watchdog import PARENT_PID_ENV, parent_is_gone, start_parent_watchdog
 
 
@@ -33,6 +34,35 @@ def test_live_parent_is_not_gone():
     assert parent_is_gone(os.getppid() + 100000) is True
 
 
+class _FakeKernel32:
+    """Stands in for kernel32 so the Windows liveness logic is testable on any platform."""
+
+    def __init__(self, open_result: int, wait_result: int):
+        self.open_result, self.wait_result, self.opened = open_result, wait_result, 0
+
+    def OpenProcess(self, access, inherit, pid):  # noqa: N802
+        self.opened += 1
+        return self.open_result
+
+    def WaitForSingleObject(self, handle, ms):  # noqa: N802
+        return self.wait_result
+
+
+def test_windows_parent_liveness_uses_a_process_handle_not_getppid():
+    parent_watchdog._win_handles.clear()
+    alive = _FakeKernel32(open_result=77, wait_result=0x102)  # WAIT_TIMEOUT: still running
+    assert parent_watchdog._parent_gone_windows(4242, alive) is False
+    assert parent_watchdog._parent_gone_windows(4242, alive) is False
+    assert alive.opened == 1, "the handle is opened once and reused (also protects against PID reuse)"
+    parent_watchdog._win_handles.clear()
+    exited = _FakeKernel32(open_result=77, wait_result=0)  # WAIT_OBJECT_0: process object signalled
+    assert parent_watchdog._parent_gone_windows(4243, exited) is True
+    parent_watchdog._win_handles.clear()
+    missing = _FakeKernel32(open_result=0, wait_result=0x102)  # cannot open: no such process
+    assert parent_watchdog._parent_gone_windows(4244, missing) is True
+    parent_watchdog._win_handles.clear()
+
+
 def test_orphaned_sidecar_requests_exit_then_forces_it():
     server = SimpleNamespace(should_exit=False)
     forced = []
@@ -53,7 +83,26 @@ def test_present_parent_keeps_runtime_running():
     assert server.should_exit is False and forced == []
 
 
-@pytest.mark.skipif(sys.platform == "win32", reason="POSIX process model")
+def _pid_alive(pid: int) -> bool:
+    """Liveness probe that is safe on Windows too (there os.kill(pid, 0) would TERMINATE the process)."""
+    if sys.platform == "win32":
+        import ctypes
+
+        k32 = ctypes.windll.kernel32  # type: ignore[attr-defined]
+        handle = k32.OpenProcess(0x1000, False, pid)  # PROCESS_QUERY_LIMITED_INFORMATION
+        if not handle:
+            return False
+        code = ctypes.c_ulong()
+        k32.GetExitCodeProcess(handle, ctypes.byref(code))
+        k32.CloseHandle(handle)
+        return code.value == 259  # STILL_ACTIVE
+    try:
+        os.kill(pid, 0)
+        return True
+    except ProcessLookupError:
+        return False
+
+
 def test_child_exits_after_supervisor_is_killed(tmp_path):
     """Real processes: supervisor spawns a child that watches it; SIGKILL the supervisor; child must exit."""
     pid_file = tmp_path / "child.pid"
@@ -92,9 +141,7 @@ def test_child_exits_after_supervisor_is_killed(tmp_path):
         deadline = time.time() + 10
         alive = True
         while time.time() < deadline:
-            try:
-                os.kill(child_pid, 0)
-            except ProcessLookupError:
+            if not _pid_alive(child_pid):
                 alive = False
                 break
             time.sleep(0.1)
@@ -104,5 +151,5 @@ def test_child_exits_after_supervisor_is_killed(tmp_path):
         if child_pid:
             try:
                 os.kill(child_pid, 9)
-            except ProcessLookupError:
+            except OSError:  # already gone: ProcessLookupError on POSIX, WinError 87 on Windows
                 pass
