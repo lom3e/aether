@@ -851,6 +851,8 @@ fn main() {
             .visible_on_all_workspaces(true)
             // The orb floats over other apps and is rarely the key window: its first click must not be swallowed.
             .accept_first_mouse(true)
+            // Files dropped on the panel must reach the page (HTML5 drop) instead of being swallowed by the native handler.
+            .disable_drag_drop_handler()
             .skip_taskbar(true)
             .visible(false)
             .shadow(false)

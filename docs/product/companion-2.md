@@ -14,7 +14,7 @@
 | Approvals / missions | From `/api/personal/overview` (+ SSE events + polling); decisions go through the canonical approval router (`submitApprovalDecision`). Shown only when the runtime reports them |
 | Pointer behaviour | Summon next to the **real global pointer**; optional *come to the cursor* mode (off by default, §4) |
 
-Replaced: `AmbientCompanion.tsx` (2,180 lines, cyan HUD, fixed 420×580 window whose "orb" mode was only a CSS state). Not carried over in this slice: context capture, file drop and quick actions (their backend routes remain), text-to-speech. They return in later slices on top of the structure below.
+Replaced: `AmbientCompanion.tsx` (2,180 lines, cyan HUD, fixed 420×580 window whose "orb" mode was only a CSS state; recoverable from Git history). Functional parity with it is tracked in §6.
 
 ## 2. Code layout (extension points)
 
@@ -54,3 +54,31 @@ Next slices plug in without touching the runtime contract:
 * Verified on macOS only (real Tauri window). Windows: compile and installed-app smoke run on the CI runner; the Companion's window behaviour on Windows (transparency, global shortcut, follow) has not been exercised by hand.
 * Follow-cursor with multiple monitors / mixed DPI is implemented via `monitor_from_point` but was only verified on a single display.
 * The first expanded panel is fixed-size (no user resizing) and dark regardless of the app theme.
+
+## 6. Functional parity with the previous Companion (audit 2026-10-15)
+
+Every feature of the old `AmbientCompanion.tsx` was checked against the backend routes (all still exist) and the new module.
+
+| Previous feature | Now | How |
+| :--- | :--- | :--- |
+| Context capture (frontmost app, window title, clipboard) | **Recovered**, explicit | Eye button → `POST /personal/companion/context`; shown as a card; "Add to message" inserts it into the (editable) input; an unreadable result is reported, never invented. Limit: asked from the panel, the frontmost app is Aether itself (the card says so); the clipboard is real |
+| Drag & drop of files into the workspace inbox | **Recovered** (+ attach button) | HTML5 drop on the panel and a file picker → `POST /personal/companion/drop`; chip with the real stored path; 10 MB cap checked before upload; the native drag-drop handler is disabled on the Companion window so the page receives the drop. Native Finder drop was **not** exercised by hand |
+| Quick actions: notifications | **Recovered** | Bell / chip → quick-action `check_notifications` (real unread count and latest items) |
+| Quick actions: refresh deliverables | **Recovered** as the Results list | from the overview (refreshed by polling, events and focus) |
+| Missions, progress | **Recovered** (and fixed) | `active_works` listed with status, stage and progress (the old UI read a non-existent `current_step`); only running/in-progress missions make the status "Working on it"; pending ones are listed but are not work in progress |
+| Results / deliverables | **Recovered** | collapsible list (title, source, size) with copy-path and open-in-Aether |
+| Approvals | Kept and improved | uses the runtime's `human_summary`; decisions go through the canonical approval router |
+| Shared session with the main Assistant | Kept, tested both directions | same `aether_active_session_id`; a conversation started in the main app continues in the Companion |
+| Proposals awaiting confirmation | **New**, truthful | a reply carrying a proposal shows "A plan is waiting for your confirmation" + *Review in Aether*; accepting is **not** done here (the accept/clarify flow lives in the main app; a third copy would duplicate it) |
+| Keyboard | Recovered | `Esc` collapse, `Cmd/Ctrl+O` open Aether, `Cmd/Ctrl+K` new conversation |
+| Errors and Orb states | Kept | see §3 |
+
+**Deliberately not recovered**
+* The hard-coded success toast of the old "Take care of it" quick action ("autonomous loop completed, deliverable ready"): the runtime actually returns `blocked_pending_acceptance`, so the message was false.
+* Text-to-speech read-aloud (voice phase M3a). Dictation is kept.
+
+**Deferred (need more than a small change)**
+* Inline proposal acceptance / clarification: extract one shared accept-and-run module used by the main Assistant, Home and the Companion.
+* "Take care of it" and "Mesh audit" quick actions: the first depends on inline proposals, the second is a niche telemetry view.
+* Capturing the *previous* frontmost app: needs a native capture at summon time, before the Companion takes focus (belongs with the screen-context phase).
+* Unread-notification badge on the orb; file preview/download from the Results list (routes exist).

@@ -80,3 +80,24 @@ html.cmp-surface, html.cmp-surface body, html.cmp-surface #root { background: tr
 .cmp-send { width: 32px; height: 32px; border-radius: 10px; border: none; background: hsl(var(--cmp-accent)); color: #fff; display: flex; align-items: center; justify-content: center; cursor: pointer; flex: none; }
 .cmp-send:disabled { background: hsl(var(--cmp-line)); color: hsl(var(--cmp-dim)); cursor: default; }
 @media (prefers-reduced-motion: reduce) { .cmp-root * { animation-duration: .001s !important; transition-duration: .001s !important; } }
+
+.cmp-fold { display: flex; align-items: center; gap: 6px; background: none; border: none; padding: 0; color: hsl(var(--cmp-dim)); cursor: pointer; }
+.cmp-fold h4 { cursor: pointer; }
+.cmp-proposal { margin-top: 8px; padding: 8px 10px; border-radius: 10px; border: 1px solid hsl(var(--cmp-accent) / .5); background: hsl(var(--cmp-accent) / .1); font-size: 12.5px; }
+.cmp-proposal .desc { color: hsl(var(--cmp-dim)); margin: 3px 0 8px; }
+.cmp-chips { padding: 0 12px 8px; display: flex; flex-direction: column; gap: 6px; }
+.cmp-chip-file { display: flex; align-items: center; gap: 6px; font-size: 12px; padding: 4px 4px 4px 10px; border-radius: 9px; background: hsl(var(--cmp-bg-2)); border: 1px solid hsl(var(--cmp-line) / .8); }
+.cmp-chip-file span { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; } .cmp-chip-file em { color: hsl(var(--cmp-dim)); font-style: normal; }
+.cmp-notice { display: flex; align-items: center; gap: 6px; font-size: 12px; padding: 6px 6px 6px 10px; border-radius: 9px; background: hsl(var(--cmp-bg-2)); border: 1px solid hsl(var(--cmp-line)); }
+.cmp-notice.warning { border-color: #f5b84b66; } .cmp-notice button { margin-left: auto; }
+.cmp-drop { position: absolute; inset: 0; z-index: 5; display: flex; align-items: center; justify-content: center; font-size: 14px; font-weight: 650; border-radius: 20px; background: hsl(var(--cmp-bg) / .92); border: 2px dashed hsl(var(--cmp-accent)); color: hsl(var(--cmp-accent)); pointer-events: none; }
+.cmp-panel { position: relative; }
+.cmp-iconbtn:disabled { opacity: .45; cursor: default; }
+
+/* Bounded regions: whatever the runtime reports, the message area and the input row always keep their space. */
+.cmp-body { min-height: 120px; }
+.cmp-activity { flex: 0 1 auto; max-height: 36%; overflow-y: auto; scrollbar-width: thin; }
+.cmp-activity:empty { display: none; }
+.cmp-chips { flex: none; max-height: 26%; overflow-y: auto; scrollbar-width: thin; }
+.cmp-banner, .cmp-foot, .cmp-head { flex: none; }
+.cmp-chips > *, .cmp-activity > * { flex: none; }

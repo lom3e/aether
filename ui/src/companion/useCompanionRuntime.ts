@@ -15,11 +15,14 @@ export interface ChatMessage {
   createdAt: string;
   /** Set when the runtime itself reported a failure for this reply (e.g. NO_PROVIDER). */
   errorCode?: string;
+  /** A proposal the runtime attached to this reply. Accepting it is done in the main app (same session). */
+  proposal?: { id: string; title: string; objective: string };
 }
 
 export interface PendingApproval {
   id?: string;
   execution_id?: string;
+  human_summary?: string;
   action_name?: string;
   title?: string;
   description?: string;
@@ -36,6 +39,57 @@ export interface RunningTask {
   current_step?: string;
 }
 
+export interface ActiveMission {
+  id: string;
+  title: string;
+  status: string;
+  current_stage?: string | null;
+  progress?: number | null;
+}
+
+export interface ResultItem {
+  id: string;
+  title: string;
+  source: string;
+  file_path: string;
+  file_type: string;
+  file_size_bytes: number;
+}
+
+/** What the runtime could read from the desktop, exactly as returned (nothing is inferred). */
+export interface DesktopContext {
+  app_name: string;
+  window_title: string;
+  clipboard_text: string;
+  timestamp: string;
+}
+
+export interface AttachedFile {
+  filename: string;
+  size: number;
+  path: string;
+}
+
+export interface NotificationsSummary {
+  unread: number;
+  items: { id: string; title: string; message: string }[];
+}
+
+export const MAX_ATTACHMENT_BYTES = 10 * 1024 * 1024;
+
+/** The runtime lists an unreadable desktop as the default "Desktop" with nothing else. */
+export function contextIsEmpty(c: DesktopContext): boolean {
+  return (!c.app_name || c.app_name === 'Desktop') && !c.window_title && !c.clipboard_text;
+}
+
+/** Proposal metadata -> what the panel shows; ignores replies without a proposal. */
+export function proposalOf(metadata: any): ChatMessage['proposal'] | undefined {
+  const p = metadata?.proposal;
+  const id = metadata?.proposal_id || p?.id;
+  if (!id) return undefined;
+  return { id: String(id), title: String(p?.title || p?.objective || ''), objective: String(p?.objective || p?.title || '') };
+}
+
 export type RuntimeProblem =
   | { kind: 'unreachable' }
   | { kind: 'no_workspace' }
@@ -50,6 +104,8 @@ export interface CompanionRuntime {
   messages: ChatMessage[];
   approvals: PendingApproval[];
   tasks: RunningTask[];
+  missions: ActiveMission[];
+  results: ResultItem[];
   problem: RuntimeProblem;
   submitting: boolean;
   status: CompanionStatus;
@@ -59,6 +115,9 @@ export interface CompanionRuntime {
   decide: (approval: PendingApproval, decision: 'approve' | 'reject', reason: string) => Promise<{ message: string; kind: 'success' | 'error' | 'info' | 'warning' }>;
   newConversation: () => void;
   refresh: () => Promise<void>;
+  captureContext: () => Promise<DesktopContext | null>;
+  attachFile: (file: File) => Promise<AttachedFile>;
+  checkNotifications: () => Promise<NotificationsSummary | null>;
   dismissProblem: () => void;
   setListening: (v: boolean) => void;
 }
@@ -75,6 +134,8 @@ export function useCompanionRuntime(): CompanionRuntime {
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [approvals, setApprovals] = useState<PendingApproval[]>([]);
   const [tasks, setTasks] = useState<RunningTask[]>([]);
+  const [missions, setMissions] = useState<ActiveMission[]>([]);
+  const [results, setResults] = useState<ResultItem[]>([]);
   const [problem, setProblem] = useState<RuntimeProblem>(null);
   const [submitting, setSubmitting] = useState(false);
   const [listening, setListening] = useState(false);
@@ -132,8 +193,13 @@ export function useCompanionRuntime(): CompanionRuntime {
           (t: RunningTask) => t.status === 'running' || t.status === 'pending',
         );
         setTasks(running);
-        // A task that was running and is not any more has finished (the runtime told us so by dropping it).
-        const now = new Set(running.map(t => t.id));
+        const works: ActiveMission[] = (Array.isArray(data?.active_works) ? data.active_works : [])
+          .filter((m: any) => ['running', 'in_progress', 'pending'].includes(m.status))
+          .map((m: any) => ({ id: m.id || m.mission_id, title: m.title || m.objective || '', status: m.status, current_stage: m.current_stage, progress: m.progress }));
+        setMissions(works);
+        setResults(Array.isArray(data?.recent_deliverables) ? data.recent_deliverables : []);
+        // A task or mission that was running and is not any more has finished (the runtime dropped it from the list).
+        const now = new Set([...running.map(t => t.id), ...works.filter(m => m.status !== 'pending').map(m => m.id)]);
         let finished = false;
         prevRunning.current.forEach(id => {
           if (!now.has(id)) finished = true;
@@ -193,6 +259,7 @@ export function useCompanionRuntime(): CompanionRuntime {
               content: m.content || '',
               createdAt: m.created_at || '',
               errorCode: m.metadata?.error_code,
+              proposal: proposalOf(m.metadata),
             }));
           setMessages(restored);
         }
@@ -279,7 +346,7 @@ export function useCompanionRuntime(): CompanionRuntime {
         const errorCode: string | undefined = data.metadata?.error_code;
         setMessages(m => [
           ...m,
-          { id: data.id || `a-${Date.now()}`, role: 'assistant', content: data.content || '', createdAt: data.created_at || new Date().toISOString(), errorCode },
+          { id: data.id || `a-${Date.now()}`, role: 'assistant', content: data.content || '', createdAt: data.created_at || new Date().toISOString(), errorCode, proposal: proposalOf(data.metadata) },
         ]);
         if (errorCode) {
           setProblem({ kind: 'request', message: errorCode });
@@ -342,18 +409,68 @@ export function useCompanionRuntime(): CompanionRuntime {
     lastPrompt.current = null;
   }, []);
 
+  const captureContext = useCallback(async (): Promise<DesktopContext | null> => {
+    try {
+      const res = await fetch(apiUrl('/api/personal/companion/context'), { method: 'POST' });
+      if (!res.ok) return null;
+      return (await res.json()) as DesktopContext;
+    } catch {
+      return null;
+    }
+  }, []);
+
+  const attachFile = useCallback(
+    async (file: File): Promise<AttachedFile> => {
+      if (file.size > MAX_ATTACHMENT_BYTES) throw new Error('too_large');
+      const ws = workspace || (await resolveWorkspace());
+      if (!ws) throw new Error('no_workspace');
+      const base64: string = await new Promise((resolve, reject) => {
+        const reader = new FileReader();
+        reader.onload = () => resolve(String(reader.result).split(',')[1] || '');
+        reader.onerror = () => reject(new Error('read_failed'));
+        reader.readAsDataURL(file);
+      });
+      const res = await fetch(apiUrl('/api/personal/companion/drop'), {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ filename: file.name, content_base64: base64, session_id: sessionId, workspace_id: ws }),
+      });
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      const d = await res.json();
+      return { filename: d.file_name || file.name, size: d.file_size ?? file.size, path: d.file_path || '' };
+    },
+    [workspace, sessionId, resolveWorkspace],
+  );
+
+  const checkNotifications = useCallback(async (): Promise<NotificationsSummary | null> => {
+    const ws = workspace || (await resolveWorkspace());
+    if (!ws) return null;
+    try {
+      const res = await fetch(apiUrl('/api/personal/companion/quick-action'), {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ action_id: 'check_notifications', workspace_id: ws }),
+      });
+      if (!res.ok) return null;
+      const d = await res.json();
+      return { unread: Number(d.unread_count) || 0, items: (d.notifications || []).map((n: any) => ({ id: n.id, title: n.title, message: n.message })) };
+    } catch {
+      return null;
+    }
+  }, [workspace, resolveWorkspace]);
+
   const status = deriveCompanionStatus({
     listening,
     submitting,
     pendingApprovals: approvals.length,
-    runningTasks: tasks.length,
+    runningTasks: tasks.length + missions.filter(m => m.status === 'running' || m.status === 'in_progress').length,
     hasError: problem !== null,
     justCompleted,
   });
 
   return {
-    workspace, messages, approvals, tasks, problem, submitting, status, decidingId,
-    send, retryLast, decide, newConversation, refresh,
+    workspace, messages, approvals, tasks, missions, results, problem, submitting, status, decidingId,
+    send, retryLast, decide, newConversation, refresh, captureContext, attachFile, checkNotifications,
     dismissProblem: () => setProblem(null),
     setListening,
   };

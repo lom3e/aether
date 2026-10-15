@@ -306,3 +306,234 @@ def test_recovers_by_itself_when_the_workspace_appears(browser_context, workspac
     expect(page.get_by_test_id("companion-status-label")).to_have_text("Ready", timeout=20000)
     expect(page.get_by_test_id("companion-problem")).to_have_count(0)
     page.close()
+
+
+# ---------------------------------------------------------------------------------------------------------------------
+# Functional parity with the previous Companion: context, files, quick actions, missions, results, proposals, continuity
+# ---------------------------------------------------------------------------------------------------------------------
+
+def _json_route(page, pattern: str, body, status: int = 200, method: str | None = None):
+    payload = json.dumps(body)
+
+    def handler(route, _request=None):
+        if method and route.request.method != method:
+            route.continue_()
+            return
+        route.fulfill(status=status, content_type="application/json", body=payload)
+
+    page.route(pattern, handler)
+
+
+def test_context_capture_is_explicit_visible_and_usable(browser_context, workspace_ready):
+    page = _open(browser_context)
+    _json_route(page, "**/api/personal/companion/context", {
+        "app_name": "Safari", "window_title": "Quarterly report", "clipboard_text": "Revenue grew 12%", "selected_text": "", "screen_summary": "", "timestamp": "2026-01-01T00:00:00Z"})
+    expect(page.get_by_test_id("companion-panel")).to_be_visible(timeout=15000)
+    assert page.get_by_test_id("companion-context").count() == 0, "nothing is read until the user asks"
+    page.get_by_test_id("companion-capture-context").click()
+    card = page.get_by_test_id("companion-context")
+    expect(card).to_contain_text("Safari — Quarterly report")
+    expect(card).to_contain_text("Revenue grew 12%")
+    page.screenshot(path=str(SHOTS / "companion2_context.png"))
+    page.get_by_test_id("companion-context-add").click()
+    value = page.get_by_test_id("companion-input").input_value()
+    assert "Context [Safari - Quarterly report]" in value and "Revenue grew 12%" in value
+    expect(page.get_by_test_id("companion-context")).to_have_count(0)
+    page.close()
+
+
+def test_unreadable_context_is_reported_not_invented(browser_context, workspace_ready):
+    page = _open(browser_context)
+    _json_route(page, "**/api/personal/companion/context", {"app_name": "Desktop", "window_title": "", "clipboard_text": "", "selected_text": "", "screen_summary": "", "timestamp": "t"})
+    page.get_by_test_id("companion-capture-context").click()
+    expect(page.get_by_test_id("companion-notice")).to_contain_text("Could not read the active window")
+    assert page.get_by_test_id("companion-context").count() == 0
+    page.close()
+
+
+def test_real_context_endpoint_yields_either_real_data_or_an_honest_notice(browser_context, workspace_ready):
+    page = _open(browser_context)
+    expect(page.get_by_test_id("companion-panel")).to_be_visible(timeout=15000)
+    page.get_by_test_id("companion-capture-context").click()
+    page.wait_for_selector("[data-testid=companion-context], [data-testid=companion-notice]", timeout=15000)
+    page.close()
+
+
+def test_attach_file_goes_to_the_workspace_inbox_through_the_real_api(browser_context, workspace_ready, tmp_path):
+    page = _open(browser_context)
+    f = tmp_path / "notes.txt"
+    f.write_text("hello from a file")
+    page.get_by_test_id("companion-file-input").set_input_files(str(f))
+    chip = page.get_by_test_id("companion-attachment")
+    expect(chip).to_contain_text("notes.txt", timeout=15000)
+    assert "inbox" in (chip.get_attribute("title") or ""), "the runtime stored the file in the workspace inbox"
+    assert "notes" in page.get_by_test_id("companion-input").input_value(), "the prompt is pre-filled but editable"
+    page.screenshot(path=str(SHOTS / "companion2_attachment.png"))
+    page.get_by_test_id("companion-attachment").get_by_role("button").click()
+    expect(page.get_by_test_id("companion-attachment")).to_have_count(0)
+    page.close()
+
+
+def test_oversized_file_is_refused_before_any_upload(browser_context, workspace_ready):
+    page = _open(browser_context)
+    uploads: list[str] = []
+    page.on("request", lambda r: uploads.append(r.url) if r.url.endswith("/companion/drop") else None)
+    page.get_by_test_id("companion-file-input").set_input_files({"name": "huge.bin", "mimeType": "application/octet-stream", "buffer": b"0" * (11 * 1024 * 1024)})
+    expect(page.get_by_test_id("companion-notice")).to_contain_text("larger than 10 MB", timeout=15000)
+    assert uploads == []
+    page.close()
+
+
+def test_dropping_a_file_shows_the_overlay_and_ingests_it(browser_context, workspace_ready):
+    page = _open(browser_context)
+    expect(page.get_by_test_id("companion-panel")).to_be_visible(timeout=15000)
+    dt = page.evaluate_handle("() => { const d = new DataTransfer(); d.items.add(new File(['dropped text'], 'dropped.md', {type: 'text/markdown'})); return d; }")
+    page.dispatch_event("[data-testid=companion-panel]", "dragover", {"dataTransfer": dt})
+    expect(page.get_by_test_id("companion-drop-overlay")).to_be_visible()
+    page.dispatch_event("[data-testid=companion-panel]", "drop", {"dataTransfer": dt})
+    expect(page.get_by_test_id("companion-attachment")).to_contain_text("dropped.md", timeout=15000)
+    expect(page.get_by_test_id("companion-drop-overlay")).to_have_count(0)
+    page.close()
+
+
+def test_notifications_quick_action_uses_the_real_runtime(browser_context, workspace_ready):
+    page = _open(browser_context)
+    page.get_by_test_id("companion-notifications").click()
+    card = page.get_by_test_id("companion-notifications-card")
+    expect(card).to_be_visible(timeout=15000)
+    assert ("unread" in card.inner_text().lower())
+    page.close()
+
+
+def test_notifications_list_unread_items(browser_context, workspace_ready):
+    page = _open(browser_context)
+    _json_route(page, "**/api/personal/companion/quick-action", {"action": "check_notifications", "status": "completed", "unread_count": 2,
+                                                                  "notifications": [{"id": "n1", "title": "Report ready", "message": "Weekly report is done"}, {"id": "n2", "title": "Approval needed", "message": ""}]})
+    page.get_by_test_id("companion-notifications").click()
+    card = page.get_by_test_id("companion-notifications-card")
+    expect(card).to_contain_text("2 unread notifications")
+    expect(card).to_contain_text("Report ready")
+    page.close()
+
+
+def test_missions_progress_and_status_come_from_the_runtime(browser_context, workspace_ready):
+    page = browser_context.new_page()
+    page.set_viewport_size({"width": 408, "height": 604})
+    _json_route(page, "**/api/personal/overview*", {"pending_approvals": [], "background_tasks": [], "active_works": [
+        {"id": "m1", "title": "Competitor analysis", "status": "running", "current_stage": "Collecting sources", "progress": 35}]})
+    page.goto(f"{_state['base_url']}/?surface=companion")
+    expect(page.get_by_test_id("companion-status-label")).to_have_text("Working on it", timeout=15000)
+    card = page.get_by_test_id("companion-mission")
+    expect(card).to_contain_text("Competitor analysis")
+    expect(card).to_contain_text("Collecting sources")
+    page.screenshot(path=str(SHOTS / "companion2_mission.png"))
+    page.close()
+
+
+def test_a_pending_mission_is_listed_but_is_not_work_in_progress(browser_context, workspace_ready):
+    page = browser_context.new_page()
+    page.set_viewport_size({"width": 408, "height": 604})
+    _json_route(page, "**/api/personal/overview*", {"pending_approvals": [], "background_tasks": [], "active_works": [{"id": "m2", "title": "Not started yet", "status": "pending"}]})
+    page.goto(f"{_state['base_url']}/?surface=companion")
+    expect(page.get_by_test_id("companion-mission")).to_contain_text("Not started yet", timeout=15000)
+    expect(page.get_by_test_id("companion-status-label")).to_have_text("Ready")
+    page.close()
+
+
+def test_results_are_listed_and_collapsible(browser_context, workspace_ready):
+    page = browser_context.new_page()
+    page.set_viewport_size({"width": 408, "height": 604})
+    _json_route(page, "**/api/personal/overview*", {"pending_approvals": [], "background_tasks": [], "recent_deliverables": [
+        {"id": "d1", "title": "report.md", "source": "Mission", "file_path": "/ws/deliverables/report.md", "file_type": ".md", "file_size_bytes": 4096},
+        {"id": "d2", "title": "data.csv", "source": "Files", "file_path": "/ws/files/data.csv", "file_type": ".csv", "file_size_bytes": 100}]})
+    page.goto(f"{_state['base_url']}/?surface=companion")
+    toggle = page.get_by_test_id("companion-results-toggle")
+    expect(toggle).to_contain_text("Recent results (2)", timeout=15000)
+    assert page.get_by_test_id("companion-result").count() == 0
+    toggle.click()
+    expect(page.get_by_test_id("companion-result")).to_have_count(2)
+    expect(page.get_by_test_id("companion-result").first).to_contain_text("4 KB")
+    page.screenshot(path=str(SHOTS / "companion2_results.png"))
+    toggle.click()
+    expect(page.get_by_test_id("companion-result")).to_have_count(0)
+    page.close()
+
+
+def test_a_proposal_is_shown_truthfully_without_pretending_to_accept_it(browser_context, workspace_ready):
+    page = browser_context.new_page()
+    page.set_viewport_size({"width": 408, "height": 604})
+    _json_route(page, "**/api/personal/chat", {"id": "m9", "session_id": "s-p", "role": "assistant", "content": "I can do this. Shall I proceed?", "created_at": "2026-01-01T00:00:00Z",
+                                               "metadata": {"proposal_id": "prop-1", "proposal": {"id": "prop-1", "title": "Write the Q3 summary", "objective": "Write the Q3 summary", "status": "pending"}}})
+    page.goto(f"{_state['base_url']}/?surface=companion")
+    page.get_by_test_id("companion-input").fill("Write the Q3 summary")
+    page.get_by_test_id("companion-send").click()
+    card = page.get_by_test_id("companion-proposal")
+    expect(card).to_contain_text("waiting for your confirmation", timeout=15000)
+    expect(card).to_contain_text("Write the Q3 summary")
+    expect(card.get_by_role("button")).to_have_text("Review in Aether")
+    assert page.get_by_test_id("companion-approve").count() == 0, "accepting a proposal is not offered here"
+    page.screenshot(path=str(SHOTS / "companion2_proposal.png"))
+    page.close()
+
+
+def test_approval_uses_the_runtime_human_summary(browser_context, workspace_ready):
+    page = browser_context.new_page()
+    page.set_viewport_size({"width": 408, "height": 604})
+    _json_route(page, "**/api/personal/overview*", {"background_tasks": [], "pending_approvals": [{"execution_id": "e1", "action_name": "email.send", "description": "Send an email", "human_summary": 'Send email to "anna@example.com"'}]})
+    page.goto(f"{_state['base_url']}/?surface=companion")
+    expect(page.get_by_test_id("companion-approvals")).to_contain_text('Send email to "anna@example.com"', timeout=15000)
+    page.close()
+
+
+def test_a_conversation_started_in_the_main_assistant_continues_in_the_companion(browser_context, workspace_ready):
+    main = browser_context.new_page()
+    main.goto(_state["base_url"])
+    main.wait_for_selector(".sidebar", timeout=15000)
+    ws_name = main.evaluate("fetch('/api/workspace').then(r => r.json()).then(d => d.name)")
+    reply = main.evaluate("""async (ws) => {
+        const r = await fetch('/api/personal/chat', {method: 'POST', headers: {'Content-Type': 'application/json', 'X-Aether-Session-Token': window.__AETHER_SESSION_TOKEN__ || ''},
+          body: JSON.stringify({prompt: 'Message written in the main assistant', workspace_id: ws, language: 'en'})});
+        return r.json();
+    }""", ws_name)
+    sid = reply["session_id"]
+    main.evaluate("(sid) => localStorage.setItem('aether_active_session_id', sid)", sid)
+    comp = _open(browser_context)
+    expect(comp.get_by_test_id("companion-msg-user").first).to_have_text("Message written in the main assistant", timeout=15000)
+    comp.get_by_test_id("companion-input").fill("And a follow-up from the companion")
+    comp.get_by_test_id("companion-send").click()
+    expect(comp.get_by_test_id("companion-msg-assistant").last).to_be_visible(timeout=30000)
+    assert comp.evaluate("localStorage.getItem('aether_active_session_id')") == sid, "same session id, not a new one"
+    comp.close()
+    main.close()
+
+
+def test_keyboard_shortcuts_new_conversation(browser_context, workspace_ready):
+    page = _open(browser_context)
+    page.get_by_test_id("companion-input").fill("Hello")
+    page.get_by_test_id("companion-send").click()
+    expect(page.get_by_test_id("companion-msg-assistant").last).to_be_visible(timeout=30000)
+    page.keyboard.press("Control+k")
+    expect(page.get_by_test_id("companion-msg-user")).to_have_count(0)
+    page.close()
+
+
+def test_layout_with_all_recovered_sections_stays_inside_the_window(browser_context, workspace_ready):
+    page = browser_context.new_page()
+    page.set_viewport_size({"width": 408, "height": 604})
+    _json_route(page, "**/api/personal/overview*", {
+        "pending_approvals": [{"execution_id": "e1", "human_summary": "Send email to anna"}],
+        "background_tasks": [{"id": "t1", "title": "Research", "status": "running", "progress_pct": 50}],
+        "active_works": [{"id": "m1", "title": "Mission", "status": "running", "progress": 20}],
+        "recent_deliverables": [{"id": "d1", "title": "report.md", "source": "Mission", "file_path": "/x/report.md", "file_type": ".md", "file_size_bytes": 10}]})
+    _json_route(page, "**/api/personal/companion/context", {"app_name": "Safari", "window_title": "T", "clipboard_text": "x", "timestamp": "t"})
+    page.goto(f"{_state['base_url']}/?surface=companion")
+    expect(page.get_by_test_id("companion-approvals")).to_be_visible(timeout=15000)
+    page.get_by_test_id("companion-capture-context").click()
+    page.get_by_test_id("companion-results-toggle").click()
+    o = page.evaluate("({inner: window.innerWidth, doc: document.documentElement.scrollWidth, ih: window.innerHeight, dh: document.documentElement.scrollHeight})")
+    assert o["doc"] <= o["inner"] + 1, o
+    for tid in ("companion-input", "companion-send", "companion-attach", "companion-capture-context", "companion-hide"):
+        b = page.get_by_test_id(tid).bounding_box()
+        assert b and 0 <= b["x"] and b["x"] + b["width"] <= 409 and 0 <= b["y"] and b["y"] + b["height"] <= 605, (tid, b)
+    page.screenshot(path=str(SHOTS / "companion2_full_sections.png"))
+    page.close()
