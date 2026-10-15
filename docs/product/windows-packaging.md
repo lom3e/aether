@@ -111,4 +111,6 @@ Eseguita sul runner GitHub `windows-latest` (workflow `windows-build.yml`, avvia
 
 Stabilità: il controllo WebView2↔runtime campiona le connessioni (Established/CloseWait) per fino a 120 s, perché una verifica puntuale era instabile (1 fallimento su 4 esecuzioni prima della correzione; poi 2 esecuzioni consecutive 29/29).
 
+Conferma finale: run [38791568794](https://github.com/lom3e/aether/actions/runs/38791568794) sull'HEAD esatto `7b5a9bc` di `development` (build, 34 test, 10/10 compatibilità, 29/29 smoke). Il workflow verifica la *compatibilità degli artefatti* di aggiornamento, **non** installa un aggiornamento su Windows.
+
 Esecuzione ripetibile: `gh workflow run windows-build.yml --ref <branch>`; su una macchina Windows `python scripts/smoke_desktop_windows.py --installer build/Aether-x64-setup.exe`.
