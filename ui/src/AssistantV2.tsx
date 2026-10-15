@@ -45,7 +45,7 @@ export function AssistantV2({
   navigate,
   onSwitchToV1,
 }: AssistantV2Props) {
-  const { t } = useTranslation();
+  const { t, language } = useTranslation();
   // Orb State
   const [orbState, setOrbState] = useState<OrbState>('idle');
   const [audioLevel, setAudioLevel] = useState<number>(0);
@@ -650,6 +650,7 @@ export function AssistantV2({
           prompt: text,
           session_id: sessionId,
           workspace_id: workspaceName,
+          language,
         }),
       });
 
@@ -802,6 +803,7 @@ export function AssistantV2({
           prompt: promptToRun,
           session_id: sessionId,
           workspace_id: workspaceName,
+          language,
           authority: acceptData.authority,
           provider_id: providerForTask,
         }),

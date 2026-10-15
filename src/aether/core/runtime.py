@@ -7,6 +7,7 @@ import re
 from typing import Any, Callable
 from uuid import uuid4
 
+from aether.core.language import no_provider_message
 from aether.actions.models import ActionExecutionStatus
 from aether.agents.agent import Agent
 from aether.agents.lifecycle import AgentLifecycleState
@@ -224,7 +225,7 @@ class Runtime:
             return ExecutionResult(
                 success=False,
                 status=ExecutionStatus.FAILED,
-                error="No AI provider configured. Open Settings → Provider.",
+                error=no_provider_message(request.instruction or ""),
                 execution_id=request.id,
                 metadata={"code": "NO_PROVIDER"},
             )
@@ -291,7 +292,7 @@ class Runtime:
                         return ExecutionResult(
                             success=False,
                             status=ExecutionStatus.FAILED,
-                            error="No AI provider configured to draft document content. Open Settings → Provider.",
+                            error=no_provider_message(request.instruction or "", drafting_document=True),
                             execution_id=request.id,
                             metadata={"code": "NO_PROVIDER"},
                         )
@@ -611,7 +612,7 @@ class Runtime:
             return ExecutionResult(
                 success=False,
                 status=ExecutionStatus.FAILED,
-                error="No AI provider configured. Open Settings → Provider.",
+                error=no_provider_message(request.instruction or ""),
                 execution_id=request.id,
                 metadata={"code": "NO_PROVIDER"},
             )

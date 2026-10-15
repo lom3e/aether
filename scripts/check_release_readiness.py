@@ -20,7 +20,7 @@ NOTARY_ENV_SETS = (
     ("APPLE_ID", "APPLE_PASSWORD", "APPLE_TEAM_ID"),
     ("APPLE_API_KEY", "APPLE_API_ISSUER", "APPLE_API_KEY_PATH"),
 )
-UPDATER_ENV = ("TAURI_SIGNING_PRIVATE_KEY",)
+UPDATER_KEY_FILE = Path.home() / ".aether-signing" / "aether-updater.key"
 
 
 def _run(cmd: list[str]) -> tuple[int, str]:
@@ -51,8 +51,8 @@ def updater_configured(conf: dict, cargo_toml: str) -> dict[str, bool]:
     return {
         "plugin_dependency": "tauri-plugin-updater" in cargo_toml,
         "public_key": bool(upd.get("pubkey")),
-        "endpoints": bool(upd.get("endpoints")),
-        "updater_artifacts": bool((conf.get("bundle") or {}).get("createUpdaterArtifacts")),
+        "require_signed_version": bool(upd.get("requireSignedVersion")),
+        "endpoints_configured": bool(upd.get("endpoints")),
     }
 
 
@@ -62,7 +62,7 @@ def collect(app: Path, env: dict[str, str] | None = None) -> dict:
     code, out = _run(["security", "find-identity", "-v", "-p", "codesigning"])
     report["developer_id_identity_in_keychain"] = bool(re.search(r"Developer ID Application", out))
     report["notarization_credentials_in_env"] = notary_env_ready(env)
-    report["updater_private_key_in_env"] = all(bool(env.get(k)) for k in UPDATER_ENV)
+    report["updater_private_key_available"] = bool(env.get("TAURI_SIGNING_PRIVATE_KEY")) or bool(env.get("TAURI_SIGNING_PRIVATE_KEY_PATH")) or UPDATER_KEY_FILE.exists()
     conf = json.loads((ROOT / "src-tauri" / "tauri.conf.json").read_text())
     report["updater"] = updater_configured(conf, (ROOT / "src-tauri" / "Cargo.toml").read_text())
     if app.exists():
@@ -77,7 +77,7 @@ def collect(app: Path, env: dict[str, str] | None = None) -> dict:
     else:
         report["bundle_signature"] = "missing"
     report["ready_to_notarize"] = report["developer_id_identity_in_keychain"] and report["notarization_credentials_in_env"]
-    report["ready_to_publish_updates"] = all(report["updater"].values()) and report["updater_private_key_in_env"]
+    report["ready_to_publish_updates"] = all(report["updater"].values()) and report["updater_private_key_available"]
     return report
 
 

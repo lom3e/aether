@@ -35,9 +35,22 @@ def test_notarization_env_needs_a_complete_credential_set():
 
 
 def test_updater_config_detection():
-    cfg = {"plugins": {"updater": {"pubkey": "K", "endpoints": ["https://x/latest.json"]}}, "bundle": {"createUpdaterArtifacts": True}}
+    cfg = {"plugins": {"updater": {"pubkey": "K", "requireSignedVersion": True, "endpoints": ["https://x/latest.json"]}}}
     assert all(readiness.updater_configured(cfg, 'tauri-plugin-updater = "2"').values())
     assert not any(readiness.updater_configured({}, "").values())
+    # key and plugin present but no hosting decided yet: not ready, and it says exactly why
+    partial = readiness.updater_configured({"plugins": {"updater": {"pubkey": "K", "endpoints": []}}}, 'tauri-plugin-updater = "2"')
+    assert partial["public_key"] and not partial["endpoints_configured"]
+
+
+def test_repository_updater_config_is_consistent():
+    import json
+    conf = json.loads((ROOT / "src-tauri" / "tauri.conf.json").read_text())
+    state = readiness.updater_configured(conf, (ROOT / "src-tauri" / "Cargo.toml").read_text())
+    assert state["plugin_dependency"] and state["public_key"] and state["require_signed_version"]
+    upd = conf["plugins"]["updater"]
+    assert upd["pubkey"].isascii() and "PRIVATE" not in upd["pubkey"].upper()
+    assert not (conf.get("bundle") or {}).get("createUpdaterArtifacts"), "official build must not require the private key"
 
 
 def test_report_never_contains_secret_values(monkeypatch, tmp_path):
@@ -63,3 +76,25 @@ def test_manifest_accumulates_platforms_per_version_only():
     assert set(b["platforms"]) == {"darwin-aarch64", "windows-x86_64"}
     c = manifest.build_manifest("1.7.0", "darwin-aarch64", "https://h/a2", "S3", existing=b)
     assert set(c["platforms"]) == {"darwin-aarch64"}
+
+
+def test_local_http_is_only_allowed_explicitly_and_only_for_loopback():
+    args = dict(version="1.6.1", platform="darwin-aarch64", signature="S")
+    with pytest.raises(ValueError):
+        manifest.build_manifest(artifact_url="http://127.0.0.1:8000/a.tar.gz", **args)
+    ok = manifest.build_manifest(artifact_url="http://127.0.0.1:8000/a.tar.gz", allow_local_http=True, **args)
+    assert ok["platforms"]["darwin-aarch64"]["url"].startswith("http://127.0.0.1")
+    with pytest.raises(ValueError):
+        manifest.build_manifest(artifact_url="http://evil.example.com/a.tar.gz", allow_local_http=True, **args)
+
+
+def test_update_artifact_script_requires_key_and_never_prints_secrets(tmp_path, capsys, monkeypatch):
+    art = _load("build_update_artifacts")
+    app = tmp_path / "Aether.app"
+    (app / "Contents").mkdir(parents=True)
+    monkeypatch.setattr("sys.argv", ["x", "--app", str(app), "--base-url", "https://h/", "--key-file", str(tmp_path / "missing.key"),
+                                     "--out-dir", str(tmp_path / "out")])
+    with pytest.raises(SystemExit) as exc:
+        art.main()
+    assert "signing key not found" in str(exc.value)
+    assert art.detect_platform() in {"darwin-aarch64", "darwin-x86_64"}

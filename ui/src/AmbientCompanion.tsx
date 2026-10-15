@@ -115,7 +115,7 @@ export function AmbientCompanion({
   workspaceName: propWorkspaceName,
   onOpenWorkspace,
 }: AmbientCompanionProps) {
-  const { t } = useTranslation();
+  const { t, language } = useTranslation();
   const [activeWorkspace, setActiveWorkspace] = useState<string>(propWorkspaceName || "");
   const [promptInput, setPromptInput] = useState("");
   const [isSubmitting, setIsSubmitting] = useState(false);
@@ -543,6 +543,7 @@ export function AmbientCompanion({
           prompt: text,
           session_id: sessionId,
           workspace_id: activeWorkspace || undefined,
+          language,
         }),
       });
 

@@ -74,7 +74,7 @@ export function Home({
   const recognitionRef = useRef<any>(null);
 
   const showToast = useContext(ToastContext);
-  const { t } = useTranslation();
+  const { t, language } = useTranslation();
 
   const fetchOverview = () => {
     if (!workspaceName) return;
@@ -289,6 +289,7 @@ export function Home({
           prompt: text,
           session_id: currentSessionId,
           workspace_id: workspaceName,
+          language,
         }),
       });
 
@@ -478,6 +479,7 @@ export function Home({
               prompt: promptToRun,
               session_id: currentSessionId,
               workspace_id: workspaceName,
+          language,
               authority,
             }),
           });

@@ -275,3 +275,42 @@ export async function notifyDesktop(
     console.debug('Web desktop notification error:', e);
   }
 }
+
+
+export interface UpdateInfo {
+  available: boolean;
+  current_version: string;
+  version: string | null;
+  notes: string | null;
+  date: string | null;
+}
+
+export type UpdateErrorCode = 'not_configured' | 'network' | 'signature' | 'busy' | 'install' | 'unknown';
+
+export interface UpdateError {
+  code: UpdateErrorCode;
+  detail: string;
+}
+
+function toUpdateError(e: unknown): UpdateError {
+  if (e && typeof e === 'object' && 'code' in e) return e as UpdateError;
+  return { code: 'unknown', detail: String(e) };
+}
+
+/** Asks the desktop supervisor whether a newer, signed release exists. Changes nothing on disk. */
+export async function checkForUpdate(): Promise<UpdateInfo> {
+  try {
+    return await invoke<UpdateInfo>('check_for_update');
+  } catch (e) {
+    throw toUpdateError(e);
+  }
+}
+
+/** Downloads, verifies the signature, installs and relaunches the app. Resolves only if nothing newer exists. */
+export async function installUpdate(): Promise<void> {
+  try {
+    await invoke('install_update');
+  } catch (e) {
+    throw toUpdateError(e);
+  }
+}

@@ -115,7 +115,13 @@ def test_files_create_document_drafting_failure_fails(temp_workspace: Workspace)
         action_id="files.create_document",
         action_args={"filename": "whitepaper.md", "content": ""},
     )
-    result = runtime.execute(task)
+    from aether.core.language import reset_ui_language, set_ui_language
+
+    token = set_ui_language("en")
+    try:
+        result = runtime.execute(task)
+    finally:
+        reset_ui_language(token)
 
     assert result.success is False
     assert result.status.value in ("failed", "cancelled")

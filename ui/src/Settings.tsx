@@ -6,7 +6,10 @@ import {
 } from 'lucide-react';
 import { apiError, apiUrl } from './api';
 import { useTranslation } from './i18n';
+import type { TranslationKey } from './i18n';
 import { useTheme } from './theme';
+import { checkForUpdate, installUpdate, isTauri } from './desktop';
+import type { UpdateError, UpdateInfo } from './desktop';
 import { TopHeader } from './TopHeader';
 import { useKeyboardShortcuts, CATEGORY_ORDER } from './shortcuts';
 import { ModelSelector } from './ModelSelector';
@@ -42,6 +45,9 @@ export function Settings({ onWorkspaceSwitched }: SettingsProps) {
 
   const showToast = useContext(ToastContext);
   const { t, language, setLanguage } = useTranslation();
+  const [updateState, setUpdateState] = useState<'idle' | 'checking' | 'installing'>('idle');
+  const [updateInfo, setUpdateInfo] = useState<UpdateInfo | null>(null);
+  const [updateError, setUpdateError] = useState<UpdateError | null>(null);
   const { theme, setTheme } = useTheme();
   const { shortcuts, formatShortcut, openShortcutsModal } = useKeyboardShortcuts();
 
@@ -293,6 +299,40 @@ export function Settings({ onWorkspaceSwitched }: SettingsProps) {
     const sizes = ['B', 'KB', 'MB', 'GB'];
     const i = Math.floor(Math.log(bytes) / Math.log(k));
     return parseFloat((bytes / Math.pow(k, i)).toFixed(1)) + ' ' + sizes[i];
+  };
+
+  const UPDATE_ERROR_KEYS: Record<UpdateError['code'], TranslationKey> = {
+    not_configured: 'updatesErrorNotConfigured',
+    network: 'updatesErrorNetwork',
+    signature: 'updatesErrorSignature',
+    install: 'updatesErrorInstall',
+    busy: 'updatesErrorBusy',
+    unknown: 'updatesErrorNetwork',
+  };
+  const updateErrorKey = (code: UpdateError['code']): TranslationKey => UPDATE_ERROR_KEYS[code] ?? 'updatesErrorNetwork';
+
+  const handleCheckUpdate = async () => {
+    setUpdateState('checking');
+    setUpdateError(null);
+    setUpdateInfo(null);
+    try {
+      setUpdateInfo(await checkForUpdate());
+    } catch (e) {
+      setUpdateError(e as UpdateError);
+    } finally {
+      setUpdateState('idle');
+    }
+  };
+
+  const handleInstallUpdate = async () => {
+    setUpdateState('installing');
+    setUpdateError(null);
+    try {
+      await installUpdate(); // the app relaunches itself on success
+    } catch (e) {
+      setUpdateError(e as UpdateError);
+      setUpdateState('idle');
+    }
   };
 
   return (
@@ -708,6 +748,43 @@ export function Settings({ onWorkspaceSwitched }: SettingsProps) {
               </div>
             </div>
           </div>
+
+          {isTauri() && (
+            <div className="card" style={{ padding: '24px' }} data-testid="updates-card">
+              <h3 style={{ fontSize: '16px', fontWeight: 600, marginBottom: '16px' }}>{t('updatesTitle')}</h3>
+              <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
+                {updateInfo && (
+                  <div style={{ fontSize: '13.5px' }}>
+                    {t('updatesCurrentVersion', { version: updateInfo.current_version })}
+                  </div>
+                )}
+                <div style={{ display: 'flex', gap: '10px', flexWrap: 'wrap' }}>
+                  <button className="btn btn-secondary" onClick={handleCheckUpdate} disabled={updateState !== 'idle'}>
+                    {updateState === 'checking' ? t('updatesChecking') : t('updatesCheck')}
+                  </button>
+                  {updateInfo?.available && (
+                    <button className="btn btn-primary" onClick={handleInstallUpdate} disabled={updateState !== 'idle'}>
+                      {t('updatesInstall')}
+                    </button>
+                  )}
+                </div>
+                {updateState === 'installing' && <div style={{ fontSize: '13.5px' }}>{t('updatesInstalling')}</div>}
+                {updateInfo && !updateInfo.available && <div style={{ fontSize: '13.5px' }}>{t('updatesUpToDate')}</div>}
+                {updateInfo?.available && (
+                  <div style={{ fontSize: '13.5px' }}>
+                    <strong>{t('updatesAvailable', { version: updateInfo.version ?? '' })}</strong>
+                    {updateInfo.notes && <div style={{ opacity: 0.8, marginTop: '4px' }}>{updateInfo.notes}</div>}
+                  </div>
+                )}
+                {updateError && (
+                  <div role="alert" style={{ fontSize: '13.5px', color: 'hsl(var(--destructive, 0 70% 55%))' }}>
+                    {t(updateErrorKey(updateError.code))}
+                  </div>
+                )}
+                <div style={{ fontSize: '12.5px', opacity: 0.7 }}>{t('updatesManualHint')}</div>
+              </div>
+            </div>
+          )}
         </div>
       )}
 

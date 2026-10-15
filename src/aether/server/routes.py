@@ -6275,6 +6275,7 @@ class PersonalChatPayload(BaseModel):
     workspace_id: str | None = None
     authority: dict[str, Any] | None = None
     provider_id: str | None = None
+    language: str | None = None  # active UI language (it/en) for fixed replies
 
 
 class IntentRequestPayload(BaseModel):
@@ -6396,6 +6397,8 @@ async def personal_chat_route(request: Request, payload: PersonalChatPayload):
             auth_obj = ExecutionAuthority.from_dict(payload.authority)
 
     from aether.personal.service import MissionCreationError
+    from aether.core.language import reset_ui_language, set_ui_language
+    _lang_token = set_ui_language(payload.language)
     try:
         msg = await asyncio.to_thread(
             ws.personal.process_prompt,
@@ -6408,6 +6411,8 @@ async def personal_chat_route(request: Request, payload: PersonalChatPayload):
     except MissionCreationError as exc:
         # Honest and explicit: the request was understood but nothing was started because no mission could be recorded.
         raise HTTPException(status_code=500, detail=f"Delegation not started: {exc}")
+    finally:
+        reset_ui_language(_lang_token)
     return msg.to_dict()
 
 

@@ -21,14 +21,18 @@ SEMVER = re.compile(r"^\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?$")
 PLATFORMS = {"darwin-aarch64", "darwin-x86_64", "windows-x86_64"}
 
 
+def _is_local_http(url: str) -> bool:
+    return re.match(r"^http://(127\.0\.0\.1|localhost)(:\d+)?/", url) is not None
+
+
 def build_manifest(version: str, platform: str, artifact_url: str, signature: str, notes: str = "",
-                   pub_date: str | None = None, existing: dict | None = None) -> dict:
+                   pub_date: str | None = None, existing: dict | None = None, allow_local_http: bool = False) -> dict:
     if not SEMVER.match(version):
         raise ValueError(f"invalid version: {version!r}")
     if platform not in PLATFORMS:
         raise ValueError(f"unsupported platform: {platform!r}")
-    if not artifact_url.startswith("https://"):
-        raise ValueError("artifact URL must use https")
+    if not artifact_url.startswith("https://") and not (allow_local_http and _is_local_http(artifact_url)):
+        raise ValueError("artifact URL must use https (plain http is only accepted for 127.0.0.1/localhost in local tests)")
     signature = signature.strip()
     if not signature:
         raise ValueError("empty signature: updates must be signed")

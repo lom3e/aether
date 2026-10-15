@@ -16,3 +16,8 @@ serde_json = "1"
 tokio = { version = "1", features = ["full"] }
 rand = "0.8"
 ureq = { version = "2.10", features = ["json"] }
+tauri-plugin-updater = "2"
+
+[features]
+# Test-only hook: on start, check/install an update automatically (AETHER_E2E_UPDATE=1). Never enabled in release builds.
+updater-e2e = []

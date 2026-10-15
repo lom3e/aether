@@ -61,7 +61,7 @@ This file is the **single canonical source for the future of Aether**: vision, v
 * Chat/mission/agent reliability was hardened in three QA passes (`151b720`, `2d1f48a`, `fc7048b`): intent routing (answer vs mission), explicit memory, entity extraction, Groq 429/`Retry-After` handling, truthful retry/error history, deliverable de-duplication by canonical path, document-edit routing with `.aether-versions/` backups, full IT/EN localization, responsive/theme browser tests.
 * The test suite collects 1,978 tests. Four backend tests are known to fail only for environmental reasons; the production stabilization plan recorded 1,348 passing at its sign-off.
 
-**M1a progress (2026-10-15, see [`product/auto-update.md`](product/auto-update.md)):** done — sidecar lifecycle fix with regression tests, window/Cmd+Q verification on the rebuilt `.app`, release-readiness and update-manifest tooling, auto-update design. **Not done / blocked:** Developer ID signing and notarization (no certificate or Apple credentials in the environment), the updater plugin and key (new dependency and key custody needed), Windows (M1b, no Windows runner). M1a therefore stays **open**.
+**M1a progress (2026-10-15, see [`product/auto-update.md`](product/auto-update.md)):** done and verified — sidecar lifecycle fix with regression tests; repeatable packaged-app smoke test (`scripts/smoke_desktop_app.py`, 31 checks incl. native window, UI→runtime traffic, SIGTERM/SIGKILL with no orphans); signed auto-update implemented with the official Tauri updater and verified end to end against a local server with a throwaway key (14/14: install + relaunch, tampered/wrong-key/version-lie/unreachable refused with the old app intact); no-provider reply localized (it/en). **Not done / blocked:** Developer ID signing and notarization (no certificate or Apple credentials), update hosting (no endpoint configured, so updates are not live), Windows (M1b, no runner). M1a therefore stays **open**.
 
 ### A.2 Capability status by layer
 
@@ -96,8 +96,8 @@ This file is the **single canonical source for the future of Aether**: vision, v
 * ~~`aether-desktop` receiving SIGTERM/SIGKILL leaves the sidecar running~~ — **fixed in M1a (2026-10-15)**: signal handler in the supervisor plus a parent-PID watchdog in the sidecar (`src/aether/server/parent_watchdog.py`); verified on the packaged app for SIGTERM, SIGINT, SIGHUP, SIGKILL and Cmd+Q.
 * Tests `test_dsk03`/`test_dsk04` can leak frozen sidecar processes; `test_runtime_execute_do_mode` creates a literal `sqlite:<path>` directory in the working directory.
 * `routes.py` is a ~9,700-line single module; splitting it is a maintainability item, not a feature.
-* No Developer ID signature or notarization: first launch on another Mac is blocked by Gatekeeper without manual override.
-* GUI-level verification of the packaged app was done manually-scripted, not as a repeatable test: with Screen Recording/Accessibility granted, the real `Aether.app` window was captured (`screencapture -l`), a workspace was created and a chat request sent through real mouse/keyboard events, and Cmd+Q exited cleanly (2026-10-15). Not yet an automated GUI smoke test in CI. Observed: the no-provider reply is in English inside the Italian UI.
+* No Developer ID signature or notarization: first launch on another Mac is blocked by Gatekeeper without manual override. The auto-update mechanism exists but has no hosted endpoint, so it is not live for users.
+* GUI-level verification of the packaged app was done manually-scripted, not as a repeatable test: with Screen Recording/Accessibility granted, the real `Aether.app` window was captured (`screencapture -l`), a workspace was created and a chat request sent through real mouse/keyboard events, and Cmd+Q exited cleanly (2026-10-15). Not yet an automated GUI smoke test in CI.
 
 ## B. Confirmed Decisions and Immediate Priorities
 

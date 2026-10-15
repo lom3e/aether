@@ -1,6 +1,8 @@
 // Prevents additional console window on Windows in release, DO NOT REMOVE!!
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
+mod updater;
+
 use std::collections::HashMap;
 use std::io::{BufRead, BufReader};
 use std::path::{Path, PathBuf};
@@ -821,6 +823,7 @@ fn main() {
 
     let app = tauri::Builder::default()
         .plugin(tauri_plugin_notification::init())
+        .plugin(tauri_plugin_updater::Builder::new().build())
         .manage(RuntimeState {
             port,
             token: token.clone(),
@@ -842,8 +845,23 @@ fn main() {
             send_desktop_notification,
             consume_notification_target,
             quit_aether,
+            updater::check_for_update,
+            updater::install_update,
         ])
         .setup(move |app| {
+            // Test-only: apply an update on start so the update flow can be verified without UI automation.
+            #[cfg(feature = "updater-e2e")]
+            if std::env::var("AETHER_E2E_UPDATE").as_deref() == Ok("1") {
+                let handle = app.handle().clone();
+                tauri::async_runtime::spawn(async move {
+                    let state = handle.state::<RuntimeState>();
+                    match updater::apply_update(&handle, state.port, &state.token, &state.child).await {
+                        Ok(()) => println!("[Aether Updater] E2E: no update was applied."),
+                        Err(e) => println!("[Aether Updater] E2E error: {} {}", e.code, e.detail),
+                    }
+                });
+            }
+
             // 1. Build Main Workspace Window
             let main_window = WebviewWindowBuilder::new(app, "main", WebviewUrl::default())
                 .initialization_script(&init_script)

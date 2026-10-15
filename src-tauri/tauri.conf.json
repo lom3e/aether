@@ -41,5 +41,12 @@
       "digestAlgorithm": "sha256",
       "timestampUrl": ""
     }
+  },
+  "plugins": {
+    "updater": {
+      "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IEM0NDQwQkU0MDVBNjgyMjUKUldRbGdxWUY1QXRFeERhNDFIdUZrQTM3NGlVZlBDQkgxZTBJWHBwUWFDRnh2anJhcGtBRjluS1oK",
+      "endpoints": [],
+      "requireSignedVersion": true
+    }
   }
 }

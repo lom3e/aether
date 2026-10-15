@@ -82,7 +82,7 @@ def test_runtime_reports_no_provider_explicitly(tmp_path, monkeypatch, ollama_lo
     rt = Runtime(workspace=w)
     assert rt.resolve_provider() is None
     res = rt.execute(Task(instruction="ciao", mode=ExecutionMode.ANSWER, workspace_id=w.id))
-    assert res.success is False and res.metadata["code"] == "NO_PROVIDER" and "Settings" in res.error
+    assert res.success is False and res.metadata["code"] == "NO_PROVIDER" and ("Settings" in res.error or "Impostazioni" in res.error)
     assert ollama_looks_installed["generate"] == 0
 
 
