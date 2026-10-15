@@ -109,4 +109,6 @@ Eseguita sul runner GitHub `windows-latest` (workflow `windows-build.yml`, avvia
 
 **Auto-update su Windows:** `scripts/verify_windows_update_artifacts.py` (10 controlli superati): target NSIS, chiave pubblica, `requireSignedVersion`, firma dell'installer con chiave **usa e getta** legata alla versione, voce `windows-x86_64` nel manifest (il pacchetto di aggiornamento è l'installer `-setup.exe`). **Non verificato:** l'installazione reale di un aggiornamento su Windows (resta il test end-to-end già fatto su macOS), la firma Authenticode e il comportamento di SmartScreen.
 
+Stabilità: il controllo WebView2↔runtime campiona le connessioni (Established/CloseWait) per fino a 120 s, perché una verifica puntuale era instabile (1 fallimento su 4 esecuzioni prima della correzione; poi 2 esecuzioni consecutive 29/29).
+
 Esecuzione ripetibile: `gh workflow run windows-build.yml --ref <branch>`; su una macchina Windows `python scripts/smoke_desktop_windows.py --installer build/Aether-x64-setup.exe`.

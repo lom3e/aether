@@ -66,12 +66,30 @@ def listening_port(pid: int) -> int | None:
     return int(rows[0]["LocalPort"]) if rows else None
 
 
-def webview_connected_to(port: int) -> bool:
+def webview_connections(port: int) -> list[str]:
+    """States of the connections that WebView2 processes hold to the runtime port (empty when none right now)."""
     rows = ps_json(
-        f"Get-NetTCPConnection -RemotePort {port} -State Established -ErrorAction SilentlyContinue | "
-        "ForEach-Object { (Get-Process -Id $_.OwningProcess -ErrorAction SilentlyContinue).ProcessName } | ConvertTo-Json -Compress"
+        f"Get-NetTCPConnection -RemotePort {port} -ErrorAction SilentlyContinue | "
+        "ForEach-Object { $p = Get-Process -Id $_.OwningProcess -ErrorAction SilentlyContinue; "
+        "if ($p -and $p.ProcessName -like '*webview*') { [string]$_.State } } | ConvertTo-Json -Compress"
     )
-    return any(isinstance(n, str) and "webview" in n.lower() for n in rows)
+    return [str(r) for r in rows]
+
+
+def webview_processes(root_pid: int) -> list[str]:
+    rows = ps_json("Get-Process | Where-Object { $_.ProcessName -like '*webview*' } | Select-Object -ExpandProperty ProcessName | ConvertTo-Json -Compress")
+    return sorted({str(r) for r in rows})
+
+
+def wait_for_webview_traffic(port: int, timeout: float = 120.0) -> list[str]:
+    """The UI talks to the runtime with short keep-alive connections, so sample until one is seen instead of expecting one at a fixed moment."""
+    end = time.time() + timeout
+    while time.time() < end:
+        states = webview_connections(port)
+        if states:
+            return states
+        time.sleep(1)
+    return []
 
 
 def pid_alive(pid: int) -> bool:
@@ -184,7 +202,9 @@ def main() -> int:
             else:
                 check("B: native window titled 'Aether' exists", False, "no top-level window with that title (is WebView2 installed / is there an interactive desktop?)")
             if port:
-                check("B: WebView2 is connected to the runtime (UI -> sidecar)", bool(wait_until(lambda: webview_connected_to(port), 45)))
+                states = wait_for_webview_traffic(port)
+                check("B: WebView2 is connected to the runtime (UI -> sidecar)", bool(states),
+                      ",".join(states) if states else f"no connection seen; webview processes: {webview_processes(proc.pid)}")
             data_dir = Path(env["APPDATA"]) / "Aether"
             check("B: data directory is under the isolated APPDATA", wait_until(data_dir.is_dir, 30) is True, str(data_dir))
             check("B: app and sidecar run from the install directory only",
