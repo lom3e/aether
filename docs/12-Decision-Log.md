@@ -794,6 +794,136 @@ Negative:
 
 ---
 
+> ADR-012 to ADR-016 (2026-10) record the product-direction decisions consolidated in [`FUTURE_ROADMAP.md`](FUTURE_ROADMAP.md) §B. Note: `docs/adr/` holds a separate technical ADR series.
+
+# ADR-012
+
+## Title
+
+Aether Core is the single runtime; every surface is a client of it.
+
+## Date
+
+2026-10-15
+
+## Status
+
+Accepted
+
+## Context
+
+Aether now has several surfaces: the Desktop UI, the ambient Companion/Orb, a Telegram bridge and voice primitives. Duplicated agent logic per surface would split memory, approvals and results.
+
+## Decision
+
+All surfaces (Desktop UI, Companion 2.0, Telegram, voice) use the same runtime, memory, context, missions, tools, approval system and results. No surface may implement a second independent agent.
+
+## Consequences
+
+Positive: one source of truth, consistent approvals and audit. Negative: surfaces depend on Core APIs being sufficient for each interaction style.
+
+---
+
+# ADR-013
+
+## Title
+
+Companion 2.0 is a complete Jarvis-style redesign, not a restyling.
+
+## Date
+
+2026-10-15
+
+## Status
+
+Accepted (direction); details to be designed
+
+## Context
+
+The existing Orb/ambient Companion is a technical base. The desired experience (reference: getjarvis.eu) is an always-reachable assistant that accompanies the user while working.
+
+## Decision
+
+Redesign experience, interaction and capabilities from scratch. Compact discreet floating form, summon by shortcut, expansion to a fuller interface, explicit state (listening, processing, acting, awaiting authorization, done). Long-term: screen understanding, annotation, pointing, mouse/keyboard control, voice, workflows via the workforce. Cursor-following, animation and placement are **not yet decided**. Actions remain governed by authorization, risk level and confirmation; Aether reports only verified outcomes and never claims capabilities it lacks. The current Orb does not constrain the design.
+
+## Consequences
+
+A design and feasibility milestone (M2) precedes implementation. Platform limits (macOS permissions, overlays) may reduce scope; this must be documented rather than hidden.
+
+---
+
+# ADR-014
+
+## Title
+
+Reliable desktop distribution first; auto-update is a roadmap goal.
+
+## Date
+
+2026-10-15
+
+## Status
+
+Accepted (direction); mechanism to be verified
+
+## Decision
+
+Desktop reliability is the top priority (M1). Auto-update is adopted as a goal with signed packages, integrity checks, error handling and recovery, plus a manual install/update path. Signing, notarization and key protection use each platform's standard mechanisms. Distribution is not considered complete before the native GUI, sidecar lifecycle, clean start/stop and installed-app behavior are verified. Windows verification proceeds when an environment is available and never blocks macOS work.
+
+## Consequences
+
+Requires signing identities, an update-signing key and an artifact host (details open). Tauri's updater is a hypothesis, not yet a decision.
+
+---
+
+# ADR-015
+
+## Title
+
+Telegram is a local-first mobile surface of Aether.
+
+## Date
+
+2026-10-15
+
+## Status
+
+Accepted (direction)
+
+## Decision
+
+Telegram connects to the same runtime via long polling from Aether Desktop, with no public server. Requirements: secure pairing, authorized-user list, secret protection, approval handling for sensitive operations. Capabilities: natural-language requests, start/follow missions, notifications, results, clarifications, approve/reject.
+
+## Consequences
+
+The bot is unavailable when the computer is off or Aether is not running; this is accepted and must be communicated honestly. A hosted service or broker is a possible future option, not a requirement.
+
+---
+
+# ADR-016
+
+## Title
+
+Voice output is local, lightweight, modular and optional.
+
+## Date
+
+2026-10-15
+
+## Status
+
+Accepted (direction); engine choice pending measurement
+
+## Decision
+
+Text-to-speech is a module separate from the language model. System TTS is the simple fallback; a local neural TTS (Piper is a candidate) is adopted only after measuring model size, memory, speed, Italian quality and license. The model is not bundled in the main installer and is downloaded only when the user enables it. The TTS reads already-generated responses without an extra LLM call. Local speech recognition and low-latency conversation are later considerations.
+
+## Consequences
+
+Aether must be fully usable with no voice model installed.
+
+---
+
 # Related Milestone
 
 * Milestone 0.1 - Agent Runtime Foundation
@@ -830,6 +960,11 @@ Aether currently has the following architectural decisions approved:
 ✅ Unified Execution Contract (see [docs/adr/ADR-001.md](file:///Users/matteo/Matteo/Lavoro/aether/docs/adr/ADR-001.md))
 ✅ ExecutionEngine as Runtime Orchestrator (see [docs/adr/ADR-002.md](file:///Users/matteo/Matteo/Lavoro/aether/docs/adr/ADR-002.md))
 ✅ ExecutionPlan Foundation (see [docs/adr/ADR-003.md](file:///Users/matteo/Matteo/Lavoro/aether/docs/adr/ADR-003.md))
+✅ Single runtime for all surfaces (ADR-012)
+✅ Companion 2.0 redesign direction (ADR-013)
+✅ Reliable desktop distribution and auto-update goal (ADR-014)
+✅ Telegram local-first surface (ADR-015)
+✅ Local, optional voice output (ADR-016)
 
 ---
 

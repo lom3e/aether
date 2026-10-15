@@ -97,30 +97,66 @@ This file is the **single canonical source for the future of Aether**: vision, v
 * No Developer ID signature or notarization: first launch on another Mac is blocked by Gatekeeper without manual override.
 * GUI-level (window) interaction of the packaged app has not been automated.
 
-## B. Immediate Priorities (Next)
+## B. Confirmed Decisions and Immediate Priorities
 
-Ordered by the principle *truthfulness and reliability before breadth* (Forensic Audit, Stabilization Plan, Principle 3).
+Decisions below were confirmed by the product owner (2026-10). They are classified so that nothing is mistaken for a finished feature: **Confirmed** = direction decided; **Vision** = long-term, not scheduled; **Hypothesis** = technical idea to verify before committing (§E.4); **Open** = undecided (§E.5).
 
-1. **Trusted desktop distribution** — Developer ID signing + notarization (DSK-04B), a GUI smoke test of the packaged app, fixing the SIGTERM orphan-sidecar case, and a first real run of the Windows build on a Windows runner. *Why first:* every other feature is unreachable for real users until the app installs without Gatekeeper workarounds.
-2. **Live verification of what already exists** — run the credential-dependent paths once with real accounts (Google Calendar, GitHub, Slack, Telegram, Email, Notion) and a real external coding agent, and record results; fix what breaks. *Why:* many layers are "Present" but only mocked at the network boundary; the roadmap must not count them as done until proven.
-3. **Close the remaining reliability gaps** — keep answering the QA findings (intent routing quality beyond keywords, agent termination, mission retry semantics), clean the test-suite leaks above, and re-run the real-provider E2E when quota allows.
-4. **Decide the open questions in §E** (distribution model, auth broker, local-AI stance) before starting M2, since they change scope.
+### B.1 Confirmed decisions
+
+| # | Decision | Class |
+| :--- | :--- | :--- |
+| D1 | **Aether Core remains the central runtime.** Every surface (Desktop UI, Companion, Telegram, voice) shares the same memory, context, missions, tools, approvals and results. No surface may become a second, independent agent. | Confirmed |
+| D2 | **Desktop App must become reliable, installable and updatable.** Reliable distribution is the top priority (M1). | Confirmed |
+| D3 | **Auto-update is a roadmap goal**, not a permanent manual-DMG model: secure, verifiable updates; signed packages and integrity checks; reliable release process for macOS and Windows; correct update-error handling with recovery; a manual install/update path remains as an alternative. Signing, notarization, key protection and update handling use each platform's proper mechanisms. | Confirmed (implementation later) |
+| D4 | **Windows:** verify the build when the environment allows (Windows runner/VM); it must **not** block macOS work. | Confirmed |
+| D5 | **Desktop is "complete" only after** the native GUI window, sidecar lifecycle, clean start/stop and installed-app behavior are verified. | Confirmed |
+| D6 | **Companion 2.0 is a complete redesign** of experience, interaction and capabilities in the spirit of a Jarvis-style assistant (reference: getjarvis.eu) — not a restyling and not just an improved Orb. The current Orb/`AmbientCompanion` is a technical base that must not constrain the design. | Confirmed |
+| D7 | **Companion actions are bounded by authorization, risk level and confirmation.** Aether states what it is really doing and never reports unverified actions as completed; it must not promise capabilities it lacks. | Confirmed |
+| D8 | **Telegram is a mobile surface of the same runtime**, first version **local-first** (Desktop connects to the bot via long polling; no public server required). Consequence: unavailable when the computer is off or Aether is not running — accepted. Pairing, user authorization, secret protection and handling of sensitive operations are required. | Confirmed |
+| D9 | **Voice output is local, lightweight, modular and optional.** System TTS as the simple fallback; a neural local TTS (candidate: Piper) only after measurement. The model is **not** bundled in the main installer; downloaded only when the user enables the feature; Aether works fully without it. TTS reads already-generated responses (no extra LLM call). | Confirmed |
+| D10 | **Preferred general order:** consolidate Desktop distribution → design Companion 2.0 → implement visual, voice and Telegram components according to real dependencies. This is a direction, not a release schedule. | Confirmed (order not final) |
+| D11 | **Simple by default** stays mandatory even as the runtime grows more complex (§F). | Confirmed |
+
+### B.2 Vision (long-term, not scheduled, not an order to build everything at once)
+
+* Companion: compact, discreet floating form (cloud/Orb) that appears when called or useful, may follow the cursor or stay near the work area, summoned by shortcut, expands to a fuller interface, shows state (listening, thinking, acting, waiting for approval, done).
+* Companion understanding and acting: screen/context understanding, pointing at and annotating screen areas, explaining what is on screen, drawing, mouse/keyboard control, interaction with apps and tools, voice commands and natural conversation, complex workflows through the Aether runtime and workforce. Ultimate goal: it can do what is asked *as far as its tools and capabilities genuinely allow*.
+* Later voice: local speech recognition and low-latency conversation (after TTS).
+* Remote/always-on Telegram via hosted service or broker (not required now).
+
+### B.3 Immediate priorities
+
+Order follows *truthfulness and reliability before breadth* and the confirmed order D10.
+
+1. **M1 — Reliable Desktop App (macOS first).** Verify the Tauri window (GUI) and sidecar lifecycle (start, SIGTERM/quit, crash, orphan cleanup); fix the known orphan-sidecar case; prepare signing, notarization and the auto-update design. Windows build verification runs as a parallel, non-blocking track (M1b).
+2. **M2 — Companion 2.0 design.** A design/specification milestone first (experience, states, interaction model, permission/risk model for acting on the computer, technical feasibility on macOS/Windows). No feature code until the spec and feasibility checks are accepted.
+3. **Live verification of what already exists** (credentialed connectors, real external coding agent) — continues in parallel as time allows; see M4.
+4. Close remaining reliability gaps (QA findings, test-suite leaks listed in §A.3).
 
 ## C. Milestones
 
-Dependencies are strict: a milestone starts only when the previous one's exit criteria are met, except where noted as parallelizable. Mapping to the original four horizons (Phase A–D) and the 9-phase plan in `NEXT_PRODUCT_EVOLUTION_PLAN.md` is given in brackets.
+A milestone's **start** requires its dependencies' exit criteria unless marked parallel. Mapping to the older horizons and the 9-phase evolution plan is in brackets. Criteria are deliberately verifiable and modest; "verified" means exercised on the real packaged app or real service, not only mocked.
 
 | # | Milestone | Scope | Depends on | Exit criteria |
 | :--- | :--- | :--- | :--- | :--- |
-| **M0** | *Foundations — done* | Core hardening, Phase A mission UX, Phase B intelligence (memory, graph, learning), Phase D slices (Personal Agent, Companion surface, voice primitives), design system, desktop macOS, P0–P3 product roadmap (v1.4–v1.6) | — | Recorded in §A; keep green |
-| **M1** | **Trusted Desktop Release** | Signing + notarization, packaged-app GUI smoke test, SIGTERM/orphan fix, Windows build verified on CI, update path (see §E open decision) | M0 | Notarized DMG installs and starts on a clean Mac; Windows NSIS installer starts on a clean Windows VM; CI builds both |
-| **M2** | **Connected Apps Golden Path** *[Fase 2–5]* | Context & Capability Router (least privilege), connector platform with Public-client PKCE and BYOA/broker model, validation set (Google, GitHub, Slack, Telegram, Notion, Email) + MCP host, Dynamic Workforce Assembly, connector→workforce→mission end-to-end with risk-based approval | M1 (for release), §B.2 | One real flow per validation connector runs end-to-end with real credentials; `CONNECTED` is only shown after a real health probe; unapproved high-risk actions never execute |
-| **M3** | **Verified Execution & Human Control** | General quality-gate framework across workforces, conflict-resolution pipeline, UI for policies/autopilot tiers/checkpoints, dry-run in the mission flow, real cost & token accounting | M2 (partly parallelizable with M2 UX) | Every mission completion is backed by a gate result; policies editable and enforced from UI; cost shown per mission |
-| **M4** | **Complete UX Overhaul — "regola del nonnino"** *[Fase 6]* | Home, Performance & Resources, Social/Content, Connected Services screens redesigned on the design system; no raw errors or jargon at tier 1; IT/EN parity | M2 screens exist | 6-question design test (§1.7.8) passes on every top-level screen; localization/responsive/theme browser tests green |
-| **M5** | **Proactive Assistant & Companion Surfaces** *[Fase 1 completion, 7; Phase D]* | Suggestions→automation loop and watchers on real connectors, notification channels (push/Telegram/Email/Slack) verified, Telegram companion live, server-side STT/TTS, screen understanding (on-demand, vision-capable provider, permission handling for macOS Accessibility/Screen Recording), mobile/universal surface | M2, M3 | A mission started from Telegram completes and notifies; screen question answered on demand; permission loss handled gracefully |
-| **M6** | **Ecosystem & Scale** *[Fase 8; Phase C/D long-term]* | MCP ecosystem and Tier 2/3 connectors, community marketplace registry (`.aether-pkg`), social workforce with real publishing APIs, Campaign BI, client-work workflows, adaptive model routing, real remote Execution Fabric, Aether Hosted/Auth Broker if chosen, public API freeze (v2.0) | M2–M5 | Third-party package installs in one click with a permission summary; remote node actually executes a workload; security audit passed |
+| **M0** | *Foundations — done* | Core hardening, Phase A mission UX, Phase B intelligence, Personal Agent, current Orb/Companion surface, voice primitives (browser STT), design system, desktop macOS build, P0–P3 product roadmap (v1.4–v1.6) | — | Recorded in §A; keep green |
+| **M1a** | **Reliable Desktop App — macOS** | Automated or scripted GUI smoke test of the packaged app (window opens, UI loads, chat reaches runtime); sidecar lifecycle (clean quit, SIGTERM, crash, relaunch with no orphan processes); installed-app behavior from a DMG on a clean user account; Developer ID signing + notarization; release pipeline; **auto-update design** (updater mechanism, signing keys and their protection, update manifest hosting, rollback/recovery, manual fallback) and then implementation | M0 | Notarized DMG opens without Gatekeeper override on a clean Mac; GUI smoke test passes; no orphan sidecar after any exit path; an update from version N to N+1 succeeds, a corrupted/unsigned update is rejected and the app keeps working; manual update path documented |
+| **M1b** | **Windows Desktop — parallel, non-blocking** | Run `windows-build.yml` / `build_distribution_windows.py` on a Windows runner; install + start + clean shutdown on a clean Windows VM; signing and update path equivalent to macOS | M0; a Windows runner/VM available | NSIS installer builds in CI, installs, starts, and exits cleanly; gaps documented if the environment is unavailable. Never gates M1a |
+| **M2** | **Companion 2.0 — Design & Feasibility** | Experience and interaction spec (compact form, summon/dismiss, cursor-following/placement options, expanded view, state model); capability and permission model for screen understanding, annotation, and input control (maps onto the existing `ExecutionAuthority` and risk model); platform feasibility spikes (macOS Accessibility/Screen Recording, overlay windows, global shortcut conflicts); shared-runtime architecture note proving no duplicate agent | M0 (M1a for macOS permissions behavior on a signed build) | Accepted design document + decision-log entries; list of verified/unverified platform capabilities; staged implementation plan with dependencies. **No implementation inside M2** |
+| **M3a** | **Local voice output (TTS)** — parallel with M3b | `VoiceOutput` module separate from the LLM; system-TTS fallback first; benchmark Piper (model size, RAM, latency, Italian quality, **license**) before choosing; opt-in model download with integrity check; reads existing responses without extra LLM calls; works offline once installed | M0; M1a for packaging/download path; M2 for how voice fits the Companion | App fully usable with no voice model; system fallback works; if a neural model is adopted, measured numbers recorded and the decision logged; offline playback verified |
+| **M3b** | **Telegram mobile surface (local-first)** | Long-polling worker inside Desktop; secure pairing (one-time code), allow-list of authorized Telegram users, token in the secret store, requests in natural language, start/follow missions, notifications, results/deliverables, clarification replies, approve/reject sensitive actions through the existing approval system | M0; existing `telegram_bridge` and notification fabric as base; M1a for lifecycle reliability | From a paired phone: a mission starts, progress arrives, a clarification is answered, an approval is granted and rejected correctly; unpaired users are ignored; behavior when Desktop is off is documented and shown honestly; no secrets in logs |
+| **M3c** | **Companion 2.0 — Visual & Interaction (first slices)** | Implement the compact floating form, states, summon/expand, voice hookup, on the shared runtime — slice by slice as defined in M2 | M2 accepted; M1a; M3a for speech | Each slice meets its M2 criteria; same memory/missions/approvals as the main app; state indicator always reflects real runtime state |
+| **M4** | **Connected Apps Golden Path** *[Fase 2–5]* | Context & Capability Router (least privilege), connector platform (Public-client PKCE / BYOA), validation set (Google, GitHub, Slack, Notion, Email; Telegram covered by M3b) + MCP host, Dynamic Workforce Assembly, connector→workforce→mission with risk-based approval; live credentialed verification of existing connectors | M0; §E.5 auth-broker decision | One real end-to-end flow per validation connector with real credentials; `CONNECTED` only after a real health probe; unapproved high-risk actions never execute |
+| **M5** | **Verified Execution & Human Control** | General quality-gate framework, conflict-resolution pipeline, UI for policies/autopilot tiers/checkpoints, dry-run in the mission flow, cost & token accounting | M4 (partly parallel) | Every mission completion backed by a gate result; policies editable and enforced from UI; cost per mission shown |
+| **M6** | **Complete UX Overhaul — "regola del nonnino"** *[Fase 6]* | Home, Performance & Resources, Content, Connected Services redesigned on the design system; no raw errors or jargon at tier 1; IT/EN parity; aligns with Companion 2.0 visual language | M4 screens; M2 visual language | 6-question design test passes on every top-level screen; localization/responsive/theme browser tests green |
+| **M7** | **Computer-Aware Companion & Proactive Assistant** *[Fase 7; Phase D]* | Screen understanding on demand (vision-capable provider), annotations/pointers, then — only after separate risk review — mouse/keyboard control and app interaction; suggestions→automation loop and watchers on real connectors; local speech recognition and low-latency conversation | M2 design, M3c, M4 risk-based approval, M5 | Each capability is individually permissioned, announces what it does, is revocable, handles lost OS permissions gracefully, and reports only verified outcomes |
+| **M8** | **Ecosystem & Scale** *[Fase 8; Phase C/D long-term]* | MCP ecosystem and Tier 2/3 connectors, community marketplace (`.aether-pkg`), social workforce with real publishing APIs, Campaign BI, client-work workflows, adaptive model routing, real remote Execution Fabric, hosted Telegram/broker if chosen, public API freeze (v2.0) | M4–M7 | Third-party package installs in one click with a permission summary; a remote node executes a workload; security audit passed |
 
-**Sequencing notes.** Fase 0 (design system) and most of Fase 1 (Companion surface) of the evolution plan are already delivered, so the plan's remaining order (Router → Connectors → Assembly → Integration → UX → Screen understanding → Expansion) is retained as M2→M6. The older "v1.5/v1.6/v1.7/v1.8" targets of `product/product-roadmap.md` are all marked completed in its own task tables (P1–P3) and are folded into M0; Windows packaging (`v1.8`) is carried into M1 because its CI workflow exists but has never been proven.
+**Sequencing notes.**
+* The path M1a → M2 → M3x follows D10. M3a and M3b are independent of each other and may run in parallel; both are real *surfaces of the same runtime*, so they must go through the existing Personal Agent, missions and approvals — no parallel logic.
+* Fase 0 (design system) and the Orb/ambient surface of Fase 1 are delivered; Companion 2.0 supersedes the "Fase 1 completion / Fase 7" wording of the evolution plan, while keeping its permission and screen-understanding constraints (macOS permission loss after re-signing, direct link to System Settings).
+* Telegram does not wait for the Connected Apps milestone: it relies on the existing bridge, notification fabric and approval system, not on third-party OAuth.
+* Windows (M1b) is a parallel track so that an unavailable Windows environment never delays macOS release quality.
 
 ## D. Long-Term Vision & Ideas Not to Forget
 
@@ -129,11 +165,13 @@ Dependencies are strict: a milestone starts only when the previous one's exit cr
 * **Aether as controller above specialist tools** (Antigravity, Codex, browser agents): single front door, quarantined process details (Layer 16).
 * **Hybrid local/cloud intelligence and hardware mesh** (Layers 17, 21): route work to Mac / PC GPU / cloud with effortless status.
 * **Compounding intelligence**: workforce memory, knowledge graph, correction loop; benchmarking and workforce evolution.
-* **Ambient presence**: Companion HUD, Telegram, voice, mobile, screen understanding with visual annotation overlay.
+* **Companion 2.0 (Jarvis-style)**: a fully redesigned ambient assistant — compact floating form that follows the work, expands on demand, understands the screen, points and annotates, and (when authorized and genuinely able) acts on the computer; same runtime, memory, missions and approvals as Core. See §B.1 D6–D7, §B.2, M2/M3c/M7.
+* **Surfaces of one runtime**: Desktop, Companion, Telegram (local-first), local voice output; shared memory, context, missions, tools, approvals and results.
+* **Self-updating, signed desktop releases** for macOS and Windows with recovery and a manual fallback (D3).
 * **Closed-loop domain workforces**: social media with performance feedback, content repurposing, campaign and business intelligence, client quote/website-feature automation (Layer 15 scenarios).
 * **Ecosystem**: `.aether-pkg` marketplace for workforces, skills, tools, connectors, workflow templates; one-click installs with permission summaries.
 * **Developer surfaces**: SDK/library, CLI, MCP interoperability, "Aether Developer Suite" as a first concrete developer product (from `post-v1-strategic-roadmap.md` §5).
-* **Possible business directions** (from the early roadmap, no decision taken): hosted SaaS instances, marketplace commission, commercial desktop/pro tiers. See §E.
+* **Possible business directions** (from the early roadmap, no decision taken): hosted SaaS instances, marketplace commission, commercial desktop/pro tiers. See §E.5.
 * **Platform/website separation**: keep Core, Desktop, Website and Community/Docs as distinct entities with clear boundaries (post-v1 roadmap §1).
 
 ## E. Risks, Limits and Open Decisions
@@ -154,20 +192,39 @@ Dependencies are strict: a milestone starts only when the previous one's exit cr
 | `product/product-roadmap.md` priority matrix lists P1–P3 items as *Planned* while its own P0–P3 task tables mark them *Completed (v1.4.x–v1.5.0)* | Task tables + code evidence win; items folded into M0. The old matrix is marked historical |
 | Layers 19.2/19.3 say Telegram and Voice are "not claimed as implemented"; matrix says voice "Completed & Verified" and code contains a Telegram bridge | Reclassified **Partial** (code and tests exist; live/server-side paths unverified) |
 | Matrix leaves Phase A/C items without status although code and tests exist | Matrix now carries a verified-status column |
-| Evolution plan says Companion shortcut `Cmd+Shift+Space`; code registers `Option+Space` (Windows `Alt+Space`) with `Cmd/Ctrl+Shift+Space` only as fallback | Code is the fact; the exact default is an open UX decision (E.3) |
-| Forensic Audit: "Local AI execution remains deferred"; Principle 5: local-first is first-class; Ollama provider exists | Treated as *deferred hardening*, not abandoned; see E.3 |
+| Evolution plan says Companion shortcut `Cmd+Shift+Space`; code registers `Option+Space` (Windows `Alt+Space`) with `Cmd/Ctrl+Shift+Space` only as fallback | Code is the fact; the exact default is decided inside the Companion 2.0 design (M2, §E.3) |
+| Forensic Audit: "Local AI execution remains deferred"; Principle 5: local-first is first-class; Ollama provider exists | Treated as *deferred hardening*, not abandoned; see E.5 |
 | `10-Roadmap.md` / `post-v1-strategic-roadmap.md` describe Aether as an open-source *framework*; later plans define a consumer *Personal AI Office* | Both identities coexist: Core/SDK stay open and composable, the Desktop App is the product. Early roadmaps marked superseded |
 | `12-Decision-Log.md` "Current Status" links point to a stale path (`/Users/matteo/Matteo/Lavoro/aether/...`) | Not edited here; referenced ADRs live in `docs/adr/` |
 | Duplicate section number "1.5" in Part II | Second one renumbered "1.5b" |
 
-### E.3 Decisions that need the product owner (not invented here)
+### E.3 Previously open decisions now resolved
 
-1. **Distribution & business model:** stay open-source/self-hosted only, or also offer *Aether Hosted* with an Auth Broker (decides whether Slack/Notion one-click is feasible)? Pricing/SaaS/marketplace revenue are listed as ideas only.
-2. **Update mechanism:** in-app auto-update (Tauri updater, requires signing keys and a release host) vs manual DMG downloads from the website.
-3. **Windows priority:** first-class target for M1 or deferred until the macOS release is notarized?
-4. **Local AI stance:** is a reliable offline (Ollama) path a release requirement or a nice-to-have, given Principle 5 versus current QA being cloud-only?
-5. **Companion shortcut default:** `Option+Space` (current) or `Cmd+Shift+Space` (evolution plan)?
-6. **Mobile/universal surface:** native app, PWA, or Telegram/voice only as the "remote" story?
+| Earlier question | Resolution |
+| :--- | :--- |
+| Update mechanism (auto-update vs manual DMG) | Auto-update is a goal (D3); manual path kept as alternative |
+| Windows priority | Verify when environment allows; non-blocking (D4) |
+| Mobile/universal surface | Telegram, local-first long polling, as first mobile surface (D8); native app/PWA not decided, see E.5 |
+| Companion shortcut default | Subsumed by the Companion 2.0 redesign (D6); decided during M2 |
+
+### E.4 Technical hypotheses to verify (not decisions)
+
+* **Updater:** Tauri's updater plugin with signed manifests is the likely route; requires an update-signing key, a hosting location for artifacts and a rollback story. Verify on a real signed build (M1a).
+* **Piper as local TTS:** plausible CPU-only, offline, multi-language option; **unverified** for model size, RAM, latency, Italian voice quality and license compatibility. Compare against the system voice before choosing (M3a).
+* **Telegram long polling inside the sidecar** is feasible with the existing `telegram_bridge`; behavior across sleep/network changes and rate limits must be measured (M3b).
+* **Cursor-following and screen overlay** on macOS/Windows (transparent always-on-top windows, Accessibility and Screen Recording permissions, multi-monitor, full-screen apps) may be restricted by the OS or by Tauri; spike in M2.
+* **Mouse/keyboard control** is feasible technically but carries the highest risk; whether it ships at all, and under which approval model, is decided after M2 (M7).
+* **Screen understanding** requires a vision-capable model; cost, privacy (screenshots leaving the machine) and local-vs-cloud handling are unevaluated.
+* Whether the existing Orb engine (`ui/src/orb/`) or a new rendering approach best supports the Companion 2.0 design.
+
+### E.5 Still-open decisions
+
+1. **Distribution & business model:** open-source/self-hosted only, or also an *Aether Hosted* offering with an Auth Broker (decides one-click Slack/Notion and any always-on Telegram service).
+2. **Local AI stance:** is a reliable offline LLM (Ollama) path a release requirement, given local-first Principle 5 versus cloud-only QA to date? (TTS is already decided local.)
+3. **Companion capability ceiling:** which of annotate / point / click / type / run workflows are in scope for the first public release, and which stay Vision (settled in M2/M7).
+4. **Mobile beyond Telegram:** native app or PWA, and when.
+5. **Update channel policy:** stable-only or also a beta channel; update-signing key custody (decided during M1a design).
+6. **Voice persona and default language behavior** (follow UI language vs. response language) for TTS.
 
 ## F. Principles and Decisions That Remain Valid
 
@@ -1186,6 +1243,8 @@ Mission Dispatched ──► User Closes App ──► Execution & Verification 
 
 ## Layer 19: Interaction Surfaces & The Aether Companion
 
+> **Update 2026-10:** the Companion is being fully redesigned as *Companion 2.0* and Telegram/voice are confirmed as surfaces of the same runtime. The decisions, scope and milestones (M2, M3a–c, M7) are defined in Part I §B–§C and prevail over the "future capability" wording below.
+
 The Companion is **not** simply "the desktop app on mobile." It is the universal ambient interaction layer.
 
 ```text
@@ -1297,34 +1356,34 @@ Development follows **Four Sequential Strategic Phases**:
 | Enterprise Knowledge Graph | Intelligence | `Differentiator` | Phase B ✅ | Present |
 | Unified Intelligence Context Retrieval | Intelligence | `Differentiator` | Phase B ✅ | Present |
 | Workforce Learning & Correction Loop | Intelligence | `Differentiator` | Phase B ✅ | Present |
-| Verified Execution & Quality Gates | Verification | `Core` | Phase B | Partial → M3 |
-| Conflict Resolution Pipeline | Verification | `Differentiator` | Phase B | Gap → M3 |
-| Human Checkpoints & Safety Gates | Human Control | `Foundation` | Phase B | Present (backend); UI breadth unverified → M3 |
-| Workspace-Wide Policies | Human Control | `Core` | Phase B | Present (backend) → M3 |
-| Configurable Autopilot Tiers | Human Control | `Core` | Phase B | Present (backend) → M3 |
-| Agent Simulation & Mission Dry Run | Human Control | `Differentiator` | Phase B | Present (backend) → M3 |
-| Aether Suggestions Engine | Intelligence | `Differentiator` | Phase B | Partial → M5 |
-| Aether Watchers | Intelligence | `Differentiator` | Phase B | Present; real-connector watching unverified → M5 |
-| Dynamic Adaptive Model Routing | Resource / Model | `Differentiator` | Phase B | Partial → M6 |
+| Verified Execution & Quality Gates | Verification | `Core` | Phase B | Partial → M5 |
+| Conflict Resolution Pipeline | Verification | `Differentiator` | Phase B | Gap → M5 |
+| Human Checkpoints & Safety Gates | Human Control | `Foundation` | Phase B | Present (backend); UI breadth unverified → M5 |
+| Workspace-Wide Policies | Human Control | `Core` | Phase B | Present (backend) → M5 |
+| Configurable Autopilot Tiers | Human Control | `Core` | Phase B | Present (backend) → M5 |
+| Agent Simulation & Mission Dry Run | Human Control | `Differentiator` | Phase B | Present (backend) → M5 |
+| Aether Suggestions Engine | Intelligence | `Differentiator` | Phase B | Partial → M7 |
+| Aether Watchers | Intelligence | `Differentiator` | Phase B | Present; real-connector watching unverified → M7 |
+| Dynamic Adaptive Model Routing | Resource / Model | `Differentiator` | Phase B | Partial → M8 |
 | Aether Actions Pipeline | Actions | `Core` | Phase C | Present |
 | Aether Connect UI | Tools & Connections | `Core` | Phase C | Present |
 | Generic Connector System | Connectors | `Differentiator` | Phase C | Present |
 | "Build the Automation for Me" | Automations | `Differentiator` | Phase C | Present |
 | Multi-Trigger Automation Daemon | Automations | `Core` | Phase C | Present |
-| Social Media Workforce | Domain Workforces | `Ecosystem` | Phase C | Partial (no real publishing APIs) → M6 |
+| Social Media Workforce | Domain Workforces | `Ecosystem` | Phase C | Partial (no real publishing APIs) → M8 |
 | Content Repurposing Engine | Domain Workforces | `Ecosystem` | Phase C | Present |
 | Visual Workflow Builder | Workflow Builder | `Core` | Phase C | Present |
-| Aether Ecosystem Marketplace | Marketplace | `Ecosystem` | Phase C | Partial (local presets; no community registry) → M6 |
+| Aether Ecosystem Marketplace | Marketplace | `Ecosystem` | Phase C | Partial (local presets; no community registry) → M8 |
 | Workforce Benchmarking & Evolution | Workforces | `Differentiator` | Phase C | Present |
-| Notification Fabric ("Notify me") | Notifications | `Core` | Phase C | Present; channel delivery live-unverified → M5 |
-| Campaign & Business Intelligence | Business Intelligence| `Differentiator` | Phase C | Partial/Gap → M6 |
-| Client Work Automation Workflows | Actions / Workforces | `Core` | Phase C | Gap → M6 |
+| Notification Fabric ("Notify me") | Notifications | `Core` | Phase C | Present; channel delivery live-unverified → M3b/M7 |
+| Campaign & Business Intelligence | Business Intelligence| `Differentiator` | Phase C | Partial/Gap → M8 |
+| Client Work Automation Workflows | Actions / Workforces | `Core` | Phase C | Gap → M8 |
 | Aether Companion Surface (Ambient Desktop HUD) | Companion | `Core` | Phase D (Slice 2: Completed & Verified ✅) | Present, tested |
 | Aether Personal Agent & Autonomous Companion Engine | Companion / Core | `Core` | Phase D (Slice 1: Completed & Verified ✅) | Present |
-| Telegram Companion | Companion | `Long-term` | Phase D (Future) | Partial (bridge + tests; live unverified) → M5 |
-| Conversational Voice Primitives | Companion | `Core` | Phase D (Completed & Verified ✅) | Partial (browser STT; server STT optional) → M5 |
-| External Agent Orchestration | Orchestration | `Differentiator` | Phase D (Future) | Present; real run unverified here → M2/M6 |
-| Local Execution Fabric & Mesh | Execution Fabric | `Long-term` | Phase D (Future) | Partial (no real remote dispatch) → M6 |
+| Telegram Companion | Companion | `Long-term` | Phase D (Future) | Partial (bridge + tests; live unverified) → M3b |
+| Conversational Voice Primitives | Companion | `Core` | Phase D (Completed & Verified ✅) | Partial (browser STT; server STT optional) → M3a (TTS) / M7 (STT) |
+| External Agent Orchestration | Orchestration | `Differentiator` | Phase D (Future) | Present; real run unverified here → M4/M8 |
+| Local Execution Fabric & Mesh | Execution Fabric | `Long-term` | Phase D (Future) | Partial (no real remote dispatch) → M8 |
 
 ---
 
