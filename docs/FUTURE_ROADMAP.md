@@ -97,7 +97,7 @@ This file is the **single canonical source for the future of Aether**: vision, v
 * Tests `test_dsk03`/`test_dsk04` can leak frozen sidecar processes; `test_runtime_execute_do_mode` creates a literal `sqlite:<path>` directory in the working directory.
 * `routes.py` is a ~9,700-line single module; splitting it is a maintainability item, not a feature.
 * No Developer ID signature or notarization: first launch on another Mac is blocked by Gatekeeper without manual override.
-* GUI-level interaction of the packaged app is only partly automated: window existence/size and Cmd+Q were driven through macOS Accessibility (System Events), and UI-to-runtime traffic was observed in the sidecar log; pixel-level screenshots are not possible in the current environment (no Screen Recording permission).
+* GUI-level verification of the packaged app was done manually-scripted, not as a repeatable test: with Screen Recording/Accessibility granted, the real `Aether.app` window was captured (`screencapture -l`), a workspace was created and a chat request sent through real mouse/keyboard events, and Cmd+Q exited cleanly (2026-10-15). Not yet an automated GUI smoke test in CI. Observed: the no-provider reply is in English inside the Italian UI.
 
 ## B. Confirmed Decisions and Immediate Priorities
 
