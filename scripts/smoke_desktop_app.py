@@ -130,6 +130,73 @@ def window_check(pid: int) -> None:
     check("B: native window 'Aether' exists", False, (r.stderr or r.stdout).strip()[:80])
 
 
+
+_JXA_WINDOWS = """
+ObjC.import('CoreGraphics');
+function run(a){ var pid=parseInt(a[0]);
+ var l=ObjC.deepUnwrap(ObjC.castRefToObject($.CGWindowListCopyWindowInfo(0,0)));
+ return JSON.stringify(l.filter(function(w){return w.kCGWindowOwnerPID==pid && w.kCGWindowName;}).map(function(w){return {name:w.kCGWindowName,on:!!w.kCGWindowIsOnscreen,b:w.kCGWindowBounds};}));}
+"""
+_JXA_MOVE = """
+ObjC.import('CoreGraphics');
+function run(a){ $.CGEventPost($.kCGHIDEventTap, $.CGEventCreateMouseEvent(null,$.kCGEventMouseMoved,$.CGPointMake(parseFloat(a[0]),parseFloat(a[1])),$.kCGMouseButtonLeft)); return 'ok'; }
+"""
+
+
+def companion_window(pid: int) -> dict | None:
+    r = subprocess.run(["osascript", "-l", "JavaScript", "-e", _JXA_WINDOWS, str(pid)], capture_output=True, text=True)
+    try:
+        for w in json.loads(r.stdout.strip() or "[]"):
+            if w["name"] == "Aether Companion":
+                return w
+    except json.JSONDecodeError:
+        pass
+    return None
+
+
+def wait_companion(pid: int, predicate, timeout: float = 8.0) -> dict | None:
+    end = time.time() + timeout
+    w = None
+    while time.time() < end:
+        w = companion_window(pid)
+        if w and predicate(w):
+            return w
+        time.sleep(0.25)
+    return w
+
+
+def companion_checks(pid: int) -> None:
+    """Native Companion 2.0 window: hidden at start, summoned by the global shortcut next to the real pointer,
+    collapsed to the compact orb with Esc, toggled back. Needs Accessibility (to send the shortcut)."""
+    w = companion_window(pid)
+    if not check("B: companion window exists and starts hidden", bool(w) and not w["on"]):
+        return
+    check("B: companion window starts at the panel size (408x604)", (round(w["b"]["Width"]), round(w["b"]["Height"])) == (408, 604))
+    cx, cy = 640, 240  # high enough that the 604-px panel is not clamped by the bottom of a laptop screen
+    subprocess.run(["osascript", "-l", "JavaScript", "-e", _JXA_MOVE, str(cx), str(cy)], capture_output=True)
+    time.sleep(0.4)
+    r = subprocess.run(["osascript", "-e", 'tell application "System Events" to key code 49 using option down'], capture_output=True, text=True)
+    if r.returncode != 0:
+        record("B: companion shortcut / orb / panel transitions", "SKIP", "Accessibility permission missing for this terminal")
+        return
+    shown = wait_companion(pid, lambda x: x["on"])
+    ok = bool(shown) and shown["on"] and (round(shown["b"]["Width"]), round(shown["b"]["Height"])) == (408, 604)
+    check("B: Option+Space shows the Companion as the expanded panel", ok)
+    if not ok:
+        return
+    near = abs(shown["b"]["X"] - (cx + 12)) <= 3 and abs(shown["b"]["Y"] - (cy + 16)) <= 3
+    check("B: panel appears next to the real pointer (+12,+16)", near, f"window at {shown['b']['X']:.0f},{shown['b']['Y']:.0f} for pointer {cx},{cy}")
+    top_left = (shown["b"]["X"], shown["b"]["Y"])
+    time.sleep(0.8)
+    subprocess.run(["osascript", "-e", 'tell application "System Events" to key code 53'], capture_output=True)  # Esc
+    orb = wait_companion(pid, lambda x: round(x["b"]["Width"]) == 88)
+    check("B: Esc collapses the panel to the 88x88 orb, keeping its top-left", bool(orb) and (round(orb["b"]["Width"]), round(orb["b"]["Height"])) == (88, 88)
+          and abs(orb["b"]["X"] - top_left[0]) <= 2 and abs(orb["b"]["Y"] - top_left[1]) <= 2)
+    subprocess.run(["osascript", "-e", 'tell application "System Events" to key code 49 using option down'], capture_output=True)
+    back = wait_companion(pid, lambda x: round(x["b"]["Width"]) == 408)
+    check("B: Option+Space on the orb expands it again", bool(back) and round(back["b"]["Height"]) == 604)
+
+
 def app_checks(skip_window: bool) -> None:
     with tempfile.TemporaryDirectory(prefix="aether_smoke_app_") as tmp:
         tmp_path = Path(tmp)
@@ -158,6 +225,7 @@ def app_checks(skip_window: bool) -> None:
                         record("B: native window 'Aether' exists", "SKIP", "--skip-window")
                     else:
                         window_check(proc.pid)
+                        companion_checks(proc.pid)
                 os.kill(proc.pid, signal.SIGTERM if mode == "TERM" else signal.SIGKILL)
                 check(f"B[{mode}]: desktop process gone", wait_gone(proc.pid, 15, proc))
                 gone = all(wait_gone(s, 25) for s in sidecars)

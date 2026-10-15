@@ -12,6 +12,8 @@ export interface AetherOrbProps {
   size?: number;
   className?: string;
   interactive?: boolean;
+  /** Use the engine's small-canvas layout (see OrbEngineOptions.compact). */
+  compact?: boolean;
 }
 
 export function AetherOrb({
@@ -24,6 +26,7 @@ export function AetherOrb({
   size = 640,
   className = '',
   interactive = true,
+  compact = false,
 }: AetherOrbProps) {
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
   const engineRef = useRef<OrbEngine | null>(null);
@@ -39,6 +42,7 @@ export function AetherOrb({
       initialState: state,
       quality,
       reducedMotion,
+      compact,
     });
     engineRef.current = engine;
 

@@ -129,12 +129,18 @@ def test_a_companion_window_configuration():
     assert 'WebviewUrl::App("index.html?surface=companion".into())' in code
 
     # 2. Window properties
-    assert 'inner_size(420.0, 580.0)' in code
+    # Companion 2.0: a transparent frameless window that is resized between the compact orb and the panel
+    assert 'inner_size(companion::PANEL_W, companion::PANEL_H)' in code
     assert 'decorations(false)' in code
+    assert 'transparent(true)' in code
     assert 'always_on_top(true)' in code
     assert 'skip_taskbar(true)' in code
     assert 'visible(false)' in code
-    assert 'shadow(true)' in code
+    assert 'shadow(false)' in code
+    companion_rs = (repo_root / "src-tauri" / "src" / "companion.rs").read_text(encoding="utf-8")
+    assert "pub const ORB_SIZE: f64" in companion_rs and "pub const PANEL_W: f64" in companion_rs
+    assert "macos-private-api" in (repo_root / "src-tauri" / "Cargo.toml").read_text(encoding="utf-8")
+    assert '"macOSPrivateApi": true' in (repo_root / "src-tauri" / "tauri.conf.json").read_text(encoding="utf-8")
 
     # 3. Surface negotiation script
     assert "window.__AETHER_SURFACE__ = 'companion'" in code
@@ -341,7 +347,7 @@ def test_j_k_surface_transitions():
     desktop_ts = repo_root / "ui" / "src" / "desktop.ts"
     app_tsx = repo_root / "ui" / "src" / "App.tsx"
     top_header_tsx = repo_root / "ui" / "src" / "TopHeader.tsx"
-    companion_tsx = repo_root / "ui" / "src" / "AmbientCompanion.tsx"
+    companion_tsx = repo_root / "ui" / "src" / "companion" / "CompanionApp.tsx"
 
     assert desktop_ts.exists()
     assert companion_tsx.exists()
@@ -354,7 +360,7 @@ def test_j_k_surface_transitions():
 
     app_code = app_tsx.read_text(encoding="utf-8")
     assert "isCompanionSurface()" in app_code
-    assert "<AmbientCompanion" in app_code
+    assert "<CompanionApp" in app_code
 
     header_code = top_header_tsx.read_text(encoding="utf-8")
     assert "minimizeToCompanion()" in header_code
@@ -365,19 +371,16 @@ def test_j_k_surface_transitions():
 # Test M: Voice Capability Truthfulness
 # ---------------------------------------------------------------------------
 def test_m_voice_truthfulness():
-    """Verify voice primitives truthfully check Web Speech API and do not fake support."""
+    """Dictation is only offered when a speech engine exists, and 'listening' follows the engine's own events."""
     repo_root = _get_repo_root()
-    companion_tsx = repo_root / "ui" / "src" / "AmbientCompanion.tsx"
-    code = companion_tsx.read_text(encoding="utf-8")
-
-    # Verifies standard Web Speech API detection without fake backend models
-    assert "SpeechRecognition" in code
-    assert "speechSynthesis" in code
-    # The honest "not supported" message is shown through the i18n table (both languages), never faked away.
-    i18n = (repo_root / "ui" / "src" / "i18n.tsx").read_text(encoding="utf-8")
-    assert "Speech recognition is not supported in this environment" in i18n
-    assert "Il riconoscimento vocale non è supportato in questo ambiente" in i18n
-    assert "t('szSpeechRecognitionIsNotSupportedIn')" in code
+    hook = (repo_root / "ui" / "src" / "companion" / "useDictation.ts").read_text(encoding="utf-8")
+    panel = (repo_root / "ui" / "src" / "companion" / "CompanionPanel.tsx").read_text(encoding="utf-8")
+    assert "SpeechRecognition" in hook
+    assert "rec.onstart = () => cb.current.onListening(true)" in hook   # listening starts only when the engine says so
+    assert "rec.onend" in hook and "rec.onerror" in hook
+    assert "dictation.supported &&" in panel                           # no microphone without an engine
+    # No text-to-speech is claimed in this slice
+    assert "speechSynthesis" not in hook and "speechSynthesis" not in panel
 
 
 # ---------------------------------------------------------------------------
@@ -386,12 +389,11 @@ def test_m_voice_truthfulness():
 def test_n_reopening_state_sync():
     """Verify visibilitychange and window focus triggers re-fetch of overview."""
     repo_root = _get_repo_root()
-    companion_tsx = repo_root / "ui" / "src" / "AmbientCompanion.tsx"
-    code = companion_tsx.read_text(encoding="utf-8")
+    code = (repo_root / "ui" / "src" / "companion" / "useCompanionRuntime.ts").read_text(encoding="utf-8")
 
     assert "visibilitychange" in code
-    assert 'window.addEventListener("focus"' in code or "window.addEventListener('focus'" in code
-    assert "fetchOverview()" in code
+    assert "window.addEventListener('focus'" in code
+    assert "fetchOverview(workspace)" in code
 
 
 # ---------------------------------------------------------------------------
@@ -541,10 +543,11 @@ def test_p_pointer_relative_positioning_contract():
     main_rs = repo_root / "src-tauri" / "src" / "main.rs"
     code = main_rs.read_text(encoding="utf-8")
 
-    assert "pub fn position_companion_near_cursor" in code
-    assert "app.cursor_position()" in code
-    assert "window.current_monitor()" in code
-    assert "position_companion_near_cursor(&companion, 420, 580)" in code
+    companion_rs = (repo_root / "src-tauri" / "src" / "companion.rs").read_text(encoding="utf-8")
+    assert "fn place_near_cursor" in companion_rs
+    assert "app.cursor_position()" in companion_rs      # the real global pointer, not page events
+    assert "monitor_from_point" in companion_rs          # clamped to the monitor that holds the pointer
+    assert "pub fn toggle_companion_window" in code and "companion::toggle(app)" in code
 
 
 # ---------------------------------------------------------------------------

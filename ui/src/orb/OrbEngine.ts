@@ -30,6 +30,8 @@ export interface OrbEngineOptions {
   initialState?: OrbState;
   quality?: QualityProfileKey;
   reducedMotion?: boolean;
+  /** Small canvases (e.g. the 64px Companion orb): sphere fills the canvas and points shrink with it. */
+  compact?: boolean;
 }
 
 export interface StateAttributes {
@@ -92,6 +94,8 @@ export class OrbEngine {
   private dpr = 1;
   private fov = 540;
   private radius = 225;
+  private compact = false;
+  private sizeFactor = 1;
 
   private reducedMotion: boolean;
   private isPageVisible = true;
@@ -267,6 +271,7 @@ export class OrbEngine {
     }
     this.ctx = ctx;
 
+    this.compact = !!options.compact;
     this.qualityMode = options.quality || 'auto';
     this.activeProfileKey = this.resolveInitialQuality();
     this.profile = this.qualityProfiles[this.activeProfileKey];
@@ -343,8 +348,9 @@ export class OrbEngine {
     this.ctx.resetTransform?.();
     this.ctx.scale(this.dpr, this.dpr);
 
-    this.radius = Math.min(230, Math.max(130, this.width * 0.355));
+    this.radius = this.compact ? this.width * 0.4 : Math.min(230, Math.max(130, this.width * 0.355));
     this.fov = this.radius * 2.35;
+    this.sizeFactor = this.compact ? Math.max(0.38, Math.min(1, this.radius / 225)) : 1;
   }
 
   private initListeners(): void {
@@ -675,7 +681,7 @@ export class OrbEngine {
       const z3 = z2;
 
       const camDist = this.fov - z3;
-      const scale = this.fov / Math.max(120, camDist);
+      const scale = this.fov / Math.max(this.fov * 0.227, camDist);
 
       this.projX[i] = centerX + x3 * scale;
       this.projY[i] = centerY - y3 * scale;
@@ -688,9 +694,9 @@ export class OrbEngine {
 
       const sizeOffset = this.sizeOffsetData[i];
       if (clampedD > 0.45) {
-        this.projSize[i] = Math.max(1.2, (ptFrontBase * 0.4 + clampedD * 0.6 + sizeOffset * 0.3) * scale);
+        this.projSize[i] = Math.max(1.2 * this.sizeFactor, (ptFrontBase * 0.4 + clampedD * 0.6 + sizeOffset * 0.3) * scale * this.sizeFactor);
       } else {
-        this.projSize[i] = Math.max(0.7, (ptBackBase * 0.5 + clampedD * 0.3) * scale);
+        this.projSize[i] = Math.max(0.7 * this.sizeFactor, (ptBackBase * 0.5 + clampedD * 0.3) * scale * this.sizeFactor);
       }
     }
 

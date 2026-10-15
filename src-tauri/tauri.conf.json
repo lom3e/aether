@@ -13,7 +13,8 @@
     "windows": [],
     "security": {
       "csp": "default-src 'self' tauri: http://localhost:8000 http://127.0.0.1:8000 ws://localhost:8000 ws://127.0.0.1:8000; connect-src 'self' http://localhost:* http://127.0.0.1:* ws://localhost:* ws://127.0.0.1:* tauri: https:; style-src 'self' 'unsafe-inline'; script-src 'self'; img-src 'self' data: https: asset:; font-src 'self' data:;"
-    }
+    },
+    "macOSPrivateApi": true
   },
   "bundle": {
     "active": true,

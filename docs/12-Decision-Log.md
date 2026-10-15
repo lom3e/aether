@@ -924,6 +924,30 @@ Aether must be fully usable with no voice model installed.
 
 ---
 
+# ADR-017
+
+## Title
+
+Companion window: transparent native window with runtime mode switching; pointer reads without Accessibility.
+
+## Date
+
+2026-10-15
+
+## Status
+
+Accepted
+
+## Decision
+
+The Companion is one dedicated native window (label `companion`) that is resized at runtime between a compact orb (88x88) and an expanded panel (408x604), anchored by its top-left corner and clamped to the monitor. It is transparent, frameless, always on top and hidden until summoned. Transparency on macOS uses Tauri's `macos-private-api` feature (not suitable for the Mac App Store; acceptable for notarized direct distribution). The pointer is read with Tauri's `cursor_position()` (no Accessibility permission). "Come to the cursor" is opt-in and only settles next to a resting pointer; it never tracks continuous movement. Overlay/annotation will live in a separate click-through window; the orb/panel window is never click-through.
+
+## Consequences
+
+Native verification is required for window behaviour (smoke test). Screen content, input control and annotations remain future work behind explicit permissions and the existing approval system.
+
+---
+
 # Related Milestone
 
 * Milestone 0.1 - Agent Runtime Foundation
@@ -965,6 +989,7 @@ Aether currently has the following architectural decisions approved:
 ✅ Reliable desktop distribution and auto-update goal (ADR-014)
 ✅ Telegram local-first surface (ADR-015)
 ✅ Local, optional voice output (ADR-016)
+✅ Companion window architecture (ADR-017)
 
 ---
 

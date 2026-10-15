@@ -21,7 +21,7 @@ import { apiUrl } from './api';
 import { isCompanionSurface, isTauri, notifyDesktop, consumeNotificationTarget } from './desktop';
 import { resolveCanonicalTarget } from './canonicalNotification';
 import { listen } from '@tauri-apps/api/event';
-import { AmbientCompanion } from './AmbientCompanion';
+import { CompanionApp } from './companion/CompanionApp';
 import { WorkflowBuilder } from './WorkflowBuilder';
 import { ContentRepurposing } from './ContentRepurposing';
 import { ProactiveWatchersView } from './ProactiveWatchersView';
@@ -555,7 +555,7 @@ export default function App() {
       <ThemeProvider>
         <LanguageProvider>
           <ToastProvider>
-            <AmbientCompanion />
+            <CompanionApp />
           </ToastProvider>
         </LanguageProvider>
       </ThemeProvider>

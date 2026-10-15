@@ -1,6 +1,7 @@
 // Prevents additional console window on Windows in release, DO NOT REMOVE!!
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
+mod companion;
 mod updater;
 
 use std::collections::HashMap;
@@ -133,9 +134,7 @@ fn toggle_companion(app: AppHandle) {
 
 #[tauri::command]
 fn hide_companion(app: AppHandle) {
-    if let Some(companion) = app.get_webview_window("companion") {
-        let _ = companion.hide();
-    }
+    companion::hide(&app);
 }
 
 #[tauri::command]
@@ -148,7 +147,7 @@ fn minimize_to_companion(app: AppHandle) {
     if let Some(main) = app.get_webview_window("main") {
         let _ = main.hide();
     }
-    toggle_companion_window(&app);
+    companion::summon_panel(&app);
 }
 
 #[tauri::command]
@@ -705,59 +704,9 @@ pub fn center_window_on_active_monitor(window: &WebviewWindow, width: u32, heigh
     }
 }
 
-pub fn position_companion_near_cursor(window: &WebviewWindow, width: u32, height: u32) {
-    let app = window.app_handle();
-    if let Ok(cursor_pos) = app.cursor_position() {
-        if let Ok(Some(monitor)) = window.current_monitor() {
-            let m_pos = monitor.position();
-            let m_size = monitor.size();
-            let scale = monitor.scale_factor();
-
-            let win_w = (width as f64 * scale) as i32;
-            let win_h = (height as f64 * scale) as i32;
-            let margin = (16.0 * scale) as i32;
-
-            // Offset slightly from cursor (e.g. 12px right and 16px down)
-            let mut target_x = cursor_pos.x as i32 + (12.0 * scale) as i32;
-            let mut target_y = cursor_pos.y as i32 + (16.0 * scale) as i32;
-
-            let max_x = m_pos.x + m_size.width as i32 - win_w - margin;
-            let min_x = m_pos.x + margin;
-            let max_y = m_pos.y + m_size.height as i32 - win_h - margin;
-            let min_y = m_pos.y + margin;
-
-            // Flip to left/above if overflowing screen bounds
-            if target_x > max_x {
-                target_x = (cursor_pos.x as i32 - win_w - (12.0 * scale) as i32).max(min_x);
-            }
-            if target_y > max_y {
-                target_y = (cursor_pos.y as i32 - win_h - (16.0 * scale) as i32).max(min_y);
-            }
-
-            let final_x = target_x.clamp(min_x, max_x.max(min_x));
-            let final_y = target_y.clamp(min_y, max_y.max(min_y));
-
-            let _ = window.set_position(tauri::PhysicalPosition::new(final_x, final_y));
-            return;
-        }
-    }
-    // Fallback to center if cursor position cannot be determined
-    center_window_on_active_monitor(window, width, height);
-}
-
+/// Summons / toggles the Companion (global shortcut, tray, minimize-to-companion). See `companion.rs`.
 pub fn toggle_companion_window(app: &AppHandle) {
-    if let Some(companion) = app.get_webview_window("companion") {
-        if let Ok(is_visible) = companion.is_visible() {
-            if is_visible {
-                let _ = companion.hide();
-            } else {
-                position_companion_near_cursor(&companion, 420, 580);
-                let _ = companion.show();
-                let _ = companion.unminimize();
-                let _ = companion.set_focus();
-            }
-        }
-    }
+    companion::toggle(app);
 }
 
 pub fn show_main_window_action(app: &AppHandle) {
@@ -822,6 +771,7 @@ fn main() {
     persist_targets_to_file(&data_dir, &valid_targets);
 
     let app = tauri::Builder::default()
+        .manage(companion::CompanionState::new())
         .plugin(tauri_plugin_notification::init())
         .plugin(tauri_plugin_updater::Builder::new().build())
         .manage(RuntimeState {
@@ -845,6 +795,10 @@ fn main() {
             send_desktop_notification,
             consume_notification_target,
             quit_aether,
+            companion::companion_get_state,
+            companion::companion_set_mode,
+            companion::companion_start_drag,
+            companion::companion_set_follow,
             updater::check_for_update,
             updater::install_update,
         ])
@@ -880,7 +834,8 @@ fn main() {
                 }
             });
 
-            // 2. Build Ambient Companion Window
+            // 2. Build the Companion window: transparent, frameless, always on top, hidden until summoned.
+            //    Its size is switched at runtime between the compact orb and the expanded panel (companion.rs).
             let companion_window = WebviewWindowBuilder::new(
                 app,
                 "companion",
@@ -888,13 +843,17 @@ fn main() {
             )
             .initialization_script(&companion_script)
             .title("Aether Companion")
-            .inner_size(420.0, 580.0)
+            .inner_size(companion::PANEL_W, companion::PANEL_H)
             .resizable(false)
             .decorations(false)
+            .transparent(true)
             .always_on_top(true)
+            .visible_on_all_workspaces(true)
+            // The orb floats over other apps and is rarely the key window: its first click must not be swallowed.
+            .accept_first_mouse(true)
             .skip_taskbar(true)
             .visible(false)
-            .shadow(true)
+            .shadow(false)
             .build()?;
 
             let companion_win_clone = companion_window.clone();
@@ -904,6 +863,7 @@ fn main() {
                     let _ = companion_win_clone.hide();
                 }
             });
+            companion::start_follow_loop(app.handle().clone());
 
             // 3. System Tray & Menu Setup
             let tray_menu = MenuBuilder::new(app)
