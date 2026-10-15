@@ -1143,6 +1143,25 @@ class MissionStore:
     # Deliverables Management & Lineage
     # ---------------------------------------------------------------------------
 
+    @staticmethod
+    def _is_versioned(meta: dict[str, Any] | None) -> bool:
+        """Deliberate versions of an artifact (parent link or version > 1) are separate records by design."""
+        meta = meta or {}
+        try:
+            return bool(meta.get("parent_deliverable_id")) or int(meta.get("version", 1)) > 1
+        except (TypeError, ValueError):
+            return False
+
+    def _canonical_deliverable_path(self, path: str | None) -> str:
+        """One spelling per file ("x.md", "./x.md", the absolute path...): the real file when it exists, else a normalised path."""
+        found = self._find_deliverable_file(path)
+        try:
+            if found is not None:
+                return str(found.resolve())
+        except OSError:
+            pass
+        return os.path.normpath(path or "")
+
     def _find_deliverable_file(self, path: str | None) -> Path | None:
         """The real file behind a deliverable path (workspace files folder, workspace root or as given), if any."""
         if not path:
@@ -1214,7 +1233,21 @@ class MissionStore:
                             file_available=found is not None,
                         )
                     )
-                return deliverables
+                # Records written before the write-time rule may hold the same file twice: show it once (the most
+                # recently updated record), keeping the others traceable; the rows themselves are never deleted.
+                collapsed: dict[tuple[str | None, str, str], Deliverable] = {}
+                for d in deliverables:
+                    key = (d.execution_id or None, self._canonical_deliverable_path(d.path),
+                           d.id if self._is_versioned(d.metadata) else "")
+                    current = collapsed.get(key)
+                    if current is None:
+                        collapsed[key] = d
+                    else:
+                        winner, loser = (d, current) if (d.updated_at or "") >= (current.updated_at or "") else (current, d)
+                        winner.metadata = {**(winner.metadata or {}), "registrations": sorted({
+                            *(winner.metadata or {}).get("registrations", [winner.id]), loser.id})}
+                        collapsed[key] = winner
+                return sorted(collapsed.values(), key=lambda d: d.created_at or "")
 
         return self._list_deliverables_legacy(mission_id)
 
@@ -1328,6 +1361,28 @@ class MissionStore:
         and syncs legacy metadata for backward compatibility.
         """
         now = datetime.now(timezone.utc).isoformat()
+
+        # The same file registered again (e.g. a stage re-run after a retry) is the same deliverable: update its record
+        # instead of adding a second one. The earlier registrations stay traceable in metadata["registrations"].
+        canonical = self._canonical_deliverable_path(deliverable.path)
+        rows = []
+        with self._get_connection() as conn:
+            rows = [] if self._is_versioned(deliverable.metadata) else conn.execute(
+                "SELECT id, execution_id, path, metadata FROM mission_deliverables WHERE mission_id = ?", (mission_id,)
+            ).fetchall()
+        for row in rows:
+            try:
+                prior = json.loads(row["metadata"] or "{}")
+            except Exception:
+                prior = {}
+            if row["id"] != deliverable.id and (row["execution_id"] or None) == (deliverable.execution_id or None) \
+                    and not self._is_versioned(prior) and self._canonical_deliverable_path(row["path"]) == canonical:
+                registrations = list(prior.get("registrations") or [row["id"]])
+                if deliverable.id not in registrations:
+                    registrations.append(deliverable.id)
+                deliverable.metadata = {**prior, **(deliverable.metadata or {}), "registrations": registrations}
+                deliverable.id = row["id"]
+                break
         meta_json = json.dumps(deliverable.metadata or {})
 
         with self._get_connection() as conn:

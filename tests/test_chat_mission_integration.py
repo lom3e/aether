@@ -339,3 +339,48 @@ def test_agents_of_an_accepted_delegation_can_write_their_report_file(stack):
     assert listed[0]["size_bytes"] > 0
     preview = asyncio.run(get_deliverable_preview(req, mission_id, listed[0]["id"]))
     assert preview["preview_available"] and "Sintesi Rossi" in preview["content"]
+
+
+def test_a_resumed_mission_drops_the_stale_error_and_registers_its_file_once(stack):
+    """After a 429 failure and a successful retry: no old error in the current state (kept as history), one deliverable."""
+    import asyncio
+    from aether.missions.runtime import MissionRuntime
+
+    ws, srv = stack
+    (ws.teams_dir / "default.yaml").write_text(yaml.safe_dump({
+        "team": {"name": "default", "provider": "groq", "model": "qwen/test-model"},
+        "agents": [{"name": "analyst", "role": "Research Analyst", "instructions": "Sei un analista.", "provider": "groq",
+                    "model": "qwen/test-model", "tools": ["write_file"]}],
+    }), encoding="utf-8")
+    srv.tool_when = "CURRENT STAGE: Stesura della sintesi"
+    srv.tool_args = {"path": "sintesi_rossi.md", "content": "# Sintesi Rossi\n\nRossi vuole il report in PDF ogni lunedì entro le 9.\n"}
+    srv.fail_when, srv.fail_remaining = "Stesura della sintesi", 10_000        # the stage that writes the file hits the rate limit
+    srv.fail_when = "Stesura della sintesi"
+    svc, msg, auth = run_chat_mission(ws, "Chiedi alla persona più adatta del team di preparare una sintesi per il cliente Rossi")
+    mission_id = next(st.details.get("mission_id") for st in msg.steps if st.details and st.details.get("mission_id"))
+    mission = wait_task(svc, ws, mission_id)
+    assert mission.status.value == "failed"
+    execution = ws.missions.get_execution(mission.execution_ids[0])
+    assert "rate limit" in (execution.error_message or "").lower()
+
+    srv.fail_remaining = 0
+
+    async def _retry():
+        runtime = MissionRuntime(ws)
+        await runtime.retry_mission(mission_id)
+        handle = runtime._active_executions.get(execution.id)
+        if handle is not None and handle.task is not None:
+            await handle.task
+        await runtime.shutdown()
+
+    asyncio.run(_retry())
+    final = ws.missions.get_mission(mission_id)
+    assert final.status.value == "completed", final.error
+    done = ws.missions.get_execution(execution.id)
+    assert not done.error_message and not done.error_details, "the old 429 is still shown as the current error"
+    assert any("rate limit" in h["error"].lower() for h in done.metadata["error_history"]), "the failure must stay in the audit history"
+    assert all(not (em.error or "") for em in ws.missions.get_execution_milestones(execution.id))
+
+    delivs = ws.missions.list_deliverables(mission_id)
+    assert [(d.name, d.status, d.file_available) for d in delivs] == [("sintesi_rossi.md", "verified", True)], [(d.name, d.status) for d in delivs]
+    assert len({d.path for d in delivs}) == 1

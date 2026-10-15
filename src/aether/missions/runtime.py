@@ -482,7 +482,7 @@ class MissionRuntime:
                     active.id,
                     milestone_id,
                     status=MilestoneExecutionStatus.PENDING,
-                    error=None,
+                    error="",
                 )
             else:
                 em_list = self.store.get_execution_milestones(active.id)
@@ -492,10 +492,21 @@ class MissionRuntime:
                             active.id,
                             em.milestone_id,
                             status=MilestoneExecutionStatus.PENDING,
-                            error=None,
+                            error="",
                         )
 
-            self.store.update_execution(active.id, status=ExecutionStatus.INTERRUPTED, error_message=None)
+            # The failure that is being retried is history, not the current state: it moves to the execution's
+            # error_history (audit) and the live error fields are cleared, so a successful run does not keep showing it.
+            history_meta = dict(active.metadata or {})
+            if active.error_message:
+                history_meta["error_history"] = list(history_meta.get("error_history") or []) + [{
+                    "error": active.error_message,
+                    "retried_at": datetime.now(timezone.utc).isoformat(),
+                }]
+            self.store.update_execution(
+                active.id, status=ExecutionStatus.INTERRUPTED, error_message="", error_details="", metadata=history_meta,
+            )
+            active.metadata, active.error_message, active.error_details = history_meta, None, None   # the launch re-saves this object
             return await self._launch_execution(active, mission, active.team_name, authority=effective_auth)
 
     async def approve_gate(

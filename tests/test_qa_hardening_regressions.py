@@ -885,3 +885,67 @@ class TestDocumentOverwriteSafety:
         self._run(ws, self._provider([("v2", "stop")]))
         names = [d.title for d in collect_workspace_deliverables(ws)]
         assert names.count("nota.md") == 1 and not any(".aether-versions" in n or n.startswith("nota.md.") for n in names)
+
+
+class TestDeliverableRegisteredOnce:
+    def _mission(self, ws):
+        mission = ws.missions.create_mission(title="T", objective="O", workspace_id=ws.id, milestones=[{"title": "S", "description": "d"}])
+        self.execs = [ws.missions.create_execution(mission_id=mission.id, team_name=None).id for _ in range(2)]
+        return mission
+
+    def test_the_same_file_registered_twice_is_one_record_with_a_trace(self, real_workspace):
+        from aether.missions.models import Deliverable
+
+        ws = real_workspace
+        mission = self._mission(ws)
+        doc = Path(ws.files_dir) / "report.md"
+        doc.write_text("contenuto", encoding="utf-8")
+        for i, spelling in enumerate(["report.md", str(doc), "./report.md"]):
+            ws.missions.add_deliverable(mission.id, Deliverable(
+                id=f"del_{i}", mission_id=mission.id, execution_id=self.execs[0], name="report.md", path=spelling, status="draft"))
+        listed = ws.missions.list_deliverables(mission.id)
+        assert len(listed) == 1 and listed[0].id == "del_0"
+        assert listed[0].metadata["registrations"] == ["del_0", "del_1", "del_2"]
+        # status updates through any of the old objects reach the single record
+        ws.missions.add_deliverable(mission.id, Deliverable(
+            id="del_2", mission_id=mission.id, execution_id=self.execs[0], name="report.md", path="./report.md", status="verified"))
+        assert [d.status for d in ws.missions.list_deliverables(mission.id)] == ["verified"]
+
+    def test_different_executions_and_different_files_stay_separate(self, real_workspace):
+        from aether.missions.models import Deliverable
+
+        ws = real_workspace
+        mission = self._mission(ws)
+        for name in ("a.md", "b.md"):
+            (Path(ws.files_dir) / name).write_text(name, encoding="utf-8")
+        ws.missions.add_deliverable(mission.id, Deliverable(id="d1", mission_id=mission.id, execution_id=self.execs[0], name="a.md", path="a.md"))
+        ws.missions.add_deliverable(mission.id, Deliverable(id="d2", mission_id=mission.id, execution_id=self.execs[1], name="a.md", path="a.md"))
+        ws.missions.add_deliverable(mission.id, Deliverable(id="d3", mission_id=mission.id, execution_id=self.execs[0], name="b.md", path="b.md"))
+        assert sorted(d.id for d in ws.missions.list_deliverables(mission.id)) == ["d1", "d2", "d3"]
+
+    def test_duplicates_already_stored_are_shown_once_and_never_deleted(self, real_workspace):
+        ws = real_workspace
+        mission = self._mission(ws)
+        doc = Path(ws.files_dir) / "report.md"
+        doc.write_text("x", encoding="utf-8")
+        with ws.missions._get_connection() as conn:
+            for i, ts in enumerate(["2026-10-14T10:00:00+00:00", "2026-10-14T11:00:00+00:00"]):
+                conn.execute(
+                    "INSERT INTO mission_deliverables (id, mission_id, execution_id, milestone_id, name, path, type, size_bytes, sha256, status, metadata, created_at, updated_at) "
+                    "VALUES (?, ?, ?, NULL, 'report.md', ?, 'document', 1, NULL, 'verified', '{}', ?, ?)",
+                    (f"old_{i}", mission.id, self.execs[0], str(doc), ts, ts))
+        listed = ws.missions.list_deliverables(mission.id)
+        assert [d.id for d in listed] == ["old_1"] and set(listed[0].metadata["registrations"]) == {"old_0", "old_1"}
+        with ws.missions._get_connection() as conn:
+            assert conn.execute("SELECT COUNT(*) FROM mission_deliverables WHERE mission_id = ?", (mission.id,)).fetchone()[0] == 2
+
+    def test_deliberate_versions_of_an_artifact_are_not_merged(self, real_workspace):
+        from aether.missions.models import Deliverable
+
+        ws = real_workspace
+        mission = self._mission(ws)
+        (Path(ws.files_dir) / "arch.md").write_text("v", encoding="utf-8")
+        ws.missions.add_deliverable(mission.id, Deliverable(id="v1", mission_id=mission.id, execution_id=self.execs[0], name="arch.md", path="arch.md", metadata={"version": 1}))
+        ws.missions.add_deliverable(mission.id, Deliverable(id="v2", mission_id=mission.id, execution_id=self.execs[0], name="arch.md", path="arch.md",
+                                                             metadata={"version": 2, "parent_deliverable_id": "v1"}))
+        assert sorted(d.id for d in ws.missions.list_deliverables(mission.id)) == ["v1", "v2"]
