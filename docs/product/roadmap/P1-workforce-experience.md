@@ -1,3 +1,5 @@
+> **HISTORICAL specification (2026-10-15).** Feature specs for a shipped milestone; task statuses in §2 are authoritative. Forward planning lives in [`FUTURE_ROADMAP.md`](../../FUTURE_ROADMAP.md).
+
 # P1 Roadmap — Workforce Experience & Core Capabilities
 
 **Milestone Target:** `v1.4.2` (UX & Feedback) / `v1.5.0` (Skills, Projects, Slash Commands, Web Search)  

@@ -1,3 +1,5 @@
+> **COMPLETED / HISTORICAL (2026-10-15).** All nine macro-passes are recorded as completed in §6. Open items that remain relevant (live connector verification, remaining reliability work) are tracked in [`FUTURE_ROADMAP.md`](FUTURE_ROADMAP.md) (Part I §B). Do not use this file for new planning.
+
 # Aether Production Stabilization Plan — Canonical Source of Truth
 
 **Audience:** Aether Core Engineers & Autonomous Implementation Agents  

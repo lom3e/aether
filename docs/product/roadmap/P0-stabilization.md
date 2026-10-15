@@ -1,3 +1,5 @@
+> **HISTORICAL specification (2026-10-15).** Feature specs for a shipped milestone; task statuses in §2 are authoritative. Forward planning lives in [`FUTURE_ROADMAP.md`](../../FUTURE_ROADMAP.md).
+
 # P0 Roadmap — Critical Bugs, Stabilization & Technical Foundation
 
 **Milestone Target:** `v1.4.1`  

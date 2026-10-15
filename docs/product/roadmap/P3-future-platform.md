@@ -1,3 +1,5 @@
+> **HISTORICAL specification (2026-10-15).** Feature specs for a shipped milestone; task statuses in §2 are authoritative. Forward planning lives in [`FUTURE_ROADMAP.md`](../../FUTURE_ROADMAP.md).
+
 # P3 Roadmap — Future Platform, Workspaces & Automations
 
 **Milestone Target:** `v1.6.0` (Filesystem & GitHub) / `v1.7.0` (Automations Engine) / `v1.8.0+` (Cross-Platform)  

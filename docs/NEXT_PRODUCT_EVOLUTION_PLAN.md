@@ -1,3 +1,5 @@
+> **DETAILED DESIGN REFERENCE (2026-10-15).** Remains the design source for the Context & Capability Router, connector auth model (Public vs Confidential client), risk model, Companion HUD, design system and Italian glossary. Its phase sequencing (§16) and Definition of Done (§19) are consolidated into [`FUTURE_ROADMAP.md`](FUTURE_ROADMAP.md) (Part I §C); where they differ, the canonical roadmap prevails.
+
 # AETHER — MASTER PRODUCT, CONNECTOR, COMPANION & UI REWORK PLAN
 **Versione Documento:** 2.3.0-MASTER (Definitive Architectural Blueprint)
 **Data di Rilascio:** Ottobre 2026

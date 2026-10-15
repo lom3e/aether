@@ -1,9 +1,9 @@
 # Aether — Future Product & Technical Roadmap
 
-**Document Status:** Master Vision & Architectural Roadmap  
-**Document Version:** `2.1.0-CONSOLIDATED`  
-**Current Baseline:** Product Hardening Complete (`v1.0.0+`)  
-**Scope:** Post-Hardening Long-Term Evolution  
+**Document Status:** Master Vision & Architectural Roadmap\
+**Document Version:** `3.0.0-CANONICAL` (consolidates all earlier plans; see §0)\
+**Current Baseline:** `v1.6.0` (`development` @ `fc7048b`), last verified 2026-10-15\
+**Scope:** Single canonical source for the future of Aether — vision, verified state, priorities, milestones, risks
 
 ---
 
@@ -17,6 +17,173 @@ This document defines the consolidated **Master Product & Technical Roadmap** fo
 
 > **IMPORTANT ARCHITECTURAL DIRECTIVE:**
 > This document is a strategic design specification. It does NOT authorize ad-hoc implementation, uncontrolled refactoring, or premature feature injection. Every phase and capability specified herein must be implemented incrementally, grounded in foundational layers, verified by automated tests, and executed without architectural drift or feature creep.
+
+---
+
+# 0. How to Read This Document (Document Map)
+
+This file is the **single canonical source for the future of Aether**: vision, verified current state, priorities, milestones, long-term ideas, risks and open decisions. Everything below the "Part II — Layer Specifications" divider is the original detailed capability specification and is kept intact.
+
+| Role | Document | Use it for |
+| :--- | :--- | :--- |
+| **Canonical roadmap** | `docs/FUTURE_ROADMAP.md` (this file) | What to build next, in which order, and why |
+| Principles | [`01-Constitution.md`](01-Constitution.md), [`PERMANENT_UX_PRINCIPLE.md`](PERMANENT_UX_PRINCIPLE.md) | Rules that never change (autonomy bounds, "simple by default") |
+| Requirements | [`02-Product-Requirements.md`](02-Product-Requirements.md) | Original product requirements (v0.1, partly outdated) |
+| Decisions | [`12-Decision-Log.md`](12-Decision-Log.md), [`adr/`](adr/) | Why architectural choices were made |
+| Detailed design (reference) | [`NEXT_PRODUCT_EVOLUTION_PLAN.md`](NEXT_PRODUCT_EVOLUTION_PLAN.md) | Full design of Capability Router, connector auth (Public vs Confidential client), risk model, Companion HUD, design system, Italian glossary. Sequencing is superseded by Part I §C below |
+| Detailed design (reference) | `*_ARCHITECTURE.md`, [`PHASE_A_*`](PHASE_A_MISSION_UX_SPEC.md) | Subsystem architecture and mission UX specs |
+| Packaging / desktop | [`product/desktop-app.md`](product/desktop-app.md), [`product/macos-packaging.md`](product/macos-packaging.md), [`product/windows-packaging.md`](product/windows-packaging.md), [`product/runtime-contract.md`](product/runtime-contract.md) | How the desktop app is built and shipped |
+| Completed / historical plans | [`product/product-roadmap.md`](product/product-roadmap.md) + [`product/roadmap/P0–P3`](product/roadmap/), [`PRODUCTION_STABILIZATION_PLAN.md`](PRODUCTION_STABILIZATION_PLAN.md), [`FORENSIC_AUDIT.md`](FORENSIC_AUDIT.md), [`aether-strategic-audit.md`](aether-strategic-audit.md) | Record of work already executed; specs of shipped features |
+| Superseded | [`post-v1-strategic-roadmap.md`](post-v1-strategic-roadmap.md), [`10-Roadmap.md`](10-Roadmap.md) | Early framework-era roadmaps (v0.1 / v1.0); history only |
+
+**Product surfaces** (kept distinct throughout this document):
+
+* **Aether Core** — Python runtime (`src/aether/`): agents, missions, memory, knowledge, actions, connectors, automations, policy, REST/WebSocket server. Surface-independent.
+* **Desktop App** — Tauri 2 supervisor + React UI + frozen Python sidecar (`src-tauri/`, `ui/`). macOS is the shipped target; Windows pipeline exists but is not verified.
+* **Companion** — an ambient *surface* of the same Personal Agent (global-shortcut micro-HUD, orb, future Telegram/voice/mobile). Not a second app and not a second brain.
+* **Website** — marketing/download site (`website/`), separate from the product.
+* **Developer surfaces** — CLI, SDK/library API, MCP server/client.
+
+---
+
+# Part I — Consolidated Roadmap
+
+*Last verified: 2026-10-15 · Baseline: `v1.6.0` (`development` @ `fc7048b`).*
+
+## A. Current State (Verified Against the Repository)
+
+"**Verified**" below means checked in this cycle by running something; "**Present**" means code and tests exist but no end-to-end verification was done in this review; "**Gap**" means no corresponding code was found.
+
+### A.1 Verified in this cycle
+
+* Official desktop build (`scripts/build_distribution.py`) produces `build/Aether.app` (~110 MB, ad-hoc signed, `codesign --deep --strict` valid) and `build/Aether.dmg` (~54 MB, `hdiutil verify` valid), version 1.6.0.
+* The frozen sidecar and the real `aether-desktop` binary start with an isolated HOME, report ready, answer `/api/health`, serve the current UI bundle and shut down via `/api/system/shutdown`. Desktop/packaging tests: 34 passed.
+* Chat/mission/agent reliability was hardened in three QA passes (`151b720`, `2d1f48a`, `fc7048b`): intent routing (answer vs mission), explicit memory, entity extraction, Groq 429/`Retry-After` handling, truthful retry/error history, deliverable de-duplication by canonical path, document-edit routing with `.aether-versions/` backups, full IT/EN localization, responsive/theme browser tests.
+* The test suite collects 1,978 tests. Four backend tests are known to fail only for environmental reasons; the production stabilization plan recorded 1,348 passing at its sign-off.
+
+### A.2 Capability status by layer
+
+| Area | Status | Evidence (code / tests) |
+| :--- | :--- | :--- |
+| Core runtime, workspaces, event bus, permissions (`ExecutionAuthority`) | **Present, hardened** | `core/`, `workspace/`, `bus/`, `tests/test_workspace_safety_regression.py`, Macro-Passes 1–9 |
+| Missions, DAG compiler, Deliverables Dossier, Execution Graph, Replay, Explain, Workforce Health | **Present, QA-hardened** | `missions/`, `ExecutionGraphCanvas.tsx`, `FlightRecorderReplay.tsx`, `WorkforceHealthView.tsx`, Playwright suites |
+| Memory (8 categories), Knowledge Graph, Unified Intelligence, Learning loop | **Present** | `memory/`, `knowledge/graph`, `intelligence/`, `learning/` |
+| Verified Execution / Quality Gates | **Partial** | `missions/reviewer.py`, `test_mission_quality_gate.py`, `test_quality_gate_tests_passed.py`; no general cross-agent gate framework |
+| Conflict Resolution Pipeline | **Gap** | no dedicated module (only per-store conflict checks) |
+| Human checkpoints, policies, autopilot tiers, mission dry run | **Present (backend)** | `policy/`, `autonomy/`, `missions/dry_run.py`; UI coverage and policy breadth unverified |
+| Actions pipeline (Intent → Proposal → Acceptance → Authority → Execution) | **Present** | `actions/`, `planning/consent.py`, Phase A hardening commits |
+| Connectors: Google Calendar, GitHub, Slack, Email, Notion, Telegram, HTTP/OpenAPI | **Present; live I/O only with real credentials** | `connections/`; Google Calendar API states fixed in `f93eb82`; live smoke tests are credential-dependent |
+| Connector auth architecture (Public-client PKCE vs Auth Broker/BYOA) | **Partial** | PKCE in `connections/oauth.py`; **no Auth Broker module** |
+| MCP | **Present** | client `tools/mcp.py`, server `mcp/server.py` |
+| Automations, "Build the automation for me", watchers, suggestions | **Present** | `automation/`, `proactive/`, `AutoArchitectModal.tsx` (tag `v1.6.0-auto-architect`) |
+| Visual Workflow Builder, Marketplace (local presets), Benchmarking | **Present** (Marketplace has no community registry) | `WorkflowBuilder.tsx`, `workflows/`, `ecosystem/`, `benchmarking/` |
+| Notification fabric | **Present**; external channels depend on connector setup | `notifications/` |
+| Model routing | **Partial** | `routing/` (resilient fallback); task-type adaptive routing and cost accounting not found |
+| External agent orchestration (coding agents) | **Present**; real Antigravity run only from Antigravity's own terminal | `coding/`, `scripts/e2e_antigravity_real.py` — **not verified from this environment** |
+| Local Execution Fabric | **Partial** | hardware probe + local routing in `fabric/`; remote dispatch not real (stabilization plan A19) |
+| Social workforce, Campaign BI, Client-work workflows | **Partial / Gap** | `content/` repurposing only; no real social-publishing APIs; no dedicated BI/quote modules |
+| Companion (ambient HUD, global shortcut, orb) | **Present** | `AmbientCompanion.tsx`, `ui/src/orb/`, `src-tauri/src/main.rs` (shortcut `Option+Space`, fallback `Cmd/Ctrl+Shift+Space`), `test_dsk06_ambient_companion.py` |
+| Telegram companion / voice | **Partial** | `telegram_bridge.py`, `personal/voice.py` (browser Web Speech by default; server STT only if `speech_recognition` is installed) |
+| Screen understanding | **Gap** | no code |
+| Design system (Fase 0 of the evolution plan) | **Present** | `ui/src/design-system/` |
+| Desktop macOS | **Verified** (ad-hoc signed only) | see A.1 |
+| Desktop Windows | **Present, unverified** | `scripts/build_distribution_windows.py`, `.github/workflows/windows-build.yml`; never run from this Mac |
+
+### A.3 Known defects and technical debt (documented, not fixed in this pass)
+
+* `aether-desktop` receiving SIGTERM leaves the sidecar running (shutdown is handled on Tauri exit events only).
+* Tests `test_dsk03`/`test_dsk04` can leak frozen sidecar processes; `test_runtime_execute_do_mode` creates a literal `sqlite:<path>` directory in the working directory.
+* `routes.py` is a ~9,700-line single module; splitting it is a maintainability item, not a feature.
+* No Developer ID signature or notarization: first launch on another Mac is blocked by Gatekeeper without manual override.
+* GUI-level (window) interaction of the packaged app has not been automated.
+
+## B. Immediate Priorities (Next)
+
+Ordered by the principle *truthfulness and reliability before breadth* (Forensic Audit, Stabilization Plan, Principle 3).
+
+1. **Trusted desktop distribution** — Developer ID signing + notarization (DSK-04B), a GUI smoke test of the packaged app, fixing the SIGTERM orphan-sidecar case, and a first real run of the Windows build on a Windows runner. *Why first:* every other feature is unreachable for real users until the app installs without Gatekeeper workarounds.
+2. **Live verification of what already exists** — run the credential-dependent paths once with real accounts (Google Calendar, GitHub, Slack, Telegram, Email, Notion) and a real external coding agent, and record results; fix what breaks. *Why:* many layers are "Present" but only mocked at the network boundary; the roadmap must not count them as done until proven.
+3. **Close the remaining reliability gaps** — keep answering the QA findings (intent routing quality beyond keywords, agent termination, mission retry semantics), clean the test-suite leaks above, and re-run the real-provider E2E when quota allows.
+4. **Decide the open questions in §E** (distribution model, auth broker, local-AI stance) before starting M2, since they change scope.
+
+## C. Milestones
+
+Dependencies are strict: a milestone starts only when the previous one's exit criteria are met, except where noted as parallelizable. Mapping to the original four horizons (Phase A–D) and the 9-phase plan in `NEXT_PRODUCT_EVOLUTION_PLAN.md` is given in brackets.
+
+| # | Milestone | Scope | Depends on | Exit criteria |
+| :--- | :--- | :--- | :--- | :--- |
+| **M0** | *Foundations — done* | Core hardening, Phase A mission UX, Phase B intelligence (memory, graph, learning), Phase D slices (Personal Agent, Companion surface, voice primitives), design system, desktop macOS, P0–P3 product roadmap (v1.4–v1.6) | — | Recorded in §A; keep green |
+| **M1** | **Trusted Desktop Release** | Signing + notarization, packaged-app GUI smoke test, SIGTERM/orphan fix, Windows build verified on CI, update path (see §E open decision) | M0 | Notarized DMG installs and starts on a clean Mac; Windows NSIS installer starts on a clean Windows VM; CI builds both |
+| **M2** | **Connected Apps Golden Path** *[Fase 2–5]* | Context & Capability Router (least privilege), connector platform with Public-client PKCE and BYOA/broker model, validation set (Google, GitHub, Slack, Telegram, Notion, Email) + MCP host, Dynamic Workforce Assembly, connector→workforce→mission end-to-end with risk-based approval | M1 (for release), §B.2 | One real flow per validation connector runs end-to-end with real credentials; `CONNECTED` is only shown after a real health probe; unapproved high-risk actions never execute |
+| **M3** | **Verified Execution & Human Control** | General quality-gate framework across workforces, conflict-resolution pipeline, UI for policies/autopilot tiers/checkpoints, dry-run in the mission flow, real cost & token accounting | M2 (partly parallelizable with M2 UX) | Every mission completion is backed by a gate result; policies editable and enforced from UI; cost shown per mission |
+| **M4** | **Complete UX Overhaul — "regola del nonnino"** *[Fase 6]* | Home, Performance & Resources, Social/Content, Connected Services screens redesigned on the design system; no raw errors or jargon at tier 1; IT/EN parity | M2 screens exist | 6-question design test (§1.7.8) passes on every top-level screen; localization/responsive/theme browser tests green |
+| **M5** | **Proactive Assistant & Companion Surfaces** *[Fase 1 completion, 7; Phase D]* | Suggestions→automation loop and watchers on real connectors, notification channels (push/Telegram/Email/Slack) verified, Telegram companion live, server-side STT/TTS, screen understanding (on-demand, vision-capable provider, permission handling for macOS Accessibility/Screen Recording), mobile/universal surface | M2, M3 | A mission started from Telegram completes and notifies; screen question answered on demand; permission loss handled gracefully |
+| **M6** | **Ecosystem & Scale** *[Fase 8; Phase C/D long-term]* | MCP ecosystem and Tier 2/3 connectors, community marketplace registry (`.aether-pkg`), social workforce with real publishing APIs, Campaign BI, client-work workflows, adaptive model routing, real remote Execution Fabric, Aether Hosted/Auth Broker if chosen, public API freeze (v2.0) | M2–M5 | Third-party package installs in one click with a permission summary; remote node actually executes a workload; security audit passed |
+
+**Sequencing notes.** Fase 0 (design system) and most of Fase 1 (Companion surface) of the evolution plan are already delivered, so the plan's remaining order (Router → Connectors → Assembly → Integration → UX → Screen understanding → Expansion) is retained as M2→M6. The older "v1.5/v1.6/v1.7/v1.8" targets of `product/product-roadmap.md` are all marked completed in its own task tables (P1–P3) and are folded into M0; Windows packaging (`v1.8`) is carried into M1 because its CI workflow exists but has never been proven.
+
+## D. Long-Term Vision & Ideas Not to Forget
+
+* **"Aether, take care of it."** — the North Star (§7): Aether understands intent, assembles a workforce, uses connected tools, delegates to external agents, verifies, learns, proposes automations and keeps the human in control.
+* **Personal AI Workforce Operating System / Personal AI Office** — Connected Apps are an enabling layer, not the product.
+* **Aether as controller above specialist tools** (Antigravity, Codex, browser agents): single front door, quarantined process details (Layer 16).
+* **Hybrid local/cloud intelligence and hardware mesh** (Layers 17, 21): route work to Mac / PC GPU / cloud with effortless status.
+* **Compounding intelligence**: workforce memory, knowledge graph, correction loop; benchmarking and workforce evolution.
+* **Ambient presence**: Companion HUD, Telegram, voice, mobile, screen understanding with visual annotation overlay.
+* **Closed-loop domain workforces**: social media with performance feedback, content repurposing, campaign and business intelligence, client quote/website-feature automation (Layer 15 scenarios).
+* **Ecosystem**: `.aether-pkg` marketplace for workforces, skills, tools, connectors, workflow templates; one-click installs with permission summaries.
+* **Developer surfaces**: SDK/library, CLI, MCP interoperability, "Aether Developer Suite" as a first concrete developer product (from `post-v1-strategic-roadmap.md` §5).
+* **Possible business directions** (from the early roadmap, no decision taken): hosted SaaS instances, marketplace commission, commercial desktop/pro tiers. See §E.
+* **Platform/website separation**: keep Core, Desktop, Website and Community/Docs as distinct entities with clear boundaries (post-v1 roadmap §1).
+
+## E. Risks, Limits and Open Decisions
+
+### E.1 Risks and technical limits
+
+* OAuth app verification: Google/Slack scopes need formal review for public use; Confidential-client services need a broker or developer-supplied credentials. **No client secret may ever be embedded in the open-source desktop binary.**
+* macOS may revoke Accessibility/Screen Recording permissions after each rebuilt/re-signed binary; the runtime must detect and guide.
+* Cloud inference cost and quota: transparent fallback policy is mandatory; the real provider used in QA is quota-limited (Groq free tier, bounded retries).
+* Several "Present" capabilities are verified only against mocks at the network boundary (§A.2) — counting them as shipped would violate Principle 3.
+* `routes.py` monolith and the size of the UI bundle slow change velocity.
+* Single-maintainer, single-machine QA: Windows and non-Apple-Silicon Macs are untested.
+
+### E.2 Contradictions found and how they were resolved
+
+| Found | Resolution in this document |
+| :--- | :--- |
+| `product/product-roadmap.md` priority matrix lists P1–P3 items as *Planned* while its own P0–P3 task tables mark them *Completed (v1.4.x–v1.5.0)* | Task tables + code evidence win; items folded into M0. The old matrix is marked historical |
+| Layers 19.2/19.3 say Telegram and Voice are "not claimed as implemented"; matrix says voice "Completed & Verified" and code contains a Telegram bridge | Reclassified **Partial** (code and tests exist; live/server-side paths unverified) |
+| Matrix leaves Phase A/C items without status although code and tests exist | Matrix now carries a verified-status column |
+| Evolution plan says Companion shortcut `Cmd+Shift+Space`; code registers `Option+Space` (Windows `Alt+Space`) with `Cmd/Ctrl+Shift+Space` only as fallback | Code is the fact; the exact default is an open UX decision (E.3) |
+| Forensic Audit: "Local AI execution remains deferred"; Principle 5: local-first is first-class; Ollama provider exists | Treated as *deferred hardening*, not abandoned; see E.3 |
+| `10-Roadmap.md` / `post-v1-strategic-roadmap.md` describe Aether as an open-source *framework*; later plans define a consumer *Personal AI Office* | Both identities coexist: Core/SDK stay open and composable, the Desktop App is the product. Early roadmaps marked superseded |
+| `12-Decision-Log.md` "Current Status" links point to a stale path (`/Users/matteo/Matteo/Lavoro/aether/...`) | Not edited here; referenced ADRs live in `docs/adr/` |
+| Duplicate section number "1.5" in Part II | Second one renumbered "1.5b" |
+
+### E.3 Decisions that need the product owner (not invented here)
+
+1. **Distribution & business model:** stay open-source/self-hosted only, or also offer *Aether Hosted* with an Auth Broker (decides whether Slack/Notion one-click is feasible)? Pricing/SaaS/marketplace revenue are listed as ideas only.
+2. **Update mechanism:** in-app auto-update (Tauri updater, requires signing keys and a release host) vs manual DMG downloads from the website.
+3. **Windows priority:** first-class target for M1 or deferred until the macOS release is notarized?
+4. **Local AI stance:** is a reliable offline (Ollama) path a release requirement or a nice-to-have, given Principle 5 versus current QA being cloud-only?
+5. **Companion shortcut default:** `Option+Space` (current) or `Cmd+Shift+Space` (evolution plan)?
+6. **Mobile/universal surface:** native app, PWA, or Telegram/voice only as the "remote" story?
+
+## F. Principles and Decisions That Remain Valid
+
+Not copied here, only referenced — see Part II §1.4, §1.6–1.7 and §6 (Eleven Tenets), [`PERMANENT_UX_PRINCIPLE.md`](PERMANENT_UX_PRINCIPLE.md), [`01-Constitution.md`](01-Constitution.md). The ones that constrain every milestone:
+
+* Simple by default, powerful to inspect (three-tier disclosure; 6-question design test).
+* Real actions are truthful and observable; no fabricated results; a state such as `CONNECTED` means a real probe passed.
+* Autonomy is bounded by policy; irreversible external actions need approval; all execution goes through `ExecutionAuthority`.
+* Features compose (Tasks → Workforces → Missions → Automations); orchestrate external tools rather than reinvent them.
+* Core is separate from applications (ADR-001); Companion is a surface of the same Personal Agent, not a second UI or brain.
+* This roadmap authorizes planning, not ad-hoc implementation: one verified increment at a time, no architectural drift.
+
+---
+
+# Part II — Layer Specifications (original detailed specification, preserved)
+
 
 ---
 
@@ -152,7 +319,7 @@ To maintain architectural clarity throughout the platform, three core concepts a
 
 ---
 
-## 1.5 The Digital Organization Operating Model
+## 1.5b The Digital Organization Operating Model
 
 Aether structures the user's digital life and professional work as an integrated **Digital Organization**:
 
@@ -1108,56 +1275,56 @@ Development follows **Four Sequential Strategic Phases**:
 
 # 4. Feature Classification & Priority Matrix
 
-| Capability / Feature | Strategic Layer | Priority Class | Target Horizon |
-| :--- | :--- | :--- | :--- |
-| Multi-Tenant Workspace Model | Core & Foundation | `Foundation` | Phase A |
-| Task Lifecycle & Event Bus | Core & Foundation | `Foundation` | Phase A |
-| Multi-Tier Permission System | Core & Foundation | `Foundation` | Phase A |
-| Provider Abstraction & Metrics | Core & Foundation | `Foundation` | Phase A |
-| Artifact Engine & Lineage | Core & Foundation | `Foundation` | Phase A |
-| Immutable Audit Trail | Core & Foundation | `Foundation` | Phase A |
-| Non-Leaking Traceability (CoT Privacy)| Execution Graph | `Foundation` | Phase A |
-| Mission System & DAG Decomposition | Mission System | `Core` | Phase A |
-| Deliverables Dossier | Mission System | `Core` | Phase A |
-| Visual Execution Graph UI | Execution Graph | `Core` | Phase A |
-| Workforce Topology & Roles | Workforces | `Core` | Phase A |
-| Cross-Agent Collaboration & Handoffs | Workforces | `Core` | Phase A |
-| Workforce Templates | Workforces | `Core` | Phase A |
-| Aether Replay ("Flight Recorder") | Execution Graph | `Differentiator` | Phase A |
-| Aether Explain Cards | Verification | `Differentiator` | Phase A |
-| Workforce Health Dashboard | Workforces | `Differentiator` | Phase A |
-| Workforce Memory (8 Categories) | Intelligence | `Differentiator` | Phase B ✅ |
-| Enterprise Knowledge Graph | Intelligence | `Differentiator` | Phase B ✅ |
-| Unified Intelligence Context Retrieval | Intelligence | `Differentiator` | Phase B ✅ |
-| Workforce Learning & Correction Loop | Intelligence | `Differentiator` | Phase B ✅ |
-| Verified Execution & Quality Gates | Verification | `Core` | Phase B |
-| Conflict Resolution Pipeline | Verification | `Differentiator` | Phase B |
-| Human Checkpoints & Safety Gates | Human Control | `Foundation` | Phase B |
-| Workspace-Wide Policies | Human Control | `Core` | Phase B |
-| Configurable Autopilot Tiers | Human Control | `Core` | Phase B |
-| Agent Simulation & Mission Dry Run | Human Control | `Differentiator` | Phase B |
-| Aether Suggestions Engine | Intelligence | `Differentiator` | Phase B |
-| Aether Watchers | Intelligence | `Differentiator` | Phase B |
-| Dynamic Adaptive Model Routing | Resource / Model | `Differentiator` | Phase B |
-| Aether Actions Pipeline | Actions | `Core` | Phase C |
-| Aether Connect UI | Tools & Connections | `Core` | Phase C |
-| Generic Connector System | Connectors | `Differentiator` | Phase C |
-| "Build the Automation for Me" | Automations | `Differentiator` | Phase C |
-| Multi-Trigger Automation Daemon | Automations | `Core` | Phase C |
-| Social Media Workforce | Domain Workforces | `Ecosystem` | Phase C |
-| Content Repurposing Engine | Domain Workforces | `Ecosystem` | Phase C |
-| Visual Workflow Builder | Workflow Builder | `Core` | Phase C |
-| Aether Ecosystem Marketplace | Marketplace | `Ecosystem` | Phase C |
-| Workforce Benchmarking & Evolution | Workforces | `Differentiator` | Phase C |
-| Notification Fabric ("Notify me") | Notifications | `Core` | Phase C |
-| Campaign & Business Intelligence | Business Intelligence| `Differentiator` | Phase C |
-| Client Work Automation Workflows | Actions / Workforces | `Core` | Phase C |
-| Aether Companion Surface (Ambient Desktop HUD) | Companion | `Core` | Phase D (Slice 2: Completed & Verified ✅) |
-| Aether Personal Agent & Autonomous Companion Engine | Companion / Core | `Core` | Phase D (Slice 1: Completed & Verified ✅) |
-| Telegram Companion | Companion | `Long-term` | Phase D (Future) |
-| Conversational Voice Primitives | Companion | `Core` | Phase D (Completed & Verified ✅) |
-| External Agent Orchestration | Orchestration | `Differentiator` | Phase D (Future) |
-| Local Execution Fabric & Mesh | Execution Fabric | `Long-term` | Phase D (Future) |
+| Capability / Feature | Strategic Layer | Priority Class | Target Horizon | Verified Status (2026-10-15) |
+| :--- | :--- | :--- | :--- | :--- |
+| Multi-Tenant Workspace Model | Core & Foundation | `Foundation` | Phase A | Present, hardened |
+| Task Lifecycle & Event Bus | Core & Foundation | `Foundation` | Phase A | Present, hardened |
+| Multi-Tier Permission System | Core & Foundation | `Foundation` | Phase A | Present, hardened (`ExecutionAuthority`) |
+| Provider Abstraction & Metrics | Core & Foundation | `Foundation` | Phase A | Present; cost accounting not found |
+| Artifact Engine & Lineage | Core & Foundation | `Foundation` | Phase A | Partial (versioned deliverables; lineage unverified) |
+| Immutable Audit Trail | Core & Foundation | `Foundation` | Phase A | Present (action ledger); immutability not independently audited |
+| Non-Leaking Traceability (CoT Privacy)| Execution Graph | `Foundation` | Phase A | Unverified |
+| Mission System & DAG Decomposition | Mission System | `Core` | Phase A | Present, QA-hardened |
+| Deliverables Dossier | Mission System | `Core` | Phase A | Present, QA-hardened |
+| Visual Execution Graph UI | Execution Graph | `Core` | Phase A | Present |
+| Workforce Topology & Roles | Workforces | `Core` | Phase A | Present |
+| Cross-Agent Collaboration & Handoffs | Workforces | `Core` | Phase A | Present |
+| Workforce Templates | Workforces | `Core` | Phase A | Present |
+| Aether Replay ("Flight Recorder") | Execution Graph | `Differentiator` | Phase A | Present |
+| Aether Explain Cards | Verification | `Differentiator` | Phase A | Present |
+| Workforce Health Dashboard | Workforces | `Differentiator` | Phase A | Present |
+| Workforce Memory (8 Categories) | Intelligence | `Differentiator` | Phase B ✅ | Present |
+| Enterprise Knowledge Graph | Intelligence | `Differentiator` | Phase B ✅ | Present |
+| Unified Intelligence Context Retrieval | Intelligence | `Differentiator` | Phase B ✅ | Present |
+| Workforce Learning & Correction Loop | Intelligence | `Differentiator` | Phase B ✅ | Present |
+| Verified Execution & Quality Gates | Verification | `Core` | Phase B | Partial → M3 |
+| Conflict Resolution Pipeline | Verification | `Differentiator` | Phase B | Gap → M3 |
+| Human Checkpoints & Safety Gates | Human Control | `Foundation` | Phase B | Present (backend); UI breadth unverified → M3 |
+| Workspace-Wide Policies | Human Control | `Core` | Phase B | Present (backend) → M3 |
+| Configurable Autopilot Tiers | Human Control | `Core` | Phase B | Present (backend) → M3 |
+| Agent Simulation & Mission Dry Run | Human Control | `Differentiator` | Phase B | Present (backend) → M3 |
+| Aether Suggestions Engine | Intelligence | `Differentiator` | Phase B | Partial → M5 |
+| Aether Watchers | Intelligence | `Differentiator` | Phase B | Present; real-connector watching unverified → M5 |
+| Dynamic Adaptive Model Routing | Resource / Model | `Differentiator` | Phase B | Partial → M6 |
+| Aether Actions Pipeline | Actions | `Core` | Phase C | Present |
+| Aether Connect UI | Tools & Connections | `Core` | Phase C | Present |
+| Generic Connector System | Connectors | `Differentiator` | Phase C | Present |
+| "Build the Automation for Me" | Automations | `Differentiator` | Phase C | Present |
+| Multi-Trigger Automation Daemon | Automations | `Core` | Phase C | Present |
+| Social Media Workforce | Domain Workforces | `Ecosystem` | Phase C | Partial (no real publishing APIs) → M6 |
+| Content Repurposing Engine | Domain Workforces | `Ecosystem` | Phase C | Present |
+| Visual Workflow Builder | Workflow Builder | `Core` | Phase C | Present |
+| Aether Ecosystem Marketplace | Marketplace | `Ecosystem` | Phase C | Partial (local presets; no community registry) → M6 |
+| Workforce Benchmarking & Evolution | Workforces | `Differentiator` | Phase C | Present |
+| Notification Fabric ("Notify me") | Notifications | `Core` | Phase C | Present; channel delivery live-unverified → M5 |
+| Campaign & Business Intelligence | Business Intelligence| `Differentiator` | Phase C | Partial/Gap → M6 |
+| Client Work Automation Workflows | Actions / Workforces | `Core` | Phase C | Gap → M6 |
+| Aether Companion Surface (Ambient Desktop HUD) | Companion | `Core` | Phase D (Slice 2: Completed & Verified ✅) | Present, tested |
+| Aether Personal Agent & Autonomous Companion Engine | Companion / Core | `Core` | Phase D (Slice 1: Completed & Verified ✅) | Present |
+| Telegram Companion | Companion | `Long-term` | Phase D (Future) | Partial (bridge + tests; live unverified) → M5 |
+| Conversational Voice Primitives | Companion | `Core` | Phase D (Completed & Verified ✅) | Partial (browser STT; server STT optional) → M5 |
+| External Agent Orchestration | Orchestration | `Differentiator` | Phase D (Future) | Present; real run unverified here → M2/M6 |
+| Local Execution Fabric & Mesh | Execution Fabric | `Long-term` | Phase D (Future) | Partial (no real remote dispatch) → M6 |
 
 ---
 

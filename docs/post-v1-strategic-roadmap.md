@@ -1,3 +1,5 @@
+> **SUPERSEDED (2026-10-15).** Early framework-era roadmap (baseline v1.0.0, Milestones 1.1–2.0). Retained for history; still-valid ideas (async/streaming providers, executable skills, DAG routing, vector memory, CLI/package management, Developer Suite) were consolidated into [`FUTURE_ROADMAP.md`](FUTURE_ROADMAP.md). Current plans: see that document.
+
 # Aether — Post-v1.0 Strategic Architecture & Product Roadmap (Refined Assessment)
 
 **Document Status:** Final Strategic Architectural Roadmap

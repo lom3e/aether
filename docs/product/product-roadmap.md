@@ -1,3 +1,5 @@
+> **HISTORICAL — v1.4.0-era plan (2026-10-15).** The priority matrix below still shows P1–P3 items as "Planned", but the P0–P3 task tables in `roadmap/` mark them Completed (v1.4.x–v1.5.0). Canonical forward planning is in [`FUTURE_ROADMAP.md`](../FUTURE_ROADMAP.md) (Part I). The P0–P3 specification files remain the reference for how those features were designed.
+
 # Aether — Product Roadmap & Architecture Master Plan
 
 **Document Status:** Official Reference Roadmap  

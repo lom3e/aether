@@ -1,3 +1,5 @@
+> **SUPERSEDED (2026-10-15).** Version 0.1 development roadmap (Phases 0–12 incl. Web, Marketplace, Commercial Product). Retained as historical record; vision and long-term ideas are consolidated into [`FUTURE_ROADMAP.md`](FUTURE_ROADMAP.md). Current plans: see that document.
+
 # Aether Development Roadmap
 
 ## Version
