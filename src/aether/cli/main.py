@@ -415,6 +415,10 @@ def _cmd_ui(args) -> None:
     server = uvicorn.Server(config)
     app.state.uvicorn_server = server
 
+    # Desktop sidecar: stop when the supervisor disappears without calling /api/system/shutdown.
+    from aether.server.parent_watchdog import start_parent_watchdog
+    start_parent_watchdog(server)
+
     if sock is not None:
         server.run(sockets=[sock])
     else:

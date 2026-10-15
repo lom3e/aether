@@ -61,6 +61,8 @@ This file is the **single canonical source for the future of Aether**: vision, v
 * Chat/mission/agent reliability was hardened in three QA passes (`151b720`, `2d1f48a`, `fc7048b`): intent routing (answer vs mission), explicit memory, entity extraction, Groq 429/`Retry-After` handling, truthful retry/error history, deliverable de-duplication by canonical path, document-edit routing with `.aether-versions/` backups, full IT/EN localization, responsive/theme browser tests.
 * The test suite collects 1,978 tests. Four backend tests are known to fail only for environmental reasons; the production stabilization plan recorded 1,348 passing at its sign-off.
 
+**M1a progress (2026-10-15, see [`product/auto-update.md`](product/auto-update.md)):** done — sidecar lifecycle fix with regression tests, window/Cmd+Q verification on the rebuilt `.app`, release-readiness and update-manifest tooling, auto-update design. **Not done / blocked:** Developer ID signing and notarization (no certificate or Apple credentials in the environment), the updater plugin and key (new dependency and key custody needed), Windows (M1b, no Windows runner). M1a therefore stays **open**.
+
 ### A.2 Capability status by layer
 
 | Area | Status | Evidence (code / tests) |
@@ -91,11 +93,11 @@ This file is the **single canonical source for the future of Aether**: vision, v
 
 ### A.3 Known defects and technical debt (documented, not fixed in this pass)
 
-* `aether-desktop` receiving SIGTERM leaves the sidecar running (shutdown is handled on Tauri exit events only).
+* ~~`aether-desktop` receiving SIGTERM/SIGKILL leaves the sidecar running~~ — **fixed in M1a (2026-10-15)**: signal handler in the supervisor plus a parent-PID watchdog in the sidecar (`src/aether/server/parent_watchdog.py`); verified on the packaged app for SIGTERM, SIGINT, SIGHUP, SIGKILL and Cmd+Q.
 * Tests `test_dsk03`/`test_dsk04` can leak frozen sidecar processes; `test_runtime_execute_do_mode` creates a literal `sqlite:<path>` directory in the working directory.
 * `routes.py` is a ~9,700-line single module; splitting it is a maintainability item, not a feature.
 * No Developer ID signature or notarization: first launch on another Mac is blocked by Gatekeeper without manual override.
-* GUI-level (window) interaction of the packaged app has not been automated.
+* GUI-level interaction of the packaged app is only partly automated: window existence/size and Cmd+Q were driven through macOS Accessibility (System Events), and UI-to-runtime traffic was observed in the sidecar log; pixel-level screenshots are not possible in the current environment (no Screen Recording permission).
 
 ## B. Confirmed Decisions and Immediate Priorities
 

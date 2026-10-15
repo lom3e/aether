@@ -518,6 +518,8 @@ fn spawn_backend_and_handshake() -> Result<(Child, u16, String, PathBuf), String
     cmd.env("PYTHONUNBUFFERED", "1");
     cmd.env("AETHER_SESSION_TOKEN", &token);
     cmd.env("AETHER_DESKTOP_RUNTIME", "1");
+    // The sidecar watches this PID and exits on its own if the supervisor disappears (crash, SIGKILL).
+    cmd.env("AETHER_PARENT_PID", std::process::id().to_string());
     if is_app_bundle {
         cmd.env("AETHER_APP_BUNDLE", "1");
     }
@@ -641,6 +643,49 @@ fn graceful_shutdown(port: u16, token: &str, child_lock: &Arc<Mutex<Option<Child
     }
 }
 
+/// Stops the sidecar when the desktop process receives SIGTERM/SIGINT/SIGHUP.
+/// Tauri only runs its exit handler for a normal quit, so without this a terminated
+/// supervisor would leave the Python sidecar running.
+fn install_termination_handler(port: u16, token: String, child: Arc<Mutex<Option<Child>>>) {
+    #[cfg(unix)]
+    {
+        use tokio::signal::unix::{signal, SignalKind};
+        thread::spawn(move || {
+            let rt = match tokio::runtime::Builder::new_current_thread().enable_all().build() {
+                Ok(rt) => rt,
+                Err(e) => {
+                    eprintln!("[Aether Desktop] Could not install termination handler: {}", e);
+                    return;
+                }
+            };
+            rt.block_on(async {
+                let (mut term, mut int, mut hup) = match (
+                    signal(SignalKind::terminate()),
+                    signal(SignalKind::interrupt()),
+                    signal(SignalKind::hangup()),
+                ) {
+                    (Ok(a), Ok(b), Ok(c)) => (a, b, c),
+                    _ => {
+                        eprintln!("[Aether Desktop] Could not register signal handlers.");
+                        return;
+                    }
+                };
+                tokio::select! {
+                    _ = term.recv() => println!("[Aether Desktop] SIGTERM received."),
+                    _ = int.recv() => println!("[Aether Desktop] SIGINT received."),
+                    _ = hup.recv() => println!("[Aether Desktop] SIGHUP received."),
+                }
+            });
+            graceful_shutdown(port, &token, &child);
+            std::process::exit(0);
+        });
+    }
+    #[cfg(not(unix))]
+    {
+        let _ = (port, token, child);
+    }
+}
+
 pub fn center_window_on_active_monitor(window: &WebviewWindow, width: u32, height: u32) {
     if let Ok(Some(monitor)) = window.current_monitor() {
         let m_pos = monitor.position();
@@ -736,6 +781,8 @@ fn main() {
     let child_arc = Arc::new(Mutex::new(Some(child)));
     let child_arc_clone = Arc::clone(&child_arc);
     let token_clone = token.clone();
+
+    install_termination_handler(port, token.clone(), Arc::clone(&child_arc));
     let notifications_muted = Arc::new(AtomicBool::new(false));
 
     let init_script = format!(
