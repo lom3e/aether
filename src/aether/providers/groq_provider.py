@@ -149,7 +149,8 @@ class GroqProvider(AIProvider):
 
     @property
     def capabilities(self) -> ProviderCapabilities:
-        return ProviderCapabilities(tools=True, structured_output=True, thinking=False)
+        from aether.vision.capability import model_supports_vision
+        return ProviderCapabilities(vision=model_supports_vision("groq", self.config.model), tools=True, structured_output=True, thinking=False)
 
     def __repr__(self) -> str:  # never expose the key through repr/logging
         return f"GroqProvider(model={self.config.model!r}, base_url={self.config.base_url!r})"
@@ -264,6 +265,10 @@ class GroqProvider(AIProvider):
         msgs: list[dict[str, Any]] = []
         for m in messages:
             d: dict[str, Any] = {"role": m.role, "content": m.content if m.content is not None else ""}
+            if getattr(m, "images", None):
+                d["content"] = [{"type": "text", "text": m.content or ""}] + [
+                    {"type": "image_url", "image_url": {"url": f"data:{im.media_type};base64,{im.data_b64}"}} for im in m.images
+                ]
             if m.tool_calls:
                 d["tool_calls"] = [
                     {"id": tc.call_id, "type": "function",

@@ -6945,6 +6945,68 @@ async def companion_drop_route(request: Request, payload: CompanionDropPayload):
     return res
 
 
+class CompanionVisionPayload(BaseModel):
+    image_base64: str
+    media_type: str | None = None
+    prompt: str = ""
+    session_id: str | None = None
+    workspace_id: str | None = None
+    language: str | None = None
+    annotate: bool = False
+
+
+@router.get("/personal/companion/vision/status")
+async def companion_vision_status_route(request: Request):
+    """Whether the provider the runtime would use can take an image. Nothing is sent to any provider."""
+    ws = getattr(request.app.state, "workspace", None)
+    if not ws:
+        raise HTTPException(status_code=503, detail="Workspace not initialized.")
+    from aether.vision.image import MAX_IMAGE_BYTES
+    from aether.vision.service import check_support
+
+    _, support = await asyncio.to_thread(check_support, ws.personal)
+    return {
+        "supported": support.supported, "reason": support.reason, "provider": support.provider, "model": support.model,
+        "max_image_bytes": MAX_IMAGE_BYTES,
+    }
+
+
+@router.post("/personal/companion/vision")
+async def companion_vision_route(request: Request, payload: CompanionVisionPayload):
+    """
+    Analyses one user-chosen screenshot through the shared runtime and session. The image is validated, sent only to a
+    vision-capable provider, and never stored: only the question, the answer and the capture's size reach the history.
+    """
+    ws = getattr(request.app.state, "workspace", None)
+    if not ws:
+        raise HTTPException(status_code=503, detail="Workspace not initialized.")
+    ws_id = _ws_key(ws, payload.workspace_id)
+    from aether.vision.image import ImageError, validate_image
+    from aether.vision.service import analyze_screen
+
+    try:
+        image = validate_image(payload.image_base64, payload.media_type)
+    except ImageError as err:
+        raise HTTPException(status_code=422, detail={"code": err.code, "message": str(err)}) from err
+    from aether.core.language import reset_ui_language, set_ui_language
+
+    token = set_ui_language(payload.language)
+    try:
+        outcome = await asyncio.wait_for(
+            asyncio.to_thread(
+                analyze_screen, ws.personal, workspace_id=ws_id, prompt=payload.prompt, image=image,
+                session_id=payload.session_id, language=payload.language or "", annotate=payload.annotate,
+            ),
+            timeout=120,
+        )
+    except asyncio.TimeoutError:
+        return {"status": "failed", "reason": "timeout", "detail": "", "provider": "", "model": "", "message": None,
+                "annotations": [], "annotations_rejected": [], "annotation_requested": payload.annotate}
+    finally:
+        reset_ui_language(token)
+    return outcome.to_dict()
+
+
 @router.post("/personal/companion/quick-action")
 async def execute_companion_quick_action_route(request: Request, payload: CompanionQuickActionPayload):
     """Dispatches an instant companion quick action across the unified system."""

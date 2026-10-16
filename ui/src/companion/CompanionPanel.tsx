@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
-import { Bell, ChevronDown, ChevronRight, Copy, Crosshair, ExternalLink, Eye, Mic, Minus, Paperclip, Plus, Send, Square, X } from 'lucide-react';
+import { Bell, Camera, ChevronDown, ChevronRight, Copy, Crosshair, ExternalLink, Eye, Mic, Minus, Paperclip, Plus, Send, Square, X } from 'lucide-react';
 import { MarkdownRenderer } from '../MarkdownRenderer';
 import { contextIsEmpty, type AttachedFile, type CompanionRuntime, type DesktopContext, type NotificationsSummary } from './useCompanionRuntime';
 import { STATUS_COLORS, STATUS_LABEL_KEYS } from './status';
@@ -7,6 +7,8 @@ import { startNativeDrag } from './windowControl';
 import { useDictation } from './useDictation';
 import { showMainWindow } from '../desktop';
 import type { TranslationKey } from '../i18n';
+import { ScreenAssist } from './vision/ScreenAssist';
+import { AnnotatedImage } from './vision/AnnotatedImage';
 
 interface Props {
   runtime: CompanionRuntime;
@@ -27,6 +29,7 @@ export function CompanionPanel({ runtime, language, t, follow, onToggleFollow, o
   const [notifications, setNotifications] = useState<NotificationsSummary | null>(null);
   const [resultsOpen, setResultsOpen] = useState(false);
   const [dragging, setDragging] = useState(false);
+  const [visionOpen, setVisionOpen] = useState(false);
   const [busyTool, setBusyTool] = useState<'context' | 'attach' | 'notifications' | null>(null);
   const fileRef = useRef<HTMLInputElement>(null);
   const inputRef = useRef<HTMLTextAreaElement>(null);
@@ -200,6 +203,12 @@ export function CompanionPanel({ runtime, language, t, follow, onToggleFollow, o
           )}
           {messages.map(m => (
             <div key={m.id} className={`cmp-msg ${m.role}${m.errorCode ? ' error' : ''}`} data-testid={`companion-msg-${m.role}`}>
+              {m.vision && (
+                <div className="cmp-msg-vision" data-testid="companion-msg-vision">
+                  <AnnotatedImage imageUrl={m.vision.imageUrl} alt={t('cmpVisionImageAlt')} shapes={m.vision.shapes} width={m.vision.width} height={m.vision.height} testId="companion-msg-image" />
+                  {m.vision.shapes.some(s => s.source === 'model') && <div className="cmp-vision-hint" data-testid="companion-model-marks">{t('cmpVisionModelMarks')}</div>}
+                </div>
+              )}
               {m.role === 'assistant' ? <MarkdownRenderer content={m.content} /> : m.content}
               {m.proposal && (
                 <div className="cmp-proposal" data-testid="companion-proposal">
@@ -329,10 +338,12 @@ export function CompanionPanel({ runtime, language, t, follow, onToggleFollow, o
           </div>
         )}
 
+        {visionOpen && <ScreenAssist runtime={runtime} language={language} t={t} onClose={() => { setVisionOpen(false); inputRef.current?.focus(); }} notify={notify} />}
         <footer className="cmp-foot">
           <input ref={fileRef} type="file" multiple hidden data-testid="companion-file-input" onChange={e => { if (e.target.files) doAttach(e.target.files); e.target.value = ''; }} />
           <div className="cmp-input-wrap">
             <button className="cmp-iconbtn" onClick={() => fileRef.current?.click()} disabled={busyTool === 'attach'} title={t('cmpAttach')} data-testid="companion-attach"><Paperclip size={15} /></button>
+            <button className="cmp-iconbtn" onClick={() => setVisionOpen(true)} disabled={submitting} title={t('cmpVisionOpen')} data-testid="companion-vision-open"><Camera size={15} /></button>
             <button className="cmp-iconbtn" onClick={doCaptureContext} disabled={busyTool === 'context'} title={t('cmpCaptureContext')} data-testid="companion-capture-context"><Eye size={15} /></button>
             <textarea
               ref={inputRef}

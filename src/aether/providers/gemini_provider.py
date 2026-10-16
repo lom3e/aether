@@ -62,7 +62,9 @@ class GeminiProvider(AIProvider):
 
     @property
     def capabilities(self) -> ProviderCapabilities:
+        from aether.vision.capability import model_supports_vision
         return ProviderCapabilities(
+            vision=model_supports_vision("gemini", self._model),
             tools=True,
             structured_output=True,
             thinking=self._model.startswith("gemini-2.0-flash-thinking"),
@@ -85,6 +87,9 @@ class GeminiProvider(AIProvider):
                 parts = []
                 if m.content:
                     parts.append(genai_types.Part.from_text(m.content))
+                for im in (m.images or []):
+                    import base64 as _b64
+                    parts.append(genai_types.Part.from_bytes(data=_b64.b64decode(im.data_b64), mime_type=im.media_type))
                 if m.tool_calls:
                     for tc in m.tool_calls:
                         parts.append(genai_types.Part.from_function_call(

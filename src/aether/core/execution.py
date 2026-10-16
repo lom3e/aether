@@ -17,6 +17,17 @@ if TYPE_CHECKING:
     from aether.core.interrupts import AgentInterrupt
 
 
+@dataclass(frozen=True, slots=True)
+class ImagePart:
+    """
+    One image attached to a message (screen understanding). Held in memory only: it is never serialized by
+    ``Message.to_dict`` (so it cannot leak into stored history) and providers without vision never see it.
+    """
+
+    media_type: str  # image/png | image/jpeg | image/webp
+    data_b64: str  # standard base64, no data-URI prefix
+
+
 @dataclass(slots=True)
 class Message:
     """
@@ -27,6 +38,7 @@ class Message:
     content: str
     tool_calls: list[ToolCall] | None = None
     tool_call_id: str | None = None
+    images: list[ImagePart] | None = None
 
     def to_dict(self) -> dict[str, str]:
         """Serialize to a plain dict for HTTP payloads."""

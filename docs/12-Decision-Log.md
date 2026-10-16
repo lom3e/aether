@@ -967,6 +967,34 @@ Future ADRs will document:
 
 ---
 
+# ADR-018
+
+## Title
+
+Screen understanding: explicit capture, vision only through the shared runtime, validated normalized annotations.
+
+## Date
+
+2026-10-16
+
+## Status
+
+Accepted
+
+## Decision
+
+* Capture is native (macOS `screencapture` after a Screen Recording preflight), one capture per explicit user gesture, with a mandatory preview before anything is sent. No ambient or periodic capture.
+* The image goes to the provider the runtime already resolves for the workspace, through a vision-specific step that joins the same session store and event stream. A separate assistant is not created. Vision support is decided per provider *and model*; unsupported means nothing is captured or sent and the user is told why. No provider or model is substituted.
+* Images exist only in memory and one request (`Message.images`, never serialized into history). The vision call has no tools; screenshot text is treated as data.
+* Annotations use coordinates normalized to the captured image. Model-suggested annotations are validated and dropped (not repaired) when invalid, shown on the captured image and labelled approximate. Manual annotations are drawn into the sent pixels.
+* No live overlay and no input control in this slice; the architecture keeps capture, analysis and rendering separate, and `to_screen_rect` is the tested bridge for a later overlay and for authorized actions.
+
+## Consequences
+
+Windows needs its own capture implementation. Vision capability is a name-based heuristic until providers expose it. A live overlay needs a staleness check between capture and drawing.
+
+---
+
 # Current Status
 
 Aether currently has the following architectural decisions approved:
@@ -990,6 +1018,7 @@ Aether currently has the following architectural decisions approved:
 ✅ Telegram local-first surface (ADR-015)
 ✅ Local, optional voice output (ADR-016)
 ✅ Companion window architecture (ADR-017)
+✅ Screen understanding: explicit capture, shared-runtime vision (ADR-018)
 
 ---
 

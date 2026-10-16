@@ -7,6 +7,7 @@ import { apiUrl, getSessionToken } from '../api';
 import { ACTIVE_SESSION_KEY, classifyRestoreResponse, forgetStaleSession } from '../sessionRestore';
 import { approvalToastKind, submitApprovalDecision } from '../canonicalNotification';
 import { deriveCompanionStatus, type CompanionStatus } from './status';
+import { sanitizeModelShapes, type Shape } from './vision/annotations';
 
 export interface ChatMessage {
   id: string;
@@ -17,7 +18,33 @@ export interface ChatMessage {
   errorCode?: string;
   /** A proposal the runtime attached to this reply. Accepting it is done in the main app (same session). */
   proposal?: { id: string; title: string; objective: string };
+  /** A screenshot the user chose to share, kept in memory for this window only (never persisted), with any marks drawn on it. */
+  vision?: { imageUrl: string; width: number; height: number; shapes: Shape[]; provider?: string; model?: string };
 }
+
+/** Whether the provider the runtime would use can take an image (nothing is sent to find out). */
+export interface VisionStatus {
+  supported: boolean;
+  reason: string;
+  provider: string;
+  model: string;
+}
+
+export interface VisionRequest {
+  prompt: string;
+  imageBase64: string;
+  mediaType: string;
+  /** What to show in the conversation (the same pixels that were sent). */
+  displayUrl: string;
+  width: number;
+  height: number;
+  language: string;
+  annotate: boolean;
+}
+
+export type VisionAnswer =
+  | { status: 'ok'; provider: string; model: string; shapes: Shape[]; rejected: number }
+  | { status: 'unavailable' | 'failed' | 'invalid_image' | 'unreachable' | 'no_workspace'; reason: string; detail: string; provider: string; model: string };
 
 export interface PendingApproval {
   id?: string;
@@ -118,6 +145,8 @@ export interface CompanionRuntime {
   captureContext: () => Promise<DesktopContext | null>;
   attachFile: (file: File) => Promise<AttachedFile>;
   checkNotifications: () => Promise<NotificationsSummary | null>;
+  fetchVisionStatus: () => Promise<VisionStatus | null>;
+  askAboutImage: (req: VisionRequest) => Promise<VisionAnswer>;
   dismissProblem: () => void;
   setListening: (v: boolean) => void;
 }
@@ -442,6 +471,70 @@ export function useCompanionRuntime(): CompanionRuntime {
     [workspace, sessionId, resolveWorkspace],
   );
 
+  const fetchVisionStatus = useCallback(async (): Promise<VisionStatus | null> => {
+    try {
+      const res = await fetch(apiUrl('/api/personal/companion/vision/status'));
+      if (!res.ok) return null;
+      const d = await res.json();
+      return { supported: !!d.supported, reason: String(d.reason || ''), provider: String(d.provider || ''), model: String(d.model || '') };
+    } catch {
+      return null;
+    }
+  }, []);
+
+  const askAboutImage = useCallback(
+    async (req: VisionRequest): Promise<VisionAnswer> => {
+      const fail = (status: 'unavailable' | 'failed' | 'invalid_image' | 'unreachable' | 'no_workspace', reason = '', detail = '', provider = '', model = ''): VisionAnswer => ({ status, reason, detail, provider, model });
+      setSubmitting(true);
+      try {
+        const ws = workspace || (await resolveWorkspace());
+        if (!ws) return fail('no_workspace');
+        const res = await fetch(apiUrl('/api/personal/companion/vision'), {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            image_base64: req.imageBase64, media_type: req.mediaType, prompt: req.prompt, session_id: sessionId,
+            workspace_id: ws, language: req.language, annotate: req.annotate,
+          }),
+        });
+        if (res.status === 422) {
+          const body = await res.json().catch(() => null);
+          return fail('invalid_image', String(body?.detail?.code || 'invalid_image'));
+        }
+        if (!res.ok) return fail('failed', 'provider_error', `HTTP ${res.status}`);
+        const d = await res.json();
+        if (d.status !== 'ok' || !d.message) {
+          return fail(d.status === 'unavailable' ? 'unavailable' : 'failed', String(d.reason || ''), String(d.detail || ''), String(d.provider || ''), String(d.model || ''));
+        }
+        const sid = d.message.session_id;
+        if (sid && sid !== sessionId) {
+          setSessionId(sid);
+          try {
+            localStorage.setItem(ACTIVE_SESSION_KEY, sid);
+          } catch {
+            /* the session still works for this window */
+          }
+        }
+        const shapes = sanitizeModelShapes(d.annotations);
+        const now = new Date().toISOString();
+        const vision = { imageUrl: req.displayUrl, width: req.width, height: req.height, provider: String(d.provider || ''), model: String(d.model || '') };
+        setMessages(m => [
+          ...m,
+          { id: `u-${Date.now()}`, role: 'user', content: req.prompt, createdAt: now, vision: { ...vision, shapes: [] } },
+          { id: d.message.id || `a-${Date.now()}`, role: 'assistant', content: d.message.content || '', createdAt: d.message.created_at || now, vision: shapes.length ? { ...vision, shapes } : undefined },
+        ]);
+        pulseCompleted();
+        fetchOverview(ws);
+        return { status: 'ok', provider: vision.provider, model: vision.model, shapes, rejected: Array.isArray(d.annotations_rejected) ? d.annotations_rejected.length : 0 };
+      } catch {
+        return fail('unreachable');
+      } finally {
+        if (mounted.current) setSubmitting(false);
+      }
+    },
+    [workspace, sessionId, resolveWorkspace, fetchOverview, pulseCompleted],
+  );
+
   const checkNotifications = useCallback(async (): Promise<NotificationsSummary | null> => {
     const ws = workspace || (await resolveWorkspace());
     if (!ws) return null;
@@ -470,7 +563,7 @@ export function useCompanionRuntime(): CompanionRuntime {
 
   return {
     workspace, messages, approvals, tasks, missions, results, problem, submitting, status, decidingId,
-    send, retryLast, decide, newConversation, refresh, captureContext, attachFile, checkNotifications,
+    send, retryLast, decide, newConversation, refresh, captureContext, attachFile, checkNotifications, fetchVisionStatus, askAboutImage,
     dismissProblem: () => setProblem(null),
     setListening,
   };

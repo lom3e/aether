@@ -2,6 +2,7 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
 mod companion;
+mod screen_capture;
 mod updater;
 
 use std::collections::HashMap;
@@ -799,6 +800,10 @@ fn main() {
             companion::companion_set_mode,
             companion::companion_start_drag,
             companion::companion_set_follow,
+            screen_capture::screen_capture_status,
+            screen_capture::screen_capture_request_permission,
+            screen_capture::screen_capture_open_settings,
+            screen_capture::screen_capture_take,
             updater::check_for_update,
             updater::install_update,
         ])

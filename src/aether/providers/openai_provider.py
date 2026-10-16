@@ -75,7 +75,9 @@ class OpenAIProvider(AIProvider):
 
     @property
     def capabilities(self) -> ProviderCapabilities:
+        from aether.vision.capability import model_supports_vision
         return ProviderCapabilities(
+            vision=model_supports_vision("openai", self._model),
             tools=True,
             structured_output=True,
             thinking=self._model.startswith("o1") or self._model.startswith("o3"),
@@ -91,6 +93,10 @@ class OpenAIProvider(AIProvider):
         msg_dicts = []
         for m in messages:
             d = {"role": m.role, "content": m.content}
+            if m.images:
+                d["content"] = [{"type": "text", "text": m.content or ""}] + [
+                    {"type": "image_url", "image_url": {"url": f"data:{im.media_type};base64,{im.data_b64}"}} for im in m.images
+                ]
             if m.tool_calls:
                 d["tool_calls"] = [
                     {

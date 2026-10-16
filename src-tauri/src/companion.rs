@@ -339,3 +339,24 @@ mod tests {
         assert!(Mode::Orb.logical_size().0 < Mode::Panel.logical_size().0);
     }
 }
+
+/// Hides the Companion so it is not part of a screenshot. Returns whether it was visible (to restore it afterwards).
+pub fn hide_for_capture(app: &AppHandle) -> bool {
+    let Some(win) = window(app) else { return false };
+    let was_visible = win.is_visible().unwrap_or(false);
+    if was_visible {
+        let _ = win.hide();
+    }
+    was_visible
+}
+
+/// Shows the Companion again exactly where it was (no re-placement), after a capture.
+pub fn restore_after_capture(app: &AppHandle, was_visible: bool) {
+    if !was_visible {
+        return;
+    }
+    if let Some(win) = window(app) {
+        let _ = win.show();
+        let _ = win.set_focus();
+    }
+}

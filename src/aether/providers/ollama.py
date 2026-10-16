@@ -157,7 +157,9 @@ class OllamaProvider(AIProvider):
     def capabilities(self) -> ProviderCapabilities:
         # Ollama supports tool calling, structured outputs via format parameter,
         # and thinking capabilities on modern models.
+        from aether.vision.capability import model_supports_vision
         return ProviderCapabilities(
+            vision=model_supports_vision("ollama", self._model),
             tools=True,
             structured_output=True,
             thinking=True,
@@ -345,6 +347,8 @@ class OllamaProvider(AIProvider):
         msg_dicts = []
         for m in messages:
             d = m.to_dict()
+            if m.images:
+                d["images"] = [im.data_b64 for im in m.images]
             if d.get("role") == "assistant" and "tool_calls" in d:
                 for tc in d["tool_calls"]:
                     func = tc.get("function", {})

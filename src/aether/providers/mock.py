@@ -29,8 +29,11 @@ class MockProvider(AIProvider):
         config: ProviderConfig | None = None,
         responses: list[str] | None = None,
         stream_chunks: list[list[str]] | None = None,
+        vision: bool = False,
     ) -> None:
         super().__init__(config)
+        self.vision = vision
+        self.calls: list[list[Message]] = []  # every message list received (tests inspect what was really sent)
         self.responses = responses or []
         self.stream_chunks = stream_chunks or []
         self._current_index = 0
@@ -38,7 +41,7 @@ class MockProvider(AIProvider):
 
     @property
     def capabilities(self) -> ProviderCapabilities:
-        return ProviderCapabilities(tools=True)
+        return ProviderCapabilities(tools=True, vision=self.vision)
 
     def generate_stream(
         self,
@@ -99,6 +102,7 @@ class MockProvider(AIProvider):
         Returns:
             ProviderResponse with mock content and zero-cost usage metadata.
         """
+        self.calls.append(list(messages))
         if self.responses and self._current_index < len(self.responses):
             content = self.responses[self._current_index]
             self._current_index += 1

@@ -74,7 +74,9 @@ class AnthropicProvider(AIProvider):
 
     @property
     def capabilities(self) -> ProviderCapabilities:
+        from aether.vision.capability import model_supports_vision
         return ProviderCapabilities(
+            vision=model_supports_vision("anthropic", self._model),
             tools=True,
             structured_output=False, # Anthropic doesn't have native structured output like OpenAI yet, typically relies on tools
             thinking=False, # Wait, Claude 3.7 has thinking, but usually it's handled via parameters
@@ -94,6 +96,11 @@ class AnthropicProvider(AIProvider):
                 system_msg += m.content + "\n"
             else:
                 d = {"role": m.role, "content": m.content}
+                if m.images:
+                    d["content"] = [
+                        {"type": "image", "source": {"type": "base64", "media_type": im.media_type, "data": im.data_b64}}
+                        for im in m.images
+                    ] + ([{"type": "text", "text": m.content}] if m.content else [])
                 if m.tool_calls:
                     # Transform tool_calls to Claude's format
                     content_list = []
