@@ -45,13 +45,10 @@ export function CompanionOrb({ status, label, badge = 0, onOpen }: Props) {
       }}
       onClick={() => {
         // The browser's own click (press and release on the orb) opens the panel, unless the press turned into a drag.
+        // mouseup fires before click, so the drag flag is only cleared here (or by the next mousedown), never on mouseup.
         const wasDrag = down.current?.dragged === true;
         down.current = null;
         if (!wasDrag) onOpen();
-      }}
-      onMouseUp={() => {
-        // A native drag swallows the click, so the drag flag must not outlive the gesture.
-        if (down.current?.dragged) down.current = null;
       }}
       onKeyDown={e => {
         if (e.key === 'Enter' || e.key === ' ') {

@@ -141,6 +141,25 @@ def test_orb_panel_transitions_and_keyboard(browser_context, workspace_ready):
     page.close()
 
 
+def test_orb_drag_does_not_open_the_panel(browser_context, workspace_ready):
+    """Regression: mouseup fires before click, so a press that turned into a drag must not be read as a click."""
+    page = _open(browser_context, mode="orb", size=(88, 88))
+    orb = page.get_by_test_id("companion-orb")
+    expect(orb).to_be_visible(timeout=15000)
+    box = orb.bounding_box()
+    x, y = box["x"] + box["width"] / 2, box["y"] + box["height"] / 2
+    page.mouse.move(x, y)
+    page.mouse.down()
+    page.mouse.move(x + 3, y + 1)
+    page.mouse.move(x + 12, y + 8)
+    page.mouse.up()
+    page.wait_for_timeout(400)
+    assert page.get_by_test_id("companion-panel").count() == 0, "a drag must not expand the Companion"
+    orb.click()  # a plain click still opens it
+    expect(page.get_by_test_id("companion-panel")).to_be_visible()
+    page.close()
+
+
 def _mock_overview(page, overview: dict):
     def handler(route):
         route.fulfill(status=200, content_type="application/json", body=json.dumps(overview))
