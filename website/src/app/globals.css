@@ -204,7 +204,6 @@ h1, h2, h3, h4, h5, h6, .section-title {
   border: 1px solid transparent;
   text-decoration: none;
   cursor: pointer;
-  box-shadow: 0 4px 18px rgba(124, 58, 237, 0.25);
   transition: transform 200ms cubic-bezier(0.16, 1, 0.3, 1), background-color 150ms ease, box-shadow 200ms ease;
   user-select: none;
 }
@@ -212,7 +211,7 @@ h1, h2, h3, h4, h5, h6, .section-title {
 .btn-primary:hover {
   transform: translateY(-1px);
   background-color: var(--btn-primary-hover);
-  box-shadow: 0 6px 22px rgba(124, 58, 237, 0.35);
+  
 }
 
 .btn-primary:active {

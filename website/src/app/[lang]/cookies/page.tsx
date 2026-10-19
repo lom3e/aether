@@ -26,7 +26,7 @@ export default function CookiesPage() {
           {/* Back link */}
           <div style={{ marginBottom: 32 }}>
             <Link
-              href="/"
+              href={`/${lang}`}
               style={{
                 display: "inline-flex",
                 alignItems: "center",

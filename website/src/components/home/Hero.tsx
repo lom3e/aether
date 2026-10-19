@@ -19,7 +19,7 @@ export function Hero({ c }: { c: Copy }) {
           <a className="ae-btn" href={DMG_URL}>{c.hero.cta}</a>
           <a className="ae-link" href="#demo">{c.hero.secondary}</a>
         </div>
-        <p className="ae-hero-note">{c.hero.note}</p>
+        <p className="ae-hero-note"><PlatformText mac={c.hero.note} pc={c.hero.notePc} /></p>
       </div>
     </section>
   );

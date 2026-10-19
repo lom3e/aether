@@ -32,7 +32,7 @@ export default function BuildersPage() {
           {/* Breadcrumb / Back Link */}
           <div style={{ marginBottom: 32 }}>
             <Link
-              href="/"
+              href={`/${lang}`}
               style={{
                 display: "inline-flex",
                 alignItems: "center",
@@ -52,12 +52,12 @@ export default function BuildersPage() {
           <div style={{ maxWidth: 780, marginBottom: 50 }}>
             <span className="section-tag">{lang === "it" ? "PER SVILUPPATORI" : "FOR BUILDERS"}</span>
             <h1 className="section-title">
-              {lang === "it" ? "Costruisci collaboratori e skill in Python." : "Build AI workers and skills in Python."}
+              {lang === "it" ? "Costruisci agenti, skill e squadre." : "Build agents, skills and teams."}
             </h1>
             <p className="section-desc">
               {lang === "it"
-                ? "Aether offre un'architettura modulare in Python con supporto nativo per specifiche YAML, integrazioni con Ollama e strumenti personalizzati."
-                : "Aether provides a modular Python runtime with native YAML specs, local Ollama integration, and custom tool authoring."}
+                ? "Il core di Aether è un runtime Python modulare: squadre e agenti in YAML, provider a scelta (Groq, OpenAI, Anthropic, Gemini, Ollama), strumenti e skill personalizzati."
+                : "Aether's core is a modular Python runtime: teams and agents in YAML, your choice of provider (Groq, OpenAI, Anthropic, Gemini, Ollama), custom tools and skills."}
             </p>
           </div>
 

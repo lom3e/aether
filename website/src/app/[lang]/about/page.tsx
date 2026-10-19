@@ -19,7 +19,7 @@ export default function AboutPage() {
           {/* Back link */}
           <div style={{ marginBottom: 32 }}>
             <Link
-              href="/"
+              href={`/${lang}`}
               style={{
                 display: "inline-flex",
                 alignItems: "center",
@@ -35,22 +35,22 @@ export default function AboutPage() {
             </Link>
           </div>
 
-          <span className="section-tag">{lang === "it" ? "INFORMAZIONI" : "ABOUT AETHER"}</span>
+          <span className="section-tag">{lang === "it" ? "CHI SIAMO" : "ABOUT"}</span>
           <h1 className="section-title" style={{ marginBottom: 24 }}>
-            {lang === "it" ? "La nostra visione." : "Our vision."}
+            {lang === "it" ? "Un assistente tuo." : "An assistant that is yours."}
           </h1>
 
           <div style={{ display: "flex", flexDirection: "column", gap: 24, fontSize: "1.125rem", color: "var(--text-secondary)", lineHeight: 1.7 }}>
             <p>
               {lang === "it"
-                ? "Aether nasce dalla convinzione che il futuro dell'intelligenza artificiale per le aziende e i professionisti non risieda in un singolo chatbot generico che cerca di fare tutto da solo, ma in una squadra di collaboratori specializzati che lavorano in modo coordinato."
-                : "Aether is built on the conviction that the future of applied AI for businesses and professionals does not belong to a single generic chatbot trying to do everything alone, but to a specialized workforce of AI workers collaborating systematically."}
+                ? "Aether è un assistente personale che vive sul tuo computer. Non è una chat che dimentica tutto: ricorda quello che gli dici, impara quando lo correggi, guarda lo schermo solo quando glielo chiedi e, per i lavori grandi, coordina squadre di agenti specializzati che puoi personalizzare."
+                : "Aether is a personal assistant that lives on your computer. It is not a chat that forgets everything: it remembers what you tell it, learns when you correct it, looks at your screen only when you ask, and for bigger jobs coordinates teams of specialised agents you can customise."}
             </p>
 
             <p>
               {lang === "it"
-                ? "Progettiamo Aether come una piattaforma aperta, rispettosa della privacy e incentrata sul controllo umano. Crediamo che i tuoi dati debbano restare tuoi e che ogni decisione critica debba sempre essere approvata da te."
-                : "We design Aether as an open, privacy-first platform centered on human oversight. We believe your data must remain yours and that critical actions should always require your explicit confirmation."}
+                ? "Lo costruiamo come software aperto (licenza MIT), rispettoso della privacy e centrato sul controllo umano: i tuoi dati restano tuoi, sei tu a scegliere il modello, e le azioni sensibili aspettano la tua approvazione. Aether dice quello che ha verificato davvero, e niente di più."
+                : "We build it as open source software (MIT license), privacy-first and centred on human oversight: your data stays yours, you choose the model, and sensitive actions wait for your approval. Aether reports what it actually verified, and nothing more."}
             </p>
           </div>
 
@@ -59,24 +59,24 @@ export default function AboutPage() {
             {[
               {
                 icon: Users,
-                title: lang === "it" ? "Lavoro di Squadra" : "Workforce Collaboration",
+                title: lang === "it" ? "Squadre su misura" : "Teams built for you",
                 desc: lang === "it"
-                  ? "Scomporre i compiti complessi tra più collaboratori dedicati garantisce precisione e verificabilità."
-                  : "Decomposing complex goals across specialized workers delivers reliability and zero hallucination drift.",
+                  ? "Per i lavori complessi più agenti specializzati, ognuno con ruolo e strumenti, che tu puoi personalizzare."
+                  : "For complex jobs, several specialised agents, each with its own role and tools, that you can customise.",
               },
               {
                 icon: Laptop,
-                title: lang === "it" ? "Privacy & Sovranità" : "Privacy & Sovereignty",
+                title: lang === "it" ? "Privacy e scelta" : "Privacy and choice",
                 desc: lang === "it"
-                  ? "I tuoi documenti aziendali possono essere elaborati localmente con Ollama senza dipendenze cloud obbligatorie."
-                  : "Your company knowledge can be processed 100% locally with Ollama without forced cloud lock-in.",
+                  ? "Memoria e documenti restano sul tuo computer. Con un modello locale (Ollama) nulla esce; con un provider cloud, il testo va solo a quel provider."
+                  : "Memory and documents stay on your computer. With a local model (Ollama) nothing leaves; with a cloud provider, the text goes only to that provider.",
               },
               {
                 icon: ShieldCheck,
                 title: lang === "it" ? "Controllo Umano" : "Human Oversight",
                 desc: lang === "it"
-                  ? "L'intelligenza artificiale accelera il lavoro; tu mantieni sempre l'ultima parola."
-                  : "AI workers accelerate the execution; you always maintain the final decision.",
+                  ? "L'AI accelera il lavoro; tu mantieni l'ultima parola."
+                  : "AI speeds the work up; you keep the final word.",
               },
             ].map((v, i) => {
               const Icon = v.icon;

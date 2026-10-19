@@ -12,7 +12,7 @@
   --ae-accent-ink: #ffffff;
   --ae-ease: cubic-bezier(0.16, 1, 0.3, 1);
 }
-[data-theme="dark"] { --ae-step-1: #131317; --ae-step-2: #1b1b21; }
+[data-theme="dark"] { --ae-step-1: #131317; --ae-step-2: #1b1b21; --ae-accent: #7c3aed; }
 [data-theme="light"] { --ae-step-1: #f1f0f5; --ae-step-2: #e7e5ef; }
 
 .ae-skip { position: absolute; left: -999px; top: 8px; z-index: 300; background: var(--ae-ink); color: var(--bg-page); padding: 10px 16px; border-radius: var(--ae-pill); }
@@ -152,15 +152,13 @@
 
 /* ---------- teams ---------- */
 .ae-teams-grid { display: grid; grid-template-columns: repeat(12, 1fr); gap: var(--ae-gap); margin-top: clamp(40px, 6vw, 80px); }
-.ae-team { grid-column: span 3; background: var(--ae-step-1); border-radius: var(--ae-r); padding: 24px; min-height: 240px; display: flex; flex-direction: column; justify-content: space-between; }
-.ae-team h3 { font-size: clamp(26px, 2.4vw, 36px); letter-spacing: -0.03em; font-weight: 700; }
-.ae-team .nodes { display: flex; gap: 6px; }
-.ae-team .nodes i { width: 18px; height: 18px; border-radius: 50%; background: var(--ae-accent); display: block; }
-.ae-team .nodes i:nth-child(2) { opacity: 0.7; } .ae-team .nodes i:nth-child(3) { opacity: 0.5; } .ae-team .nodes i:nth-child(4) { opacity: 0.3; }
+.ae-team { grid-column: span 12; background: var(--ae-step-1); border-radius: var(--ae-r); padding: 22px 28px; min-height: 0; display: grid; grid-template-columns: minmax(0, 4fr) minmax(0, 8fr); gap: 20px; align-items: baseline; }
+.ae-team h3 { font-size: clamp(28px, 3.4vw, 52px); letter-spacing: -0.035em; font-weight: 700; line-height: 1; }
+.ae-team .ae-p { font-size: 18px; max-width: 52ch; }
 .ae-teams-wide { grid-column: span 6; background: var(--ae-step-2); border-radius: var(--ae-r); padding: 28px; min-height: 220px; display: flex; flex-direction: column; justify-content: flex-end; position: relative; }
-.ae-badge { position: absolute; top: 20px; right: 20px; background: var(--ae-ink); color: var(--bg-page); border-radius: var(--ae-pill); padding: 6px 14px; font-size: 14px; font-weight: 700; }
-@media (max-width: 920px) { .ae-team { grid-column: span 6; } .ae-teams-wide { grid-column: span 12; } }
-@media (max-width: 520px) { .ae-team { grid-column: span 12; min-height: 170px; } }
+.ae-badge-unused { position: absolute; top: 20px; right: 20px; background: var(--ae-ink); color: var(--bg-page); border-radius: var(--ae-pill); padding: 6px 14px; font-size: 14px; font-weight: 700; }
+@media (max-width: 920px) { .ae-teams-wide { grid-column: span 12; } }
+@media (max-width: 640px) { .ae-team { grid-template-columns: 1fr; gap: 8px; } }
 
 /* ---------- privacy (accent field) ---------- */
 .ae-privacy { background: var(--ae-accent); color: var(--ae-accent-ink); }
@@ -176,7 +174,7 @@
 
 /* ---------- models ---------- */
 .ae-providers { display: flex; flex-wrap: wrap; gap: var(--ae-gap); margin-top: 40px; }
-.ae-provider { background: var(--ae-step-1); border-radius: var(--ae-pill); padding: 18px 30px; font-size: clamp(22px, 2.4vw, 34px); font-weight: 700; letter-spacing: -0.03em; }
+.ae-provider { background: var(--ae-step-1); border-radius: var(--ae-pill); padding: 16px 28px; font-size: clamp(18px, 2.2vw, 30px); font-weight: 700; letter-spacing: -0.03em; }
 
 /* ---------- download ---------- */
 .ae-download { background: var(--ae-step-1); }
@@ -229,3 +227,13 @@
 }
 
 .ae-demo .ae-h2 { font-size: clamp(36px, 4.3vw, 68px); max-width: 15ch; }
+
+/* ---------- real screenshots ---------- */
+.ae-shots { display: grid; grid-template-columns: repeat(3, 1fr); gap: var(--ae-gap); margin-top: clamp(40px, 6vw, 72px); align-items: start; }
+.ae-shot-card { background: var(--ae-step-1); border-radius: calc(var(--ae-r) + 8px); padding: clamp(14px, 2vw, 24px); }
+.ae-shot-card.wide { grid-column: 1 / -1; }
+.ae-shot-frame { border-radius: var(--ae-r); overflow: hidden; display: flex; justify-content: center; }
+.ae-shot-frame img { display: block; width: 100%; height: auto; }
+.ae-shot-card:not(.wide) .ae-shot-frame img { max-width: 330px; }
+.ae-shot-label { margin-top: 14px; display: flex; align-items: center; font-weight: 650; color: var(--ae-ink); font-size: 16px; }
+@media (max-width: 920px) { .ae-shots { grid-template-columns: 1fr; } }

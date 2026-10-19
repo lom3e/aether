@@ -20,7 +20,7 @@ export default function PrivacyPage() {
           {/* Back link */}
           <div style={{ marginBottom: 32 }}>
             <Link
-              href="/"
+              href={`/${lang}`}
               style={{
                 display: "inline-flex",
                 alignItems: "center",
@@ -101,8 +101,8 @@ export default function PrivacyPage() {
               </h2>
               <p>
                 {isIt
-                  ? "Il Titolare del trattamento dei dati raccolti tramite questo sito web (aether-workforce.org / aether-website-mu.vercel.app) è il progetto Aether promosso da LMLabs (con sede in Italia). Per qualsiasi richiesta o per l'esercizio dei diritti previsti dal GDPR, puoi contattarci all'indirizzo email dedicato:"
-                  : "The Data Controller for information processed through this website (aether-workforce.org / aether-website-mu.vercel.app) is the Aether Project sponsored by LMLabs (based in Italy). For any privacy inquiries or to exercise your GDPR rights, you can reach out via email at:"}
+                  ? "Il Titolare del trattamento dei dati raccolti tramite questo sito web (aethermate.com) è il progetto Aether promosso da LMLabs (con sede in Italia). Per qualsiasi richiesta o per l'esercizio dei diritti previsti dal GDPR, puoi contattarci all'indirizzo email dedicato:"
+                  : "The Data Controller for information processed through this website (aethermate.com) is the Aether Project sponsored by LMLabs (based in Italy). For any privacy inquiries or to exercise your GDPR rights, you can reach out via email at:"}
               </p>
               <div style={{ marginTop: 10, padding: "12px 18px", background: "var(--bg-surface)", border: "1px solid var(--border-subtle)", borderRadius: "var(--radius-sm)", display: "inline-block" }}>
                 <a

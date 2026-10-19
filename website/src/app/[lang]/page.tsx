@@ -3,6 +3,7 @@ import { copy, isLang } from "@/content/home";
 import { Nav } from "@/components/home/Nav";
 import { Hero } from "@/components/home/Hero";
 import { CompanionDemo } from "@/components/home/CompanionDemo";
+import { RealApp } from "@/components/home/RealApp";
 import { ScreenFlow } from "@/components/home/ScreenFlow";
 import { MemoryBoard } from "@/components/home/MemoryBoard";
 import { Teams } from "@/components/home/Teams";
@@ -36,6 +37,7 @@ export default async function HomePage({ params }: { params: Promise<{ lang: str
         <Hero c={c} />
         <CompanionDemo c={c} />
         <ScreenFlow c={c} />
+        <RealApp c={c} />
         <MemoryBoard c={c} />
         <Teams c={c} />
         <Privacy c={c} />

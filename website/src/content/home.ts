@@ -5,7 +5,7 @@
 export interface Copy {
   meta: { title: string; description: string; ogTitle: string };
   nav: { demo: string; screen: string; memory: string; teams: string; privacy: string; faq: string; download: string; builders: string };
-  hero: { l1: string; l2: string; l2Pc: string; sub: string; cta: string; secondary: string; note: string; orbLabel: string };
+  hero: { l1: string; l2: string; l2Pc: string; sub: string; cta: string; secondary: string; note: string; notePc: string; orbLabel: string };
   demo: {
     title: string;
     sub: string;
@@ -19,6 +19,7 @@ export interface Copy {
     states: Record<"idle" | "working" | "needs-you" | "done", string>;
     note: string;
   };
+  real: { title: string; sub: string; caption: string; shots: { alt: string; label: string }[] };
   screen: {
     title: string;
     sub: string;
@@ -40,7 +41,7 @@ export interface Copy {
     sub: string;
     presets: { name: string; line: string }[];
     architect: { title: string; text: string };
-    community: { title: string; text: string; badge: string };
+    community: { title: string; text: string };
   };
   privacy: {
     title: string;
@@ -82,6 +83,7 @@ export const it: Copy = {
     cta: "Scarica per macOS",
     secondary: "Guardalo lavorare",
     note: "Gratuito e open source (MIT). Per Mac con Apple Silicon.",
+    notePc: "Gratuito e open source (MIT). Per ora solo per macOS: Windows e Linux non sono ancora pubblicati.",
     orbLabel: "L'orb di Aether, la presenza del Companion",
   },
   demo: {
@@ -119,6 +121,17 @@ export const it: Copy = {
     reset: "Ricomincia",
     states: { idle: "Pronto", working: "Al lavoro", "needs-you": "Serve il tuo ok", done: "Fatto" },
     note: "Scena illustrativa con risposte scritte a mano: nell'app le risposte arrivano dal modello che scegli tu.",
+  },
+  real: {
+    title: "Questo è Aether. Per davvero.",
+    sub: "Schermate dell'app su Mac, non mockup.",
+    caption: "Schermate reali, con un workspace di prova.",
+    shots: [
+      { alt: "La finestra principale di Aether con la richiesta «Di cosa hai bisogno oggi?»", label: "La finestra principale" },
+      { alt: "Il Companion aperto, con le richieste suggerite", label: "Il Companion" },
+      { alt: "Il Companion mentre scegli schermo intero o un'area", label: "Scegli cosa condividere" },
+      { alt: "L'anteprima della cattura con gli strumenti per disegnare", label: "Controlli l'anteprima" },
+    ],
   },
   screen: {
     title: "Guarda quando glielo chiedi.",
@@ -168,7 +181,7 @@ export const it: Copy = {
     versions: { title: "Niente sovrascritture a sorpresa.", text: "Quando Aether modifica un tuo documento, la versione precedente resta salvata." },
   },
   teams: {
-    title: "Non un assistente solo. Una squadra su misura.",
+    title: "Una squadra su misura.",
     sub: "Per i lavori grandi Aether coordina agenti specializzati, ognuno con il suo ruolo, i suoi strumenti e le sue regole. Li personalizzi tu.",
     presets: [
       { name: "Ricerca", line: "Un coordinatore che pianifica e specialisti che leggono, confrontano e riassumono." },
@@ -177,7 +190,7 @@ export const it: Copy = {
       { name: "Starter", line: "Il punto di partenza per costruire la tua." },
     ],
     architect: { title: "Descrivila e basta.", text: "Racconta cosa ti serve: l'Auto-Architect propone la squadra, tu rivedi ruoli e strumenti prima di applicarla." },
-    community: { title: "Squadre condivise dalla community.", text: "Pubblicare e installare squadre di altri, con un riepilogo dei permessi, è nella roadmap. Oggi le squadre si creano e si installano in locale, da preset.", badge: "In arrivo" },
+    community: { title: "Squadre della community, in arrivo.", text: "Pubblicare e installare squadre di altri, con un riepilogo dei permessi, è nella roadmap. Oggi le squadre si creano e si installano in locale, da preset." },
   },
   privacy: {
     title: "Tuo, per costruzione.",
@@ -259,6 +272,7 @@ export const en: Copy = {
     cta: "Download for macOS",
     secondary: "Watch it work",
     note: "Free and open source (MIT). For Macs with Apple Silicon.",
+    notePc: "Free and open source (MIT). For now macOS only: Windows and Linux are not published yet.",
     orbLabel: "The Aether orb, the Companion's presence",
   },
   demo: {
@@ -296,6 +310,17 @@ export const en: Copy = {
     reset: "Start over",
     states: { idle: "Ready", working: "Working", "needs-you": "Needs your OK", done: "Done" },
     note: "An illustrative scene with hand-written answers: in the app the answers come from the model you choose.",
+  },
+  real: {
+    title: "This is Aether. For real.",
+    sub: "Screenshots of the Mac app, not mockups.",
+    caption: "Real screenshots, with a test workspace.",
+    shots: [
+      { alt: "Aether's main window with the prompt “What do you need today?”", label: "The main window" },
+      { alt: "The Companion open, with suggested requests", label: "The Companion" },
+      { alt: "The Companion while you choose entire screen or an area", label: "Choose what to share" },
+      { alt: "The capture preview with the drawing tools", label: "You check the preview" },
+    ],
   },
   screen: {
     title: "It looks when you ask.",
@@ -345,7 +370,7 @@ export const en: Copy = {
     versions: { title: "No surprise overwrites.", text: "When Aether edits one of your documents, the previous version stays saved." },
   },
   teams: {
-    title: "Not one assistant. A team built for you.",
+    title: "A team built for you.",
     sub: "For bigger jobs Aether coordinates specialised agents, each with its own role, tools and rules. You customise them.",
     presets: [
       { name: "Research", line: "A coordinator who plans and specialists who read, compare and summarise." },
@@ -354,7 +379,7 @@ export const en: Copy = {
       { name: "Starter", line: "The starting point to build your own." },
     ],
     architect: { title: "Just describe it.", text: "Tell it what you need: the Auto-Architect proposes the team, and you review roles and tools before applying it." },
-    community: { title: "Teams shared by the community.", text: "Publishing and installing other people's teams, with a permissions summary, is on the roadmap. Today teams are created and installed locally, from presets.", badge: "Coming" },
+    community: { title: "Community teams, coming.", text: "Publishing and installing other people's teams, with a permissions summary, is on the roadmap. Today teams are created and installed locally, from presets." },
   },
   privacy: {
     title: "Yours, by construction.",

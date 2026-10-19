@@ -11,11 +11,8 @@ export function Teams({ c }: { c: Copy }) {
         <div className="ae-teams-grid">
           {t.presets.map((p, i) => (
             <Rise key={p.name} className="ae-team" i={i}>
-              <span className="nodes" aria-hidden="true"><i /><i /><i /><i /></span>
-              <div>
-                <h3>{p.name}</h3>
-                <p className="ae-p" style={{ marginTop: 8 }}>{p.line}</p>
-              </div>
+              <h3>{p.name}</h3>
+              <p className="ae-p">{p.line}</p>
             </Rise>
           ))}
           <Rise className="ae-teams-wide" i={0}>
@@ -23,7 +20,6 @@ export function Teams({ c }: { c: Copy }) {
             <p className="ae-p" style={{ marginTop: 10, maxWidth: "46ch" }}>{t.architect.text}</p>
           </Rise>
           <Rise className="ae-teams-wide" i={1}>
-            <span className="ae-badge">{t.community.badge}</span>
             <h3 style={{ fontSize: 28, letterSpacing: "-0.03em" }}>{t.community.title}</h3>
             <p className="ae-p" style={{ marginTop: 10, maxWidth: "46ch" }}>{t.community.text}</p>
           </Rise>
