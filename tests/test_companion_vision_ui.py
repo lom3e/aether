@@ -317,3 +317,39 @@ def test_remember_this_screen_sends_one_explicit_request_and_closes(browser_cont
     assert base64.b64decode(kept[0]["image_base64"])[:4] == b"\x89PNG"
     assert not page._errors, page._errors
     page.close()
+
+
+def test_a_blurred_area_is_destroyed_in_the_image_that_is_sent(browser_context, workspace_ready):
+    page = _open(browser_context, _stub())
+    sent: list = []
+    _mock_vision(page, reply=OK_REPLY, record=sent)
+    page.get_by_test_id("companion-vision-open").click()
+    page.get_by_test_id("vision-capture-screen").click()
+    preview = page.get_by_test_id("vision-preview")
+    expect(preview).to_be_visible(timeout=10000)
+    page.get_by_test_id("vision-tool-blur").click()
+    b = preview.bounding_box()
+    page.mouse.move(b["x"] + b["width"] * 0.1, b["y"] + b["height"] * 0.1)
+    page.mouse.down()
+    page.mouse.move(b["x"] + b["width"] * 0.5, b["y"] + b["height"] * 0.5, steps=6)
+    page.mouse.up()
+    expect(page.get_by_test_id("vision-mark-count")).to_have_text("1 mark(s)")
+    page.get_by_test_id("vision-prompt").fill("What is here?")
+    page.get_by_test_id("vision-send").click()
+    expect(page.get_by_test_id("companion-msg-assistant").last).to_contain_text("colour gradient", timeout=10000)
+    assert len(sent) == 1
+
+    def pixels(b64):  # (inside the blurred area, outside it) as RGB sums, read back through a canvas
+        return page.evaluate("""async (b64) => {
+            const img = new Image(); img.src = 'data:image/png;base64,' + b64; await img.decode();
+            const c = document.createElement('canvas'); c.width = img.naturalWidth; c.height = img.naturalHeight;
+            const x = c.getContext('2d'); x.drawImage(img, 0, 0);
+            const at = (fx, fy) => { const d = x.getImageData(Math.floor(c.width * fx), Math.floor(c.height * fy), 1, 1).data; return d[0] + d[1] + d[2]; };
+            return [at(0.3, 0.3), at(0.8, 0.8)];
+        }""", b64)
+
+    before_in, before_out = pixels(_png_b64())
+    after_in, after_out = pixels(sent[0]["image_base64"])
+    assert after_out == before_out, "outside the blurred area the image is untouched"
+    assert after_in < before_in * 0.7, "inside it the original pixels are replaced"
+    page.close()

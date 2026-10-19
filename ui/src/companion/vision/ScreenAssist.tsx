@@ -6,7 +6,7 @@
  * exists only in this component's state: closing it discards it.
  */
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { Camera, Crop, Monitor, Square, ArrowUpRight, Highlighter, Undo2, X } from 'lucide-react';
+import { Camera, Crop, Monitor, Square, ArrowUpRight, Highlighter, EyeOff, Undo2, X } from 'lucide-react';
 import type { CompanionRuntime, VisionStatus } from '../useCompanionRuntime';
 import type { TranslationKey } from '../../i18n';
 import { showMainWindow } from '../../desktop';
@@ -61,6 +61,7 @@ const TOOLS: { id: Tool; icon: typeof Square; key: TranslationKey }[] = [
   { id: 'box', icon: Square, key: 'cmpVisionToolBox' },
   { id: 'highlight', icon: Highlighter, key: 'cmpVisionToolHighlight' },
   { id: 'arrow', icon: ArrowUpRight, key: 'cmpVisionToolArrow' },
+  { id: 'blur', icon: EyeOff, key: 'cmpVisionToolBlur' },
 ];
 
 export function ScreenAssist({ runtime, language, t, onClose, notify }: Props) {

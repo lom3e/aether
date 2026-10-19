@@ -163,3 +163,10 @@ html.cmp-vibrant .cmp-drop { background: hsl(var(--cmp-bg) / .8); }
 .cmp-vision-body > * { flex: none; }
 
 .cmp-vision-remember { display: flex; align-items: center; flex-wrap: wrap; gap: 8px; margin-top: 10px; color: var(--cmp-dim); font-size: 12px; }
+
+.cmp-second { margin-top: 2px; }
+.cmp-second-level { font-weight: 500; }
+.cmp-second-level.differ { color: hsl(var(--cmp-accent)); }
+.cmp-second-op { display: flex; flex-direction: column; gap: 2px; }
+.cmp-second-op b { font-weight: 500; color: hsl(var(--cmp-dim)); font-size: 12px; }
+.cmp-shape.blur { fill: rgba(30, 30, 36, .82); stroke: rgba(255,255,255,.35); stroke-width: 1; stroke-dasharray: 3 3; }

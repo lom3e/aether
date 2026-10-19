@@ -14,6 +14,7 @@ export function ShapesOverlay({ shapes, width, height }: OverlayProps) {
       <svg className="cmp-shapes" viewBox="0 0 1 1" preserveAspectRatio="none" aria-hidden="true">
         {shapes.map((s, i) => {
           const cls = `cmp-shape ${s.source}`;
+          if (s.kind === 'blur') return <rect key={i} className="cmp-shape blur" x={s.x} y={s.y} width={s.w} height={s.h} />;
           if (s.kind === 'box') return <rect key={i} className={cls} x={s.x} y={s.y} width={s.w} height={s.h} vectorEffect="non-scaling-stroke" />;
           if (s.kind === 'highlight') return <rect key={i} className={`${cls} fill`} x={s.x} y={s.y} width={s.w} height={s.h} vectorEffect="non-scaling-stroke" />;
           if (s.kind === 'arrow' && s.x2 !== undefined && s.y2 !== undefined) {

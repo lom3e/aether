@@ -3,8 +3,8 @@
  * width/height, origin top-left), so they mean the same thing at any display size. Pure functions: no DOM except
  * `flattenToDataUrl`, which draws on a canvas.
  */
-export type ShapeKind = 'box' | 'highlight' | 'arrow' | 'point';
-export type Tool = 'box' | 'highlight' | 'arrow';
+export type ShapeKind = 'box' | 'highlight' | 'arrow' | 'point' | 'blur';
+export type Tool = 'box' | 'highlight' | 'arrow' | 'blur';
 
 export interface Shape {
   kind: ShapeKind;
@@ -91,6 +91,27 @@ export function toScreenRect(
 const USER_COLOR = '#ff3b6b';
 const HIGHLIGHT = 'rgba(255, 214, 10, 0.38)';
 
+/** Replaces a region with large flat blocks: the original pixels are gone from the image that gets sent. */
+function pixelate(ctx: CanvasRenderingContext2D, img: HTMLImageElement, s: Shape, W: number, H: number): void {
+  const x = Math.floor(s.x * W), y = Math.floor(s.y * H);
+  const w = Math.max(1, Math.ceil(s.w * W)), h = Math.max(1, Math.ceil(s.h * H));
+  const block = Math.max(12, Math.round(Math.min(w, h) / 3));
+  const sw = Math.max(1, Math.round(w / block)), sh = Math.max(1, Math.round(h / block));
+  const tmp = document.createElement('canvas');
+  tmp.width = sw;
+  tmp.height = sh;
+  const t = tmp.getContext('2d');
+  if (!t) throw new Error('canvas_unavailable');
+  t.drawImage(img, x, y, w, h, 0, 0, sw, sh);
+  ctx.save();
+  ctx.imageSmoothingEnabled = false;
+  ctx.drawImage(tmp, 0, 0, sw, sh, x, y, w, h);
+  // Text strokes survive coarse blocks poorly but not never: flatten the blocks towards their mean so nothing legible remains.
+  ctx.fillStyle = 'rgba(40, 40, 46, 0.55)';
+  ctx.fillRect(x, y, w, h);
+  ctx.restore();
+}
+
 /** Draws the user's own marks onto the image so the model sees what they pointed at. Returns a PNG data URL. */
 export async function flattenToDataUrl(imageUrl: string, shapes: Shape[]): Promise<string> {
   const img = await new Promise<HTMLImageElement>((resolve, reject) => {
@@ -107,6 +128,7 @@ export async function flattenToDataUrl(imageUrl: string, shapes: Shape[]): Promi
   const ctx = canvas.getContext('2d');
   if (!ctx) throw new Error('canvas_unavailable');
   ctx.drawImage(img, 0, 0, W, H);
+  for (const s of shapes) if (s.source === 'user' && s.kind === 'blur') pixelate(ctx, img, s, W, H);
   const lw = Math.max(3, Math.round(Math.min(W, H) / 220));
   ctx.lineWidth = lw;
   ctx.strokeStyle = USER_COLOR;

@@ -129,3 +129,32 @@ def test_replies_without_receipts_show_nothing(browser_context, workspace_ready)
     page = _open(browser_context, {"id": "m", "session_id": "s", "role": "assistant", "content": "Due on the 5th.", "metadata": {}}, [])
     assert page.get_by_test_id("companion-receipts").count() == 0
     page.close()
+
+
+def test_second_opinion_is_offered_only_with_two_providers_and_shows_the_comparison(browser_context, workspace_ready):
+    # Mocked routes: they exercise the UI's gating, the request it sends and how disagreement is shown.
+    page = browser_context.new_page()
+    page.set_viewport_size({"width": 408, "height": 604})
+    page.add_init_script("localStorage.setItem('aether_language', 'en');")
+    sent: list = []
+    page.route("**/api/personal/chat", lambda r: r.fulfill(status=200, content_type="application/json", body=json.dumps(_reply(CLOUD, SOURCES))))
+    page.route("**/api/personal/second-opinion/providers", lambda r: r.fulfill(status=200, content_type="application/json", body='{"providers":["openai","groq"],"available":true}'))
+    page.route("**/api/personal/second-opinion", lambda r: (sent.append(json.loads(r.request.post_data or "{}")), r.fulfill(status=200, content_type="application/json", body=json.dumps({
+        "status": "ok",
+        "opinions": [{"provider": "openai", "model": "m1", "status": "ok", "content": "Due on the 5th."},
+                     {"provider": "groq", "model": "m2", "status": "ok", "content": "Due on the 15th."},
+                     {"provider": "gemini", "status": "failed", "reason": "RuntimeError"}],
+        "agreement": {"level": "partial", "similarity": 0.3, "differing_numbers": ["5", "15"]}})))[1])
+    page.goto(f"{_state['base_url']}/?surface=companion")
+    expect(page.get_by_test_id("companion-panel")).to_be_visible(timeout=15000)
+    page.get_by_test_id("companion-input").fill("When are my invoices due?")
+    page.get_by_test_id("companion-send").click()
+    btn = page.get_by_test_id("companion-second-opinion-btn")
+    expect(btn).to_be_visible(timeout=15000)
+    btn.click()
+    expect(page.get_by_test_id("companion-second-level")).to_contain_text("Partly different")
+    expect(page.get_by_test_id("companion-second-level")).to_contain_text("5, 15")
+    expect(page.get_by_test_id("companion-second-opinion")).to_contain_text("Due on the 15th.")
+    expect(page.get_by_test_id("companion-second-opinion")).to_contain_text("No answer from this model.")
+    assert sent == [{"question": "When are my invoices due?", "language": "en"}]
+    page.close()

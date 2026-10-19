@@ -11,6 +11,7 @@ import type { TranslationKey } from '../i18n';
 import { ScreenAssist } from './vision/ScreenAssist';
 import { AnnotatedImage } from './vision/AnnotatedImage';
 import { Receipts } from './Receipts';
+import { SecondOpinion } from './SecondOpinion';
 
 interface Props {
   runtime: CompanionRuntime;
@@ -220,7 +221,7 @@ export function CompanionPanel({ runtime, language, t, follow, onToggleFollow, o
               <button className="cmp-chip" onClick={doNotifications} data-testid="companion-chip-notifications">{t('cmpNotifications')}</button>
             </div>
           )}
-          {messages.map(m => (
+          {messages.map((m, mi) => (
             <div key={m.id} className={`cmp-msg ${m.role}${m.errorCode ? ' error' : ''}`} data-testid={`companion-msg-${m.role}`}>
               {m.vision && (
                 <div className="cmp-msg-vision" data-testid="companion-msg-vision">
@@ -230,6 +231,7 @@ export function CompanionPanel({ runtime, language, t, follow, onToggleFollow, o
               )}
               {m.role === 'assistant' ? <MarkdownRenderer content={m.content} /> : m.content}
               {m.role === 'assistant' && !m.errorCode && <Receipts message={m} t={t} notify={notify} />}
+              {m.role === 'assistant' && !m.errorCode && !m.vision && <SecondOpinion question={[...messages.slice(0, mi)].reverse().find(x => x.role === 'user')?.content || ''} language={language} t={t} />}
               {m.proposal && (
                 <div className="cmp-proposal" data-testid="companion-proposal">
                   <b>{t('cmpProposalTitle')}</b>
