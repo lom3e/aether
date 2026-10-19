@@ -53,7 +53,7 @@ def test_mcp_server_initialization_and_capabilities(temp_workspace: Workspace):
     assert result["protocolVersion"] == "2024-11-05"
     assert "tools" in result["capabilities"]
     assert result["serverInfo"]["name"] == "aether-mcp"
-    assert result["serverInfo"]["version"] == "1.6.0"
+    assert result["serverInfo"]["version"] == "1.7.0"
 
 
 def test_mcp_server_notification_and_ping(temp_workspace: Workspace):

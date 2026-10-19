@@ -105,7 +105,7 @@ def validate_distribution():
 
     assert plist_data.get("CFBundleIdentifier") == "com.aether.desktop"
     assert plist_data.get("CFBundleDisplayName") == "Aether"
-    assert plist_data.get("CFBundleShortVersionString") in ["1.5.0", "1.6.0"]
+    assert plist_data.get("CFBundleShortVersionString") in ["1.5.0", "1.6.0", "1.7.0"]
 
     # Validate DMG by mounting temporarily
     print("Testing DMG mount integrity...")

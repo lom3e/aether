@@ -9,6 +9,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+---
+
+## [v1.7.0] - 2026-10-19
+
+### Minor Release: Companion 2.0, screen understanding, reliable desktop app
+
+### Added
+- **Companion 2.0** (native, transparent window): compact orb and expanded panel on the shared runtime and session; real statuses; approvals, missions, results and notifications from the runtime; summon next to the pointer with the global shortcut (`Option+Space`); opt-in "come to the cursor"; drag and drop and file picker; context capture.
+- **Screen understanding** (macOS): explicit full-screen or area capture with Screen Recording permission guidance, preview before sending, drawing of boxes/highlights/arrows into the image, and analysis only by a vision-capable model of the configured provider. Model-suggested annotations are validated and shown on the captured image. Nothing is captured in the background and images are never stored. Details: `docs/product/screen-understanding.md`, ADR-018.
+- **Desktop reliability (macOS)**: graceful sidecar shutdown, parent watchdog (no orphan runtime after SIGTERM/SIGKILL), signed auto-update plumbing (Tauri updater, minisign; verified end to end against a local server; **not live**: no hosted endpoint yet), packaged-app smoke test.
+- **Windows**: NSIS installer built and smoke-tested on the GitHub `windows-latest` runner (not verified on physical hardware; not published).
+- **Website** relaunch (IT/EN, `aethermate.com`).
+
+### Changed
+- The "no AI provider" reply follows the UI language (IT/EN).
+- Dragging the Companion orb no longer expands the panel.
+
 ### Fixed (QA reliability pass)
 - **Routing**: questions ("Quando riceve il report il cliente Bianchi?") are answered, never turned into missions; explicit "Ricorda che…" / "Remember that…" statements are saved as persistent, user-stated memory and recalled in later sessions.
 - **Clarifications**: a proposal waiting for an answer can be resumed (`POST /api/personal/proposals/{id}/clarify`) from the Home card or the Orb; rejecting a proposal is persisted (`revoked`); unverifiable client names no longer block a plan and relative pronouns are no longer taken for clients.
