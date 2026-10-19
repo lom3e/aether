@@ -36,7 +36,7 @@ def _workspace_max_tokens(workspace: Any | None) -> int | None:
         return None
 
 
-def resolve_provider(
+def _resolve_provider_unaudited(
     explicit_provider: AIProvider | None = None,
     agent_config: Any | None = None,
     team_config: Any | None = None,
@@ -128,3 +128,37 @@ def resolve_provider(
     # No provider named and no stored credential: do NOT guess a local service. "Not configured" is an explicit state
     # that callers report to the user (they never receive a provider they did not choose).
     return None
+
+
+def resolve_provider(
+    explicit_provider: AIProvider | None = None,
+    agent_config: Any | None = None,
+    team_config: Any | None = None,
+    workspace: Any | None = None,
+    provider_manager: Any | None = None,
+    preferred_provider_name: str | None = None,
+    preferred_model_name: str | None = None,
+    timeout: float | None = None,
+) -> AIProvider | None:
+    """
+    Same contract as above, plus the privacy layer: a provider that this function BUILDS (never an instance injected by
+    the caller, and never the unresolved stub) is instrumented so that cloud calls are masked and every call is recorded
+    in the workspace's egress ledger.
+    """
+    provider = _resolve_provider_unaudited(
+        explicit_provider, agent_config, team_config, workspace, provider_manager,
+        preferred_provider_name, preferred_model_name, timeout,
+    )
+    if provider is None or provider is explicit_provider or workspace is None:
+        return provider
+    try:
+        from aether.providers.unresolved import UnresolvedProvider
+        if isinstance(provider, UnresolvedProvider):
+            return provider
+        from aether.privacy.audit import instrument_provider, ledger_for
+        ledger = ledger_for(workspace)
+        if ledger is not None:
+            instrument_provider(provider, ledger, getattr(workspace, "id", None))
+    except Exception as exc:  # noqa: BLE001 - never let auditing stop the user from reaching a model
+        logger.warning("egress auditing unavailable: %s", type(exc).__name__)
+    return provider

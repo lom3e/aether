@@ -15,6 +15,10 @@ use std::time::{Duration, Instant};
 
 use serde::Serialize;
 use tauri::{AppHandle, LogicalSize, Manager, PhysicalPosition, State, WebviewWindow};
+#[cfg(target_os = "macos")]
+use tauri::utils::config::WindowEffectsConfig;
+#[cfg(target_os = "macos")]
+use tauri::window::{Effect, EffectState};
 
 pub const ORB_SIZE: f64 = 88.0;
 pub const PANEL_W: f64 = 408.0;
@@ -109,6 +113,30 @@ fn notify_mode(win: &WebviewWindow, mode: Mode) {
     ));
 }
 
+/// The panel is a vibrant (blurred, translucent) macOS sheet with a native shadow; the orb is plain transparent glass
+/// (a blurred square behind a round orb would look broken). Other platforms keep the solid CSS panel.
+pub fn apply_chrome(win: &WebviewWindow, mode: Mode) {
+    #[cfg(target_os = "macos")]
+    {
+        let _ = win.set_shadow(mode == Mode::Panel);
+        let effects = if mode == Mode::Panel {
+            Some(WindowEffectsConfig {
+                effects: vec![Effect::HudWindow],
+                state: Some(EffectState::Active),
+                radius: Some(26.0),
+                color: None,
+            })
+        } else {
+            None
+        };
+        let _ = win.set_effects(effects);
+    }
+    #[cfg(not(target_os = "macos"))]
+    {
+        let _ = (win, mode);
+    }
+}
+
 /// Switches between the compact orb and the expanded panel, keeping the top-left corner where it was
 /// (clamped so the window never leaves the screen).
 pub fn set_mode(app: &AppHandle, mode: Mode) {
@@ -124,6 +152,7 @@ pub fn set_mode(app: &AppHandle, mode: Mode) {
     if let Some(state) = app.try_state::<CompanionState>() {
         *state.mode.lock().unwrap() = mode;
     }
+    apply_chrome(&win, mode);
     if mode == Mode::Panel {
         let _ = win.set_focus();
     }
@@ -143,6 +172,7 @@ pub fn toggle(app: &AppHandle) {
         if let Some(state) = app.try_state::<CompanionState>() {
             *state.mode.lock().unwrap() = Mode::Panel;
         }
+        apply_chrome(&win, Mode::Panel);
         let _ = win.show();
         let _ = win.unminimize();
         let _ = win.set_focus();

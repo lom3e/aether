@@ -1,14 +1,16 @@
 import { useEffect, useRef, useState } from 'react';
-import { Bell, Camera, ChevronDown, ChevronRight, Copy, Crosshair, ExternalLink, Eye, Mic, Minus, Paperclip, Plus, Send, Square, X } from 'lucide-react';
+import { Bell, Camera, ChevronDown, ChevronRight, Copy, Crosshair, ExternalLink, Eye, MoreHorizontal, Mic, Minus, Paperclip, Plus, Send, Square, X } from 'lucide-react';
+import { AetherOrb } from '../orb/AetherOrb';
 import { MarkdownRenderer } from '../MarkdownRenderer';
 import { contextIsEmpty, type AttachedFile, type CompanionRuntime, type DesktopContext, type NotificationsSummary } from './useCompanionRuntime';
-import { STATUS_COLORS, STATUS_LABEL_KEYS } from './status';
+import { STATUS_COLORS, STATUS_LABEL_KEYS, orbStateFor } from './status';
 import { startNativeDrag } from './windowControl';
 import { useDictation } from './useDictation';
 import { showMainWindow } from '../desktop';
 import type { TranslationKey } from '../i18n';
 import { ScreenAssist } from './vision/ScreenAssist';
 import { AnnotatedImage } from './vision/AnnotatedImage';
+import { Receipts } from './Receipts';
 
 interface Props {
   runtime: CompanionRuntime;
@@ -30,6 +32,7 @@ export function CompanionPanel({ runtime, language, t, follow, onToggleFollow, o
   const [resultsOpen, setResultsOpen] = useState(false);
   const [dragging, setDragging] = useState(false);
   const [visionOpen, setVisionOpen] = useState(false);
+  const [menuOpen, setMenuOpen] = useState(false);
   const [busyTool, setBusyTool] = useState<'context' | 'attach' | 'notifications' | null>(null);
   const fileRef = useRef<HTMLInputElement>(null);
   const inputRef = useRef<HTMLTextAreaElement>(null);
@@ -59,7 +62,8 @@ export function CompanionPanel({ runtime, language, t, follow, onToggleFollow, o
     const onKey = (e: KeyboardEvent) => {
       if (e.key === 'Escape') {
         e.preventDefault();
-        onCollapse();
+        if (menuOpen) setMenuOpen(false);
+        else onCollapse();
       } else if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 'o') {
         e.preventDefault();
         showMainWindow();
@@ -73,7 +77,16 @@ export function CompanionPanel({ runtime, language, t, follow, onToggleFollow, o
     };
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
-  }, [onCollapse, runtime]);
+  }, [onCollapse, runtime, menuOpen]);
+
+  useEffect(() => {
+    if (!menuOpen) return;
+    const close = (e: MouseEvent) => {
+      if (!(e.target as HTMLElement).closest('.cmp-menu, [data-testid="companion-menu"]')) setMenuOpen(false);
+    };
+    document.addEventListener('mousedown', close);
+    return () => document.removeEventListener('mousedown', close);
+  }, [menuOpen]);
 
   const submit = (value?: string) => {
     const v = (value ?? text).trim();
@@ -181,21 +194,27 @@ export function CompanionPanel({ runtime, language, t, follow, onToggleFollow, o
           <span className="cmp-title">Aether</span>
           <span className="cmp-status" data-testid="companion-status-label" role="status" aria-live="polite">{t(STATUS_LABEL_KEYS[status])}</span>
           <span className="cmp-spacer" />
-          <button className="cmp-iconbtn" onClick={doNotifications} disabled={busyTool === 'notifications'} title={t('cmpNotifications')} data-testid="companion-notifications"><Bell size={15} /></button>
-          <button className="cmp-iconbtn" aria-pressed={follow} onClick={onToggleFollow} title={`${follow ? t('cmpFollowOn') : t('cmpFollowOff')} — ${t('cmpFollowHint')}`} data-testid="companion-follow-toggle">
-            <Crosshair size={15} />
-          </button>
-          <button className="cmp-iconbtn" onClick={runtime.newConversation} title={t('cmpNewConversation')} data-testid="companion-new"><Plus size={16} /></button>
-          <button className="cmp-iconbtn" onClick={() => showMainWindow()} title={t('cmpOpenWorkspace')} data-testid="companion-open-main"><ExternalLink size={15} /></button>
-          <button className="cmp-iconbtn" onClick={onCollapse} title={t('cmpCollapse')} data-testid="companion-collapse"><Minus size={16} /></button>
-          <button className="cmp-iconbtn" onClick={onHide} title={t('cmpHide')} data-testid="companion-hide"><X size={16} /></button>
+          <button className="cmp-iconbtn" onClick={() => setMenuOpen(o => !o)} aria-haspopup="menu" aria-expanded={menuOpen} aria-label={t('cmpMenu')} title={t('cmpMenu')} data-testid="companion-menu"><MoreHorizontal size={17} /></button>
+          {menuOpen && (
+            <div className="cmp-menu" role="menu" data-testid="companion-menu-list">
+              <button role="menuitem" onClick={() => { setMenuOpen(false); doNotifications(); }} disabled={busyTool === 'notifications'} data-testid="companion-notifications"><Bell size={15} />{t('cmpNotifications')}</button>
+              <button role="menuitem" aria-pressed={follow} onClick={() => { onToggleFollow(); }} title={t('cmpFollowHint')} data-testid="companion-follow-toggle"><Crosshair size={15} />{follow ? t('cmpFollowOn') : t('cmpFollowOff')}</button>
+              <button role="menuitem" onClick={() => { setMenuOpen(false); runtime.newConversation(); }} data-testid="companion-new"><Plus size={15} />{t('cmpNewConversation')}</button>
+              <button role="menuitem" onClick={() => { setMenuOpen(false); showMainWindow(); }} data-testid="companion-open-main"><ExternalLink size={15} />{t('cmpOpenWorkspace')}</button>
+              <hr />
+              <button role="menuitem" onClick={() => { setMenuOpen(false); onCollapse(); }} data-testid="companion-collapse"><Minus size={15} />{t('cmpCollapse')}</button>
+              <button role="menuitem" onClick={() => { setMenuOpen(false); onHide(); }} data-testid="companion-hide"><X size={15} />{t('cmpHide')}</button>
+            </div>
+          )}
         </header>
 
         <div className="cmp-body" ref={bodyRef} data-testid="companion-messages">
           {messages.length === 0 && !submitting && (
             <div className="cmp-empty">
+              <div className="cmp-empty-orb" aria-hidden="true">
+                <AetherOrb state={orbStateFor(status)} size={112} quality="medium" interactive={false} compact />
+              </div>
               <h3>{t('cmpEmptyTitle')}</h3>
-              <p>{t('cmpEmptyHint')}</p>
               <button className="cmp-chip" onClick={() => submit(t('cmpSuggestion1'))}>{t('cmpSuggestion1')}</button>
               <button className="cmp-chip" onClick={() => submit(t('cmpSuggestion2'))}>{t('cmpSuggestion2')}</button>
               <button className="cmp-chip" onClick={doNotifications} data-testid="companion-chip-notifications">{t('cmpNotifications')}</button>
@@ -210,6 +229,7 @@ export function CompanionPanel({ runtime, language, t, follow, onToggleFollow, o
                 </div>
               )}
               {m.role === 'assistant' ? <MarkdownRenderer content={m.content} /> : m.content}
+              {m.role === 'assistant' && !m.errorCode && <Receipts message={m} t={t} notify={notify} />}
               {m.proposal && (
                 <div className="cmp-proposal" data-testid="companion-proposal">
                   <b>{t('cmpProposalTitle')}</b>

@@ -6276,6 +6276,7 @@ class PersonalChatPayload(BaseModel):
     authority: dict[str, Any] | None = None
     provider_id: str | None = None
     language: str | None = None  # active UI language (it/en) for fixed replies
+    send_unmasked: bool = False  # the user chose to send this request without masking sensitive identifiers
 
 
 class IntentRequestPayload(BaseModel):
@@ -6399,15 +6400,22 @@ async def personal_chat_route(request: Request, payload: PersonalChatPayload):
     from aether.personal.service import MissionCreationError
     from aether.core.language import reset_ui_language, set_ui_language
     _lang_token = set_ui_language(payload.language)
+    from aether.privacy.scope import egress_scope
     try:
-        msg = await asyncio.to_thread(
-            ws.personal.process_prompt,
-            workspace_id=ws_id,
-            prompt=payload.prompt,
-            session_id=payload.session_id,
-            authority=auth_obj,
-            provider_id=payload.provider_id,
-        )
+        try:
+            from aether.knowledge.screen_memory import screen_memory_for
+            await asyncio.to_thread(screen_memory_for(ws).sweep)  # expired screen memories never reach an answer
+        except Exception:  # noqa: BLE001
+            pass
+        with egress_scope(session_id=payload.session_id, purpose="chat", unmasked=payload.send_unmasked):
+            msg = await asyncio.to_thread(
+                ws.personal.process_prompt,
+                workspace_id=ws_id,
+                prompt=payload.prompt,
+                session_id=payload.session_id,
+                authority=auth_obj,
+                provider_id=payload.provider_id,
+            )
     except MissionCreationError as exc:
         # Honest and explicit: the request was understood but nothing was started because no mission could be recorded.
         raise HTTPException(status_code=500, detail=f"Delegation not started: {exc}")
@@ -6953,6 +6961,7 @@ class CompanionVisionPayload(BaseModel):
     workspace_id: str | None = None
     language: str | None = None
     annotate: bool = False
+    send_unmasked: bool = False
 
 
 @router.get("/personal/companion/vision/status")
@@ -6991,20 +7000,165 @@ async def companion_vision_route(request: Request, payload: CompanionVisionPaylo
     from aether.core.language import reset_ui_language, set_ui_language
 
     token = set_ui_language(payload.language)
+    from aether.privacy.scope import egress_scope
     try:
-        outcome = await asyncio.wait_for(
-            asyncio.to_thread(
-                analyze_screen, ws.personal, workspace_id=ws_id, prompt=payload.prompt, image=image,
-                session_id=payload.session_id, language=payload.language or "", annotate=payload.annotate,
-            ),
-            timeout=120,
-        )
+        with egress_scope(session_id=payload.session_id, purpose="vision", unmasked=payload.send_unmasked):
+            outcome = await asyncio.wait_for(
+                asyncio.to_thread(
+                    analyze_screen, ws.personal, workspace_id=ws_id, prompt=payload.prompt, image=image,
+                    session_id=payload.session_id, language=payload.language or "", annotate=payload.annotate,
+                ),
+                timeout=120,
+            )
     except asyncio.TimeoutError:
         return {"status": "failed", "reason": "timeout", "detail": "", "provider": "", "model": "", "message": None,
                 "annotations": [], "annotations_rejected": [], "annotation_requested": payload.annotate}
     finally:
         reset_ui_language(token)
     return outcome.to_dict()
+
+
+class PrivacySettingsPayload(BaseModel):
+    redact: bool | None = None
+
+
+class PrivacyPreviewPayload(BaseModel):
+    text: str
+
+
+def _privacy_ledger(request: Request):
+    ws = getattr(request.app.state, "workspace", None)
+    if not ws:
+        raise HTTPException(status_code=503, detail="Workspace not initialized.")
+    from aether.privacy.audit import ledger_for
+
+    ledger = ledger_for(ws)
+    if ledger is None:
+        raise HTTPException(status_code=503, detail="The egress ledger is unavailable.")
+    return ledger
+
+
+@router.get("/privacy/ledger")
+async def privacy_ledger_route(request: Request, limit: int = 100, session_id: str | None = None):
+    """What was sent to model providers (kinds and counts, never content), newest first."""
+    ledger = _privacy_ledger(request)
+    return {"entries": await asyncio.to_thread(ledger.list, limit, None, session_id)}
+
+
+@router.get("/privacy/summary")
+async def privacy_summary_route(request: Request, days: int = 7):
+    import time as _time
+
+    ledger = _privacy_ledger(request)
+    since = _time.time() - max(1, min(days, 365)) * 86400
+    return {"days": days, "summary": await asyncio.to_thread(ledger.summary, since), "settings": ledger.settings()}
+
+
+@router.get("/privacy/settings")
+async def privacy_settings_get_route(request: Request):
+    return _privacy_ledger(request).settings()
+
+
+@router.put("/privacy/settings")
+async def privacy_settings_put_route(request: Request, payload: PrivacySettingsPayload):
+    values = {k: v for k, v in payload.model_dump().items() if v is not None}
+    return _privacy_ledger(request).update_settings(**values)
+
+
+class ScreenRememberPayload(BaseModel):
+    image_base64: str
+    media_type: str | None = None
+    ttl_days: int = 7
+    hint: str = ""
+    language: str | None = None
+    workspace_id: str | None = None
+    send_unmasked: bool = False
+
+
+@router.post("/personal/companion/vision/remember")
+async def companion_vision_remember_route(request: Request, payload: ScreenRememberPayload):
+    """Keeps ONE previewed capture as a short local text note that expires (7 or 30 days). The image is not stored."""
+    ws = getattr(request.app.state, "workspace", None)
+    if not ws:
+        raise HTTPException(status_code=503, detail="Workspace not initialized.")
+    if payload.ttl_days not in (7, 30):
+        raise HTTPException(status_code=422, detail={"code": "bad_ttl", "message": "ttl_days must be 7 or 30"})
+    from aether.knowledge.screen_memory import screen_memory_for
+    from aether.privacy.scope import egress_scope
+    from aether.vision.image import ImageError, validate_image
+    from aether.vision.service import describe_screen_for_memory
+
+    try:
+        image = validate_image(payload.image_base64, payload.media_type)
+    except ImageError as err:
+        raise HTTPException(status_code=422, detail={"code": err.code, "message": str(err)}) from err
+    with egress_scope(purpose="screen_memory", unmasked=payload.send_unmasked):
+        outcome = await asyncio.to_thread(describe_screen_for_memory, ws.personal, image=image, language=payload.language or "", hint=payload.hint)
+    if outcome.status != "ok":
+        return outcome.to_dict()
+    mem = screen_memory_for(ws)
+    item = await asyncio.to_thread(
+        mem.remember, outcome.message["content"], ttl_days=payload.ttl_days, workspace_id=ws.id,
+        provider=outcome.provider, model=outcome.model,
+    )
+    return {"status": "ok", "item": item, "description": outcome.message["content"], "provider": outcome.provider, "model": outcome.model}
+
+
+@router.get("/screen-memory")
+async def screen_memory_list_route(request: Request):
+    ws = getattr(request.app.state, "workspace", None)
+    if not ws:
+        return {"items": []}
+    from aether.knowledge.screen_memory import screen_memory_for
+
+    return {"items": await asyncio.to_thread(screen_memory_for(ws).list)}
+
+
+@router.delete("/screen-memory/{memory_id}")
+async def screen_memory_forget_route(request: Request, memory_id: str):
+    ws = getattr(request.app.state, "workspace", None)
+    if not ws:
+        raise HTTPException(status_code=503, detail="Workspace not initialized.")
+    from aether.knowledge.screen_memory import screen_memory_for
+
+    result = await asyncio.to_thread(screen_memory_for(ws).forget, memory_id)
+    if result.get("reason") == "not_found":
+        raise HTTPException(status_code=404, detail="Screen memory not found.")
+    return result
+
+
+@router.get("/undo")
+async def undo_list_route(request: Request, limit: int = 50):
+    """What Aether did to your files, newest first, and whether each change can be undone (and why not)."""
+    ws = getattr(request.app.state, "workspace", None)
+    if not ws:
+        return {"items": []}
+    from aether.actions import undo as undo_mod
+
+    return {"items": await asyncio.to_thread(undo_mod.list_items, ws, ws.id, limit)}
+
+
+@router.post("/undo/{execution_id}")
+async def undo_apply_route(request: Request, execution_id: str):
+    ws = getattr(request.app.state, "workspace", None)
+    if not ws:
+        raise HTTPException(status_code=503, detail="Workspace not initialized.")
+    from aether.actions import undo as undo_mod
+
+    try:
+        return await asyncio.to_thread(undo_mod.undo, ws, execution_id)
+    except undo_mod.UndoError as exc:
+        status_code = 404 if exc.code == "not_found" else 409
+        raise HTTPException(status_code=status_code, detail={"code": exc.code, "message": str(exc)}) from exc
+
+
+@router.post("/privacy/preview")
+async def privacy_preview_route(payload: PrivacyPreviewPayload):
+    """What masking would do to this text, computed locally; nothing is sent anywhere."""
+    from aether.privacy.redaction import mask_text
+
+    masked, mapping = mask_text(payload.text[:20000])
+    return {"masked": masked, "counts": mapping.counts, "total": mapping.total}
 
 
 @router.post("/personal/companion/quick-action")

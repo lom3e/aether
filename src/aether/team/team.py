@@ -622,6 +622,21 @@ class Team:
                     except ValueError:
                         pass  # already registered
 
+    def _audited(self, provider: AIProvider | None) -> AIProvider | None:
+        """Records the agents' provider calls in the workspace egress ledger (and masks sensitive identifiers for cloud models)."""
+        if provider is None or not self.conversation_db_path:
+            return provider
+        try:
+            from pathlib import Path
+            from aether.privacy.audit import instrument_provider
+            from aether.privacy.ledger import EgressLedger
+            ledger = getattr(self, "_egress_ledger", None)
+            if ledger is None:
+                ledger = self._egress_ledger = EgressLedger(Path(self.conversation_db_path).parent / "privacy.db")
+            return instrument_provider(provider, ledger, self.workspace_id)
+        except Exception:  # noqa: BLE001 - never block an agent because auditing is unavailable
+            return provider
+
     def _provider_for(self, agent_config: AgentConfig) -> AIProvider | None:
         """Return the appropriate provider for this agent."""
         provider_name = agent_config.provider or self.config.default_provider
@@ -674,7 +689,7 @@ class Team:
                     api_key = os.environ.get(f"{provider_name.upper()}_API_KEY")
 
             p_config = ProviderConfig(model=model_name, api_key=api_key, timeout=timeout_val)
-            return self._provider_manager.get(provider_name, config=p_config)
+            return self._audited(self._provider_manager.get(provider_name, config=p_config))
         except Exception as e:
             if self.verbose:
                 print(f"[Team] Warning: could not resolve provider '{provider_name}' for agent '{agent_config.name}': {e}")

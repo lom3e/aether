@@ -79,7 +79,7 @@ class AssembledContext:
             "workspace_id": self.workspace_id,
             "purpose": self.purpose,
             "injected": [
-                {"tag": i.tag, "kind": i.kind, "ref": i.ref, "source": i.source, "trust": i.trust, "chars": len(i.content)}
+                {"tag": i.tag, "kind": i.kind, "ref": i.ref, "title": (i.title or "")[:90], "source": i.source, "trust": i.trust, "chars": len(i.content)}
                 for i in self.items
             ],
             "stats": dict(self.stats),

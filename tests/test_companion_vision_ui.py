@@ -300,3 +300,20 @@ def test_italian_ui(browser_context, workspace_ready):
     expect(page.get_by_test_id("vision-permission")).to_contain_text("Registrazione schermo", timeout=10000)
     expect(page.get_by_test_id("vision-capture-screen")).to_contain_text("Schermo intero")
     page.close()
+
+
+def test_remember_this_screen_sends_one_explicit_request_and_closes(browser_context, workspace_ready):
+    page = _open(browser_context, _stub())
+    _mock_vision(page)
+    kept: list = []
+    page.route("**/api/personal/companion/vision/remember", lambda r: (kept.append(json.loads(r.request.post_data or "{}")), r.fulfill(status=200, content_type="application/json", body=json.dumps({"status": "ok", "item": {"id": "scr-1"}})))[1])
+    page.get_by_test_id("companion-vision-open").click()
+    page.get_by_test_id("vision-capture-screen").click()
+    expect(page.get_by_test_id("vision-preview")).to_be_visible(timeout=10000)
+    assert kept == [], "nothing is kept until the user chooses a duration"
+    page.get_by_test_id("vision-remember-30").click()
+    expect(page.get_by_test_id("companion-vision")).to_have_count(0, timeout=10000)
+    assert len(kept) == 1 and kept[0]["ttl_days"] == 30
+    assert base64.b64decode(kept[0]["image_base64"])[:4] == b"\x89PNG"
+    assert not page._errors, page._errors
+    page.close()

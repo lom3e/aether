@@ -3446,6 +3446,22 @@ class PersonalAgentService:
 
         # 7. Record assistant message
         msg_metadata["intent_type"] = getattr(intent, "intent_type", "general")
+        # Receipts: which remembered things were really injected into this answer (not merely stored or searchable).
+        if intel_context is not None and "sources" not in msg_metadata:
+            try:
+                injected = []
+                for i in intel_context.trace().get("injected", []):
+                    if i.get("kind") == "history":
+                        continue
+                    ref = str(i.get("ref") or "")
+                    # Memory evidence is "hybrid_<memory id>": the real memory id is what can be forgotten later.
+                    if i.get("kind") == "memory" and ref.startswith("hybrid_"):
+                        i = {**i, "ref": ref[len("hybrid_"):], "forgettable": True}
+                    injected.append(i)
+                if injected:
+                    msg_metadata["sources"] = injected[:12]
+            except Exception:  # noqa: BLE001
+                pass
         assistant_msg = PersonalMessage(
             id=f"msg-{uuid.uuid4().hex[:12]}",
             session_id=session_id,

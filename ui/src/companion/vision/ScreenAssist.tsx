@@ -76,6 +76,7 @@ export function ScreenAssist({ runtime, language, t, onClose, notify }: Props) {
   const [prompt, setPrompt] = useState('');
   const [annotate, setAnnotate] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [remembering, setRemembering] = useState(false);
   const alive = useRef(true);
 
   useEffect(() => {
@@ -150,6 +151,31 @@ export function ScreenAssist({ runtime, language, t, onClose, notify }: Props) {
       setCapture({ platform: 'other', supported: false, permission: 'unsupported' });
     } else {
       setNote(t('cmpVisionCaptureFailed', { detail: r.detail }));
+    }
+  };
+
+  const remember = async (ttlDays: 7 | 30) => {
+    if (!image || remembering) return;
+    setRemembering(true);
+    let b64 = image.base64;
+    let mediaType = image.mediaType;
+    try {
+      if (marks.length > 0) {
+        b64 = stripDataUrl(await flattenToDataUrl(image.url, marks));
+        mediaType = 'image/png';
+      }
+      const r = await runtime.rememberImage({ imageBase64: b64, mediaType, ttlDays, language });
+      if (!alive.current) return;
+      if (r === 'ok') {
+        notify(t('cmpRememberDone', { days: ttlDays }), 'success');
+        onClose();
+      } else {
+        notify(t(r === 'unavailable' ? 'cmpRememberUnavailable' : 'cmpRememberFailed'), 'error');
+      }
+    } catch {
+      if (alive.current) notify(t('cmpRememberFailed'), 'error');
+    } finally {
+      if (alive.current) setRemembering(false);
     }
   };
 
@@ -265,6 +291,12 @@ export function ScreenAssist({ runtime, language, t, onClose, notify }: Props) {
               <input type="checkbox" checked={annotate} onChange={e => setAnnotate(e.target.checked)} disabled={phase === 'sending'} data-testid="vision-annotate" />
               <span>{t('cmpVisionAnnotate')}</span>
             </label>
+            <div className="cmp-vision-remember" data-testid="vision-remember">
+              <span>{t('cmpRememberLabel')}</span>
+              {([7, 30] as const).map(d => (
+                <button key={d} className="cmp-btn tiny" onClick={() => remember(d)} disabled={phase === 'sending' || remembering || !canAnalyse} data-testid={`vision-remember-${d}`}>{t('cmpRememberDays', { days: d })}</button>
+              ))}
+            </div>
             {sentTo && <p className="cmp-vision-hint" data-testid="vision-sent-to">{t('cmpVisionSentTo', { target: sentTo })}</p>}
             {phase === 'error' && error && <div className="cmp-banner" role="alert" data-testid="vision-error"><span>{error}</span></div>}
           </>

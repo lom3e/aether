@@ -39,7 +39,12 @@ export function CompanionApp() {
 
   // Sync with the native window: initial mode, later changes (shortcut, tray), and the stored follow preference.
   useEffect(() => {
-    getNativeState().then(s => s && setMode(s.mode));
+    getNativeState().then(s => {
+      if (!s) return;
+      setMode(s.mode);
+      // macOS gives the panel a native vibrant sheet: the page then draws it flat and translucent.
+      if (s.platform === 'macos') document.documentElement.classList.add('cmp-vibrant');
+    });
     setNativeFollow(follow);
     return onNativeModeChange(setMode);
     // eslint-disable-next-line react-hooks/exhaustive-deps

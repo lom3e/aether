@@ -18,6 +18,9 @@ export interface ChatMessage {
   errorCode?: string;
   /** A proposal the runtime attached to this reply. Accepting it is done in the main app (same session). */
   proposal?: { id: string; title: string; objective: string };
+  /** Receipts: what the runtime really injected into this answer, and what left the computer for it. */
+  sources?: AnswerSource[];
+  egress?: EgressSummary;
   /** A screenshot the user chose to share, kept in memory for this window only (never persisted), with any marks drawn on it. */
   vision?: { imageUrl: string; width: number; height: number; shapes: Shape[]; provider?: string; model?: string };
 }
@@ -45,6 +48,36 @@ export interface VisionRequest {
 export type VisionAnswer =
   | { status: 'ok'; provider: string; model: string; shapes: Shape[]; rejected: number }
   | { status: 'unavailable' | 'failed' | 'invalid_image' | 'unreachable' | 'no_workspace'; reason: string; detail: string; provider: string; model: string };
+
+export interface AnswerSource {
+  tag?: string;
+  kind: string;
+  ref: string;
+  title?: string;
+  source?: string;
+  trust?: string;
+  /** A memory record the user can remove from here (its id is the real memory id). */
+  forgettable?: boolean;
+}
+
+export interface EgressSummary {
+  ids?: string[];
+  requests: number;
+  local_only: boolean;
+  providers: string[];
+  models?: string[];
+  images: number;
+  redactions: Record<string, number>;
+  redactions_total: number;
+  unmasked?: boolean;
+}
+
+/** Receipts carried by a reply's metadata (both optional: background answers and older messages have none). */
+export function receiptsOf(metadata: any): { sources?: AnswerSource[]; egress?: EgressSummary } {
+  const sources = Array.isArray(metadata?.sources) && metadata.sources.length ? (metadata.sources as AnswerSource[]) : undefined;
+  const egress = metadata?.egress && typeof metadata.egress === 'object' ? (metadata.egress as EgressSummary) : undefined;
+  return { sources, egress };
+}
 
 export interface PendingApproval {
   id?: string;
@@ -147,6 +180,7 @@ export interface CompanionRuntime {
   checkNotifications: () => Promise<NotificationsSummary | null>;
   fetchVisionStatus: () => Promise<VisionStatus | null>;
   askAboutImage: (req: VisionRequest) => Promise<VisionAnswer>;
+  rememberImage: (req: { imageBase64: string; mediaType: string; ttlDays: 7 | 30; language: string }) => Promise<'ok' | 'unavailable' | 'failed'>;
   dismissProblem: () => void;
   setListening: (v: boolean) => void;
 }
@@ -289,6 +323,7 @@ export function useCompanionRuntime(): CompanionRuntime {
               createdAt: m.created_at || '',
               errorCode: m.metadata?.error_code,
               proposal: proposalOf(m.metadata),
+              ...receiptsOf(m.metadata),
             }));
           setMessages(restored);
         }
@@ -375,7 +410,7 @@ export function useCompanionRuntime(): CompanionRuntime {
         const errorCode: string | undefined = data.metadata?.error_code;
         setMessages(m => [
           ...m,
-          { id: data.id || `a-${Date.now()}`, role: 'assistant', content: data.content || '', createdAt: data.created_at || new Date().toISOString(), errorCode, proposal: proposalOf(data.metadata) },
+          { id: data.id || `a-${Date.now()}`, role: 'assistant', content: data.content || '', createdAt: data.created_at || new Date().toISOString(), errorCode, proposal: proposalOf(data.metadata), ...receiptsOf(data.metadata) },
         ]);
         if (errorCode) {
           setProblem({ kind: 'request', message: errorCode });
@@ -482,6 +517,26 @@ export function useCompanionRuntime(): CompanionRuntime {
     }
   }, []);
 
+  const rememberImage = useCallback(
+    async (req: { imageBase64: string; mediaType: string; ttlDays: 7 | 30; language: string }): Promise<'ok' | 'unavailable' | 'failed'> => {
+      try {
+        const ws = workspace || (await resolveWorkspace());
+        if (!ws) return 'failed';
+        const res = await fetch(apiUrl('/api/personal/companion/vision/remember'), {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ image_base64: req.imageBase64, media_type: req.mediaType, ttl_days: req.ttlDays, language: req.language, workspace_id: ws }),
+        });
+        if (!res.ok) return 'failed';
+        const d = await res.json();
+        return d.status === 'ok' ? 'ok' : d.status === 'unavailable' ? 'unavailable' : 'failed';
+      } catch {
+        return 'failed';
+      }
+    },
+    [workspace, resolveWorkspace],
+  );
+
   const askAboutImage = useCallback(
     async (req: VisionRequest): Promise<VisionAnswer> => {
       const fail = (status: 'unavailable' | 'failed' | 'invalid_image' | 'unreachable' | 'no_workspace', reason = '', detail = '', provider = '', model = ''): VisionAnswer => ({ status, reason, detail, provider, model });
@@ -521,7 +576,7 @@ export function useCompanionRuntime(): CompanionRuntime {
         setMessages(m => [
           ...m,
           { id: `u-${Date.now()}`, role: 'user', content: req.prompt, createdAt: now, vision: { ...vision, shapes: [] } },
-          { id: d.message.id || `a-${Date.now()}`, role: 'assistant', content: d.message.content || '', createdAt: d.message.created_at || now, vision: shapes.length ? { ...vision, shapes } : undefined },
+          { id: d.message.id || `a-${Date.now()}`, role: 'assistant', content: d.message.content || '', createdAt: d.message.created_at || now, vision: shapes.length ? { ...vision, shapes } : undefined, ...receiptsOf(d.message.metadata) },
         ]);
         pulseCompleted();
         fetchOverview(ws);
@@ -563,7 +618,7 @@ export function useCompanionRuntime(): CompanionRuntime {
 
   return {
     workspace, messages, approvals, tasks, missions, results, problem, submitting, status, decidingId,
-    send, retryLast, decide, newConversation, refresh, captureContext, attachFile, checkNotifications, fetchVisionStatus, askAboutImage,
+    send, retryLast, decide, newConversation, refresh, captureContext, attachFile, checkNotifications, fetchVisionStatus, askAboutImage, rememberImage,
     dismissProblem: () => setProblem(null),
     setListening,
   };

@@ -1041,9 +1041,11 @@ class ActionExecutor:
                         backup_path = history / f"{target_path.name}.{stamp}"
                         backup_path.write_text(previous, encoding="utf-8")
                 target_path.write_text(content, encoding="utf-8")
+                import hashlib as _hashlib
                 return {
                     "path": str(target_path),
                     "filename": filename,
+                    "sha256": _hashlib.sha256(content.encode("utf-8")).hexdigest(),  # lets "undo" refuse when the file changed since
                     "bytes": len(content.encode("utf-8")),
                     "status": "updated" if backup_path else "created",
                     **({"previous_version": str(backup_path)} if backup_path else {}),

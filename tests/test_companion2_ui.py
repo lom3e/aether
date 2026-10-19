@@ -60,6 +60,13 @@ def _open(context, mode: str | None = None, size=(408, 604), language: str = "en
     return page
 
 
+def _menu(page, testid: str):
+    """The header actions live in one overflow menu; opens it (if closed) and returns the item."""
+    if page.get_by_test_id("companion-menu-list").count() == 0:
+        page.get_by_test_id("companion-menu").click()
+    return page.get_by_test_id(testid)
+
+
 def test_panel_starts_ready_with_an_honest_empty_state(browser_context, workspace_ready):
     page = _open(browser_context)
     expect(page.get_by_test_id("companion-panel")).to_be_visible(timeout=15000)
@@ -113,7 +120,7 @@ def test_conversation_is_shared_with_the_main_assistant_session(browser_context,
     second = _open(browser_context)  # a fresh window restores the same session from the runtime
     expect(second.get_by_test_id("companion-msg-user").first).to_be_visible(timeout=15000)
     assert second.evaluate("localStorage.getItem('aether_active_session_id')") == sid
-    second.get_by_test_id("companion-new").click()
+    _menu(second, "companion-new").click()
     expect(second.get_by_test_id("companion-msg-user")).to_have_count(0)
     assert second.evaluate("localStorage.getItem('aether_active_session_id')") is None
     second.close()
@@ -136,7 +143,7 @@ def test_orb_panel_transitions_and_keyboard(browser_context, workspace_ready):
     expect(page.get_by_test_id("companion-orb")).to_be_visible()
     page.get_by_test_id("companion-orb").press("Enter")
     expect(page.get_by_test_id("companion-panel")).to_be_visible()
-    page.get_by_test_id("companion-collapse").click()
+    _menu(page, "companion-collapse").click()
     expect(page.get_by_test_id("companion-orb")).to_be_visible()
     page.close()
 
@@ -231,7 +238,7 @@ def test_panel_layout_has_no_horizontal_overflow(browser_context, workspace_read
     o = page.evaluate("({inner: window.innerWidth, doc: document.documentElement.scrollWidth, body: document.body.scrollWidth})")
     assert o["doc"] <= o["inner"] + 1 and o["body"] <= o["inner"] + 1, o
     # the header buttons and the input stay inside the window
-    for tid in ("companion-hide", "companion-send", "companion-input"):
+    for tid in ("companion-menu", "companion-send", "companion-input"):
         b = page.get_by_test_id(tid).bounding_box()
         assert b and b["x"] >= 0 and b["x"] + b["width"] <= size[0] + 1, (tid, b)
     page.close()
@@ -417,7 +424,7 @@ def test_dropping_a_file_shows_the_overlay_and_ingests_it(browser_context, works
 
 def test_notifications_quick_action_uses_the_real_runtime(browser_context, workspace_ready):
     page = _open(browser_context)
-    page.get_by_test_id("companion-notifications").click()
+    _menu(page, "companion-notifications").click()
     card = page.get_by_test_id("companion-notifications-card")
     expect(card).to_be_visible(timeout=15000)
     assert ("unread" in card.inner_text().lower())
@@ -428,7 +435,7 @@ def test_notifications_list_unread_items(browser_context, workspace_ready):
     page = _open(browser_context)
     _json_route(page, "**/api/personal/companion/quick-action", {"action": "check_notifications", "status": "completed", "unread_count": 2,
                                                                   "notifications": [{"id": "n1", "title": "Report ready", "message": "Weekly report is done"}, {"id": "n2", "title": "Approval needed", "message": ""}]})
-    page.get_by_test_id("companion-notifications").click()
+    _menu(page, "companion-notifications").click()
     card = page.get_by_test_id("companion-notifications-card")
     expect(card).to_contain_text("2 unread notifications")
     expect(card).to_contain_text("Report ready")
@@ -551,7 +558,7 @@ def test_layout_with_all_recovered_sections_stays_inside_the_window(browser_cont
     page.get_by_test_id("companion-results-toggle").click()
     o = page.evaluate("({inner: window.innerWidth, doc: document.documentElement.scrollWidth, ih: window.innerHeight, dh: document.documentElement.scrollHeight})")
     assert o["doc"] <= o["inner"] + 1, o
-    for tid in ("companion-input", "companion-send", "companion-attach", "companion-capture-context", "companion-hide"):
+    for tid in ("companion-input", "companion-send", "companion-attach", "companion-capture-context", "companion-menu"):
         b = page.get_by_test_id(tid).bounding_box()
         assert b and 0 <= b["x"] and b["x"] + b["width"] <= 409 and 0 <= b["y"] and b["y"] + b["height"] <= 605, (tid, b)
     page.screenshot(path=str(SHOTS / "companion2_full_sections.png"))

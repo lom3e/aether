@@ -373,6 +373,17 @@ class PersonalStore:
 
     def add_message(self, message: PersonalMessage) -> PersonalMessage:
         """Adds a message to a session."""
+        if message.role == "assistant":
+            # What left the computer while this reply was produced travels with the reply ("receipts"); only kinds and
+            # counts, never content. No scope (background work, tests) means nothing is added.
+            try:
+                from aether.privacy.scope import current_scope
+                scope = current_scope()
+                summary = scope.summary() if scope else None
+                if summary and "egress" not in (message.metadata or {}):
+                    message.metadata = {**(message.metadata or {}), "egress": summary}
+            except Exception:  # noqa: BLE001
+                pass
         existing_session = self.get_session(message.session_id)
         if not existing_session:
             snippet = (message.content or "").strip().split("\n")[0][:45].strip()

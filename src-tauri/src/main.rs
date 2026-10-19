@@ -863,6 +863,7 @@ fn main() {
             .shadow(false)
             .build()?;
 
+            companion::apply_chrome(&companion_window, companion::Mode::Panel);
             let companion_win_clone = companion_window.clone();
             companion_window.on_window_event(move |event| {
                 if let tauri::WindowEvent::CloseRequested { api, .. } = event {
