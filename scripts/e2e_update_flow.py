@@ -35,7 +35,7 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT / "scripts"))
 TAURI = ROOT / "ui" / "node_modules" / ".bin" / "tauri"
-OLD_V, NEW_V = "1.7.0", "1.7.1"
+OLD_V, NEW_V = "1.7.1", "1.7.2"
 results: list[tuple[str, bool, str]] = []
 
 

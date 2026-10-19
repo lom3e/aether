@@ -11,6 +11,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [v1.7.1] - 2026-10-19
+
+### Added
+- **Automatic updates are live for this build onwards**: the app looks for `latest.json` in the latest GitHub release (`plugins.updater.endpoints`), verifies the minisign signature bound to the version, and installs only on an explicit click (Settings → General → Updates). Versions up to 1.7.0 have no update endpoint: download 1.7.1 once by hand.
+
+### Fixed
+- The Home hub card "Automazioni" now follows the UI language.
+- The Companion input fits on one line (shorter placeholder, tighter tool buttons).
+
 ## [v1.7.0] - 2026-10-19
 
 ### Minor Release: Companion 2.0, screen understanding, reliable desktop app

@@ -33,7 +33,7 @@ class AetherMCPServer:
 
     PROTOCOL_VERSION = "2024-11-05"
     SERVER_NAME = "aether-mcp"
-    SERVER_VERSION = "1.7.0"
+    SERVER_VERSION = "1.7.1"
 
     def __init__(self, workspace: Workspace) -> None:
         if not workspace:

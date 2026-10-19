@@ -1,6 +1,6 @@
 # Aether Desktop — Signing, Notarization & Auto-Update
 
-**Status (2026-10-15):** the signed-update mechanism is **implemented and verified end to end against a local test server with a throwaway key**. It is **not live for users**: no update endpoint is configured, and Developer ID signing and notarization are blocked on Apple credentials. Check the live state with `python scripts/check_release_readiness.py`.
+**Status (2026-10-19):** the signed-update mechanism is **implemented, verified end to end against a local test server with a throwaway key**, and from v1.7.1 **configured to read `latest.json` from the latest GitHub release** (`https://github.com/lom3e/aether/releases/latest/download/latest.json`; every release must attach `latest.json`, the `.app.tar.gz` and its `.sig`). Builds up to 1.7.0 have no endpoint. Developer ID signing and notarization are still blocked on Apple credentials (updates work without them: the updater downloads and verifies the package itself). Check the live state with `python scripts/check_release_readiness.py`.
 
 ## 1. What exists and what was verified
 
