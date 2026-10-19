@@ -1,6 +1,7 @@
 import type { Copy } from "@/content/home";
 import { OrbCanvas } from "@/components/orb/OrbCanvas";
 import { DMG_URL } from "@/lib/site";
+import { PlatformText } from "./PlatformText";
 
 export function Hero({ c }: { c: Copy }) {
   return (
@@ -11,7 +12,7 @@ export function Hero({ c }: { c: Copy }) {
       <div className="ae-wrap ae-hero-copy">
         <h1 className="ae-h1">
           <span>{c.hero.l1}</span>
-          <span>{c.hero.l2}</span>
+          <span><PlatformText mac={c.hero.l2} pc={c.hero.l2Pc} /></span>
         </h1>
         <p className="ae-hero-sub">{c.hero.sub}</p>
         <div className="ae-hero-actions">

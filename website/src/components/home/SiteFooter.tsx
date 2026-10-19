@@ -3,6 +3,7 @@
 import Link from "next/link";
 import { useLanguage } from "@/lib/i18n/context";
 import { REPO_URL } from "@/lib/site";
+import { PlatformText } from "./PlatformText";
 
 export function SiteFooter() {
   const { lang, c } = useLanguage();
@@ -38,7 +39,7 @@ export function SiteFooter() {
           </div>
           <div>
             <h4>Aether</h4>
-            <p className="ae-p" style={{ fontSize: 16 }}>{f.tagline}</p>
+            <p className="ae-p" style={{ fontSize: 16 }}><PlatformText mac={f.tagline} pc={f.taglinePc} /></p>
           </div>
         </div>
         <div className="ae-foot-base">

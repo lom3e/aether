@@ -5,7 +5,7 @@
 export interface Copy {
   meta: { title: string; description: string; ogTitle: string };
   nav: { demo: string; screen: string; memory: string; teams: string; privacy: string; faq: string; download: string; builders: string };
-  hero: { l1: string; l2: string; sub: string; cta: string; secondary: string; note: string; orbLabel: string };
+  hero: { l1: string; l2: string; l2Pc: string; sub: string; cta: string; secondary: string; note: string; orbLabel: string };
   demo: {
     title: string;
     sub: string;
@@ -63,7 +63,7 @@ export interface Copy {
     free: string;
   };
   faq: { title: string; items: { q: string; a: string }[] };
-  footer: { tagline: string; product: string; project: string; legal: string; builders: string; about: string; privacy: string; cookies: string; cookieSettings: string; github: string; changelog: string; copy: string; built: string };
+  footer: { tagline: string; taglinePc: string; product: string; project: string; legal: string; builders: string; about: string; privacy: string; cookies: string; cookieSettings: string; github: string; changelog: string; copy: string; built: string };
 }
 
 export const it: Copy = {
@@ -77,6 +77,7 @@ export const it: Copy = {
   hero: {
     l1: "Il tuo assistente.",
     l2: "Sul tuo Mac.",
+    l2Pc: "Sul tuo PC.",
     sub: "Aether vive sul tuo computer. Guarda lo schermo solo quando glielo chiedi, ricorda quello che gli dici, impara quando lo correggi e chiede il tuo sì prima di agire.",
     cta: "Scarica per macOS",
     secondary: "Guardalo lavorare",
@@ -226,6 +227,7 @@ export const it: Copy = {
   },
   footer: {
     tagline: "Il tuo assistente. Sul tuo Mac.",
+    taglinePc: "Il tuo assistente. Sul tuo PC.",
     product: "Prodotto",
     project: "Progetto",
     legal: "Legale",
@@ -252,6 +254,7 @@ export const en: Copy = {
   hero: {
     l1: "Your assistant.",
     l2: "On your Mac.",
+    l2Pc: "On your PC.",
     sub: "Aether lives on your computer. It looks at your screen only when you ask, remembers what you tell it, learns when you correct it and asks your yes before it acts.",
     cta: "Download for macOS",
     secondary: "Watch it work",
@@ -401,6 +404,7 @@ export const en: Copy = {
   },
   footer: {
     tagline: "Your assistant. On your Mac.",
+    taglinePc: "Your assistant. On your PC.",
     product: "Product",
     project: "Project",
     legal: "Legal",
