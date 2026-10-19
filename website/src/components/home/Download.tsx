@@ -5,7 +5,7 @@ import { DMG_URL, REPO_URL, RELEASES_URL } from "@/lib/site";
 import { useGithubLatestRelease } from "@/lib/useGithubRelease";
 import { Heading, Rise } from "./Rise";
 
-export function Download({ c }: { c: Copy }) {
+export function Download({ c, lang }: { c: Copy; lang: string }) {
   const d = c.download;
   const { version } = useGithubLatestRelease();
   return (
@@ -21,7 +21,7 @@ export function Download({ c }: { c: Copy }) {
           <Rise as="p" i={3} className="ae-p" style={{ marginTop: 18 }}>{d.requirements} {d.free}</Rise>
           <Rise i={3} className="ae-row" style={{ marginTop: 22, gap: 22 }}>
             <a className="ae-link" href={REPO_URL}>{d.github}</a>
-            <a className="ae-link" href={`${REPO_URL}/blob/development/CHANGELOG.md`}>{d.changelog}</a>
+            <a className="ae-link" href={`/${lang}/changelog`}>{d.changelog}</a>
           </Rise>
         </div>
         <div>

@@ -37,9 +37,15 @@ export function OrbCanvas({ state = "idle", className = "", compact = false, sca
     engineRef.current = engine;
     let raf = 0;
     let visible = true;
+    // Phones: the big hero/footer orbs draw at ~30 fps so the main thread stays free for the page.
+    const slow = scale && window.matchMedia("(max-width: 760px)").matches;
+    let last = 0;
     let tabVisible = !document.hidden;
     const loop = (t: number) => {
-      if (visible && tabVisible) engine.render(t);
+      if (visible && tabVisible && (!slow || t - last > 33)) {
+        last = t;
+        engine.render(t);
+      }
       raf = requestAnimationFrame(loop);
     };
     raf = requestAnimationFrame(loop);

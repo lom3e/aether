@@ -45,7 +45,7 @@ export function Nav() {
           ))}
         </nav>
         <div className="ae-nav-tools">
-          <button className="ae-chip" onClick={() => setLang(lang === "it" ? "en" : "it")} aria-label={lang === "it" ? "Switch to English" : "Passa all'italiano"}>
+          <button className="ae-chip" onClick={() => setLang(lang === "it" ? "en" : "it")} aria-label={lang === "it" ? "EN, English" : "IT, Italiano"}>
             {lang === "it" ? "EN" : "IT"}
           </button>
           <button className="ae-chip" onClick={toggleTheme} aria-label={resolvedTheme === "dark" ? "Light theme" : "Dark theme"}>

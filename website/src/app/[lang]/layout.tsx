@@ -6,6 +6,7 @@ import "../site.css";
 import { LanguageProvider } from "@/lib/i18n/context";
 import { ThemeProvider } from "@/lib/theme-context";
 import { CookieConsent } from "@/components/CookieConsent";
+import { ConsentAnalytics } from "@/components/ConsentAnalytics";
 import { copy, isLang, LANGS } from "@/content/home";
 import { SITE_URL } from "@/lib/site";
 
@@ -60,6 +61,7 @@ export default async function RootLayout({ children, params }: { children: React
           <LanguageProvider lang={lang}>
             {children}
             <CookieConsent />
+            <ConsentAnalytics />
           </LanguageProvider>
         </ThemeProvider>
       </body>

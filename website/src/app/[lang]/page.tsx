@@ -42,7 +42,7 @@ export default async function HomePage({ params }: { params: Promise<{ lang: str
         <Teams c={c} />
         <Privacy c={c} />
         <Models c={c} />
-        <Download c={c} />
+        <Download c={c} lang={lang} />
         <Faq c={c} />
       </main>
       <SiteFooter />

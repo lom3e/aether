@@ -279,7 +279,7 @@ export class OrbEngine {
     this.qualityMode = options.quality || 'auto';
     this.activeProfileKey = this.resolveInitialQuality();
     this.profile = this.qualityProfiles[this.activeProfileKey];
-    this.particleCount = this.profile.particleCount * (this.scaleWithCanvas ? (this.activeProfileKey === 'low' ? 3 : 6) : 1);
+    this.particleCount = this.profile.particleCount * (this.scaleWithCanvas ? (this.activeProfileKey === 'low' ? 2 : 6) : 1);
 
     this.reducedMotion = options.reducedMotion !== undefined
       ? options.reducedMotion
@@ -325,7 +325,7 @@ export class OrbEngine {
     this.qualityMode = newQuality;
     this.activeProfileKey = this.resolveInitialQuality();
     this.profile = this.qualityProfiles[this.activeProfileKey];
-    this.particleCount = this.profile.particleCount * (this.scaleWithCanvas ? (this.activeProfileKey === 'low' ? 3 : 6) : 1);
+    this.particleCount = this.profile.particleCount * (this.scaleWithCanvas ? (this.activeProfileKey === 'low' ? 2 : 6) : 1);
     this.setupCanvas();
     this.initParticles();
   }

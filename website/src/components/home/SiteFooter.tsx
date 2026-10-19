@@ -15,26 +15,26 @@ export function SiteFooter() {
       <div className="ae-wrap">
         <div className="ae-foot-cols">
           <div>
-            <h4>{f.product}</h4>
+            <p className="ae-foot-h">{f.product}</p>
             <a href={`${base}#demo`}>{c.nav.demo}</a>
             <a href={`${base}#memory`}>{c.nav.memory}</a>
             <a href={`${base}#download`}>{c.nav.download}</a>
           </div>
           <div>
-            <h4>{f.project}</h4>
+            <p className="ae-foot-h">{f.project}</p>
             <Link href={`${base}/builders`}>{f.builders}</Link>
             <Link href={`${base}/about`}>{f.about}</Link>
             <a href={REPO_URL}>{f.github}</a>
-            <a href={`${REPO_URL}/blob/development/CHANGELOG.md`}>{f.changelog}</a>
+            <Link href={`/${lang}/changelog`}>{f.changelog}</Link>
           </div>
           <div>
-            <h4>{f.legal}</h4>
+            <p className="ae-foot-h">{f.legal}</p>
             <Link href={`${base}/privacy`}>{f.privacy}</Link>
             <Link href={`${base}/cookies`}>{f.cookies}</Link>
             <button onClick={() => window.dispatchEvent(new CustomEvent("aether-open-cookie-preferences"))}>{f.cookieSettings}</button>
           </div>
           <div>
-            <h4>Aether</h4>
+            <p className="ae-foot-h">Aether</p>
             <p className="ae-p" style={{ fontSize: 16 }}><PlatformText mac={f.tagline} pc={f.taglinePc} /></p>
           </div>
         </div>
