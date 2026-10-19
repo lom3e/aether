@@ -1,0 +1,28 @@
+.pv-page { flex: 1; display: flex; flex-direction: column; min-width: 0; overflow: hidden; }
+.pv-body { flex: 1; overflow-y: auto; padding: 8px 32px 48px; width: 100%; max-width: 720px; margin: 0 auto; }
+.pv-tabs { display: flex; gap: 4px; margin: 8px 0 24px; }
+.pv-tabs button { background: none; border: 0; color: hsl(var(--muted-fg)); font: inherit; font-size: 14px; padding: 6px 12px; border-radius: 999px; cursor: pointer; transition: background .2s, color .2s; }
+.pv-tabs button:hover { color: hsl(var(--fg)); }
+.pv-tabs button.on { background: hsl(var(--muted)); color: hsl(var(--fg)); }
+.pv-tabs button:focus-visible, .pv-link:focus-visible { outline: 2px solid hsl(var(--ring)); outline-offset: 2px; }
+.pv-lead { font-size: 22px; line-height: 1.35; letter-spacing: -0.02em; margin-bottom: 20px; }
+.pv-switch { display: flex; gap: 12px; align-items: flex-start; padding: 14px 0; margin-bottom: 8px; cursor: pointer; }
+.pv-switch input { margin-top: 4px; accent-color: hsl(var(--primary)); }
+.pv-switch strong { display: block; font-weight: 500; font-size: 14px; }
+.pv-switch small, .pv-main small { display: block; color: hsl(var(--muted-fg)); font-size: 12.5px; margin-top: 2px; }
+.pv-list { list-style: none; display: flex; flex-direction: column; }
+.pv-list li { display: flex; align-items: center; gap: 12px; padding: 11px 0; }
+.pv-list li + li { box-shadow: 0 -1px 0 hsl(var(--border) / .5); }
+.pv-main { flex: 1; min-width: 0; font-size: 14px; overflow-wrap: anywhere; }
+.pv-list time { color: hsl(var(--muted-fg)); font-size: 12px; white-space: nowrap; }
+.pv-dot { width: 8px; height: 8px; border-radius: 50%; flex: none; }
+.pv-dot.local { background: hsl(var(--success)); }
+.pv-dot.cloud { background: hsl(var(--primary)); }
+.pv-link { background: none; border: 0; color: hsl(var(--primary)); font: inherit; font-size: 13px; cursor: pointer; padding: 4px 8px; border-radius: 6px; }
+.pv-link:hover { background: hsl(var(--muted)); }
+.pv-group { margin-bottom: 28px; }
+.pv-group h3 { font-size: 13px; font-weight: 500; color: hsl(var(--muted-fg)); text-transform: capitalize; margin-bottom: 4px; }
+.pv-group h3 span { opacity: .6; margin-left: 4px; }
+.pv-empty, .pv-limits { color: hsl(var(--muted-fg)); font-size: 13.5px; line-height: 1.6; }
+.pv-limits { margin-top: 28px; }
+@media (max-width: 640px) { .pv-body { padding: 8px 16px 40px; } .pv-lead { font-size: 19px; } }

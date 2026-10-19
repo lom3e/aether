@@ -89,7 +89,7 @@ def test_01_personal_agent_companion_flow(browser_context):
     prompt_area.fill("Create a document named project_plan.md with key milestones")
 
     # Send prompt
-    page.locator("button:has-text('Take Care of It')").click()
+    page.locator("[data-testid='companion-submit-btn']").click()
 
     # 3. Wait for response and stepper
     page.wait_for_selector("text=Understanding intent", timeout=10000)
@@ -115,7 +115,7 @@ def test_02_action_safety_gating_flow(browser_context):
     prompt_area = page.locator("textarea[placeholder*='What would you like Aether to take care of']")
     prompt_area.fill("Schedule a meeting with the Architecture Team for Friday at 10am")
 
-    page.locator("button:has-text('Take Care of It')").click()
+    page.locator("[data-testid='companion-submit-btn']").click()
     page.wait_for_timeout(1500)
 
     # Verify confirmation banner / card
@@ -140,6 +140,8 @@ def test_03_connections_and_integrations_view(browser_context):
     _ensure_workspace(page)
 
     # Navigate to Connections
+    if not page.locator("[data-testid='nav-connections']").count():  # lives under the collapsed 'More' group
+        page.locator("[data-testid='nav-advanced']").click()
     page.locator("[data-testid='nav-connections']").click()
     page.wait_for_timeout(500)
 

@@ -1,0 +1,20 @@
+.home-hero { display: flex; flex-direction: column; align-items: center; gap: 10px; padding: 7vh 0 28px; text-align: center; }
+.home-greeting { font-size: clamp(28px, 4.2vw, 40px); font-weight: 600; letter-spacing: -0.035em; line-height: 1.1; }
+.home-quiet { background: none; border: 0; font: inherit; font-size: 13px; color: hsl(var(--primary)); cursor: pointer; padding: 4px 10px; border-radius: 999px; }
+.home-quiet:hover { background: hsl(var(--primary) / .1); }
+.home-composer { position: relative; max-width: 680px; margin: 0 auto; background: hsl(var(--card)); border-radius: 24px; padding: 16px 18px 12px; box-shadow: 0 0 0 1px hsl(var(--border) / .6), 0 12px 40px -18px hsl(var(--fg) / .25); transition: box-shadow .25s ease; }
+.home-composer:focus-within { box-shadow: 0 0 0 1px hsl(var(--primary) / .55), 0 0 0 5px hsl(var(--primary) / .12), 0 12px 40px -18px hsl(var(--fg) / .25); }
+.home-composer[data-listening='true'] { box-shadow: 0 0 0 1px hsl(0 72% 51% / .6), 0 0 0 5px hsl(0 72% 51% / .12); }
+.home-composer textarea { width: 100%; resize: none; border: 0; outline: 0; background: transparent; font: inherit; font-size: 16px; line-height: 1.5; color: hsl(var(--fg)); padding: 2px 0; }
+.home-composer-tools { display: flex; justify-content: flex-end; align-items: center; gap: 6px; margin-top: 4px; }
+.home-icon-btn, .home-send { width: 34px; height: 34px; border-radius: 50%; border: 0; display: inline-flex; align-items: center; justify-content: center; cursor: pointer; transition: background .2s, transform .15s, opacity .2s; }
+.home-icon-btn { background: transparent; color: hsl(var(--muted-fg)); }
+.home-icon-btn:hover { background: hsl(var(--muted)); color: hsl(var(--fg)); }
+.home-send { background: hsl(var(--primary)); color: hsl(var(--primary-fg)); }
+.home-send:hover:not(:disabled) { transform: scale(1.06); }
+.home-send:disabled { opacity: .3; cursor: default; }
+.home-icon-btn:focus-visible, .home-send:focus-visible, .home-suggestions button:focus-visible { outline: 2px solid hsl(var(--ring)); outline-offset: 2px; }
+.home-suggestions { display: flex; flex-wrap: wrap; justify-content: center; gap: 4px 6px; max-width: 680px; margin: 16px auto 40px; }
+.home-suggestions button { background: none; border: 0; font: inherit; font-size: 13.5px; color: hsl(var(--muted-fg)); padding: 6px 12px; border-radius: 999px; cursor: pointer; transition: background .2s, color .2s; }
+.home-suggestions button:hover { background: hsl(var(--muted)); color: hsl(var(--fg)); }
+@media (prefers-reduced-motion: reduce) { .home-composer, .home-send, .home-suggestions button { transition: none; } }

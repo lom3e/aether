@@ -32,7 +32,7 @@ export const tokens = {
   },
   typography: {
     fonts: {
-      sans: 'var(--font-sans, "Inter", -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif)',
+      sans: 'var(--font-sans, -apple-system, BlinkMacSystemFont, "SF Pro Text", "Segoe UI", system-ui, sans-serif)',
       mono: 'var(--font-mono, "JetBrains Mono", monospace)',
     },
     sizes: {

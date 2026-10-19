@@ -41,7 +41,7 @@ def _proposals():
 def _send(page, text):
     box = page.locator("textarea[placeholder*='What would you like Aether to take care of']")
     box.fill(text)
-    page.locator("button:has-text('Take Care of It')").click()
+    page.locator("[data-testid='companion-submit-btn']").click()
 
 
 def test_rejecting_a_proposal_is_stored_by_the_server(browser_context):

@@ -1,10 +1,10 @@
 import { useState, useEffect, useRef, useContext } from 'react';
 import {
-  Sparkles, MessageSquare, Users, Database, Settings, ShoppingBag,
+  Sparkles, MessageSquare, Users, Database, Settings,
   Plus, ChevronLeft, Moon, Sun, Globe, Trash2, Search,
   ChevronDown, ChevronRight, MoreVertical, Archive, Copy, Edit2, Check,
   Pin, Folder, GitBranch, ExternalLink, RefreshCw, X, Target,
-  Link2, Activity as ActivityIcon, Cpu, Clock, FileCheck
+  Link2, Activity as ActivityIcon, Cpu, Clock, FileCheck, ShieldCheck
 } from 'lucide-react';
 import { useTranslation } from './i18n';
 import { useTheme } from './theme';
@@ -62,9 +62,9 @@ export function Sidebar({
   const [advancedOpen, setAdvancedOpen] = useState<boolean>(() => {
     try {
       const saved = localStorage.getItem('aether_sidebar_advanced');
-      return saved !== 'false';
+      return saved === 'true';
     } catch {
-      return true;
+      return false;
     }
   });
 
@@ -648,44 +648,15 @@ export function Sidebar({
             <Tooltip content={t('seSwitchToAssistantV2ModeAether')} position={collapsed ? 'right' : 'top'}>
               <button
                 type="button"
-                className="btn"
                 data-testid="sidebar-switch-to-v2"
                 onClick={onSwitchToV2}
-                style={{
-                  width: '100%',
-                  display: 'flex',
-                  alignItems: 'center',
-                  justifyContent: collapsed ? 'center' : 'space-between',
-                  padding: collapsed ? '8px' : '7px 10px',
-                  borderRadius: '8px',
-                  background: 'linear-gradient(135deg, rgba(140, 92, 246, 0.16) 0%, rgba(99, 102, 241, 0.08) 100%)',
-                  border: '1px solid rgba(140, 92, 246, 0.35)',
-                  color: '#ede9fe',
-                  cursor: 'pointer',
-                  fontSize: '12px',
-                  fontWeight: 500,
-                  transition: 'all 0.18s ease',
-                  boxShadow: '0 2px 8px rgba(140, 92, 246, 0.12)'
-                }}
+                className="btn btn-ghost"
+                style={{ width: '100%', justifyContent: collapsed ? 'center' : 'flex-start', padding: '7px 8px', fontSize: '13px', gap: '8px' }}
               >
                 <div style={{ display: 'flex', alignItems: 'center', gap: '7px' }}>
-                  <Sparkles size={14} style={{ color: '#c4b5fd', flexShrink: 0 }} />
-                  {!collapsed && <span style={{ fontWeight: 600 }}>Assistant V2</span>}
+                  <Sparkles size={15} style={{ color: 'hsl(var(--primary))', flexShrink: 0 }} />
+                  {!collapsed && <span>Orb</span>}
                 </div>
-                {!collapsed && (
-                  <span style={{
-                    fontSize: '9px',
-                    textTransform: 'uppercase',
-                    letterSpacing: '0.08em',
-                    padding: '2px 5px',
-                    borderRadius: '4px',
-                    background: 'rgba(140, 92, 246, 0.3)',
-                    color: '#f5f3ff',
-                    fontWeight: 700
-                  }}>
-                    Orb
-                  </span>
-                )}
               </button>
             </Tooltip>
           )}
@@ -744,7 +715,7 @@ export function Sidebar({
           {/* Main Product Navigation — Unified Hierarchy */}
           <div>
             {!collapsed && (
-              <div style={{ fontSize: '10px', fontWeight: 600, color: 'hsl(var(--muted-fg))', padding: '2px 8px', textTransform: 'uppercase', letterSpacing: '0.05em' }}>
+              <div style={{ fontSize: '10px', color: 'hsl(var(--muted-fg))', padding: '2px 8px', fontWeight: 500 }}>
                 {t('workspace')}
               </div>
             )}
@@ -774,51 +745,27 @@ export function Sidebar({
               </button>
             </Tooltip>
 
-            <Tooltip content={t('navConnections') || 'Servizi'} position={collapsed ? 'right' : 'top'} disabled={!collapsed}>
+            <Tooltip content={t('navMemoryContext')} position={collapsed ? 'right' : 'top'} disabled={!collapsed}>
               <button
-                data-testid="nav-connections"
-                className={`btn btn-ghost ${currentView === 'connections' ? 'active' : ''}`}
+                data-testid="nav-memory"
+                className={`btn btn-ghost ${currentView === 'memory' || currentView === 'knowledge' || currentView === 'learning' ? 'active' : ''}`}
                 style={{ width: '100%', justifyContent: collapsed ? 'center' : 'flex-start', padding: '7px 8px', fontSize: '13px', marginTop: '2px' }}
-                onClick={() => onNavigate('connections')}
+                onClick={() => onNavigate('memory')}
               >
-                <Link2 size={15} />
-                {!collapsed && <span>{t('navConnections') || 'Servizi'}</span>}
+                <Database size={15} />
+                {!collapsed && <span>{t('navMemoryContext')}</span>}
               </button>
             </Tooltip>
 
-            <Tooltip content={t('navResultsTooltip')} position={collapsed ? 'right' : 'top'} disabled={!collapsed}>
+            <Tooltip content={t('navPrivacyTooltip')} position={collapsed ? 'right' : 'top'} disabled={!collapsed}>
               <button
-                data-testid="nav-results"
-                className={`btn btn-ghost ${currentView === 'results' || currentView === 'deliverables' ? 'active' : ''}`}
+                data-testid="nav-privacy"
+                className={`btn btn-ghost ${currentView === 'privacy' ? 'active' : ''}`}
                 style={{ width: '100%', justifyContent: collapsed ? 'center' : 'flex-start', padding: '7px 8px', fontSize: '13px', marginTop: '2px' }}
-                onClick={() => onNavigate('results')}
+                onClick={() => onNavigate('privacy')}
               >
-                <FileCheck size={15} />
-                {!collapsed && <span>{t('navResults')}</span>}
-              </button>
-            </Tooltip>
-
-            <Tooltip content={t('navWorkforce') || 'Assistenti'} position={collapsed ? 'right' : 'top'} disabled={!collapsed}>
-              <button
-                data-testid="nav-workforce"
-                className={`btn btn-ghost ${currentView === 'workforce' || currentView === 'agents' || currentView === 'teams' ? 'active' : ''}`}
-                style={{ width: '100%', justifyContent: collapsed ? 'center' : 'flex-start', padding: '7px 8px', fontSize: '13px', marginTop: '2px' }}
-                onClick={() => onNavigate('workforce')}
-              >
-                <Users size={15} />
-                {!collapsed && <span>{t('navWorkforce') || 'Assistenti'}</span>}
-              </button>
-            </Tooltip>
-
-            <Tooltip content={t('navAutomations') || 'Automazioni'} position={collapsed ? 'right' : 'top'} disabled={!collapsed}>
-              <button
-                data-testid="nav-automations"
-                className={`btn btn-ghost ${currentView === 'automations' ? 'active' : ''}`}
-                style={{ width: '100%', justifyContent: collapsed ? 'center' : 'flex-start', padding: '7px 8px', fontSize: '13px', marginTop: '2px' }}
-                onClick={() => onNavigate('automations')}
-              >
-                <Clock size={15} />
-                {!collapsed && <span>{t('navAutomations') || 'Automazioni'}</span>}
+                <ShieldCheck size={15} />
+                {!collapsed && <span>{t('navPrivacy')}</span>}
               </button>
             </Tooltip>
           </div>
@@ -850,9 +797,6 @@ export function Sidebar({
                   {advancedOpen ? <ChevronDown size={13} /> : <ChevronRight size={13} />}
                   <span>{t('navSystem')}</span>
                 </span>
-                <span className="badge" style={{ fontSize: '9px', padding: '1px 5px', opacity: 0.8 }}>
-                  {t('navSystemBadge')}
-                </span>
               </button>
             ) : (
               <div style={{ height: '1px', backgroundColor: 'hsl(var(--border)/0.5)', margin: '6px 4px' }} />
@@ -872,15 +816,51 @@ export function Sidebar({
                   </button>
                 </Tooltip>
 
-                <Tooltip content={t('navMemoryContext')} position={collapsed ? 'right' : 'top'} disabled={!collapsed}>
+                <Tooltip content={t('navConnections') || 'Servizi'} position={collapsed ? 'right' : 'top'} disabled={!collapsed}>
                   <button
-                    data-testid="nav-memory"
-                    className={`btn btn-ghost ${currentView === 'memory' || currentView === 'knowledge' || currentView === 'learning' ? 'active' : ''}`}
+                    data-testid="nav-connections"
+                    className={`btn btn-ghost ${currentView === 'connections' ? 'active' : ''}`}
                     style={{ width: '100%', justifyContent: collapsed ? 'center' : 'flex-start', padding: '6px 8px', fontSize: '12.5px' }}
-                    onClick={() => onNavigate('memory')}
+                    onClick={() => onNavigate('connections')}
                   >
-                    <Database size={14} />
-                    {!collapsed && <span>{t('navMemoryContext')}</span>}
+                    <Link2 size={14} />
+                    {!collapsed && <span>{t('navConnections') || 'Servizi'}</span>}
+                  </button>
+                </Tooltip>
+
+                <Tooltip content={t('navResultsTooltip')} position={collapsed ? 'right' : 'top'} disabled={!collapsed}>
+                  <button
+                    data-testid="nav-results"
+                    className={`btn btn-ghost ${currentView === 'results' || currentView === 'deliverables' ? 'active' : ''}`}
+                    style={{ width: '100%', justifyContent: collapsed ? 'center' : 'flex-start', padding: '6px 8px', fontSize: '12.5px' }}
+                    onClick={() => onNavigate('results')}
+                  >
+                    <FileCheck size={14} />
+                    {!collapsed && <span>{t('navResults')}</span>}
+                  </button>
+                </Tooltip>
+
+                <Tooltip content={t('navWorkforce') || 'Assistenti'} position={collapsed ? 'right' : 'top'} disabled={!collapsed}>
+                  <button
+                    data-testid="nav-workforce"
+                    className={`btn btn-ghost ${currentView === 'workforce' || currentView === 'agents' || currentView === 'teams' ? 'active' : ''}`}
+                    style={{ width: '100%', justifyContent: collapsed ? 'center' : 'flex-start', padding: '6px 8px', fontSize: '12.5px' }}
+                    onClick={() => onNavigate('workforce')}
+                  >
+                    <Users size={14} />
+                    {!collapsed && <span>{t('navWorkforce') || 'Assistenti'}</span>}
+                  </button>
+                </Tooltip>
+
+                <Tooltip content={t('navAutomations') || 'Automazioni'} position={collapsed ? 'right' : 'top'} disabled={!collapsed}>
+                  <button
+                    data-testid="nav-automations"
+                    className={`btn btn-ghost ${currentView === 'automations' ? 'active' : ''}`}
+                    style={{ width: '100%', justifyContent: collapsed ? 'center' : 'flex-start', padding: '6px 8px', fontSize: '12.5px' }}
+                    onClick={() => onNavigate('automations')}
+                  >
+                    <Clock size={14} />
+                    {!collapsed && <span>{t('navAutomations') || 'Automazioni'}</span>}
                   </button>
                 </Tooltip>
 
@@ -896,29 +876,29 @@ export function Sidebar({
                   </button>
                 </Tooltip>
 
-                {/* Compatibility alias elements for E2E tests */}
-                <div style={{ display: 'none' }}>
-                  <button data-testid="nav-work" onClick={() => onNavigate('missions')}>Work</button>
-                  <button data-testid="nav-deliverables" onClick={() => onNavigate('results')}>Deliverables</button>
-                  <button data-testid="nav-agents" onClick={() => onNavigate('agents')}>Agents</button>
-                  <button data-testid="nav-teams" onClick={() => onNavigate('teams')}>Teams</button>
-                  <button data-testid="nav-knowledge" onClick={() => onNavigate('knowledge')}>Knowledge</button>
-                  <button data-testid="nav-learning" onClick={() => onNavigate('learning')}>Learning</button>
-                  <button data-testid="nav-workflows" onClick={() => onNavigate('workflows')}>Workflows</button>
-                  <button data-testid="nav-content" onClick={() => onNavigate('content')}>Content</button>
-                  <button data-testid="nav-content-social" onClick={() => onNavigate('content')}>{t('szContentSocial')}</button>
-                  <button data-testid="nav-proactive" onClick={() => onNavigate('proactive')}>Proactive</button>
-                  <button data-testid="nav-marketplace" onClick={() => onNavigate('marketplace')}>Marketplace</button>
-                </div>
               </div>
             )}
+        {/* Compatibility alias elements for E2E tests */}
+        <div style={{ display: 'none' }}>
+          <button data-testid="nav-work" onClick={() => onNavigate('missions')}>Work</button>
+          <button data-testid="nav-deliverables" onClick={() => onNavigate('results')}>Deliverables</button>
+          <button data-testid="nav-agents" onClick={() => onNavigate('agents')}>Agents</button>
+          <button data-testid="nav-teams" onClick={() => onNavigate('teams')}>Teams</button>
+          <button data-testid="nav-knowledge" onClick={() => onNavigate('knowledge')}>Knowledge</button>
+          <button data-testid="nav-learning" onClick={() => onNavigate('learning')}>Learning</button>
+          <button data-testid="nav-workflows" onClick={() => onNavigate('workflows')}>Workflows</button>
+          <button data-testid="nav-content" onClick={() => onNavigate('content')}>Content</button>
+          <button data-testid="nav-content-social" onClick={() => onNavigate('content')}>{t('szContentSocial')}</button>
+          <button data-testid="nav-proactive" onClick={() => onNavigate('proactive')}>Proactive</button>
+          <button data-testid="nav-marketplace" onClick={() => onNavigate('marketplace')}>Marketplace</button>
+        </div>
           </div>
 
           {/* Projects Section */}
           <div ref={projectSectionRef}>
             {!collapsed && (
               <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '2px 8px', marginBottom: '4px' }}>
-                <span style={{ fontSize: '10px', fontWeight: 600, color: 'hsl(var(--muted-fg))', textTransform: 'uppercase', letterSpacing: '0.05em' }}>
+                <span style={{ fontSize: '10px', color: 'hsl(var(--muted-fg))', fontWeight: 500 }}>
                   {t('uiProjects')}
                 </span>
                 <Tooltip content={t('sidebarNewProject')} position="top">
@@ -1094,7 +1074,7 @@ export function Sidebar({
           <div ref={convMenuRef}>
             {!collapsed && (
               <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '2px 8px', marginBottom: '4px' }}>
-                <span style={{ fontSize: '10px', fontWeight: 600, color: 'hsl(var(--muted-fg))', textTransform: 'uppercase', letterSpacing: '0.05em' }}>
+                <span style={{ fontSize: '10px', color: 'hsl(var(--muted-fg))', fontWeight: 500 }}>
                   {showArchived ? t('archived') : t('navConversations')}
                 </span>
                 <button
@@ -1330,7 +1310,7 @@ export function Sidebar({
           {/* Platform Settings */}
           <div>
             {!collapsed && (
-              <div style={{ fontSize: '10px', fontWeight: 600, color: 'hsl(var(--muted-fg))', padding: '2px 8px', textTransform: 'uppercase', letterSpacing: '0.05em' }}>
+              <div style={{ fontSize: '10px', color: 'hsl(var(--muted-fg))', padding: '2px 8px', fontWeight: 500 }}>
                 {t('platform')}
               </div>
             )}
@@ -1347,16 +1327,6 @@ export function Sidebar({
                 </button>
               </Tooltip>
 
-              <Tooltip content={t('navMarketplace')} position={collapsed ? 'right' : 'top'} disabled={!collapsed}>
-                <button
-                  className={`btn btn-ghost ${currentView === 'marketplace' ? 'active' : ''}`}
-                  style={{ width: '100%', justifyContent: collapsed ? 'center' : 'flex-start', padding: '7px 8px', fontSize: '13px' }}
-                  onClick={() => onNavigate('marketplace')}
-                >
-                  <ShoppingBag size={15} />
-                  {!collapsed && <span>{t('navMarketplace')}</span>}
-                </button>
-              </Tooltip>
             </div>
           </div>
         </div>

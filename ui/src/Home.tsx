@@ -1,14 +1,15 @@
 import { useState, useEffect, useContext, useRef } from 'react';
 import { translateStepTitle } from './stepTitles';
 import {
-  Sparkles, Send, CheckCircle2, Clock, AlertTriangle, ArrowRight,
-  Plus, Calendar, FileText, Users, Activity, Check, X, Shield, RefreshCw,
+  Send, CheckCircle2, Clock, AlertTriangle, ArrowRight,
+  Plus, FileText, Check, X, Shield,
   Mic, MicOff, Volume2, VolumeX, ExternalLink, Loader2
 } from 'lucide-react';
 import { apiUrl } from './api';
 import { useTranslation } from './i18n';
 import { ToastContext } from './toast';
 import { AutoArchitectModal } from './AutoArchitectModal';
+import './home.css';
 import { TopHeader } from './TopHeader';
 import { NotificationCenter } from './NotificationCenter';
 import { submitApprovalDecision, approvalToastKind, approvalIsFinished, approvalIsInProgress } from './canonicalNotification';
@@ -48,7 +49,6 @@ export function Home({
   navigate,
   workspaceName,
   initialApprovalId,
-  onNewTask,
   onOpenWorkspaceModal,
 }: HomeProps) {
   const [promptInput, setPromptInput] = useState('');
@@ -612,176 +612,62 @@ export function Home({
   return (
     <div style={{ display: 'flex', flexDirection: 'column', width: '100%', minHeight: '100%' }}>
       <TopHeader
-        title="Personal AI Office"
-        subtitle={workspaceName}
-        icon={Sparkles}
-        actions={
-          <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-            <NotificationCenter workspaceName={workspaceName} onNavigate={navigate} />
-            <button
-              className="btn btn-ghost"
-              onClick={fetchOverview}
-              style={{ display: 'flex', alignItems: 'center', gap: '6px', fontSize: '13px' }}
-            >
-              <RefreshCw size={14} /> {t('connRefresh')}
-            </button>
-          </div>
-        }
+        title={workspaceName || 'Aether'}
+        actions={<NotificationCenter workspaceName={workspaceName} onNavigate={navigate} />}
       />
       <div style={{ padding: '32px 28px 64px 28px', maxWidth: '1080px', margin: '0 auto', width: '100%', boxSizing: 'border-box' }}>
-        {/* Top Hero Banner & Status */}
-        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '24px' }}>
-          <div>
-            <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
-              <h1 style={{ fontSize: '24px', fontWeight: 700, margin: 0, color: 'hsl(var(--fg))' }}>
-                {t('homeUiWhatDoYouNeedToday')}
-              </h1>
-              <span className="badge badge-primary" style={{ fontSize: '12px', padding: '2px 8px' }}>
-                {workspaceName}
-              </span>
-              {overview.pending_approvals?.length > 0 ? (
-                <span className="badge" style={{ backgroundColor: '#f59e0b20', color: '#f59e0b', border: '1px solid #f59e0b50', fontSize: '11px' }}>
-                  {overview.pending_approvals.length} {t('homeUiNeedsApproval')}
-                </span>
-              ) : overview.background_tasks?.some((t: any) => t.status === 'running') ? (
-                <span className="badge" style={{ backgroundColor: 'hsl(var(--primary)/0.15)', color: 'hsl(var(--primary))', fontSize: '11px' }}>
-                  {t('homeUiWorkInProgress')}
-                </span>
-              ) : (
-                <span className="badge" style={{ backgroundColor: '#10b98115', color: '#10b981', border: '1px solid #10b98130', fontSize: '11px' }}>
-                  {t('homeUiReadyToHelp')}
-                </span>
-              )}
-            </div>
-            <p style={{ margin: '6px 0 0', fontSize: '14px', color: 'hsl(var(--muted-fg))' }}>
-              {t('homeUiDescribeYourGoalOrAskAether')}
-            </p>
+        {/* Greeting + one composer. Everything else lives in the rail and the command palette. */}
+        <div className="home-hero">
+          <h1 className="home-greeting">{t('homeUiWhatDoYouNeedToday')}</h1>
+          {overview.pending_approvals?.length > 0 && (
+            <button type="button" className="home-quiet" onClick={() => navigate('home')} data-testid="home-approvals-hint">
+              {overview.pending_approvals.length} {t('homeUiNeedsApproval')}
+            </button>
+          )}
+        </div>
+
+        <div className="home-composer" data-listening={isListening ? 'true' : 'false'}>
+          <textarea
+            data-testid="companion-input-field"
+            rows={2}
+            placeholder={isListening ? t('homeUiListeningSpeakClearly') : t('homeUiWhatWouldYouLikeAetherTo')}
+            value={promptInput}
+            onChange={e => setPromptInput(e.target.value)}
+            onKeyDown={e => {
+              if (e.key === 'Enter' && !e.shiftKey) {
+                e.preventDefault();
+                handleSendPrompt(promptInput);
+              }
+            }}
+          />
+          <div className="home-composer-tools">
+            <button
+              type="button"
+              data-testid="voice-mic-btn"
+              onClick={toggleListening}
+              title={isListening ? t('homeUiStopListening') : t('homeUiVoiceInputClickToSpeak')}
+              aria-label={isListening ? t('homeUiStopListening') : t('homeUiVoiceInputClickToSpeak')}
+              className="home-icon-btn"
+            >
+              {isListening ? <MicOff size={17} /> : <Mic size={17} />}
+            </button>
+            <button
+              data-testid="companion-submit-btn"
+              className="home-send"
+              disabled={!promptInput.trim() || isSubmitting}
+              onClick={() => handleSendPrompt(promptInput)}
+              aria-label={isSubmitting ? t('homeUiProcessing') : t('homeUiTakeCareOfIt')}
+              title={isSubmitting ? t('homeUiProcessing') : t('homeUiTakeCareOfIt')}
+            >
+              <Send size={16} />
+            </button>
           </div>
         </div>
 
-        {/* 1. HERO COLLABORATOR PROMPT BOX (TOP PROMINENT INTERACTION) */}
-        <div className="card" style={{
-          padding: '24px',
-          borderRadius: '16px',
-          boxShadow: '0 8px 30px rgba(0,0,0,0.06)',
-          marginBottom: '28px',
-          border: '1px solid hsl(var(--primary)/0.2)',
-          backgroundColor: 'hsl(var(--card))',
-        }}>
-          <div style={{ display: 'flex', gap: '12px', alignItems: 'flex-start' }}>
-            <div style={{
-              width: '40px',
-              height: '40px',
-              borderRadius: '12px',
-              backgroundColor: isListening ? '#ef444420' : 'hsl(var(--primary)/0.15)',
-              color: isListening ? '#ef4444' : 'hsl(var(--primary))',
-              display: 'flex',
-              alignItems: 'center',
-              justifyContent: 'center',
-              flexShrink: 0,
-              transition: 'all 0.2s ease',
-            }}>
-              {isListening ? <Mic size={22} className="animate-pulse" /> : <Sparkles size={22} />}
-            </div>
-            <div style={{ flex: 1 }}>
-              <textarea
-                data-testid="companion-input-field"
-                className="input"
-                rows={2}
-                placeholder={isListening ? t('homeUiListeningSpeakClearly') : t('homeUiWhatWouldYouLikeAetherTo')}
-                value={promptInput}
-                onChange={e => setPromptInput(e.target.value)}
-                onKeyDown={e => {
-                  if (e.key === 'Enter' && !e.shiftKey) {
-                    e.preventDefault();
-                    handleSendPrompt(promptInput);
-                  }
-                }}
-                style={{ width: '100%', resize: 'none', fontSize: '14px', lineHeight: 1.5, border: 'none', outline: 'none', padding: '4px 0', background: 'transparent' }}
-              />
-              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginTop: '12px', paddingTop: '10px', borderTop: '1px solid hsl(var(--border)/0.5)', flexWrap: 'wrap', gap: '8px' }}>
-                {/* Suggestion Chips */}
-                <div style={{ display: 'flex', gap: '6px', flexWrap: 'wrap' }}>
-                  <button
-                    type="button"
-                    className="btn btn-ghost"
-                    onClick={() => handleSendPrompt(t('homeUiAetherGiveMeAStatusUpdate'))}
-                    style={{ fontSize: '12px', padding: '4px 10px', borderRadius: '12px', backgroundColor: 'hsl(var(--primary)/0.1)', color: 'hsl(var(--primary))', fontWeight: 600 }}
-                  >
-                    <Sparkles size={12} style={{ marginRight: '4px' }} /> {t('homeUiAetherHandleIt')}
-                  </button>
-                  <button
-                    type="button"
-                    className="btn btn-ghost"
-                    onClick={() => {
-                      if (onNewTask) onNewTask();
-                      else handleSendPrompt(t('homeUiNewTask'));
-                    }}
-                    style={{ fontSize: '12px', padding: '4px 10px', borderRadius: '12px', backgroundColor: 'hsl(var(--muted)/0.5)' }}
-                  >
-                    <Plus size={12} style={{ marginRight: '4px' }} /> {t('homeUiNewTask')}
-                  </button>
-                  <button
-                    type="button"
-                    className="btn btn-ghost"
-                    onClick={() => handleSendPrompt(t('homeUiCheckMyCalendarAppointmentsForTomorrow'))}
-                    style={{ fontSize: '12px', padding: '4px 10px', borderRadius: '12px', backgroundColor: 'hsl(var(--muted)/0.5)' }}
-                  >
-                    <Calendar size={12} style={{ marginRight: '4px' }} /> {t('homeUiCheckSchedule')}
-                  </button>
-                  <button
-                    type="button"
-                    className="btn btn-ghost"
-                    onClick={() => handleSendPrompt(t('homeUiCreateADocumentWithTheProject'))}
-                    style={{ fontSize: '12px', padding: '4px 10px', borderRadius: '12px', backgroundColor: 'hsl(var(--muted)/0.5)' }}
-                  >
-                    <FileText size={12} style={{ marginRight: '4px' }} /> {t('homeUiCreateDocument')}
-                  </button>
-                  <button
-                    type="button"
-                    className="btn btn-ghost"
-                    onClick={() => handleSendPrompt(t('homeUiDelegateToTheTeamAnalyzeThe'))}
-                    style={{ fontSize: '12px', padding: '4px 10px', borderRadius: '12px', backgroundColor: 'hsl(var(--muted)/0.5)' }}
-                  >
-                    <Users size={12} style={{ marginRight: '4px' }} /> {t('homeUiDelegateToTeam')}
-                  </button>
-                </div>
-
-                <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap', maxWidth: '100%' }}>
-                  {/* Push-to-Talk Microphone Button */}
-                  <button
-                    type="button"
-                    data-testid="voice-mic-btn"
-                    onClick={toggleListening}
-                    title={isListening ? t('homeUiStopListening') : t('homeUiVoiceInputClickToSpeak')}
-                    className={`btn ${isListening ? 'btn-danger' : 'btn-ghost'}`}
-                    style={{
-                      padding: '6px 10px',
-                      display: 'flex',
-                      alignItems: 'center',
-                      gap: '4px',
-                      fontSize: '13px',
-                      color: isListening ? '#ef4444' : undefined,
-                    }}
-                  >
-                    {isListening ? <MicOff size={16} /> : <Mic size={16} />}
-                    <span style={{ fontSize: '12px' }}>{isListening ? t('homeUiListening') : t('homeUiVoice')}</span>
-                  </button>
-
-                  <button
-                    data-testid="companion-submit-btn"
-                    className="btn btn-primary"
-                    disabled={!promptInput.trim() || isSubmitting}
-                    onClick={() => handleSendPrompt(promptInput)}
-                    style={{ padding: '6px 16px', display: 'flex', alignItems: 'center', gap: '6px', fontSize: '13px' }}
-                  >
-                    {isSubmitting ? t('homeUiProcessing') : t('homeUiTakeCareOfIt')}
-                    <Send size={14} />
-                  </button>
-                </div>
-              </div>
-            </div>
-          </div>
+        <div className="home-suggestions">
+          <button type="button" onClick={() => handleSendPrompt(t('homeUiAetherGiveMeAStatusUpdate'))}>{t('homeUiAetherHandleIt')}</button>
+          <button type="button" onClick={() => handleSendPrompt(t('homeUiCheckMyCalendarAppointmentsForTomorrow'))}>{t('homeUiCheckSchedule')}</button>
+          <button type="button" onClick={() => handleSendPrompt(t('homeUiCreateADocumentWithTheProject'))}>{t('homeUiCreateDocument')}</button>
         </div>
 
         {/* Live Conversation Stream (if any) */}
@@ -1223,81 +1109,6 @@ export function Home({
             </div>
           </div>
         )}
-
-        {/* 5. HUB SHORTCUTS: Lavori, Connessioni, Automazioni, Attività */}
-        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(min(220px, 100%), 1fr))', gap: '16px', marginBottom: '28px' }}>
-          {/* Lavori */}
-          <div
-            className="card"
-            style={{ padding: '18px', borderRadius: '12px', cursor: 'pointer' }}
-            onClick={() => navigate('missions')}
-          >
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '8px' }}>
-              <div style={{ display: 'flex', alignItems: 'center', gap: '8px', fontWeight: 600, fontSize: '14.5px' }}>
-                <Users size={17} color="hsl(var(--primary))" /> {t('homeCardWorkTitle')}
-              </div>
-              <ArrowRight size={15} color="hsl(var(--muted-fg))" />
-            </div>
-            <div style={{ fontSize: '12.5px', color: 'hsl(var(--muted-fg))' }}>
-              {overview.active_works?.length > 0 ? (
-                <span><strong>{overview.active_works.length}</strong> {t('homeUiActiveMissions')}</span>
-              ) : (
-                <span>{t('homeUiOngoingProjectsAndSupervisedTasks')}</span>
-              )}
-            </div>
-          </div>
-
-          {/* Servizi Collegati */}
-          <div
-            className="card"
-            style={{ padding: '18px', borderRadius: '12px', cursor: 'pointer' }}
-            onClick={() => navigate('connections')}
-          >
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '8px' }}>
-              <div style={{ display: 'flex', alignItems: 'center', gap: '8px', fontWeight: 600, fontSize: '14.5px' }}>
-                <Calendar size={17} color="#4285F4" /> {t('homeCardServicesTitle')}
-              </div>
-              <ArrowRight size={15} color="hsl(var(--muted-fg))" />
-            </div>
-            <div style={{ fontSize: '12.5px', color: 'hsl(var(--muted-fg))' }}>
-              <span><strong>{overview.connected_apps_count || 0}</strong> {t('homeUiAppsVerified')}</span>
-            </div>
-          </div>
-
-          {/* Automazioni */}
-          <div
-            className="card"
-            style={{ padding: '18px', borderRadius: '12px', cursor: 'pointer' }}
-            onClick={() => navigate('automations')}
-          >
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '8px' }}>
-              <div style={{ display: 'flex', alignItems: 'center', gap: '8px', fontWeight: 600, fontSize: '14.5px' }}>
-                <Clock size={17} color="#8b5cf6" /> {t('navAutomations')}
-              </div>
-              <ArrowRight size={15} color="hsl(var(--muted-fg))" />
-            </div>
-            <div style={{ fontSize: '12.5px', color: 'hsl(var(--muted-fg))' }}>
-              <span>{t('homeUiAutomaticSchedulesAndRecurringTasks')}</span>
-            </div>
-          </div>
-
-          {/* Cronologia Attività */}
-          <div
-            className="card"
-            style={{ padding: '18px', borderRadius: '12px', cursor: 'pointer' }}
-            onClick={() => navigate('activity')}
-          >
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '8px' }}>
-              <div style={{ display: 'flex', alignItems: 'center', gap: '8px', fontWeight: 600, fontSize: '14.5px' }}>
-                <Activity size={17} color="#10b981" /> {t('homeCardHistoryTitle')}
-              </div>
-              <ArrowRight size={15} color="hsl(var(--muted-fg))" />
-            </div>
-            <div style={{ fontSize: '12.5px', color: 'hsl(var(--muted-fg))' }}>
-              <span>{t('homeUiTransparentLogOfAllExecutedActions')}</span>
-            </div>
-          </div>
-        </div>
 
         {/* AutoArchitect Modal */}
         {isAutoArchitectOpen && (

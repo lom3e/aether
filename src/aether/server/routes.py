@@ -7104,6 +7104,37 @@ async def companion_vision_remember_route(request: Request, payload: ScreenRemem
     return {"status": "ok", "item": item, "description": outcome.message["content"], "provider": outcome.provider, "model": outcome.model}
 
 
+class SecondOpinionPayload(BaseModel):
+    question: str
+    context: str = ""
+    language: str | None = None
+    providers: list[str] | None = None
+
+
+@router.get("/personal/second-opinion/providers")
+async def second_opinion_providers_route(request: Request):
+    ws = getattr(request.app.state, "workspace", None)
+    if not ws:
+        raise HTTPException(status_code=503, detail="Workspace not initialized.")
+    from aether.personal.second_opinion import configured_provider_names
+
+    names = await asyncio.to_thread(configured_provider_names, ws)
+    return {"providers": names, "available": len(names) >= 2}
+
+
+@router.post("/personal/second-opinion")
+async def second_opinion_route(request: Request, payload: SecondOpinionPayload):
+    """The same question to up to three different configured models, with an agreement summary (a text comparison)."""
+    ws = getattr(request.app.state, "workspace", None)
+    if not ws:
+        raise HTTPException(status_code=503, detail="Workspace not initialized.")
+    if not payload.question.strip():
+        raise HTTPException(status_code=422, detail={"code": "empty_question", "message": "question is empty"})
+    from aether.personal.second_opinion import ask
+
+    return await asyncio.to_thread(ask, ws, payload.question[:8000], providers=payload.providers, context=payload.context[:8000], language=payload.language or "it")
+
+
 @router.get("/screen-memory")
 async def screen_memory_list_route(request: Request):
     ws = getattr(request.app.state, "workspace", None)

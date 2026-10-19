@@ -1,4 +1,5 @@
 import { useState, useEffect, useCallback, useContext } from 'react';
+import { Privacy } from './Privacy';
 import { Sidebar } from './Sidebar';
 import { Chat } from './Chat';
 import { Knowledge } from './Knowledge';
@@ -519,6 +520,7 @@ function MainApp() {
         {hasWorkspace && currentView === 'content' && <ContentRepurposing navigate={navigate} />}
         {hasWorkspace && currentView === 'proactive' && <ProactiveWatchersView />}
         {hasWorkspace && currentView === 'fabric' && <ExecutionFabricView />}
+        {hasWorkspace && currentView === 'privacy' && <Privacy />}
         {hasWorkspace && currentView === 'settings' && <Settings onWorkspaceSwitched={handleWorkspaceSwitched} />}
         {currentView === 'marketplace' && <Marketplace />}
       </div>
