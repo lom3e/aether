@@ -137,3 +137,5 @@ src-tauri/resources/
 
 # Raw design references
 Loghi Aether/
+.vercel
+.env*
