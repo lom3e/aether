@@ -42,8 +42,6 @@ export function CompanionApp() {
     getNativeState().then(s => {
       if (!s) return;
       setMode(s.mode);
-      // macOS gives the panel a native vibrant sheet: the page then draws it flat and translucent.
-      if (s.platform === 'macos') document.documentElement.classList.add('cmp-vibrant');
     });
     setNativeFollow(follow);
     return onNativeModeChange(setMode);

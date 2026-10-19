@@ -17,8 +17,6 @@ use serde::Serialize;
 use tauri::{AppHandle, LogicalSize, Manager, PhysicalPosition, State, WebviewWindow};
 #[cfg(target_os = "macos")]
 use tauri::utils::config::WindowEffectsConfig;
-#[cfg(target_os = "macos")]
-use tauri::window::{Effect, EffectState};
 
 pub const ORB_SIZE: f64 = 88.0;
 pub const PANEL_W: f64 = 408.0;
@@ -113,23 +111,14 @@ fn notify_mode(win: &WebviewWindow, mode: Mode) {
     ));
 }
 
-/// The panel is a vibrant (blurred, translucent) macOS sheet with a native shadow; the orb is plain transparent glass
-/// (a blurred square behind a round orb would look broken). Other platforms keep the solid CSS panel.
+/// No native shadow and no vibrancy: a blurred halo behind a rounded transparent window read as a smudge. Both modes are
+/// plain transparent glass; the page draws its own crisp, solid surface.
 pub fn apply_chrome(win: &WebviewWindow, mode: Mode) {
     #[cfg(target_os = "macos")]
     {
-        let _ = win.set_shadow(mode == Mode::Panel);
-        let effects = if mode == Mode::Panel {
-            Some(WindowEffectsConfig {
-                effects: vec![Effect::HudWindow],
-                state: Some(EffectState::Active),
-                radius: Some(26.0),
-                color: None,
-            })
-        } else {
-            None
-        };
-        let _ = win.set_effects(effects);
+        let _ = mode;
+        let _ = win.set_shadow(false);
+        let _ = win.set_effects(None::<WindowEffectsConfig>);
     }
     #[cfg(not(target_os = "macos"))]
     {

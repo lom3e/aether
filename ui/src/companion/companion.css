@@ -11,7 +11,7 @@ html.cmp-surface, html.cmp-surface body, html.cmp-surface #root { background: tr
 .cmp-orb { width: 100vw; height: 100vh; display: flex; align-items: center; justify-content: center; cursor: pointer; position: relative; }
 .cmp-orb-core { width: 68px; height: 68px; border-radius: 50%; position: relative; display: flex; align-items: center; justify-content: center;
   background: radial-gradient(circle at 50% 38%, hsl(240 8% 15%) 0%, hsl(240 8% 7%) 100%);
-  box-shadow: 0 8px 26px hsl(0 0% 0% / .5), 0 0 30px var(--cmp-glow, hsl(var(--cmp-accent) / .3));
+  box-shadow: inset 0 0 0 1px hsl(0 0% 100% / .1);
   transition: box-shadow .35s ease, transform .25s var(--ae-ease, ease); }
 .cmp-orb:hover .cmp-orb-core { transform: scale(1.07); }
 .cmp-orb:active .cmp-orb-core { transform: scale(.97); }
@@ -31,10 +31,10 @@ html.cmp-vibrant .cmp-shell { padding: 0; }
 html.cmp-vibrant .cmp-panel { background: hsl(var(--cmp-bg) / .42); -webkit-backdrop-filter: none; backdrop-filter: none; box-shadow: none; border-radius: 26px; }
 html.cmp-vibrant .cmp-vision { background: hsl(var(--cmp-bg) / .6); }
 html.cmp-vibrant .cmp-drop { background: hsl(var(--cmp-bg) / .8); }
-.cmp-shell { width: 100vw; height: 100vh; padding: 12px; box-sizing: border-box; }
+.cmp-shell { width: 100vw; height: 100vh; padding: 0; box-sizing: border-box; }
 .cmp-panel { position: relative; width: 100%; height: 100%; display: flex; flex-direction: column; overflow: hidden; border-radius: 26px;
-  background: hsl(var(--cmp-bg) / .84); -webkit-backdrop-filter: blur(34px) saturate(1.5); backdrop-filter: blur(34px) saturate(1.5);
-  box-shadow: 0 24px 60px hsl(0 0% 0% / .5), inset 0 0 0 1px hsl(0 0% 100% / .07); animation: cmp-in .28s cubic-bezier(.2,.8,.2,1); }
+  background: hsl(var(--cmp-bg) / .98);
+  box-shadow: inset 0 0 0 1px hsl(0 0% 100% / .09); animation: cmp-in .28s cubic-bezier(.2,.8,.2,1); }
 @keyframes cmp-in { from { opacity: 0; transform: scale(.97) translateY(8px); } to { opacity: 1; transform: none; } }
 .cmp-head { position: relative; display: flex; align-items: center; gap: 9px; padding: 14px 12px 6px 20px; cursor: grab; flex: none; }
 .cmp-head:active { cursor: grabbing; }

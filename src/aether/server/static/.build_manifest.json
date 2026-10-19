@@ -1,13 +1,13 @@
 {
   "manifest_version": "1.0",
-  "generated_at": "2026-10-19T22:41:56.437467+00:00",
+  "generated_at": "2026-10-19T22:57:40.058851+00:00",
   "source": "ui/dist",
   "target": "src/aether/server/static",
   "file_count": 13,
-  "total_bytes": 5627934,
+  "total_bytes": 5627694,
   "files": {
     "icon.png": "658495e9568c6f0258ab16b69755d7bba43cc0766c7748bf6e05f0b23cacdb2f",
-    "index.html": "def042102ce2c08418abcaec1089cc5da2215c65cbc4f94c8fb68ca62f2d54b0",
+    "index.html": "a193b1607b94645d44201ec7a5b60eb6a993bdbe5a26517a7cbacd81f6d19739",
     "logo.png": "658495e9568c6f0258ab16b69755d7bba43cc0766c7748bf6e05f0b23cacdb2f",
     "icons.svg": "b45fa506195cfcdef406ba9f0c77b36ddc1a7c224040926ec70abc2fdea7b93a",
     "favicon.svg": "5e49bf20d68aa517195aa596b7444eb0db060da2ade6598ad523182ebde42eac",
@@ -17,7 +17,7 @@
     "brand/logo_bianco.svg": "69c365adb03b0be08b407d48a2641ea6a05ae2bc87a61fdc04e678e1f3bd4ae7",
     "brand/logo_nero.svg": "57f24ea0a4fb899d494e9666a0d916103fcf9258ef77d80183c00e0341057285",
     "brand/favicon.svg": "5e49bf20d68aa517195aa596b7444eb0db060da2ade6598ad523182ebde42eac",
-    "assets/index-B73IdC5z.css": "d612b14e61626fa5ec2ff2b459b1539159373eb63655a3c9e7a836c7db1721fd",
-    "assets/index-CfJHBoVh.js": "27d9ffad42b44e322ad817cbb9286554aef043c6a464603e709ebba3c80bbdff"
+    "assets/index-CkRbvNxi.js": "b53752a6edf51afb0f481363543f997d4b89c79dcfbd95c1b6487513f13247e6",
+    "assets/index-BEVraUXp.css": "0f777de94817f61cb7d29db5f2fb81a39e863ef96a0025539125f136052e9bf9"
   }
 }
