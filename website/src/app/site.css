@@ -56,6 +56,7 @@
 
 /* ---------- hero: the giant cropped orb ---------- */
 .ae-hero { position: relative; min-height: 100svh; overflow: hidden; display: flex; align-items: center; background: var(--bg-page); }
+.ae-hero-orb-move { width: 100%; height: 100%; will-change: transform; }
 .ae-hero-orb { position: absolute; width: 124vh; height: 124vh; left: calc(78% - 62vh); top: calc(55% - 62vh); pointer-events: none; }
 .ae-orb { position: relative; width: 100%; height: 100%; }
 .ae-orb-canvas { width: 100%; height: 100%; display: block; }
@@ -204,20 +205,12 @@
 
 /* ---------- footer: the mark, built large ---------- */
 .ae-footer { padding: clamp(72px, 9vw, 130px) 0 28px; }
-.ae-mega { display: flex; align-items: flex-end; gap: 4px; height: clamp(120px, 24vw, 340px); }
-.ae-mega span { flex: 1; display: flex; align-items: flex-start; justify-content: center; border-radius: 22px; font-weight: 800; font-size: clamp(60px, 14vw, 210px); letter-spacing: -0.05em; line-height: 0.9; padding-top: 4%; overflow: hidden; }
-.ae-mega span:nth-child(1) { background: var(--ae-accent); color: var(--ae-accent-ink); height: 100%; }
-.ae-mega span:nth-child(2) { background: var(--ae-ink); color: var(--bg-page); height: 82%; }
-.ae-mega span:nth-child(3) { background: var(--ae-step-2); color: var(--ae-ink); height: 100%; }
-.ae-mega span:nth-child(4) { background: var(--ae-accent); color: var(--ae-accent-ink); height: 70%; }
-.ae-mega span:nth-child(5) { background: var(--ae-ink); color: var(--bg-page); height: 92%; }
-.ae-mega span:nth-child(6) { background: var(--ae-step-2); color: var(--ae-ink); height: 78%; }
 .ae-foot-cols { display: grid; grid-template-columns: repeat(4, 1fr); gap: 24px; margin-top: 56px; }
 .ae-foot-cols h4 { font-size: 15px; color: var(--ae-mute); font-weight: 650; margin-bottom: 12px; }
 .ae-foot-cols a, .ae-foot-cols button { display: block; background: none; border: 0; padding: 0; font: inherit; color: var(--ae-ink); text-align: left; text-decoration: none; font-size: 16px; line-height: 2; cursor: pointer; }
 .ae-foot-cols a:hover, .ae-foot-cols button:hover { text-decoration: underline; text-underline-offset: 4px; }
 .ae-foot-base { display: flex; justify-content: space-between; gap: 16px; flex-wrap: wrap; margin-top: 56px; font-size: 14.5px; color: var(--ae-mute); }
-@media (max-width: 760px) { .ae-foot-cols { grid-template-columns: 1fr 1fr; } .ae-mega span { border-radius: 14px; } }
+@media (max-width: 760px) { .ae-foot-cols { grid-template-columns: 1fr 1fr; } }
 
 /* ---------- reduced motion ---------- */
 @media (prefers-reduced-motion: reduce) {
@@ -232,8 +225,93 @@
 .ae-shots { display: grid; grid-template-columns: repeat(3, 1fr); gap: var(--ae-gap); margin-top: clamp(40px, 6vw, 72px); align-items: start; }
 .ae-shot-card { background: var(--ae-step-1); border-radius: calc(var(--ae-r) + 8px); padding: clamp(14px, 2vw, 24px); }
 .ae-shot-card.wide { grid-column: 1 / -1; }
-.ae-shot-frame { border-radius: var(--ae-r); overflow: hidden; display: flex; justify-content: center; }
+.ae-shot-frame { display: flex; justify-content: center; }
 .ae-shot-frame img { display: block; width: 100%; height: auto; }
 .ae-shot-card:not(.wide) .ae-shot-frame img { max-width: 330px; }
 .ae-shot-label { margin-top: 14px; display: flex; align-items: center; font-weight: 650; color: var(--ae-ink); font-size: 16px; }
 @media (max-width: 920px) { .ae-shots { grid-template-columns: 1fr; } }
+
+/* ================= motion ================= */
+/* hero headline: each line slides up out of a mask */
+.ae-line { display: block; overflow: hidden; padding-bottom: 0.12em; margin-bottom: -0.12em; }
+.ae-line > span { display: block; animation: ae-line-up 1s var(--ae-ease) both; }
+.ae-line.d1 > span { animation-delay: 140ms; }
+@keyframes ae-line-up { from { transform: translateY(105%); } to { transform: none; } }
+.ae-in-load { animation: ae-load-in 900ms var(--ae-ease) both; animation-delay: var(--d, 0ms); }
+@keyframes ae-load-in { from { opacity: 0; transform: translateY(18px); } to { opacity: 1; transform: none; } }
+
+/* headings: words rise one after the other */
+.js .ae-words .ae-w { display: inline-block; overflow: hidden; vertical-align: top; padding-bottom: 0.1em; margin-bottom: -0.1em; }
+.js .ae-words .ae-w > span { display: inline-block; transform: translateY(108%); transition: transform 800ms var(--ae-ease); transition-delay: calc(var(--k) * 70ms); }
+.js .ae-words.in .ae-w > span { transform: none; }
+
+/* wipe: the accent field opens like the orb, from the top centre */
+.js .ae-wipe { clip-path: circle(0% at 50% 0%); transition: clip-path 1200ms var(--ae-ease); }
+.js .ae-wipe.in { clip-path: circle(150% at 50% 0%); }
+.js .ae-wipe .ae-priv-col { opacity: 0; transform: translateY(24px); transition: opacity 700ms var(--ae-ease) 500ms, transform 700ms var(--ae-ease) 500ms; }
+.js .ae-wipe.in .ae-priv-col { opacity: 1; transform: none; }
+.js .ae-wipe.in .ae-priv-col:nth-child(2) { transition-delay: 620ms; } .js .ae-wipe.in .ae-priv-col:nth-child(3) { transition-delay: 740ms; }
+
+/* tiles and cards */
+.ae-tile, .ae-team, .ae-shot-card, .ae-small-tile, .ae-teams-wide { transition: transform 360ms var(--ae-ease), background-color 240ms; }
+.ae-tile:not(.acc):hover, .ae-team:hover, .ae-teams-wide:hover, .ae-small-tile:hover { transform: translateY(-5px); background-color: var(--ae-step-2); }
+.ae-tile.acc:hover { transform: translateY(-5px); }
+.ae-shot-card:hover { transform: translateY(-6px); }
+.ae-shot-frame img { transition: transform 700ms var(--ae-ease); }
+.ae-shot-card:hover .ae-shot-frame img { transform: scale(1.025); }
+.ae-bubble { animation: ae-float 6s ease-in-out infinite; } .ae-bubble.sm { animation-duration: 4.5s; }
+@keyframes ae-float { 0%,100% { transform: translateY(0); } 50% { transform: translateY(-8px); } }
+
+/* correction flow: the three rows arrive in sequence */
+.js .ae-flow div { opacity: 0; transform: translateX(-14px); transition: opacity 600ms var(--ae-ease), transform 600ms var(--ae-ease); }
+.js .in .ae-flow div, .js .ae-flow.in div { opacity: 1; transform: none; }
+.js .in .ae-flow div:nth-child(1) { transition-delay: 500ms; } .js .in .ae-flow div:nth-child(2) { transition-delay: 1100ms; } .js .in .ae-flow div:nth-child(3) { transition-delay: 1700ms; }
+
+/* demo and screen flow */
+.ae-pop { animation: ae-pop 420ms var(--ae-ease) both; }
+@keyframes ae-pop { from { opacity: 0; transform: translateY(10px) scale(0.97); } to { opacity: 1; transform: none; } }
+.ae-fade { animation: ae-fade 520ms var(--ae-ease) both; }
+@keyframes ae-fade { from { opacity: 0; transform: translateY(10px); } to { opacity: 1; transform: none; } }
+.ae-ui { animation: ae-fade 520ms var(--ae-ease) both; }
+.ae-draw { stroke-dasharray: 1; stroke-dashoffset: 1; animation: ae-draw 900ms 250ms var(--ae-ease) forwards; }
+@keyframes ae-draw { to { stroke-dashoffset: 0; } }
+.ae-caret { display: inline-block; width: 2px; height: 1em; margin-left: 2px; vertical-align: -0.12em; background: currentColor; animation: ae-blink 0.9s steps(1) infinite; }
+@keyframes ae-blink { 50% { opacity: 0 !important; } }
+.ae-sr { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
+.ae-choice { transition: transform 240ms var(--ae-ease); } .ae-choice:hover { transform: translateX(4px); }
+
+/* providers marquee */
+.ae-marquee { overflow: hidden; margin-top: 44px; }
+.ae-marquee-track { display: flex; width: max-content; animation: ae-marquee 34s linear infinite; }
+.ae-marquee:hover .ae-marquee-track { animation-play-state: paused; }
+.ae-marquee-set { display: flex; gap: var(--ae-gap); padding-right: var(--ae-gap); }
+.ae-marquee .ae-provider { white-space: nowrap; font-size: clamp(26px, 3.4vw, 52px); padding: 18px 38px; }
+@keyframes ae-marquee { to { transform: translateX(-50%); } }
+
+/* links and nav */
+.ae-link, .ae-nav-links a { background: linear-gradient(currentColor, currentColor) 0 100% / 0 2px no-repeat; transition: background-size 320ms var(--ae-ease); text-decoration: none !important; padding-bottom: 3px; }
+.ae-link { background-size: 100% 2px; } .ae-link:hover { background-size: 0 2px; background-position: 100% 100%; }
+.ae-nav-links a:hover { background-size: 100% 2px; }
+.ae-acc details[open] .ans { animation: ae-fade 420ms var(--ae-ease) both; }
+.ae-acc details { transition: background-color 300ms; }
+
+/* scroll-linked rise for the screenshots (Chrome and Safari 26+; elsewhere the plain entrance applies) */
+@supports (animation-timeline: view()) {
+  .ae-shot-card .ae-shot-frame { animation: ae-shot-rise linear both; animation-timeline: view(); animation-range: entry 0% cover 35%; }
+  @keyframes ae-shot-rise { from { transform: translateY(46px) scale(0.96); } to { transform: none; } }
+}
+
+/* footer: the orb rises from the bottom edge */
+.ae-footer { padding-bottom: 0; overflow: hidden; }
+.ae-foot-orb { position: relative; width: min(1100px, 130vw); aspect-ratio: 1; margin: clamp(32px, 6vw, 80px) auto 0; margin-bottom: calc(min(1100px, 130vw) * -0.62); pointer-events: none; }
+.ae-foot-word { position: absolute; left: 0; right: 0; top: 7%; text-align: center; font-weight: 800; font-size: clamp(64px, 15vw, 220px); letter-spacing: -0.05em; line-height: 1; color: var(--ae-ink); }
+.ae-foot-base { margin-top: 40px; }
+.ae-footer .ae-wrap { position: relative; z-index: 2; }
+
+@media (prefers-reduced-motion: reduce) {
+  .ae-line > span, .ae-in-load, .ae-pop, .ae-fade, .ae-ui, .ae-bubble, .ae-marquee-track { animation: none !important; }
+  .js .ae-words .ae-w > span, .js .ae-flow div, .js .ae-wipe .ae-priv-col { transform: none !important; opacity: 1 !important; transition: none !important; }
+  .js .ae-wipe { clip-path: none !important; transition: none !important; }
+  .ae-draw { animation: none; stroke-dashoffset: 0; }
+  .ae-shot-card .ae-shot-frame { animation: none !important; }
+}

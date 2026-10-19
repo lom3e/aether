@@ -1,10 +1,28 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState, useSyncExternalStore } from "react";
 import type { Copy } from "@/content/home";
 import { OrbCanvas } from "@/components/orb/OrbCanvas";
 import type { OrbState } from "@/components/orb/OrbEngine";
-import { Rise } from "./Rise";
+import { Heading, Rise } from "./Rise";
+
+const subscribeMotion = (cb: () => void) => {
+  const mq = window.matchMedia("(prefers-reduced-motion: reduce)");
+  mq.addEventListener("change", cb);
+  return () => mq.removeEventListener("change", cb);
+};
+
+function Typed({ text }: { text: string }) {
+  const reduced = useSyncExternalStore(subscribeMotion, () => window.matchMedia("(prefers-reduced-motion: reduce)").matches, () => false);
+  const [n, setN] = useState(0);
+  useEffect(() => {
+    if (reduced) return;
+    const id = window.setInterval(() => setN((v) => (v >= text.length ? v : v + 2)), 22);
+    return () => window.clearInterval(id);
+  }, [text, reduced]);
+  const shown = reduced ? text.length : n;
+  return <>{text.slice(0, shown)}<span className="ae-caret" aria-hidden="true" style={{ opacity: shown < text.length ? 1 : 0 }} /></>;
+}
 
 type Phase = "idle" | "working" | "needs-you" | "done" | "rejected";
 
@@ -35,7 +53,7 @@ export function CompanionDemo({ c }: { c: Copy }) {
     <section className="ae-section ae-demo" id="demo">
       <div className="ae-wrap ae-demo-grid">
         <div>
-          <Rise as="h2" className="ae-h2">{d.title}</Rise>
+          <Heading>{d.title}</Heading>
           <Rise as="p" i={1} className="ae-lead">{d.sub}</Rise>
           <Rise as="p" i={2} className="ae-demo-note">{d.note}</Rise>
         </div>
@@ -49,10 +67,10 @@ export function CompanionDemo({ c }: { c: Copy }) {
           </div>
           <div className="ae-panel" data-ui>
             <div className="ae-panel-title">Aether</div>
-            {sc && <div className="ae-msg user">{sc.ask}</div>}
+            {sc && <div className="ae-msg user ae-pop" key={`u${pick}`}>{sc.ask}</div>}
             {sc && phase === "working" && <div className="ae-msg work">{sc.working}</div>}
             {sc && phase === "needs-you" && sc.approval && (
-              <div className="ae-approval">
+              <div className="ae-approval ae-pop">
                 <b>{sc.approval.title}</b>
                 <small>{sc.approval.detail}</small>
                 <div className="ae-row">
@@ -61,7 +79,7 @@ export function CompanionDemo({ c }: { c: Copy }) {
                 </div>
               </div>
             )}
-            {sc && phase === "done" && <div className="ae-msg bot">{sc.done}</div>}
+            {sc && phase === "done" && <div className="ae-msg bot"><span className="ae-sr">{sc.done}</span><span aria-hidden="true"><Typed key={`t${pick}`} text={sc.done} /></span></div>}
             {sc && phase === "rejected" && <div className="ae-msg bot">{d.rejected}</div>}
             {(phase === "done" || phase === "rejected") && <div className="ae-row"><button className="ae-mini" onClick={reset}>{d.reset}</button></div>}
             {phase === "idle" && (

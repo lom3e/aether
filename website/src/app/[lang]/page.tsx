@@ -37,7 +37,7 @@ export default async function HomePage({ params }: { params: Promise<{ lang: str
         <Hero c={c} />
         <CompanionDemo c={c} />
         <ScreenFlow c={c} />
-        <RealApp c={c} />
+        <RealApp c={c} lang={lang} />
         <MemoryBoard c={c} />
         <Teams c={c} />
         <Privacy c={c} />

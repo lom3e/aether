@@ -1,12 +1,12 @@
 import type { Copy } from "@/content/home";
-import { Rise } from "./Rise";
+import { Heading, Rise } from "./Rise";
 
 export function MemoryBoard({ c }: { c: Copy }) {
   const m = c.memory;
   return (
     <section className="ae-section" id="memory">
       <div className="ae-wrap">
-        <Rise as="h2" className="ae-h2" style={{ maxWidth: "20ch" }}>{m.title}</Rise>
+        <Heading style={{ maxWidth: "20ch" }}>{m.title}</Heading>
         <Rise as="p" i={1} className="ae-lead">{m.sub}</Rise>
         <div className="ae-board">
           <Rise className="ae-tile s6 tall acc" i={0}>

@@ -1,11 +1,11 @@
 import type { Copy } from "@/content/home";
-import { Rise } from "./Rise";
+import { Heading, Rise } from "./Rise";
 
 export function Faq({ c }: { c: Copy }) {
   return (
     <section className="ae-section" id="faq">
       <div className="ae-wrap ae-faq-grid">
-        <Rise as="h2" className="ae-h2 ae-faq-title">{c.faq.title}</Rise>
+        <Heading className="ae-h2 ae-faq-title">{c.faq.title}</Heading>
         <div className="ae-acc">
           {c.faq.items.map((it, i) => (
             <Rise key={it.q} i={Math.min(i, 3)}>

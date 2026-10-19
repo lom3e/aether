@@ -4,6 +4,7 @@ import Link from "next/link";
 import { useLanguage } from "@/lib/i18n/context";
 import { REPO_URL } from "@/lib/site";
 import { PlatformText } from "./PlatformText";
+import { OrbCanvas } from "@/components/orb/OrbCanvas";
 
 export function SiteFooter() {
   const { lang, c } = useLanguage();
@@ -12,11 +13,6 @@ export function SiteFooter() {
   return (
     <footer className="ae-footer">
       <div className="ae-wrap">
-        <div className="ae-mega" aria-label="Aether" role="img">
-          {"AETHER".split("").map((ch, i) => (
-            <span key={i} aria-hidden="true">{ch}</span>
-          ))}
-        </div>
         <div className="ae-foot-cols">
           <div>
             <h4>{f.product}</h4>
@@ -46,6 +42,10 @@ export function SiteFooter() {
           <span>{f.copy}</span>
           <a href="https://lmlabs.it" style={{ color: "inherit" }}>{f.built}</a>
         </div>
+      </div>
+      <div className="ae-foot-orb" aria-hidden="true">
+        <OrbCanvas scale label="Aether" state="idle" />
+        <span className="ae-foot-word">Aether</span>
       </div>
     </footer>
   );

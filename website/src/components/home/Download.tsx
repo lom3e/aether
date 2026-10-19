@@ -3,7 +3,7 @@
 import type { Copy } from "@/content/home";
 import { DMG_URL, REPO_URL, RELEASES_URL } from "@/lib/site";
 import { useGithubLatestRelease } from "@/lib/useGithubRelease";
-import { Rise } from "./Rise";
+import { Heading, Rise } from "./Rise";
 
 export function Download({ c }: { c: Copy }) {
   const d = c.download;
@@ -12,7 +12,7 @@ export function Download({ c }: { c: Copy }) {
     <section className="ae-section ae-download" id="download">
       <div className="ae-wrap ae-dl-grid">
         <div>
-          <Rise as="h2" className="ae-h2">{d.title}</Rise>
+          <Heading>{d.title}</Heading>
           <Rise as="p" i={1} className="ae-lead">{d.sub}</Rise>
           <Rise i={2} className="ae-hero-actions">
             <a className="ae-btn" href={DMG_URL}>{d.button}</a>

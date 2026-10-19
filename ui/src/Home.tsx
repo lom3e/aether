@@ -1272,7 +1272,7 @@ export function Home({
           >
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '8px' }}>
               <div style={{ display: 'flex', alignItems: 'center', gap: '8px', fontWeight: 600, fontSize: '14.5px' }}>
-                <Clock size={17} color="#8b5cf6" /> Automazioni
+                <Clock size={17} color="#8b5cf6" /> {t('navAutomations')}
               </div>
               <ArrowRight size={15} color="hsl(var(--muted-fg))" />
             </div>

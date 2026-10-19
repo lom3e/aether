@@ -1,12 +1,12 @@
 import type { Copy } from "@/content/home";
-import { Rise } from "./Rise";
+import { Heading, Rise } from "./Rise";
 
 export function Teams({ c }: { c: Copy }) {
   const t = c.teams;
   return (
     <section className="ae-section" id="teams" style={{ paddingTop: 0 }}>
       <div className="ae-wrap">
-        <Rise as="h2" className="ae-h2" style={{ maxWidth: "20ch" }}>{t.title}</Rise>
+        <Heading style={{ maxWidth: "20ch" }}>{t.title}</Heading>
         <Rise as="p" i={1} className="ae-lead">{t.sub}</Rise>
         <div className="ae-teams-grid">
           {t.presets.map((p, i) => (
