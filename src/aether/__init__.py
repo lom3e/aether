@@ -6,6 +6,6 @@ from aether.planning.types import Goal, Observation
 from aether.errors import AetherError
 from aether.tools.decorator import tool
 
-__version__ = "1.7.1"
+__version__ = "1.8.0"
 
 __all__ = ["Agent", "Task", "Goal", "Observation", "AetherError", "tool", "__version__"]

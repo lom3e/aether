@@ -1,6 +1,6 @@
 [package]
 name = "aether-desktop"
-version = "1.7.1"
+version = "1.8.0"
 description = "Aether Desktop Application"
 edition = "2021"
 

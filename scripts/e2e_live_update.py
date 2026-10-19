@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Live update check: an older build (production public key, the REAL endpoint) updates itself from the latest GitHub release.
 
-    python scripts/e2e_live_update.py [--old-version 1.7.0] [--expect 1.7.1] [--keep]
+    python scripts/e2e_live_update.py [--old-version 1.7.1] [--expect 1.8.0] [--keep]
 
 Builds a test binary of --old-version (feature `updater-e2e`, which applies an update on start when AETHER_E2E_UPDATE=1),
 puts it into a copy of build/Aether.app, runs it with an isolated HOME and expects it to download, verify (production
@@ -29,7 +29,7 @@ ROOT = e2e.ROOT
 def main() -> int:
     ap = argparse.ArgumentParser()
     ap.add_argument("--old-version", default="1.7.0")
-    ap.add_argument("--expect", default="1.7.1")
+    ap.add_argument("--expect", default="1.8.0")
     ap.add_argument("--keep", action="store_true")
     a = ap.parse_args()
     conf = json.loads((ROOT / "src-tauri" / "tauri.conf.json").read_text())

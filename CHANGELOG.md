@@ -11,6 +11,24 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [v1.8.0] - 2026-10-20
+
+### Added
+- **Aether Minimal**: new design language. System font (no web font download), graphite/warm-white palette, a four-item rail (Home, Work, Memory, Privacy) with everything else under "More", a Home with one greeting and one central field, a quieter Orb header, and a translucent minimal Companion.
+- **Privacy screen**: *what leaves your computer* (a ledger of kinds and counts per request to a model, never the content), *what Aether knows* (memories by category and remembered screens, each with a verified "forget"), and *history* with undo.
+- **Masking before sending**: IBANs, cards, Italian tax codes, emails, phone numbers and API-key shapes are replaced by placeholders for cloud models and restored locally in the reply (on by default, switchable). Pattern-based: it can miss things.
+- **Answer receipts** in the Companion: which memories, documents and lessons an answer used and what left the computer; "forget" a memory or tell Aether the right answer.
+- **Undo of document writes** made by Aether (restores the previous version or removes a file it created); refused when the file changed afterwards.
+- **Remember this screen**: after a capture, keep a short text note for 7 or 30 days (never the image, never automatic).
+- **Hide an area** tool on captures: the area is pixelated before anything is sent.
+- **Second opinion**: ask the other configured models the same question and see whether they agree (text comparison, not a fact check). Offered only with two or more configured providers.
+
+### Changed
+- Sidebar secondary destinations moved under "More"; Home hub cards removed (reachable from the rail and the command palette).
+
+### Known limits
+- Not yet notarized; Apple Silicon only. Second opinion, masking and screen memory were verified with mock providers; no real cloud provider was available in testing.
+
 ## [v1.7.1] - 2026-10-19
 
 ### Added
