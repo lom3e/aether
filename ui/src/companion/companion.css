@@ -73,7 +73,10 @@ html.cmp-surface, html.cmp-surface body, html.cmp-surface #root { background: tr
 .cmp-banner { margin: 0 16px 8px; padding: 9px 12px; border-radius: 10px; font-size: 12.5px; line-height: 1.4; display: flex; gap: 10px; align-items: center; background: #f0616d18; border: 1px solid #f0616d66; }
 .cmp-banner button { margin-left: auto; flex: none; }
 .cmp-foot { padding: 10px 12px 12px; border-top: 1px solid hsl(var(--cmp-line) / .55); }
-.cmp-input-wrap { display: flex; align-items: flex-end; gap: 6px; background: hsl(var(--cmp-bg-2)); border: 1px solid hsl(var(--cmp-line) / .8); border-radius: 14px; padding: 6px 6px 6px 12px; transition: border-color .15s; }
+.cmp-input-wrap { display: flex; align-items: flex-end; gap: 6px; background: hsl(var(--cmp-bg-2)); border: 1px solid hsl(var(--cmp-line) / .8); border-radius: 14px; padding: 6px 6px 6px 8px; transition: border-color .15s; }
+.cmp-input-wrap { gap: 2px; }
+.cmp-input-wrap .cmp-iconbtn { width: 26px; height: 26px; flex: none; }
+.cmp-input-wrap .cmp-input { min-width: 0; margin-left: 4px; }
 .cmp-input-wrap:focus-within { border-color: hsl(var(--cmp-accent) / .8); }
 .cmp-input { flex: 1; resize: none; background: transparent; border: none; outline: none; color: hsl(var(--cmp-fg)); font: inherit; font-size: 13.5px; line-height: 1.45; max-height: 110px; padding: 5px 0; user-select: text; -webkit-user-select: text; }
 .cmp-input::placeholder { color: hsl(var(--cmp-dim)); }
