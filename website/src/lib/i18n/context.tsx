@@ -1,58 +1,41 @@
 "use client";
 
-import React, { createContext, useContext, useState } from "react";
+import React, { createContext, useContext } from "react";
+import { usePathname, useRouter } from "next/navigation";
 import { translations } from "./translations";
+import { copy, type Copy, type Lang } from "@/content/home";
 
-export type Language = "it" | "en";
+export type Language = Lang;
 
 interface LanguageContextType {
   lang: Language;
   setLang: (lang: Language) => void;
-  t: typeof translations.it;
+  /** Cookie-banner strings. */
+  t: (typeof translations)["it"];
+  /** Site copy for the active language. */
+  c: Copy;
 }
 
 const LanguageContext = createContext<LanguageContextType | undefined>(undefined);
 
-function getInitialLanguage(): Language {
-  if (typeof window === "undefined") return "it";
-  try {
-    const urlParams = new URLSearchParams(window.location.search);
-    const urlLang = urlParams.get("lang") as Language | null;
-    if (urlLang && (urlLang === "it" || urlLang === "en")) {
-      return urlLang;
-    }
+/** The language comes from the route (/it, /en): crawlers and people see the same thing. */
+export function LanguageProvider({ lang, children }: { lang: Language; children: React.ReactNode }) {
+  const router = useRouter();
+  const pathname = usePathname();
 
-    const saved = localStorage.getItem("aether_lang") as Language | null;
-    if (saved && (saved === "it" || saved === "en")) {
-      return saved;
-    }
-
-    return navigator.language.startsWith("it") ? "it" : "en";
-  } catch {
-    // ignore
-  }
-  return "it";
-}
-
-export function LanguageProvider({ children }: { children: React.ReactNode }) {
-  const [lang, setLangState] = useState<Language>(getInitialLanguage);
-
-  const setLang = (newLang: Language) => {
-    setLangState(newLang);
+  const setLang = (next: Language) => {
+    if (next === lang) return;
     try {
-      localStorage.setItem("aether_lang", newLang);
-      const url = new URL(window.location.href);
-      url.searchParams.set("lang", newLang);
-      window.history.replaceState({}, "", url.toString());
+      localStorage.setItem("aether_lang", next);
     } catch {
       // ignore
     }
+    const rest = pathname.replace(/^\/(it|en)(?=\/|$)/, "");
+    router.push(`/${next}${rest || ""}`);
   };
 
-  const t = translations[lang] || translations.it;
-
   return (
-    <LanguageContext.Provider value={{ lang, setLang, t }}>
+    <LanguageContext.Provider value={{ lang, setLang, t: translations[lang], c: copy[lang] }}>
       {children}
     </LanguageContext.Provider>
   );
@@ -60,12 +43,6 @@ export function LanguageProvider({ children }: { children: React.ReactNode }) {
 
 export function useLanguage(): LanguageContextType {
   const context = useContext(LanguageContext);
-  if (!context) {
-    return {
-      lang: "it",
-      setLang: () => {},
-      t: translations.it,
-    };
-  }
+  if (!context) return { lang: "it", setLang: () => {}, t: translations.it, c: copy.it };
   return context;
 }

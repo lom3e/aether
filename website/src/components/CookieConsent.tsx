@@ -30,6 +30,8 @@ export function CookieConsent() {
     marketing: false,
   });
 
+  /* Reads the stored consent after hydration; state cannot be initialised from localStorage during SSR. */
+  /* eslint-disable react-hooks/set-state-in-effect */
   useEffect(() => {
     setMounted(true);
     try {

@@ -15,7 +15,7 @@ interface ThemeContextType {
 const ThemeContext = createContext<ThemeContextType | undefined>(undefined);
 
 function getInitialTheme(): Theme {
-  if (typeof window === "undefined") return "light";
+  if (typeof window === "undefined") return "dark";
   try {
     const saved = localStorage.getItem("aether_theme") as Theme | null;
     if (saved && (saved === "light" || saved === "dark" || saved === "system")) {
@@ -24,11 +24,11 @@ function getInitialTheme(): Theme {
   } catch {
     // ignore
   }
-  return "light";
+  return "dark";
 }
 
 function resolveTheme(theme: Theme): ResolvedTheme {
-  if (typeof window === "undefined") return "light";
+  if (typeof window === "undefined") return "dark";
   if (theme === "system") {
     return window.matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light";
   }
