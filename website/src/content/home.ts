@@ -19,7 +19,7 @@ export interface Copy {
     states: Record<"idle" | "working" | "needs-you" | "done", string>;
     note: string;
   };
-  real: { title: string; sub: string; caption: string; shots: { alt: string; label: string }[] };
+  real: { title: string; sub: string; caption: string; video: { label: string; caption: string; play: string; pause: string }; shots: { alt: string; label: string }[] };
   screen: {
     title: string;
     sub: string;
@@ -126,6 +126,12 @@ export const it: Copy = {
     title: "Questo è Aether. Per davvero.",
     sub: "Schermate dell'app su Mac, non mockup.",
     caption: "Schermate reali, con un workspace di prova.",
+    video: {
+      label: "Registrazione dello schermo dell'app",
+      caption: "Il Companion si richiama, cattura un'area, mostra l'anteprima e l'utente disegna una freccia. Poi scarta: non viene inviato nulla.",
+      play: "Riproduci il video",
+      pause: "Metti in pausa il video",
+    },
     shots: [
       { alt: "La finestra principale di Aether con la richiesta «Di cosa hai bisogno oggi?»", label: "La finestra principale" },
       { alt: "Il Companion aperto, con le richieste suggerite", label: "Il Companion" },
@@ -315,6 +321,12 @@ export const en: Copy = {
     title: "This is Aether. For real.",
     sub: "Screenshots of the Mac app, not mockups.",
     caption: "Real screenshots, with a test workspace.",
+    video: {
+      label: "Screen recording of the app",
+      caption: "The Companion is summoned, captures an area, shows the preview and the user draws an arrow. Then they discard it: nothing is sent.",
+      play: "Play the video",
+      pause: "Pause the video",
+    },
     shots: [
       { alt: "Aether's main window with the prompt “What do you need today?”", label: "The main window" },
       { alt: "The Companion open, with suggested requests", label: "The Companion" },

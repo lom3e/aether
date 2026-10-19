@@ -1,6 +1,7 @@
 import Image from "next/image";
 import type { Copy } from "@/content/home";
 import { Heading, Rise } from "./Rise";
+import { AppVideo } from "./AppVideo";
 
 const FILES = [
   { name: "app-home.png", w: 2400, h: 1600 },
@@ -16,6 +17,9 @@ export function RealApp({ c, lang }: { c: Copy; lang: string }) {
       <div className="ae-wrap">
         <Heading style={{ maxWidth: "20ch" }}>{r.title}</Heading>
         <Rise as="p" i={1} className="ae-lead">{r.sub}</Rise>
+        <Rise i={2} className="ae-video-wrap">
+          <AppVideo src={`/video/companion-${lang}.mp4`} poster={`/video/companion-${lang}.jpg`} label={r.video.label} caption={r.video.caption} play={r.video.play} pause={r.video.pause} />
+        </Rise>
         <div className="ae-shots">
           {r.shots.map((s, i) => (
             <Rise key={s.label} i={Math.min(i, 3)} className={`ae-shot-card${i === 0 ? " wide" : ""}`}>
