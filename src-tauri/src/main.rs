@@ -114,7 +114,7 @@ fn get_runtime_info(state: State<RuntimeState>) -> Result<RuntimeInfo, String> {
         api_url: format!("http://127.0.0.1:{}", state.port),
         session_token: state.token.clone(),
         port: state.port,
-        version: "1.8.0".to_string(),
+        version: "1.8.1".to_string(),
         notifications_muted: state.notifications_muted.load(Ordering::Relaxed),
     })
 }

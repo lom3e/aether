@@ -11,6 +11,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [v1.8.1] - 2026-10-20
+
+### Fixed
+- The Companion no longer draws a blurred shadow or glow behind the panel and the small orb: no native shadow, no vibrancy, no halo. The panel and the orb are crisp solid surfaces.
+
 ## [v1.8.0] - 2026-10-20
 
 ### Added
