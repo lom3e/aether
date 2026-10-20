@@ -23,8 +23,16 @@ export interface ScreenRect {
 
 export type CaptureErrorCode = 'permission_denied' | 'cancelled' | 'capture_failed' | 'unsupported' | 'too_large';
 
+export interface OcrWord {
+  text: string;
+  x: number;
+  y: number;
+  w: number;
+  h: number;
+}
+
 export type CaptureResult =
-  | { ok: true; imageBase64: string; mediaType: string; width: number; height: number; mode: CaptureMode; screen: ScreenRect | null }
+  | { ok: true; imageBase64: string; mediaType: string; width: number; height: number; mode: CaptureMode; screen: ScreenRect | null; /** null: the local OCR was not available */ ocrWords: OcrWord[] | null }
   | { ok: false; error: CaptureErrorCode; detail: string };
 
 const UNSUPPORTED: CaptureStatus = { platform: 'other', supported: false, permission: 'unsupported' };
@@ -61,7 +69,7 @@ export async function takeCapture(mode: CaptureMode): Promise<CaptureResult> {
   try {
     const r = await invoke<any>('screen_capture_take', { mode });
     if (r?.ok && r.image_base64 && r.width > 0 && r.height > 0) {
-      return { ok: true, imageBase64: r.image_base64, mediaType: r.media_type || 'image/png', width: r.width, height: r.height, mode, screen: r.screen ?? null };
+      return { ok: true, imageBase64: r.image_base64, mediaType: r.media_type || 'image/png', width: r.width, height: r.height, mode, screen: r.screen ?? null, ocrWords: Array.isArray(r.ocr?.words) ? r.ocr.words : null };
     }
     const code = (r?.error as CaptureErrorCode) || 'capture_failed';
     return { ok: false, error: code, detail: String(r?.detail ?? '') };

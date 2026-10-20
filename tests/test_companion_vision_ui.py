@@ -353,3 +353,66 @@ def test_a_blurred_area_is_destroyed_in_the_image_that_is_sent(browser_context, 
     assert after_out == before_out, "outside the blurred area the image is untouched"
     assert after_in < before_in * 0.7, "inside it the original pixels are replaced"
     page.close()
+
+
+def _ocr_capture():
+    """A capture whose local OCR (stubbed; the real helper's output shape) found an IBAN in the middle of the image."""
+    words = [{"text": "Fattura", "x": 0.05, "y": 0.1, "w": 0.15, "h": 0.1},
+             {"text": "IT60X0542811101000000123456", "x": 0.25, "y": 0.45, "w": 0.5, "h": 0.1}]
+    return {"ok": True, "image_base64": _png_b64(), "media_type": "image/png", "width": 320, "height": 200,
+            "screen": {"x": 0, "y": 0, "width": 1440, "height": 900}, "ocr": {"width": 320, "height": 200, "words": words}}
+
+
+def _read_pixel(page, b64, fx, fy):
+    return page.evaluate("""async ([b64, fx, fy]) => {
+        const img = new Image(); img.src = 'data:image/png;base64,' + b64; await img.decode();
+        const c = document.createElement('canvas'); c.width = img.naturalWidth; c.height = img.naturalHeight;
+        const x = c.getContext('2d'); x.drawImage(img, 0, 0);
+        const d = x.getImageData(Math.floor(c.width * fx), Math.floor(c.height * fy), 1, 1).data; return d[0] + d[1] + d[2];
+    }""", [b64, fx, fy])
+
+
+def test_screen_shield_hides_sensitive_text_before_the_image_is_sent_and_can_be_shown(browser_context, workspace_ready):
+    # The OCR output is stubbed (the native helper is verified separately); the shield route is the real server's.
+    page = _open(browser_context, _stub(capture=_ocr_capture()))
+    sent: list = []
+    _mock_vision(page, reply=OK_REPLY, record=sent)
+    page.get_by_test_id("companion-vision-open").click()
+    page.get_by_test_id("vision-capture-screen").click()
+    expect(page.get_by_test_id("vision-preview")).to_be_visible(timeout=10000)
+    shield = page.get_by_test_id("vision-shield")
+    expect(shield).to_have_attribute("data-state", "hidden", timeout=10000)
+    expect(shield).to_contain_text("Hidden before sending: 1 area(s) (iban)")
+    expect(page.get_by_test_id("vision-mark-count")).to_have_text("", timeout=2000)  # automatic areas are not the user's marks
+    page.get_by_test_id("vision-prompt").fill("What is this?")
+    page.get_by_test_id("vision-send").click()
+    expect(page.get_by_test_id("companion-msg-assistant").last).to_contain_text("colour gradient", timeout=10000)
+    assert len(sent) == 1
+    before_in, before_out = _read_pixel(page, _png_b64(), 0.5, 0.5), _read_pixel(page, _png_b64(), 0.1, 0.9)
+    after_in, after_out = _read_pixel(page, sent[0]["image_base64"], 0.5, 0.5), _read_pixel(page, sent[0]["image_base64"], 0.1, 0.9)
+    assert after_out == before_out and after_in < before_in * 0.7, "the IBAN area is destroyed in the sent image, the rest is untouched"
+    page.close()
+
+    # "Show them" sends the image as it is.
+    page = _open(browser_context, _stub(capture=_ocr_capture()))
+    sent2: list = []
+    _mock_vision(page, reply=OK_REPLY, record=sent2)
+    page.get_by_test_id("companion-vision-open").click()
+    page.get_by_test_id("vision-capture-screen").click()
+    expect(page.get_by_test_id("vision-shield")).to_have_attribute("data-state", "hidden", timeout=10000)
+    page.get_by_test_id("vision-shield-show").click()
+    expect(page.get_by_test_id("vision-shield")).to_have_attribute("data-state", "shown")
+    page.get_by_test_id("vision-send").click()
+    expect(page.get_by_test_id("companion-msg-assistant").last).to_contain_text("colour gradient", timeout=10000)
+    assert sent2[0]["image_base64"] == _png_b64(), "nothing was changed when the user chose to send it as it is"
+    page.close()
+
+
+def test_without_local_ocr_the_user_is_told_nothing_was_hidden(browser_context, workspace_ready):
+    page = _open(browser_context, _stub())
+    _mock_vision(page, reply=OK_REPLY, record=[])
+    page.get_by_test_id("companion-vision-open").click()
+    page.get_by_test_id("vision-capture-screen").click()
+    expect(page.get_by_test_id("vision-shield")).to_have_attribute("data-state", "unavailable", timeout=10000)
+    expect(page.get_by_test_id("vision-shield")).to_contain_text("not available")
+    page.close()

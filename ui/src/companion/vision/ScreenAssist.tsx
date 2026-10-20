@@ -13,8 +13,10 @@ import { showMainWindow } from '../../desktop';
 import {
   getCaptureStatus, openCaptureSettings, requestCapturePermission, takeCapture,
   type CaptureMode, type CaptureResult, type CaptureStatus,
+  type OcrWord,
 } from './captureBridge';
 import { flattenToDataUrl, stripDataUrl, type Shape, type Tool } from './annotations';
+import { apiUrl } from '../../api';
 import { AnnotationEditor } from './AnnotatedImage';
 
 type T = (key: TranslationKey, params?: Record<string, string | number>) => string;
@@ -78,6 +80,8 @@ export function ScreenAssist({ runtime, language, t, onClose, notify }: Props) {
   const [annotate, setAnnotate] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [remembering, setRemembering] = useState(false);
+  // Screen Shield: null = not run / local OCR unavailable; otherwise what was hidden automatically.
+  const [shield, setShield] = useState<{ total: number; kinds: string[]; ran: boolean; off: boolean } | null>(null);
   const alive = useRef(true);
 
   useEffect(() => {
@@ -112,6 +116,7 @@ export function ScreenAssist({ runtime, language, t, onClose, notify }: Props) {
     return () => window.removeEventListener('keydown', onKey, true);
   }, [phase, onClose]);
 
+  const userMarks = marks.filter(x => x.source === 'user');
   const canAnalyse = !!vision?.supported;
   const platformOk = !!capture?.supported;
   const permission = capture?.permission;
@@ -137,7 +142,9 @@ export function ScreenAssist({ runtime, language, t, onClose, notify }: Props) {
     if (r.ok) {
       setImage({ url: `data:${r.mediaType};base64,${r.imageBase64}`, base64: r.imageBase64, mediaType: r.mediaType, width: r.width, height: r.height });
       setMarks([]);
+      setShield(null);
       setPhase('review');
+      void runShield(r.ocrWords);
       return;
     }
     setPhase('choose');
@@ -153,6 +160,30 @@ export function ScreenAssist({ runtime, language, t, onClose, notify }: Props) {
     } else {
       setNote(t('cmpVisionCaptureFailed', { detail: r.detail }));
     }
+  };
+
+  /** Local OCR words -> regions with sensitive data -> pixelated before anything is sent. Never blocks the review. */
+  const runShield = async (words: OcrWord[] | null) => {
+    if (!words) {
+      setShield({ total: 0, kinds: [], ran: false, off: false });
+      return;
+    }
+    try {
+      const res = await fetch(apiUrl('/api/privacy/screen-shield'), { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ words }) });
+      if (!res.ok) throw new Error(String(res.status));
+      const d = await res.json();
+      if (!alive.current) return;
+      const regions: { x: number; y: number; w: number; h: number; kind: string }[] = d.regions || [];
+      setMarks(m => [...m.filter(x => x.source !== 'auto'), ...regions.map(g => ({ kind: 'blur' as const, x: g.x, y: g.y, w: g.w, h: g.h, label: g.kind, source: 'auto' as const }))]);
+      setShield({ total: regions.length, kinds: Object.keys(d.counts || {}), ran: true, off: false });
+    } catch {
+      if (alive.current) setShield({ total: 0, kinds: [], ran: false, off: false });
+    }
+  };
+
+  const showHidden = () => {
+    setMarks(m => m.filter(x => x.source !== 'auto'));
+    setShield(s => (s ? { ...s, off: true } : s));
   };
 
   const remember = async (ttlDays: 7 | 30) => {
@@ -277,14 +308,20 @@ export function ScreenAssist({ runtime, language, t, onClose, notify }: Props) {
           <>
             <h4 className="cmp-vision-sub">{t('cmpVisionPreviewTitle')}</h4>
             <AnnotationEditor imageUrl={image.url} alt={t('cmpVisionImageAlt')} width={image.width} height={image.height} tool={tool} shapes={marks} onAdd={s => setMarks(m => [...m, s])} />
+            {shield && (
+              <div className="cmp-shield" data-testid="vision-shield" data-state={shield.ran ? (shield.off ? 'shown' : shield.total ? 'hidden' : 'clean') : 'unavailable'}>
+                {!shield.ran ? t('cmpShieldUnavailable') : shield.off ? t('cmpShieldShown') : shield.total > 0 ? t('cmpShieldHidden', { count: shield.total, kinds: shield.kinds.join(', ') }) : t('cmpShieldClean')}
+                {shield.ran && !shield.off && shield.total > 0 && <button className="cmp-link" onClick={showHidden} data-testid="vision-shield-show">{t('cmpShieldShow')}</button>}
+              </div>
+            )}
             <div className="cmp-tools" role="toolbar" aria-label={t('cmpVisionMarksHint')}>
               {TOOLS.map(({ id, icon: Icon, key }) => (
                 <button key={id} className="cmp-iconbtn" aria-pressed={tool === id} title={t(key)} onClick={() => setTool(id)} data-testid={`vision-tool-${id}`}><Icon size={15} /></button>
               ))}
-              <button className="cmp-iconbtn" title={t('cmpVisionUndo')} disabled={marks.length === 0} onClick={() => setMarks(m => m.slice(0, -1))} data-testid="vision-undo"><Undo2 size={15} /></button>
-              <button className="cmp-btn tiny" disabled={marks.length === 0} onClick={() => setMarks([])} data-testid="vision-clear">{t('cmpVisionClear')}</button>
+              <button className="cmp-iconbtn" title={t('cmpVisionUndo')} disabled={userMarks.length === 0} onClick={() => setMarks(m => { const i = m.map(x => x.source).lastIndexOf('user'); return i < 0 ? m : m.filter((_, j) => j !== i); })} data-testid="vision-undo"><Undo2 size={15} /></button>
+              <button className="cmp-btn tiny" disabled={userMarks.length === 0} onClick={() => setMarks(m => m.filter(x => x.source === 'auto'))} data-testid="vision-clear">{t('cmpVisionClear')}</button>
               <span className="cmp-spacer" />
-              <span className="cmp-vision-count" data-testid="vision-mark-count">{marks.length > 0 ? t('cmpVisionMarkCount', { count: marks.length }) : ''}</span>
+              <span className="cmp-vision-count" data-testid="vision-mark-count">{userMarks.length > 0 ? t('cmpVisionMarkCount', { count: userMarks.length }) : ''}</span>
             </div>
             <p className="cmp-vision-hint">{t('cmpVisionMarksHint')}</p>
             <textarea className="cmp-vision-prompt" data-testid="vision-prompt" rows={2} value={prompt} placeholder={t('cmpVisionPromptPlaceholder')} onChange={e => setPrompt(e.target.value)} disabled={phase === 'sending'} />

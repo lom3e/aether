@@ -58,6 +58,9 @@ pub struct CaptureResult {
     pub mode: String,
     /// Where the image sits on the desktop, in screen points. Known for full-screen captures only.
     pub screen: Option<ScreenRect>,
+    /// What the bundled local OCR read: `{width,height,words:[{text,x,y,w,h}]}` with boxes normalised to the image. None when
+    /// the helper is missing or failed: the capture is then offered without automatic hiding, and the UI says so.
+    pub ocr: Option<serde_json::Value>,
 }
 
 impl CaptureResult {
@@ -153,6 +156,50 @@ mod mac {
         Ok(dir)
     }
 
+    /// Where the bundled OCR helper lives: next to the runtime in the app bundle, or AETHER_VISION_PATH for development.
+    fn vision_helper() -> Option<PathBuf> {
+        if let Ok(p) = std::env::var("AETHER_VISION_PATH") {
+            let p = PathBuf::from(p);
+            if p.is_file() {
+                return Some(p);
+            }
+        }
+        let exe = std::env::current_exe().ok()?;
+        let dir = exe.parent()?;
+        [dir.join("../Resources/aether-vision"), dir.join("../Resources/resources/aether-vision"), dir.join("../../resources/aether-vision")]
+            .into_iter()
+            .find(|c| c.is_file())
+    }
+
+    /// Local OCR (macOS Vision, offline) of one image file. Bounded to 8 s; any failure yields None, never an error.
+    pub(super) fn ocr_words(image: &std::path::Path) -> Option<serde_json::Value> {
+        let helper = vision_helper()?;
+        let mut child = Command::new(helper)
+            .arg("ocr")
+            .arg(image)
+            .stdout(std::process::Stdio::piped())
+            .stderr(std::process::Stdio::null())
+            .spawn()
+            .ok()?;
+        let started = std::time::Instant::now();
+        loop {
+            match child.try_wait().ok()? {
+                Some(status) if status.success() => break,
+                Some(_) => return None,
+                None if started.elapsed() > Duration::from_secs(8) => {
+                    let _ = child.kill();
+                    let _ = child.wait();
+                    return None;
+                }
+                None => std::thread::sleep(Duration::from_millis(25)),
+            }
+        }
+        let mut out = String::new();
+        use std::io::Read;
+        child.stdout.take()?.read_to_string(&mut out).ok()?;
+        serde_json::from_str(&out).ok()
+    }
+
     pub fn capture(mode: &str) -> CaptureResult {
         let region = mode == "region";
         let dir = match scratch_dir() {
@@ -201,6 +248,7 @@ mod mac {
                 return Err(CaptureResult::err(mode, "too_large", format!("{} bytes", bytes.len())));
             }
             let (w, h) = png_size(&bytes).ok_or_else(|| CaptureResult::err(mode, "capture_failed", "not a PNG"))?;
+            let ocr = ocr_words(used);
             Ok(CaptureResult {
                 ok: true,
                 image_base64: Some(base64_encode(&bytes)),
@@ -209,6 +257,7 @@ mod mac {
                 height: Some(h),
                 mode: mode.to_string(),
                 screen: if region { None } else { Some(main_display_rect()) },
+                ocr,
                 ..Default::default()
             })
         })();

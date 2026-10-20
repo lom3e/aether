@@ -17,7 +17,8 @@ export interface Shape {
   x2?: number;
   y2?: number;
   label?: string;
-  source: 'user' | 'model';
+  /** user: drawn by hand. model: returned by the model. auto: Screen Shield (local OCR found something sensitive). */
+  source: 'user' | 'model' | 'auto';
 }
 
 export interface Pt {
@@ -128,7 +129,7 @@ export async function flattenToDataUrl(imageUrl: string, shapes: Shape[]): Promi
   const ctx = canvas.getContext('2d');
   if (!ctx) throw new Error('canvas_unavailable');
   ctx.drawImage(img, 0, 0, W, H);
-  for (const s of shapes) if (s.source === 'user' && s.kind === 'blur') pixelate(ctx, img, s, W, H);
+  for (const s of shapes) if ((s.source === 'user' || s.source === 'auto') && s.kind === 'blur') pixelate(ctx, img, s, W, H);
   const lw = Math.max(3, Math.round(Math.min(W, H) / 220));
   ctx.lineWidth = lw;
   ctx.strokeStyle = USER_COLOR;

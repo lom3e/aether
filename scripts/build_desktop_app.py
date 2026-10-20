@@ -94,6 +94,13 @@ def main():
     print(f"Copying {FROZEN_RUNTIME_DIR} -> {dest_runtime_dir}...")
     shutil.copytree(FROZEN_RUNTIME_DIR, dest_runtime_dir, symlinks=True)
 
+    # 4b. Local OCR helper (macOS Vision) used by Screen Shield: compiled from source, shipped in Contents/Resources.
+    if sys.platform == "darwin":
+        helper_src = TAURI_DIR / "helpers" / "aether-vision.swift"
+        helper_out = RESOURCES_DIR / "aether-vision"
+        print(f"Compiling OCR helper {helper_src.name} -> {helper_out}...")
+        run_command(["swiftc", "-O", str(helper_src), "-o", str(helper_out)])
+
     # Also prepare binaries folder for any externalBin fallback
     binaries_dir = TAURI_DIR / "binaries"
     binaries_dir.mkdir(parents=True, exist_ok=True)

@@ -7183,6 +7183,18 @@ async def undo_apply_route(request: Request, execution_id: str):
         raise HTTPException(status_code=status_code, detail={"code": exc.code, "message": str(exc)}) from exc
 
 
+class ScreenShieldPayload(BaseModel):
+    words: list[dict]
+
+
+@router.post("/privacy/screen-shield")
+async def privacy_screen_shield_route(payload: ScreenShieldPayload):
+    """Regions of a screenshot to hide (from the local OCR's words and boxes). Computed locally; nothing is sent anywhere."""
+    from aether.privacy.screen_shield import find_regions
+
+    return await asyncio.to_thread(find_regions, payload.words)
+
+
 @router.post("/privacy/preview")
 async def privacy_preview_route(payload: PrivacyPreviewPayload):
     """What masking would do to this text, computed locally; nothing is sent anywhere."""
