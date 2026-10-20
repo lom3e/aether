@@ -122,11 +122,13 @@ def test_03_connections_and_integrations_view(browser_context):
     page.locator("[data-testid='nav-connections']").click()
     page.wait_for_timeout(500)
 
-    expect(page.locator("h1:has-text('Connections & Integrations')")).to_be_visible()
-    expect(page.locator("text=Google Calendar").first).to_be_visible()
-    expect(page.locator("text=GitHub").first).to_be_visible()
+    expect(page.get_by_test_id("connections-view")).to_be_visible()
+    expect(page.get_by_test_id("conn-row-google_calendar")).to_be_visible()
+    expect(page.get_by_test_id("conn-row-github")).to_be_visible()
 
-    # Switch to Calendar Schedule tab
+    # The full previous screen (calendar schedule, keys, bots, custom APIs) lives under Advanced
+    page.get_by_test_id("connections-advanced-toggle").click()
+    expect(page.locator("h1:has-text('Connections & Integrations')")).to_be_visible()
     page.locator("button:has-text('Calendar Schedule')").click()
     page.wait_for_timeout(500)
 
