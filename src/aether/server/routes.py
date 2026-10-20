@@ -1299,6 +1299,8 @@ class SkillInfo(BaseModel):
     builtin: bool = True
     category: str = "native"
     permissions: list[str] = Field(default_factory=list)
+    permission_details: list[dict[str, str]] = Field(default_factory=list)
+    requires: dict[str, Any] | None = None
 
 class SkillAssignPayload(BaseModel):
     agent_name: str
@@ -1316,6 +1318,17 @@ async def list_available_skills(request: Request):
         from aether.skills.builtin import get_builtin_skills
         skills_list = get_builtin_skills()
 
+    from aether.skills.catalog import permission_details, readiness
+
+    ws = getattr(request.app.state, "workspace", None)
+
+    def _conn_status(provider: str) -> str | None:
+        try:
+            c = ws.connections.get_connection(ws.id, provider) if ws else None
+            return c.status.value if c else None
+        except Exception:  # noqa: BLE001
+            return None
+
     return [
         SkillInfo(
             name=s.name,
@@ -1325,6 +1338,8 @@ async def list_available_skills(request: Request):
             builtin=bool(s.metadata.get("builtin", True) if s.metadata else True),
             category=str(s.metadata.get("category", "native") if s.metadata else "native"),
             permissions=list(s.metadata.get("permissions", []) if s.metadata else []),
+            permission_details=permission_details(list(s.metadata.get("permissions", []) if s.metadata else [])),
+            requires=readiness(s.name, _conn_status),
         )
         for s in skills_list
     ]
@@ -1341,6 +1356,20 @@ async def assign_skill_to_agent_route(request: Request, skill_name: str, payload
 
     current_skills = list(agent_config.skills or [])
     if payload.enabled:
+        from aether.skills.catalog import readiness as _readiness
+
+        ws_ = getattr(request.app.state, "workspace", None)
+
+        def _status(provider: str) -> str | None:
+            try:
+                c = ws_.connections.get_connection(ws_.id, provider) if ws_ else None
+                return c.status.value if c else None
+            except Exception:  # noqa: BLE001
+                return None
+
+        need = _readiness(skill_name, _status)
+        if need and need["state"] != "ready":
+            raise HTTPException(status_code=409, detail={"code": "connection_required", "connection": need["connection"], "state": need["state"]})
         if skill_name not in current_skills:
             current_skills.append(skill_name)
     else:
@@ -1357,7 +1386,16 @@ async def assign_skill_to_agent_route(request: Request, skill_name: str, payload
                 from aether.skills.skill import Skill
                 if payload.enabled:
                     if not any(s.name == skill_name for s in a.skills):
-                        a.skills.append(Skill(name=skill_name, description=f"Skill {skill_name}"))
+                        real = None
+                        try:
+                            real = team.skill_registry.get(skill_name) if getattr(team, "skill_registry", None) else None
+                        except Exception:  # noqa: BLE001
+                            real = None
+                        if real is None:
+                            from aether.skills.builtin import get_builtin_skills
+
+                            real = next((b for b in get_builtin_skills() if b.name == skill_name), None)
+                        a.skills.append(real or Skill(name=skill_name, description=f"Skill {skill_name}"))
                 else:
                     a.skills = [s for s in a.skills if s.name != skill_name]
 
@@ -1383,8 +1421,21 @@ async def save_skill_config_route(request: Request, skill_name: str, payload: Sk
     if not team:
         raise HTTPException(status_code=503, detail="Team workforce not initialized.")
 
+    from aether.skills.catalog import MASK, is_secret_field
+
+    ws = getattr(request.app.state, "workspace", None)
+    store = getattr(ws, "secret_store", None) if ws else None
     configs = team.config.metadata.setdefault("skill_configs", {})
-    configs[skill_name] = payload.config
+    previous = configs.get(skill_name, {}) if isinstance(configs.get(skill_name), dict) else {}
+    safe: dict[str, Any] = {}
+    for key, value in payload.config.items():
+        if is_secret_field(key) and isinstance(value, str):
+            if value and value != MASK and store is not None:
+                store.store_secret(secret_ref=f"skill_config:{skill_name}:{key}", value=value.strip(), entity_type="skill", entity_id=skill_name)
+            safe[key] = MASK if (value or previous.get(key)) else ""
+        else:
+            safe[key] = value
+    configs[skill_name] = safe
 
     from aether.team.loader import TeamLoader
     try:
@@ -1393,7 +1444,7 @@ async def save_skill_config_route(request: Request, skill_name: str, payload: Sk
     except Exception as e:
         logger.warning(f"Could not persist team config after skill config update: {e}")
 
-    return {"status": "saved", "skill": skill_name, "config": payload.config}
+    return {"status": "saved", "skill": skill_name, "config": safe}
 
 @router.get("/agents")
 async def get_agents(request: Request):

@@ -17,6 +17,8 @@ interface SkillItem {
   icon: any;
   enabled: boolean;
   permissions: string[];
+  permissionDetails?: { id: string; risk: 'read' | 'write' | 'sensitive' }[];
+  requires?: { connection: string; state: 'ready' | 'not_connected' | 'needs_reauth' | 'unavailable' } | null;
   requiresConfig?: boolean;
   configFields?: Array<{ key: string; label: string; type: string; placeholder: string }>;
   version?: string;
@@ -37,7 +39,7 @@ const buildInitialSkills = (t: (key: any) => string): SkillItem[] => [
     author: t('sdAetherCore'),
   },
   {
-    id: 'search_knowledge',
+    id: 'knowledge_retrieval',
     name: t('sdKnowledgeRetrieval'),
     category: 'native',
     descriptionKey: 'skillKnowledgeDesc',
@@ -80,11 +82,6 @@ const buildInitialSkills = (t: (key: any) => string): SkillItem[] => [
     descriptionDefault: t('sdReadSearchDraftAndOrganizeEmails'),
     icon: Mail,
     enabled: false,
-    requiresConfig: true,
-    configFields: [
-      { key: 'client_id', label: t('sdOauthClientId'), type: 'text', placeholder: 'xxxx.apps.googleusercontent.com' },
-      { key: 'api_key', label: t('sdServiceAccountApiKey'), type: 'password', placeholder: 'AIzaSy...' }
-    ],
     permissions: ['email:read', 'email:draft', 'email:send'],
     version: '1.0.0',
     author: t('sdGoogleCloudEcosystem'),
@@ -97,10 +94,6 @@ const buildInitialSkills = (t: (key: any) => string): SkillItem[] => [
     descriptionDefault: t('sdConnectPrivateRepositoriesCreatePullRequests'),
     icon: GitBranch,
     enabled: true,
-    requiresConfig: true,
-    configFields: [
-      { key: 'token', label: t('sdPersonalAccessToken'), type: 'password', placeholder: 'ghp_xxxxxxxxxxxxxxxxxxxx' }
-    ],
     permissions: ['git:clone', 'git:read', 'git:commit'],
     version: '1.2.0',
     author: t('sdGithubConnect'),
@@ -113,11 +106,6 @@ const buildInitialSkills = (t: (key: any) => string): SkillItem[] => [
     descriptionDefault: t('sdBroadcastTaskUpdatesHumanInThe'),
     icon: MessageSquare,
     enabled: false,
-    requiresConfig: true,
-    configFields: [
-      { key: 'webhook_url', label: t('sdIncomingWebhookUrl'), type: 'text', placeholder: 'https://hooks.slack.com/services/...' },
-      { key: 'bot_token', label: t('sdBotUserOauthToken'), type: 'password', placeholder: 'xoxb-...' }
-    ],
     permissions: ['chat:write', 'channels:read'],
     version: '1.0.0',
     author: t('sdSlackEcosystem'),
@@ -191,7 +179,10 @@ export function Skills({ navigate }: { navigate?: (view: string) => void } = {})
           return {
             ...item,
             version: backendMatch?.version || item.version,
-            enabled: isAssigned || item.category === 'native' || hasConfig,
+            permissionDetails: backendMatch?.permission_details || [],
+            requires: backendMatch?.requires ?? null,
+            // A skill that needs a connection is only "on" when it is assigned AND the connection is ready.
+            enabled: (isAssigned || item.category === 'native' || hasConfig) && (!backendMatch?.requires || backendMatch.requires.state === 'ready'),
           };
         });
       });
@@ -207,6 +198,10 @@ export function Skills({ navigate }: { navigate?: (view: string) => void } = {})
   }, [fetchSkillsData]);
 
   const handleToggleSkill = async (skill: SkillItem) => {
+    if (skill.requires && skill.requires.state !== 'ready') {
+      if (skill.requires.state !== 'unavailable') navigate?.('connections');
+      return;
+    }
     const next = !skill.enabled;
     setSkills(prev => prev.map(s => s.id === skill.id ? { ...s, enabled: next } : s));
 
@@ -214,11 +209,16 @@ export function Skills({ navigate }: { navigate?: (view: string) => void } = {})
     if (agents.length > 0) {
       const targetAgent = selectedAgent !== 'all' ? selectedAgent : agents[0].name;
       try {
-        await fetch(apiUrl(`/api/skills/${skill.id}/assign`), {
+        const res = await fetch(apiUrl(`/api/skills/${skill.id}/assign`), {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ agent_name: targetAgent, enabled: next }),
         });
+        if (!res.ok) {
+          setSkills(prev => prev.map(s => s.id === skill.id ? { ...s, enabled: !next } : s));
+          if (res.status === 409) navigate?.('connections');
+          return;
+        }
       } catch (err) {
         console.warn("Failed to persist skill assignment:", err);
       }
@@ -256,7 +256,7 @@ export function Skills({ navigate }: { navigate?: (view: string) => void } = {})
     return skills.filter(s => {
       const matchesCategory = filterCategory === 'all' || s.category === filterCategory;
       const q = searchQuery.toLowerCase().trim();
-      const matchesQuery = !q || s.name.toLowerCase().includes(q) || s.descriptionDefault.toLowerCase().includes(q) || s.permissions.some(p => p.toLowerCase().includes(q));
+      const matchesQuery = !q || s.name.toLowerCase().includes(q) || s.descriptionDefault.toLowerCase().includes(q) || (s.permissionDetails || []).some(p => p.id.toLowerCase().includes(q));
       return matchesCategory && matchesQuery;
     });
   }, [skills, filterCategory, searchQuery]);
@@ -400,7 +400,9 @@ export function Skills({ navigate }: { navigate?: (view: string) => void } = {})
                       }}
                       onClick={() => handleToggleSkill(skill)}
                     >
-                      {skill.enabled ? (t('statusEnabled') || 'Active') : (t('statusDisabled') || 'Disabled')}
+                      {skill.requires && skill.requires.state !== 'ready'
+                        ? (skill.requires.state === 'unavailable' ? t('skSoon') : skill.requires.state === 'needs_reauth' ? t('skReconnect') : t('skConnect'))
+                        : skill.enabled ? (t('statusEnabled') || 'Active') : (t('statusDisabled') || 'Disabled')}
                     </button>
                   </div>
 
@@ -412,9 +414,9 @@ export function Skills({ navigate }: { navigate?: (view: string) => void } = {})
                 <div>
                   {/* Permissions & Badges */}
                   <div style={{ display: 'flex', flexWrap: 'wrap', gap: '6px', marginBottom: '14px' }}>
-                    {skill.permissions.map(p => (
-                      <span key={p} className="badge" style={{ fontSize: '10px', fontFamily: 'monospace' }}>
-                        {p}
+                    {(skill.permissionDetails && skill.permissionDetails.length > 0 ? skill.permissionDetails : []).map(p => (
+                      <span key={p.id} className="badge" data-risk={p.risk} data-testid={`perm-${skill.id}-${p.id}`} style={{ fontSize: '11px', color: p.risk === 'sensitive' ? 'hsl(var(--warning))' : undefined }}>
+                        {t(`skp_${p.id.replace('.', '_')}` as any)}
                       </span>
                     ))}
                   </div>
@@ -425,7 +427,7 @@ export function Skills({ navigate }: { navigate?: (view: string) => void } = {})
                       {skill.category}
                     </span>
 
-                    {skill.requiresConfig ? (
+                    {skill.requiresConfig && !skill.requires ? (
                       <button
                         className="btn btn-ghost"
                         style={{ fontSize: '12px', padding: '4px 8px', gap: '4px' }}

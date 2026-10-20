@@ -104,6 +104,9 @@ class SkillPermissionPolicy:
         for perm in permissions:
             identifier = perm.identifier if hasattr(perm, "identifier") else str(perm)
 
+            if str(getattr(perm, "effect", "allow")).lower() == "deny":
+                raise SkillPermissionDeniedError(f"Permission '{identifier}' is declared with effect 'deny' and cannot be granted.")
+
             if deny_all:
                 raise SkillPermissionDeniedError(
                     f"Permission '{identifier}' denied: the active policy blocks all permissions."
