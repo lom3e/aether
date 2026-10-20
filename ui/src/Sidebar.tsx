@@ -584,7 +584,7 @@ export function Sidebar({
               flexDirection: 'column',
               gap: '2px'
             }}>
-              <div style={{ fontSize: '10px', fontWeight: 600, color: 'hsl(var(--muted-fg))', padding: '4px 8px', textTransform: 'uppercase' }}>
+              <div style={{ fontSize: '10px', fontWeight: 600, color: 'hsl(var(--muted-fg))', padding: '4px 8px' }}>
                 {t('allWorkspaces')}
               </div>
               <div style={{ maxHeight: '180px', overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: '2px' }}>
@@ -787,7 +787,6 @@ export function Sidebar({
                   fontSize: '11px',
                   fontWeight: 600,
                   color: 'hsl(var(--muted-fg))',
-                  textTransform: 'uppercase',
                   letterSpacing: '0.05em',
                   borderRadius: '6px',
                   marginBottom: '2px',

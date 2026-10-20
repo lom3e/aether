@@ -875,3 +875,17 @@ p {
 }
 
 
+
+/* ── Aether Minimal: global pass (calmer surfaces for every screen; separation by tone and space, not by outlines) ── */
+.top-header { height: 52px; border-bottom: 0; padding: 0 28px; }
+.top-header-title { font-weight: 600; letter-spacing: -0.015em; }
+.card { border: 0; box-shadow: inset 0 0 0 1px hsl(var(--border) / .5); border-radius: var(--radius); transition: box-shadow var(--dur) var(--ease), background-color var(--dur) var(--ease); }
+.card-interactive:hover { border-color: transparent; box-shadow: inset 0 0 0 1px hsl(var(--primary) / .4); background-color: hsl(var(--card-hover)); }
+.badge { border-radius: 999px; padding: 2px 9px; font-weight: 500; }
+.badge-primary { border: 0; }
+.btn { border-radius: 10px; transition: background-color var(--dur) var(--ease), box-shadow var(--dur) var(--ease), opacity var(--dur) var(--ease); }
+.btn-primary:hover:not(:disabled) { box-shadow: none; opacity: .9; }
+.btn-secondary { border-color: transparent; }
+.btn:focus-visible, .form-input:focus-visible, input:focus-visible, textarea:focus-visible, select:focus-visible { outline: 2px solid hsl(var(--ring) / .6); outline-offset: 2px; }
+h1, h2, h3 { letter-spacing: -0.025em; }
+@media (prefers-reduced-motion: reduce) { * { transition-duration: 0.01ms !important; animation-duration: 0.01ms !important; } }
