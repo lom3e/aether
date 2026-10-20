@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef, useContext } from 'react';
-import { Send, Sparkles, Square, Plus } from 'lucide-react';
+import { Send, Sparkles, Square } from 'lucide-react';
 import { ToastContext } from './toast';
 import { apiUrl, getSessionToken } from './api';
 import { useTranslation } from './i18n';
@@ -13,7 +13,6 @@ interface ChatProps {
   onSelectConversation?: (id: string, tempTitle?: string) => void;
   onConversationUpdated: () => void;
   hasWorkspace?: boolean;
-  onOpenWorkspaceModal?: () => void;
 }
 
 export function Chat({
@@ -22,7 +21,6 @@ export function Chat({
   onSelectConversation,
   onConversationUpdated,
   hasWorkspace = true,
-  onOpenWorkspaceModal,
 }: ChatProps) {
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [activities, setActivities] = useState<ActivityItem[]>([]);
@@ -502,10 +500,7 @@ export function Chat({
   };
 
   const handleSend = async () => {
-    if (!hasWorkspace) {
-      if (onOpenWorkspaceModal) onOpenWorkspaceModal();
-      return;
-    }
+    if (!hasWorkspace) return;
     if (!input.trim() || loading) return;
 
     const userPrompt = input.trim();
@@ -844,21 +839,12 @@ export function Chat({
               />
             </div>
 
-            <h2 style={{ fontSize: '22px', fontWeight: 700, marginBottom: '8px', color: 'hsl(var(--fg))' }}>
-              {t('firstCreateWorkspace')}
+            <h2 style={{ fontSize: '22px', fontWeight: 600, marginBottom: '8px', color: 'hsl(var(--fg))' }}>
+              {t('spaceStartingTitle')}
             </h2>
-            <p className="text-muted" style={{ fontSize: '14px', maxWidth: '440px', marginBottom: '24px', lineHeight: 1.6 }}>
-              {t('firstCreateWorkspaceDesc')}
+            <p className="text-muted" style={{ fontSize: '14px', maxWidth: '440px', lineHeight: 1.6 }}>
+              {t('spaceStartingDesc')}
             </p>
-
-            <button
-              className="btn btn-primary"
-              style={{ padding: '10px 22px', fontSize: '14px', display: 'inline-flex', alignItems: 'center', gap: '8px' }}
-              onClick={onOpenWorkspaceModal}
-            >
-              <Plus size={16} />
-              <span>{language === 'it' ? '+ Crea workspace' : t('sdCreateWorkspace')}</span>
-            </button>
           </div>
         ) : !hasMessages ? (
           /* Empty / Draft Welcome State */
@@ -1042,7 +1028,7 @@ export function Chat({
               boxShadow: 'none',
               fontSize: '14px'
             }}
-            placeholder={!hasWorkspace ? t('createWorkspaceFirstPlaceholder') : t('chatInputPlaceholder')}
+            placeholder={!hasWorkspace ? t('spaceStartingTitle') : t('chatInputPlaceholder')}
             value={input}
             onChange={e => setInput(e.target.value)}
             onKeyDown={handleKeyDown}

@@ -328,7 +328,7 @@ def test_recovers_by_itself_when_the_workspace_appears(browser_context, workspac
 
     page.route("**/api/workspace", workspace)
     page.goto(f"{_state['base_url']}/?surface=companion")
-    expect(page.get_by_test_id("companion-problem")).to_contain_text("No workspace is open", timeout=15000)
+    expect(page.get_by_test_id("companion-problem")).to_contain_text("still getting ready", timeout=15000)
     expect(page.get_by_test_id("companion-status-label")).to_have_text("Ready", timeout=20000)
     expect(page.get_by_test_id("companion-problem")).to_have_count(0)
     page.close()

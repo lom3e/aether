@@ -43,31 +43,11 @@ def _base_url() -> str:
 
 
 def _ensure_workspace(page):
-    """Ensures active workspace is selected or initialized."""
-    base_url = _base_url()
-    page.goto(base_url)
-    page.wait_for_selector(".sidebar", timeout=10000)
-
-    # Check if workspace creation button exists
-    create_ws_btn = page.locator("button:has-text('+ Create workspace'), button:has-text('+ Crea workspace')").first
-    if create_ws_btn.is_visible():
-        create_ws_btn.click()
-        page.wait_for_selector("input[placeholder*='Acme Robotics'], input[placeholder*='Financial Research']", timeout=5000)
-
-    name_input = page.locator("input[placeholder*='Acme Robotics'], input[placeholder*='Financial Research']").first
-    if name_input.is_visible():
-        name_input.fill("Knowledge Test Workspace")
-        create_btn = page.locator("button:has-text('Create & Open Workspace'), button:has-text('Initialize Workspace')").first
-        expect(create_btn).to_be_enabled(timeout=5000)
-        create_btn.click()
-        page.wait_for_selector(".badge-primary, .sidebar", timeout=10000)
-        page.wait_for_timeout(1000)
-
-    # Dismiss any stray modal if still open
-    cancel_btn = page.locator("button:has-text('Cancel'), button:has-text('Annulla')").first
-    if cancel_btn.is_visible():
-        cancel_btn.click()
-        page.wait_for_timeout(300)
+    """Opens the app. Aether always has its one personal space (created by the runtime at launch): nothing to create."""
+    page.goto(_base_url())
+    page.wait_for_selector(".sidebar", timeout=15000)
+    page.wait_for_selector("h1:has-text('What do you need today?'), h1:has-text('Di cosa hai bisogno oggi?'), [data-testid='nav-home']", timeout=15000)
+    page.wait_for_timeout(300)
 
 
 def test_00_ensure_workspace(browser_context):

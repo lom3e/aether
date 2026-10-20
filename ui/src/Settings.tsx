@@ -34,9 +34,7 @@ export function Settings({ onWorkspaceSwitched }: SettingsProps) {
   // Workspace Settings State
   const [workspaceInfo, setWorkspaceInfo] = useState<any>(null);
   const [workspaceStats, setWorkspaceStats] = useState<any>(null);
-  const [wsName, setWsName] = useState('');
-  const [savingWs, setSavingWs] = useState(false);
-  const [isDeletingWs, setIsDeletingWs] = useState(false);
+  const [otherSpaces, setOtherSpaces] = useState<any[]>([]);
 
   // Connected Project State
   const [projectPathInput, setProjectPathInput] = useState('');
@@ -51,13 +49,25 @@ export function Settings({ onWorkspaceSwitched }: SettingsProps) {
   const { theme, setTheme } = useTheme();
   const { shortcuts, formatShortcut, openShortcutsModal } = useKeyboardShortcuts();
 
+  const useSpace = async (sp: any) => {
+    try {
+      const res = await fetch(apiUrl('/api/workspaces/switch'), { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ workspace_id: sp.id, path: sp.path }) });
+      if (res.ok && onWorkspaceSwitched) onWorkspaceSwitched();
+    } catch (err) {
+      console.error(err);
+    }
+  };
+
   const fetchWorkspaceData = () => {
+    fetch(apiUrl('/api/workspaces'))
+      .then(res => res.json())
+      .then(list => setOtherSpaces(Array.isArray(list) ? list.filter((w: any) => !w.is_active) : []))
+      .catch(() => setOtherSpaces([]));
     fetch(apiUrl('/api/workspace'))
       .then(res => res.json())
       .then(data => {
         setWorkspaceInfo(data);
         if (data && data.name) {
-          setWsName(data.name);
         }
       })
       .catch(console.error);
@@ -152,36 +162,6 @@ export function Settings({ onWorkspaceSwitched }: SettingsProps) {
     }
   };
 
-  const handleSaveWorkspaceName = async () => {
-    if (!wsName.trim()) return;
-    setSavingWs(true);
-    try {
-      const wsListRes = await fetch(apiUrl('/api/workspaces'));
-      const wsList = await wsListRes.json();
-      const current = wsList.find((w: any) => w.is_active);
-      if (!current) throw new Error(t('szActiveWorkspaceNotFound'));
-
-      const res = await fetch(apiUrl(`/api/workspaces/${current.id}`), {
-        method: 'PATCH',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ name: wsName.trim() })
-      });
-
-      if (res.ok) {
-        showToast(t('szWorkspaceNameUpdated'), 'success');
-        fetchWorkspaceData();
-        if (onWorkspaceSwitched) onWorkspaceSwitched();
-      } else {
-        const err = await apiError(res, t('szFailedToUpdateWorkspaceName'));
-        showToast(err.message, 'error');
-      }
-    } catch (err: any) {
-      showToast(err.message || t('szFailedToUpdateWorkspace'), 'error');
-    } finally {
-      setSavingWs(false);
-    }
-  };
-
   const handleClearKnowledge = async () => {
     try {
       const res = await fetch(apiUrl('/api/workspaces/current/clear-knowledge'), {
@@ -265,33 +245,6 @@ export function Settings({ onWorkspaceSwitched }: SettingsProps) {
     }
   };
 
-  const handleDeleteCurrentWorkspace = async () => {
-    try {
-      const wsListRes = await fetch(apiUrl('/api/workspaces'));
-      const wsList = await wsListRes.json();
-      const current = Array.isArray(wsList) ? (wsList.find((w: any) => w.is_active) || wsList[0]) : null;
-      if (!current) {
-        showToast(t('szNoWorkspaceFoundToDelete'), 'error');
-        setIsDeletingWs(false);
-        return;
-      }
-
-      const res = await fetch(apiUrl(`/api/workspaces/${current.id}`), {
-        method: 'DELETE'
-      });
-      if (res.ok) {
-        showToast(`Workspace "${current.name}" deleted.`, 'info');
-        setIsDeletingWs(false);
-        if (onWorkspaceSwitched) onWorkspaceSwitched();
-      } else {
-        const err = await apiError(res, t('szFailedToDeleteWorkspace'));
-        showToast(err.message, 'error');
-      }
-    } catch (err: any) {
-      console.error(t('szFailedToDeleteWorkspace2'), err);
-      showToast(err?.message || t('szFailedToDeleteWorkspace'), 'error');
-    }
-  };
 
   const formatBytes = (bytes: number) => {
     if (!bytes || bytes === 0) return '0 B';
@@ -487,38 +440,21 @@ export function Settings({ onWorkspaceSwitched }: SettingsProps) {
             )}
           </div>
 
-          {/* General Workspace Info */}
-          <div className="card" style={{ padding: '24px' }}>
-            <h3 style={{ fontSize: '16px', fontWeight: 600, marginBottom: '16px' }}>{t('generalWorkspace')}</h3>
-            <div style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
-              <div>
-                <label className="form-label">{t('workspaceDisplayName')}</label>
-                <div style={{ display: 'flex', gap: '10px' }}>
-                  <input
-                    type="text"
-                    className="form-input"
-                    value={wsName}
-                    onChange={e => setWsName(e.target.value)}
-                  />
-                  <button
-                    className="btn btn-primary"
-                    style={{ padding: '8px 18px', flexShrink: 0 }}
-                    onClick={handleSaveWorkspaceName}
-                    disabled={savingWs || !wsName.trim()}
-                  >
-                    {t('save')}
-                  </button>
-                </div>
-              </div>
-
-              <div>
-                <label className="form-label">{t('activeTeam')}</label>
-                <div style={{ fontSize: '13.5px', color: 'hsl(var(--fg))', padding: '8px 12px', background: 'hsl(var(--muted)/0.5)', borderRadius: '6px' }}>
-                  {workspaceInfo?.name || 'default'} ({workspaceInfo?.agents?.length || 0} {workspaceInfo?.agents?.length === 1 ? t('agentSingular').toLowerCase() : t('agentPlural').toLowerCase()} {t('statusActive').toLowerCase()})
-                </div>
+          {/* Previous spaces: Aether is one personal space now; older ones stay reachable here, nothing is deleted. */}
+          {otherSpaces.length > 0 && (
+            <div className="card" style={{ padding: '24px' }} data-testid="previous-spaces">
+              <h3 style={{ fontSize: '16px', fontWeight: 600, marginBottom: '6px' }}>{t('prevSpacesTitle')}</h3>
+              <p className="text-muted" style={{ fontSize: '13px', marginBottom: '14px' }}>{t('prevSpacesDesc')}</p>
+              <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
+                {otherSpaces.map(sp => (
+                  <div key={sp.id || sp.path} style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '12px', padding: '10px 12px', background: 'hsl(var(--muted)/0.5)', borderRadius: '10px' }}>
+                    <span style={{ fontSize: '13.5px' }}>{sp.name}</span>
+                    <button className="btn btn-secondary" style={{ padding: '6px 12px', fontSize: '12.5px' }} onClick={() => useSpace(sp)} data-testid={`use-space-${sp.id}`}>{t('prevSpacesUse')}</button>
+                  </div>
+                ))}
               </div>
             </div>
-          </div>
+          )}
 
           {/* Danger Zone */}
           <div className="card" style={{ padding: '24px', border: '1px solid hsl(var(--destructive)/0.3)' }}>
@@ -548,15 +484,6 @@ export function Settings({ onWorkspaceSwitched }: SettingsProps) {
                 </button>
               </div>
 
-              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '12px', background: 'hsl(var(--destructive)/0.05)', borderRadius: '8px', border: '1px solid hsl(var(--destructive)/0.2)' }}>
-                <div>
-                  <div style={{ fontWeight: 600, fontSize: '13px', color: 'hsl(var(--destructive))' }}>{t('deleteWorkspaceTitle')}</div>
-                  <div style={{ fontSize: '12px', color: 'hsl(var(--muted-fg))' }}>{t('deleteWorkspaceDesc')}</div>
-                </div>
-                <button className="btn btn-destructive" onClick={() => setIsDeletingWs(true)}>
-                  {t('deleteWorkspaceTitle')}
-                </button>
-              </div>
             </div>
           </div>
         </div>
@@ -873,48 +800,6 @@ export function Settings({ onWorkspaceSwitched }: SettingsProps) {
                   </div>
                 );
               })}
-            </div>
-          </div>
-        </div>
-      )}
-
-      {/* Delete Workspace Confirmation Modal */}
-      {isDeletingWs && (
-        <div style={{
-          position: 'fixed',
-          inset: 0,
-          backgroundColor: 'rgba(0,0,0,0.7)',
-          display: 'flex',
-          alignItems: 'center',
-          justifyContent: 'center',
-          padding: '24px',
-          zIndex: 100
-        }}>
-          <div style={{
-            backgroundColor: 'hsl(var(--card))',
-            border: '1px solid hsl(var(--destructive))',
-            borderRadius: '10px',
-            padding: '24px',
-            maxWidth: '440px',
-            width: '100%',
-            display: 'flex',
-            flexDirection: 'column',
-            gap: '14px'
-          }}>
-            <div style={{ display: 'flex', alignItems: 'center', gap: '10px', color: 'hsl(var(--destructive))' }}>
-              <AlertTriangle size={20} />
-              <h3 style={{ fontSize: '16px', fontWeight: 600 }}>{t('deleteCurrentWorkspaceTitle')}</h3>
-            </div>
-            <p style={{ fontSize: '13px', color: 'hsl(var(--muted-fg))', lineHeight: 1.5 }}>
-              {t('deleteWorkspaceConfirmDesc')}
-            </p>
-            <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '10px', marginTop: '6px' }}>
-              <button className="btn btn-secondary" onClick={() => setIsDeletingWs(false)}>
-                {t('cancel')}
-              </button>
-              <button className="btn btn-destructive" onClick={handleDeleteCurrentWorkspace}>
-                {t('deleteWorkspaceTitle')}
-              </button>
             </div>
           </div>
         </div>

@@ -154,8 +154,28 @@ async def test_case_d_delete_last_workspace_transitions_to_no_workspace_state(cl
 
 @pytest.mark.asyncio
 async def test_case_e_startup_resolution_with_zero_workspaces(clean_registry, monkeypatch):
-    """Case E: Server startup with 0 registered workspaces leaves workspace as None."""
+    """Case E: with nothing registered, startup creates the personal space (one Aether per person) in the data dir."""
     monkeypatch.delenv("AETHER_WORKSPACE", raising=False)
+    monkeypatch.delenv("AETHER_NO_AUTO_WORKSPACE", raising=False)
+    monkeypatch.setattr(Path, "cwd", lambda: clean_registry / "empty-cwd")
+
+    app.state.workspace = "stale"
+    app.state.workspace_root = "stale"
+    app.state.team = "stale"
+
+    await startup_event()
+
+    assert app.state.workspace is not None and app.state.workspace.root.name == "personal"
+    assert app.state.workspace_root == app.state.workspace.root
+    assert app.state.team is not None
+    app.state.workspace.close()
+
+
+@pytest.mark.asyncio
+async def test_case_e2_startup_without_auto_creation_leaves_workspace_none(clean_registry, monkeypatch):
+    """Case E2: the legacy behaviour is still reachable (escape hatch) and still safe."""
+    monkeypatch.delenv("AETHER_WORKSPACE", raising=False)
+    monkeypatch.setenv("AETHER_NO_AUTO_WORKSPACE", "1")
     monkeypatch.setattr(Path, "cwd", lambda: clean_registry / "empty-cwd")
 
     app.state.workspace = "stale"

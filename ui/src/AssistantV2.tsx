@@ -21,7 +21,6 @@ interface AssistantV2Props {
   workspaceName: string;
   navigate: (view: string, params?: any) => void;
   onSwitchToV1: () => void;
-  onOpenWorkspaceModal?: () => void;
 }
 
 interface StepItem {

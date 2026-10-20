@@ -330,9 +330,9 @@ class WorkspaceRegistry:
                     seed_knowledge=True,
                     set_as_default=True,
                 )
-            except Exception:
-                # Fallback to starter-workforce or default team
-                pass
+            except Exception as exc:  # noqa: BLE001 - the workspace is usable without the preset; say why it is bare
+                import logging
+                logging.getLogger(__name__).warning("Preset %r could not be applied to %s: %s", preset_id, ws_dir, type(exc).__name__)
         else:
             # Create minimal empty default team
             default_team_path = ws.teams_dir / "default.yaml"
@@ -370,6 +370,25 @@ agents:
         # Register in global registry
         cls.register(ws.root, name=clean_name, description=description)
         return ws
+
+    PERSONAL_SLUG = "personal"
+    PERSONAL_NAME = "Aether"
+
+    @classmethod
+    def ensure_personal_workspace(cls) -> Workspace:
+        """The one Aether space of a person who has none yet: `<data dir>/workspaces/personal`, never the current directory.
+
+        Idempotent: an existing folder with an `aether.yaml` is reused (and re-registered if the registry lost it); a half-made
+        folder (no `aether.yaml`) is completed; `Workspace.init` writes the manifest, so a crash leaves either nothing or a valid space.
+        """
+        ws_dir = get_default_workspaces_dir() / cls.PERSONAL_SLUG
+        if (ws_dir / "aether.yaml").exists():
+            ws = Workspace(ws_dir)
+            if not any(Path(e.get("path", "")).resolve() == ws_dir.resolve() for e in cls.load_registry().get("workspaces", [])):
+                cls.register(ws.root, name=cls.PERSONAL_NAME, description="")
+            return ws
+        ws_dir.parent.mkdir(parents=True, exist_ok=True)
+        return cls.create_workspace(cls.PERSONAL_NAME, target_dir=ws_dir)
 
     @classmethod
     def rename_workspace(cls, ws: Workspace, new_name: str) -> None:

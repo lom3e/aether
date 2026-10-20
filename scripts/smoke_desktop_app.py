@@ -8,7 +8,7 @@ script are stopped. No mouse coordinates are used.
   B. App:      launch the real app -> sidecar ready + /api/health, window exists (macOS Accessibility, skipped with a
                note when that permission is missing), the UI's own API traffic reaches the runtime, then
                SIGTERM -> app and sidecar both gone; second launch + SIGKILL -> the sidecar's parent watchdog stops it.
-  C. Runtime:  start the frozen sidecar directly with a known token -> /api/health, UI + asset served, workspace creation,
+  C. Runtime:  start the frozen sidecar directly with a known token -> /api/health, UI + asset served, the personal space created at first launch,
                chat without provider answers in the requested language (it/en), authenticated shutdown endpoint.
 
 Usage: python scripts/smoke_desktop_app.py [--skip-window]      exit code 0 only if every executed check passed.
@@ -269,10 +269,9 @@ def runtime_checks() -> None:
             check("C: UI index served", st == 200 and asset is not None)
             if asset:
                 check("C: UI asset served", http(base + asset.group(1))[0] == 200)
-            st, body = http(base + "/api/workspaces", "POST", {"name": "Smoke", "path": str(Path(tmp) / "ws")}, token)
-            if st not in (200, 201):
-                st, body = http(base + "/api/workspaces", "POST", {"name": "Smoke"}, token)
-            check("C: workspace creation via API", st in (200, 201), f"{st} {body[:80]}")
+            # One Aether per person: the runtime creates the personal space by itself at first launch (nothing to create).
+            st, body = http(base + "/api/workspace", "GET", None, token)
+            check("C: the personal space exists after the first boot", st == 200 and '"name":"Aether"' in body.replace(" ", ""), f"{st} {body[:80]}")
             for lang, expected in (("it", "Nessun provider AI configurato"), ("en", "No AI provider configured")):
                 st, body = http(base + "/api/personal/chat", "POST", {"prompt": "Ciao, chi sei?", "language": lang}, token, timeout=60)
                 check(f"C: chat without provider answers in '{lang}'", st == 200 and expected in body, f"{st}")

@@ -138,7 +138,7 @@ async def startup_event():
     configured_root = os.environ.get("AETHER_WORKSPACE")
     workspace_source = "AETHER_WORKSPACE" if configured_root else None
     if not configured_root:
-        if (Path.cwd() / "aether.yaml").exists():
+        if (Path.cwd() / "aether.yaml").exists() and not os.environ.get("AETHER_DESKTOP_RUNTIME"):
             configured_root = str(Path.cwd())
             workspace_source = "current directory"
         else:
@@ -161,6 +161,16 @@ async def startup_event():
                 if workspaces:
                     configured_root = workspaces[0]["path"]
                     workspace_source = "first registered workspace"
+
+    if not configured_root and os.environ.get("AETHER_NO_AUTO_WORKSPACE") != "1":
+        # One Aether per person: nothing found anywhere -> make the personal space in the data directory (never the cwd).
+        try:
+            from aether.workspace.registry import WorkspaceRegistry
+            personal = await asyncio.to_thread(WorkspaceRegistry.ensure_personal_workspace)
+            configured_root = str(personal.root)
+            workspace_source = "personal space (created on first launch)"
+        except Exception as exc:  # noqa: BLE001
+            print(f"Warning: could not create the personal space: {type(exc).__name__}: {exc}")
 
     if not configured_root:
         app.state.workspace = None

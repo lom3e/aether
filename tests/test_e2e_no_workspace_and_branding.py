@@ -177,76 +177,27 @@ def test_05_theme_aware_collapsed_logo(browser_context):
     page.close()
 
 
-def test_06_workspace_modal_model_suggestions(browser_context):
-    """Verifies that WorkspaceModal provides intelligent model dropdowns for all providers with custom input toggle."""
-    base_url = _base_url()
+def test_06_first_run_model_card_replaces_the_workspace_form(browser_context):
+    """There is no workspace form any more: Home asks for a provider and a key once, sends them to the settings route, and goes away."""
+    import json
+
     page = browser_context.new_page()
-    page.goto(base_url)
-    page.wait_for_selector(".sidebar", timeout=10000)
-
-    # Open Create Workspace Modal (from Home button or Sidebar dropdown)
-    create_btn = page.locator("button:has-text('+ Create workspace'), button:has-text('+ Crea workspace')").first
-    if not create_btn.is_visible():
-        ws_switcher = page.locator(".sidebar button:has-text('AI WORKFORCE'), .sidebar button:has-text('CLICK TO CREATE'), .sidebar button:has-text('CLICCA PER CREARE')").first
-        if ws_switcher.is_visible():
-            ws_switcher.click()
-            page.wait_for_timeout(300)
-            page.locator("button:has-text('+ New Workspace'), button:has-text('+ Nuovo Workspace')").first.click()
-    else:
-        create_btn.click()
-
-    page.wait_for_timeout(500)
-
-    # Modal must be visible
-    modal = page.locator("h2:has-text('New Workspace'), h3:has-text('New Workspace'), div:has-text('Workspace Name')").first
-    expect(modal).to_be_visible()
-
-    # Provider select and Model select must be visible
-    provider_select = page.locator("select:has(option[value='ollama'])").first
-    expect(provider_select).to_be_visible()
-
-    # Product policy: no model is ever preselected. Each provider offers its suggested models and the user picks one.
-    def _model_select_with(option_value):
-        return page.locator(f"select:has(option[value='{option_value}'])").first
-
-    # 1. Ollama (suggestions come from the live local installation, so only the policy is asserted)
-    provider_select.select_option("ollama")
-    page.wait_for_timeout(300)
-    model_select = page.locator("select").nth(1)
-    expect(model_select).to_be_visible()
-    assert model_select.input_value() == "", "no model may be preselected"
-
-    # 2-4. Hosted providers: suggestions are listed, none is selected until explicitly chosen
-    for provider, model in (
-        ("openai", "gpt-4o"),
-        ("anthropic", "claude-3-5-sonnet-20241022"),
-        ("gemini", "gemini-2.0-flash"),
-    ):
-        provider_select.select_option(provider)
-        page.wait_for_timeout(300)
-        picker = _model_select_with(model)
-        expect(picker).to_be_visible()
-        assert picker.input_value() == "", f"{provider}: no model may be preselected"
-        picker.select_option(model)
-        assert picker.input_value() == model
-
-    # 5. Toggle Custom model
-    custom_btn = page.locator("button:has-text('Custom model...')").first
-    expect(custom_btn).to_be_visible()
-    custom_btn.click()
-    page.wait_for_timeout(300)
-
-    custom_input = page.locator("input[placeholder*='custom-model']").first
-    expect(custom_input).to_be_visible()
-    custom_input.fill("my-fine-tuned-model:v1")
-    assert custom_input.input_value() == "my-fine-tuned-model:v1"
-
-    # 6. Switch back to Suggested list
-    suggested_btn = page.locator("button:has-text('Suggested list')").first
-    suggested_btn.click()
-    page.wait_for_timeout(300)
-    expect(page.locator("select:has(option[value='gemini-2.0-flash'])").first).to_be_visible()
-
-    # Close modal
-    page.locator("button:has-text('Cancel'), button:has-text('Annulla')").first.click()
+    saved: list = []
+    state = {"done": False}
+    page.route("**/api/settings/provider", lambda r: (
+        (saved.append(json.loads(r.request.post_data or "{}")), state.update(done=True), r.fulfill(status=200, content_type="application/json", body="{}"))
+        if r.request.method == "POST"
+        else r.fulfill(status=200, content_type="application/json", body=json.dumps({"provider": "groq" if state["done"] else "", "model": "m", "configured": {"groq": state["done"], "openai": False, "anthropic": False, "gemini": False, "ollama": True}}))))
+    page.goto(_base_url())
+    page.wait_for_selector(".sidebar", timeout=15000)
+    card = page.get_by_test_id("first-run-model")
+    expect(card).to_be_visible(timeout=10000)
+    assert page.locator("[data-testid='frm-provider'] option").count() == 4
+    expect(page.get_by_test_id("frm-save")).to_be_disabled()
+    page.get_by_test_id("frm-key").fill("sk-test-not-a-real-key")
+    page.get_by_test_id("frm-save").click()
+    expect(card).to_have_count(0, timeout=10000)
+    assert saved and saved[0]["provider"] == "groq" and saved[0]["api_key"] == "sk-test-not-a-real-key" and saved[0]["apply_to_all_agents"] is True
+    assert "sk-test-not-a-real-key" not in page.content(), "the key is never left in the page"
+    assert page.locator("[data-testid='workspace-switcher-button']").count() == 0 and page.locator("text=/new workspace/i").count() == 0
     page.close()

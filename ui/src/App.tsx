@@ -13,7 +13,6 @@ import { Connections } from './Connections';
 import { WorkforceHub } from './WorkforceHub';
 import { ActivityFeed } from './ActivityFeed';
 import { CommandPalette } from './CommandPalette';
-import { WorkspaceModal } from './WorkspaceModal';
 import { ShortcutsProvider, useKeyboardShortcuts, ShortcutsModal } from './shortcuts';
 import { ToastProvider, ToastContext } from './toast';
 import { LanguageProvider } from './i18n';
@@ -76,8 +75,6 @@ function MainApp() {
 
   // Modals & Palettes
   const [isCommandPaletteOpen, setIsCommandPaletteOpen] = useState(false);
-  const [isWorkspaceModalOpen, setIsWorkspaceModalOpen] = useState(false);
-  const [workspaceModalMode, setWorkspaceModalMode] = useState<'create' | 'manage'>('create');
 
   const showToast = useContext(ToastContext);
 
@@ -161,27 +158,7 @@ function MainApp() {
       labelKey: 'shortcutNewTask',
       category: 'general',
       allowInInput: false,
-      action: () => {
-        if (!workspaceName) {
-          handleOpenWorkspaceModal('create');
-        } else {
-          handleNewConversation();
-        }
-      },
-    });
-
-    const unregister4 = registerShortcut({
-      id: 'manage_workspace',
-      key: 'w',
-      meta: true,
-      shift: true,
-      labelKey: 'shortcutManageWorkspace',
-      category: 'workspace',
-      allowInInput: false,
-      action: () => {
-        setWorkspaceModalMode('manage');
-        setIsWorkspaceModalOpen((prev) => !prev);
-      },
+      action: () => handleNewConversation(),
     });
 
     const unregister5 = registerShortcut({
@@ -192,7 +169,6 @@ function MainApp() {
       allowInInput: true,
       action: () => {
         setIsCommandPaletteOpen(false);
-        setIsWorkspaceModalOpen(false);
         closeShortcutsModal();
       },
     });
@@ -209,7 +185,6 @@ function MainApp() {
       unregister1();
       unregister2();
       unregister3();
-      unregister4();
       unregister5();
       unregisterNav1();
       unregisterNav2();
@@ -386,11 +361,6 @@ function MainApp() {
     }
   };
 
-  const handleOpenWorkspaceModal = (mode: 'create' | 'manage') => {
-    setWorkspaceModalMode(mode);
-    setIsWorkspaceModalOpen(true);
-  };
-
   const handleWorkspaceSwitched = () => {
     setActiveConversationId(null);
     setCurrentView('home');
@@ -415,7 +385,6 @@ function MainApp() {
           workspaceName={workspaceName}
           navigate={navigate}
           onSwitchToV1={() => handleSwitchExperience('v1')}
-          onOpenWorkspaceModal={() => handleOpenWorkspaceModal('create')}
         />
 
         <CommandPalette
@@ -425,13 +394,6 @@ function MainApp() {
           onNewConversation={handleNewConversation}
           conversations={conversations}
           onSelectConversation={handleSelectConversation}
-        />
-
-        <WorkspaceModal
-          isOpen={isWorkspaceModalOpen}
-          onClose={() => setIsWorkspaceModalOpen(false)}
-          onWorkspaceSwitched={handleWorkspaceSwitched}
-          initialMode={workspaceModalMode}
         />
 
         <ShortcutsModal
@@ -455,20 +417,18 @@ function MainApp() {
         onNewConversation={handleNewConversation}
         onDeleteConversation={handleDeleteConversation}
         onOpenCommandPalette={() => setIsCommandPaletteOpen(true)}
-        onOpenWorkspaceModal={handleOpenWorkspaceModal}
         onRefreshConversations={fetchConversations}
-        onWorkspaceSwitched={handleWorkspaceSwitched}
         onSwitchToV2={() => handleSwitchExperience('v2')}
       />
 
       <div className="main-content">
-        {!hasWorkspace && currentView !== 'home' && currentView !== 'marketplace' ? (
-          // Every other screen reads the workspace: without one they would only show raw server errors.
-          <div data-testid="no-workspace-notice" style={{ flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '40px 24px' }}>
-            <div className="card" style={{ maxWidth: '480px', width: '100%', padding: '36px', textAlign: 'center' }}>
-              <h2 style={{ fontSize: '20px', fontWeight: 700, marginBottom: '10px' }}>{t('createFirstWorkspace')}</h2>
-              <p className="text-muted" style={{ fontSize: '14px', lineHeight: 1.6, marginBottom: '22px' }}>{t('noActiveWorkspaceDesc')}</p>
-              <button className="btn btn-primary" onClick={() => handleOpenWorkspaceModal('create')}>{t('createWorkspaceBtn')}</button>
+        {!hasWorkspace && currentView !== 'marketplace' ? (
+          // The personal space is created by the runtime at first launch; if it is not there yet (or could not be made) say so calmly.
+          <div data-testid="workspace-unavailable-notice" style={{ flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '40px 24px' }}>
+            <div style={{ maxWidth: '420px', width: '100%', textAlign: 'center' }}>
+              <h2 style={{ fontSize: '20px', fontWeight: 600, marginBottom: '8px' }}>{t('spaceStartingTitle')}</h2>
+              <p className="text-muted" style={{ fontSize: '14px', lineHeight: 1.6, marginBottom: '20px' }}>{t('spaceStartingDesc')}</p>
+              <button className="btn btn-secondary" onClick={() => fetchWorkspace()}>{t('spaceRetry')}</button>
             </div>
           </div>
         ) : null}
@@ -480,7 +440,6 @@ function MainApp() {
             onNewTask={handleNewConversation}
             onSelectConversation={handleSelectConversation}
             conversations={conversations}
-            onOpenWorkspaceModal={() => handleOpenWorkspaceModal('create')}
           />
         )}
         {hasWorkspace && (currentView === 'missions' || currentView === 'work') && (
@@ -505,7 +464,6 @@ function MainApp() {
             onSelectConversation={handleSelectConversation}
             onConversationUpdated={fetchConversations}
             hasWorkspace={hasWorkspace}
-            onOpenWorkspaceModal={() => handleOpenWorkspaceModal('create')}
           />
         )}
         {hasWorkspace && currentView === 'agents' && <WorkforceHub initialTab="agents" navigate={navigate} />}
@@ -532,13 +490,6 @@ function MainApp() {
         onNewConversation={handleNewConversation}
         conversations={conversations}
         onSelectConversation={handleSelectConversation}
-      />
-
-      <WorkspaceModal
-        isOpen={isWorkspaceModalOpen}
-        onClose={() => setIsWorkspaceModalOpen(false)}
-        onWorkspaceSwitched={handleWorkspaceSwitched}
-        initialMode={workspaceModalMode}
       />
 
       <ShortcutsModal

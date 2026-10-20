@@ -2,7 +2,7 @@ import { useState, useEffect, useContext, useRef } from 'react';
 import { translateStepTitle } from './stepTitles';
 import {
   Send, CheckCircle2, Clock, AlertTriangle, ArrowRight,
-  Plus, FileText, Check, X, Shield,
+  FileText, Check, X, Shield,
   Mic, MicOff, Volume2, VolumeX, ExternalLink, Loader2
 } from 'lucide-react';
 import { apiUrl } from './api';
@@ -10,6 +10,7 @@ import { useTranslation } from './i18n';
 import { ToastContext } from './toast';
 import { AutoArchitectModal } from './AutoArchitectModal';
 import './home.css';
+import { FirstRunModel } from './FirstRunModel';
 import { TopHeader } from './TopHeader';
 import { NotificationCenter } from './NotificationCenter';
 import { submitApprovalDecision, approvalToastKind, approvalIsFinished, approvalIsInProgress } from './canonicalNotification';
@@ -21,7 +22,6 @@ interface HomeProps {
   onNewTask?: () => void;
   onSelectConversation?: (id: string) => void;
   conversations?: any[];
-  onOpenWorkspaceModal?: () => void;
 }
 
 interface StepItem {
@@ -49,7 +49,6 @@ export function Home({
   navigate,
   workspaceName,
   initialApprovalId,
-  onOpenWorkspaceModal,
 }: HomeProps) {
   const [promptInput, setPromptInput] = useState('');
   const [isSubmitting, setIsSubmitting] = useState(false);
@@ -567,47 +566,8 @@ export function Home({
     }
   };
 
-  // If no workspace exists or is active, show the explicit no-workspace empty state
-  if (!workspaceName) {
-    return (
-      <div style={{ flex: 1, overflowY: 'auto', display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '40px 24px' }}>
-        <div className="card" style={{ maxWidth: '520px', width: '100%', padding: '44px 36px', textAlign: 'center', boxShadow: '0 12px 36px rgba(0,0,0,0.08)' }}>
-          <div style={{
-            width: '64px',
-            height: '64px',
-            borderRadius: '16px',
-            backgroundColor: 'hsl(var(--primary)/0.12)',
-            display: 'flex',
-            alignItems: 'center',
-            justifyContent: 'center',
-            margin: '0 auto 20px',
-          }}>
-            <img
-              src="/brand/logo_viola.svg"
-              alt="Aether"
-              width="36"
-              height="36"
-              style={{ display: 'block' }}
-            />
-          </div>
-          <h2 style={{ fontSize: '22px', fontWeight: 700, marginBottom: '10px', color: 'hsl(var(--fg))' }}>
-            {t('createFirstWorkspace')}
-          </h2>
-          <p className="text-muted" style={{ fontSize: '14px', lineHeight: 1.6, marginBottom: '28px', maxWidth: '420px', margin: '0 auto 28px' }}>
-            {t('noActiveWorkspaceDesc')}
-          </p>
-          <button
-            className="btn btn-primary"
-            style={{ padding: '10px 24px', fontSize: '14px', margin: '0 auto', display: 'inline-flex', alignItems: 'center', gap: '8px' }}
-            onClick={onOpenWorkspaceModal ? onOpenWorkspaceModal : () => navigate('settings')}
-          >
-            <Plus size={16} />
-            <span>{t('createWorkspaceBtn')}</span>
-          </button>
-        </div>
-      </div>
-    );
-  }
+  // The personal space is created by the runtime at launch; until it is there App shows the calm "getting ready" notice.
+  if (!workspaceName) return null;
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', width: '100%', minHeight: '100%' }}>
@@ -625,6 +585,8 @@ export function Home({
             </button>
           )}
         </div>
+
+        <FirstRunModel />
 
         <div className="home-composer" data-listening={isListening ? 'true' : 'false'}>
           <textarea

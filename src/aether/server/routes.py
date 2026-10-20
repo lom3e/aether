@@ -781,7 +781,12 @@ async def init_workspace(request: Request, data: WorkspaceInitRequest):
     # The launcher may select a workspace explicitly through AETHER_WORKSPACE.
     # Keep that root stable during onboarding instead of silently falling back
     # to the server process directory.
-    cwd = getattr(request.app.state, "workspace_root", None) or Path.cwd()
+    cwd = getattr(request.app.state, "workspace_root", None)
+    if cwd is None:
+        # Never initialise inside whatever directory the server happens to run in (in development that is the repo).
+        from aether.core.paths import get_default_workspaces_dir
+        cwd = get_default_workspaces_dir() / "personal" if os.environ.get("AETHER_DESKTOP_RUNTIME") else Path.cwd()
+        Path(cwd).mkdir(parents=True, exist_ok=True)
     try:
         ws = Workspace.get_or_init(cwd, data.name.strip())
         request.app.state.workspace = ws

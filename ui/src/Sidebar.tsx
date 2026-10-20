@@ -22,9 +22,7 @@ interface SidebarProps {
   onNewConversation: () => void;
   onDeleteConversation: (id: string) => void;
   onOpenCommandPalette: () => void;
-  onOpenWorkspaceModal?: (mode: 'create' | 'manage') => void;
   onRefreshConversations?: () => void;
-  onWorkspaceSwitched?: () => void;
   workspaceVersion?: number;
   onSwitchToV2?: () => void;
 }
@@ -40,9 +38,7 @@ export function Sidebar({
   onNewConversation,
   onDeleteConversation,
   onOpenCommandPalette,
-  onOpenWorkspaceModal,
   onRefreshConversations,
-  onWorkspaceSwitched,
   onSwitchToV2
 }: SidebarProps) {
   // A phone-width window cannot afford a 260px sidebar next to the content: start collapsed and fold it whenever the
@@ -97,10 +93,6 @@ export function Sidebar({
   const [githubLoading, setGithubLoading] = useState(false);
   const [githubError, setGithubError] = useState<string | null>(null);
 
-  // Workspace Switcher Dropdown
-  const [isWsDropdownOpen, setIsWsDropdownOpen] = useState(false);
-  const [allWorkspaces, setAllWorkspaces] = useState<any[]>([]);
-
   const dropdownRef = useRef<HTMLDivElement>(null);
   const convMenuRef = useRef<HTMLDivElement>(null);
   const projectSectionRef = useRef<HTMLDivElement>(null);
@@ -126,18 +118,6 @@ export function Sidebar({
     return `${Math.floor(diff / 86400)}d`;
   };
 
-  // Fetch workspaces list for dropdown
-  const fetchWorkspaces = () => {
-    fetch(apiUrl('/api/workspaces'))
-      .then(res => res.json())
-      .then(data => {
-        if (Array.isArray(data)) {
-          setAllWorkspaces(data);
-        }
-      })
-      .catch(console.error);
-  };
-
   const fetchProjects = () => {
     fetch(apiUrl('/api/projects'))
       .then(res => res.json())
@@ -150,7 +130,6 @@ export function Sidebar({
   };
 
   useEffect(() => {
-    fetchWorkspaces();
     fetchProjects();
   }, [workspaceName, workspaceVersion]);
 
@@ -158,9 +137,6 @@ export function Sidebar({
   useEffect(() => {
     const handleClickOutside = (e: MouseEvent) => {
       const target = e.target as Node;
-      if (dropdownRef.current && !dropdownRef.current.contains(target)) {
-        setIsWsDropdownOpen(false);
-      }
       if (convMenuRef.current && !convMenuRef.current.contains(target)) {
         setActiveMenuConvId(null);
       }
@@ -364,26 +340,6 @@ export function Sidebar({
     }
   };
 
-  const handleSwitchWorkspace = async (ws: any) => {
-    if (ws.is_active) {
-      setIsWsDropdownOpen(false);
-      return;
-    }
-    try {
-      const res = await fetch(apiUrl('/api/workspaces/switch'), {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ workspace_id: ws.id, path: ws.path })
-      });
-      if (res.ok) {
-        setIsWsDropdownOpen(false);
-        if (onWorkspaceSwitched) onWorkspaceSwitched();
-      }
-    } catch (err) {
-      console.error(t('szFailedToSwitchWorkspace'), err);
-    }
-  };
-
   const handleRenameConversation = async (convId: string) => {
     if (!editTitleValue.trim()) {
       setEditingConvId(null);
@@ -473,51 +429,10 @@ export function Sidebar({
         }} ref={dropdownRef}>
           {!collapsed ? (
             <>
-              <button
-                className="btn btn-ghost"
-                data-testid="workspace-switcher-button"
-                style={{
-                  display: 'flex',
-                  alignItems: 'center',
-                  gap: '10px',
-                  padding: '6px 8px',
-                  borderRadius: '8px',
-                  maxWidth: '190px',
-                  overflow: 'hidden'
-                }}
-                onClick={() => {
-                  fetchWorkspaces();
-                  setIsWsDropdownOpen(!isWsDropdownOpen);
-                }}
-              >
-                <div style={{
-                  width: '26px',
-                  height: '26px',
-                  borderRadius: '6px',
-                  backgroundColor: 'hsl(var(--primary)/0.12)',
-                  display: 'flex',
-                  alignItems: 'center',
-                  justifyContent: 'center',
-                  flexShrink: 0
-                }}>
-                  <img
-                    src="/brand/logo_viola.svg"
-                    alt={t('sdAetherLogo')}
-                    width="18"
-                    height="18"
-                    style={{ width: '18px', height: '18px', objectFit: 'contain', display: 'block' }}
-                  />
-                </div>
-                <div style={{ overflow: 'hidden', textAlign: 'left' }}>
-                  <div style={{ fontSize: '13px', fontWeight: 600, color: 'hsl(var(--fg))', whiteSpace: 'nowrap', textOverflow: 'ellipsis', overflow: 'hidden', display: 'flex', alignItems: 'center', gap: '4px' }}>
-                    <span>{workspaceName || t('noWorkspace')}</span>
-                    <ChevronDown size={12} className="text-muted" />
-                  </div>
-                  <div style={{ fontSize: '10px', color: 'hsl(var(--muted-fg))', letterSpacing: '0.04em' }}>
-                    {workspaceName ? t('aiWorkforce') : t('clickToCreate')}
-                  </div>
-                </div>
-              </button>
+              <div data-testid="sidebar-brand" style={{ display: 'flex', alignItems: 'center', gap: '10px', padding: '6px 8px', overflow: 'hidden' }}>
+                <img src="/brand/logo_viola.svg" alt={t('sdAetherLogo')} width="22" height="22" style={{ width: '22px', height: '22px', objectFit: 'contain', display: 'block', flexShrink: 0 }} />
+                <span style={{ fontSize: '14px', fontWeight: 600, letterSpacing: '-0.01em', color: 'hsl(var(--fg))' }}>Aether</span>
+              </div>
 
               <Tooltip content={t('collapseSidebar')} position="bottom">
                 <button
@@ -567,79 +482,6 @@ export function Sidebar({
             </Tooltip>
           )}
 
-          {/* Workspace Switcher Popover Dropdown */}
-          {isWsDropdownOpen && !collapsed && (
-            <div style={{
-              position: 'absolute',
-              top: '56px',
-              left: '12px',
-              width: '236px',
-              backgroundColor: 'hsl(var(--card))',
-              border: '1px solid hsl(var(--border))',
-              borderRadius: '8px',
-              boxShadow: '0 10px 25px rgba(0,0,0,0.3)',
-              padding: '6px',
-              zIndex: 100,
-              display: 'flex',
-              flexDirection: 'column',
-              gap: '2px'
-            }}>
-              <div style={{ fontSize: '10px', fontWeight: 600, color: 'hsl(var(--muted-fg))', padding: '4px 8px' }}>
-                {t('allWorkspaces')}
-              </div>
-              <div style={{ maxHeight: '180px', overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: '2px' }}>
-                {allWorkspaces.length === 0 ? (
-                  <div style={{ fontSize: '11px', color: 'hsl(var(--muted-fg))', padding: '6px 8px' }}>
-                    {t('noWorkspacesSaved')}
-                  </div>
-                ) : (
-                  allWorkspaces.map(ws => (
-                    <button
-                      key={ws.id || ws.path}
-                      className={`btn btn-ghost ${ws.is_active ? 'active' : ''}`}
-                      style={{
-                        width: '100%',
-                        justifyContent: 'space-between',
-                        padding: '6px 8px',
-                        fontSize: '12px',
-                        borderRadius: '6px'
-                      }}
-                      onClick={() => handleSwitchWorkspace(ws)}
-                    >
-                      <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                        {ws.name}
-                      </span>
-                      {ws.is_active && <Check size={13} className="text-primary" />}
-                    </button>
-                  ))
-                )}
-              </div>
-
-              <div style={{ height: '1px', backgroundColor: 'hsl(var(--border))', margin: '4px 0' }} />
-
-              <button
-                className="btn btn-ghost"
-                style={{ width: '100%', justifyContent: 'flex-start', padding: '6px 8px', fontSize: '12px' }}
-                onClick={() => {
-                  setIsWsDropdownOpen(false);
-                  if (onOpenWorkspaceModal) onOpenWorkspaceModal('create');
-                }}
-              >
-                <Plus size={13} /> {t('newWorkspaceBtn')}
-              </button>
-
-              <button
-                className="btn btn-ghost"
-                style={{ width: '100%', justifyContent: 'flex-start', padding: '6px 8px', fontSize: '12px' }}
-                onClick={() => {
-                  setIsWsDropdownOpen(false);
-                  onNavigate('settings');
-                }}
-              >
-                <Settings size={13} /> {t('manageWorkspaces')}
-              </button>
-            </div>
-          )}
         </div>
 
         {/* Assistant V2 Mode Switcher & New Task */}
@@ -665,13 +507,7 @@ export function Sidebar({
             <button
               className="btn btn-primary"
               style={{ width: '100%', padding: collapsed ? '8px' : '8px 12px', fontSize: '13px' }}
-              onClick={() => {
-                if (!workspaceName) {
-                  if (onOpenWorkspaceModal) onOpenWorkspaceModal('create');
-                } else {
-                  onNewConversation();
-                }
-              }}
+              onClick={() => onNewConversation()}
             >
               <Plus size={15} />
               {!collapsed && <span>{t('newTask')}</span>}
