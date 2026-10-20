@@ -138,3 +138,28 @@ def test_routes_round_trip_with_the_memory_mirror(ws):
     assert e2.value.status_code == 404
     assert asyncio.run(routes.life_contacts_delete(_req("DELETE"), c["id"]))["deleted"] is True
     assert ws.memory.get_memory(c["memory_id"], workspace_id=ws.id) is None or ws.memory.get_memory(c["memory_id"], workspace_id=ws.id).is_deleted
+
+
+def test_the_morning_brief_is_opt_in_once_a_day_and_silent_when_empty(ws, monkeypatch):
+    from aether.life import briefing
+
+    s = LifeStore(Path(ws.conversations_db_path).parent / "life.db")
+    sent: list = []
+    monkeypatch.setattr(ws.notifications.__class__, "notify", lambda self, *a, **k: sent.append((a, k)))
+    s.add_job("Preventivo", due_at=_ts(0, 17))
+    morning = NOW.replace(hour=8, minute=0)
+    assert s.settings() == {"brief_enabled": False, "brief_time": "08:30", "last_brief_date": ""}
+    assert briefing.maybe_send_brief(ws, s, now=NOW) is False and sent == [], "off by default: nothing is ever sent"
+    s.update_settings(brief_enabled=True)
+    assert briefing.maybe_send_brief(ws, s, now=morning) is False, "not before the chosen time"
+    assert briefing.maybe_send_brief(ws, s, now=NOW) is True and len(sent) == 1
+    assert "Preventivo" in sent[0][0][3] and sent[0][0][2] == "Oggi"
+    assert briefing.maybe_send_brief(ws, s, now=NOW + dt.timedelta(hours=2)) is False, "once a day"
+    s2 = LifeStore(Path(ws.conversations_db_path).parent / "life2.db")
+    s2.update_settings(brief_enabled=True)
+    assert briefing.maybe_send_brief(ws, s2, now=NOW) is False and len(sent) == 1, "nothing to say, nothing sent"
+    assert s2.settings()["last_brief_date"] == NOW.strftime("%Y-%m-%d"), "the day is marked so it does not retry every minute"
+    with pytest.raises(ValueError):
+        s.update_settings(brief_time="25:99")
+    saved = asyncio.run(routes.life_settings_put(_req("PUT"), routes.LifeSettingsPayload(brief_enabled=False, brief_time="07:45")))
+    assert saved["brief_enabled"] is False and saved["brief_time"] == "07:45"

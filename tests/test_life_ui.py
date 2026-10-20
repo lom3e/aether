@@ -64,3 +64,22 @@ def test_capture_today_people_and_forget(browser_context):
     page.get_by_test_id("person-forget").click()
     expect(page.get_by_test_id("people-empty")).to_be_visible(timeout=10000)
     page.close()
+
+
+def test_morning_brief_setting_is_off_by_default_and_saved_by_the_real_server(browser_context):
+    import test_personal_agent_ui as base
+
+    base._state.update(_state)
+    page = browser_context.new_page()
+    _ensure_workspace(page)
+    page.locator("[data-testid='nav-settings']").click()
+    page.get_by_role("button", name="General").click()
+    toggle = page.get_by_test_id("brief-toggle")
+    expect(toggle).not_to_be_checked(timeout=10000)
+    toggle.check()
+    page.get_by_test_id("brief-time").fill("07:15")
+    page.get_by_test_id("brief-time").blur()
+    page.wait_for_timeout(500)
+    saved = page.evaluate("async () => (await fetch('/api/life/settings')).json()")
+    assert saved["brief_enabled"] is True and saved["brief_time"] == "07:15"
+    page.close()

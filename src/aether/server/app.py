@@ -267,6 +267,16 @@ async def startup_event():
         except Exception as exc:
             print(f"Warning: could not start automation scheduler: {exc}")
 
+        # Optional morning brief (off unless the user turns it on in Settings)
+        try:
+            from aether.life.briefing import brief_loop
+
+            _t = getattr(app.state, "life_brief_task", None)
+            if _t is None or _t.done():
+                app.state.life_brief_task = asyncio.create_task(brief_loop(app.state))
+        except Exception as exc:
+            print(f"Warning: could not start the morning brief loop: {exc}")
+
         # Initialize Mission Runtime
         try:
             from aether.missions.runtime import MissionRuntime
@@ -309,6 +319,11 @@ app.add_api_route("/content/repurpose", repurpose_content_route, methods=["POST"
 
 async def shutdown_event():
     app.state.is_shutting_down = True
+
+    # 0. Stop the morning-brief loop
+    brief_task = getattr(app.state, "life_brief_task", None)
+    if brief_task is not None and not brief_task.done():
+        brief_task.cancel()
 
     # 0. Stop Automation Scheduler
     scheduler = getattr(app.state, "scheduler", None)

@@ -7306,6 +7306,26 @@ async def life_reminders_delete(request: Request, reminder_id: str):
     return {"deleted": True, "id": reminder_id}
 
 
+class LifeSettingsPayload(BaseModel):
+    brief_enabled: bool | None = None
+    brief_time: str | None = None
+
+
+@router.get("/life/settings")
+async def life_settings_get(request: Request):
+    _, store = _life(request)
+    return store.settings()
+
+
+@router.put("/life/settings")
+async def life_settings_put(request: Request, payload: LifeSettingsPayload):
+    _, store = _life(request)
+    try:
+        return store.update_settings(**{k: v for k, v in payload.model_dump().items() if v is not None})
+    except ValueError as exc:
+        raise _life_value_error(exc) from exc
+
+
 @router.get("/life/today")
 async def life_today(request: Request, language: str = "it"):
     """Appointments (read-only calendar), jobs and reminders due, overdue and soon, plus what waits for approval."""

@@ -30,6 +30,7 @@ CREATE TABLE IF NOT EXISTS reminders (
     id TEXT PRIMARY KEY, contact_id TEXT, job_id TEXT, text TEXT NOT NULL, due_at REAL, done INTEGER NOT NULL DEFAULT 0,
     source TEXT NOT NULL DEFAULT 'manual', created_at REAL NOT NULL, done_at REAL
 );
+CREATE TABLE IF NOT EXISTS life_settings (key TEXT PRIMARY KEY, value TEXT NOT NULL);
 CREATE INDEX IF NOT EXISTS jobs_due ON jobs(status, due_at);
 CREATE INDEX IF NOT EXISTS reminders_due ON reminders(done, due_at);
 """
@@ -50,6 +51,33 @@ class LifeStore:
         conn = sqlite3.connect(self.path, timeout=10)
         conn.row_factory = sqlite3.Row
         return _Conn(conn)
+
+    # -- settings (all opt-in, off by default) ---------------------------------------------------------------
+    DEFAULT_SETTINGS = {"brief_enabled": False, "brief_time": "08:30", "last_brief_date": ""}
+
+    def settings(self) -> dict[str, Any]:
+        import json
+
+        out = dict(self.DEFAULT_SETTINGS)
+        with self._lock, self._conn() as c:
+            for r in c.execute("SELECT key, value FROM life_settings"):
+                try:
+                    out[r["key"]] = json.loads(r["value"])
+                except ValueError:
+                    pass
+        return out
+
+    def update_settings(self, **values: Any) -> dict[str, Any]:
+        import json
+        import re
+
+        if "brief_time" in values and not re.fullmatch(r"([01]\d|2[0-3]):[0-5]\d", str(values["brief_time"])):
+            raise ValueError("brief_time must be HH:MM")
+        with self._lock, self._conn() as c:
+            for k, v in values.items():
+                if k in self.DEFAULT_SETTINGS and v is not None:
+                    c.execute("INSERT INTO life_settings(key,value) VALUES(?,?) ON CONFLICT(key) DO UPDATE SET value=excluded.value", (k, json.dumps(v)))
+        return self.settings()
 
     # -- contacts ---------------------------------------------------------------------------------------------
     def add_contact(self, name: str, *, kind: str = "person", company: str = "", email: str = "", phone: str = "", notes: str = "") -> dict[str, Any]:
