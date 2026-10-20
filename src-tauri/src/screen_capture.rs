@@ -296,6 +296,22 @@ pub fn screen_capture_open_settings() {
     mac::open_settings();
 }
 
+/// A capture for the summon flow (hotkey pressed): the display under the pointer's main screen, taken BEFORE the Bar shows, so
+/// nothing of the Companion is in the picture and no hide/restore dance is needed. Blocking; call from a worker thread.
+pub fn capture_screen_blocking() -> CaptureResult {
+    #[cfg(not(target_os = "macos"))]
+    {
+        CaptureResult::err("screen", "unsupported", "screen capture is not implemented on this platform yet")
+    }
+    #[cfg(target_os = "macos")]
+    {
+        if !mac::permission_granted() {
+            return CaptureResult::err("screen", "permission_denied", "Screen Recording permission is not granted");
+        }
+        mac::capture("screen")
+    }
+}
+
 /// One capture, on explicit request. `mode` is "screen" (main display) or "region" (the system selection UI).
 #[tauri::command]
 pub async fn screen_capture_take(app: AppHandle, mode: String) -> CaptureResult {

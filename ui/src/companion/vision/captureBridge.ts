@@ -77,3 +77,17 @@ export async function takeCapture(mode: CaptureMode): Promise<CaptureResult> {
     return { ok: false, error: 'capture_failed', detail: String(e?.message ?? e) };
   }
 }
+
+/** The screen read when the Companion was summoned with the hotkey (held once by the native side, in memory only). */
+export async function takeSummonCapture(): Promise<Extract<CaptureResult, { ok: true }> | null> {
+  if (!isTauri()) return null;
+  try {
+    const r = await invoke<any>('companion_take_context');
+    if (r?.ok && r.image_base64 && r.width > 0 && r.height > 0) {
+      return { ok: true, imageBase64: r.image_base64, mediaType: r.media_type || 'image/png', width: r.width, height: r.height, mode: 'screen', screen: r.screen ?? null, ocrWords: Array.isArray(r.ocr?.words) ? r.ocr.words : null };
+    }
+  } catch (e) {
+    console.warn('companion_take_context failed:', e);
+  }
+  return null;
+}

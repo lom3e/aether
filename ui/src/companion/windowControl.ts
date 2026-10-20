@@ -33,6 +33,16 @@ export async function setNativeMode(mode: CompanionMode): Promise<void> {
   }
 }
 
+/** The Bar grows and shrinks with its content: report the height (CSS px) the page needs. */
+export async function resizeNativePanel(height: number): Promise<void> {
+  if (!isTauri()) return;
+  try {
+    await invoke('companion_resize_panel', { height });
+  } catch (e) {
+    console.warn('companion_resize_panel failed:', e);
+  }
+}
+
 export async function startNativeDrag(): Promise<void> {
   if (!isTauri()) return;
   try {
@@ -59,4 +69,16 @@ export function onNativeModeChange(handler: (mode: CompanionMode) => void): () =
   };
   window.addEventListener('aether-companion-mode', listener);
   return () => window.removeEventListener('aether-companion-mode', listener);
+}
+
+export type SummonPhase = 'press' | 'release' | 'tap' | 'cancel';
+
+/** The summon key: press (the Bar is up, start listening), release after a hold (send), tap (just open for typing), cancel. */
+export function onSummon(cb: (phase: SummonPhase) => void): () => void {
+  const handler = (e: Event) => {
+    const phase = (e as CustomEvent).detail?.phase as SummonPhase | undefined;
+    if (phase) cb(phase);
+  };
+  window.addEventListener('aether-companion-summon', handler);
+  return () => window.removeEventListener('aether-companion-summon', handler);
 }

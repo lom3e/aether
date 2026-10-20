@@ -42,6 +42,8 @@ export function CompanionApp() {
     getNativeState().then(s => {
       if (!s) return;
       setMode(s.mode);
+      // macOS gives the Bar a frosted-glass sheet (native vibrancy, no shadow): the page draws it flat and translucent.
+      if (s.platform === 'macos') document.documentElement.classList.add('cmp-vibrant');
     });
     setNativeFollow(follow);
     return onNativeModeChange(setMode);

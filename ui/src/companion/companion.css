@@ -173,3 +173,24 @@ html.cmp-vibrant .cmp-drop { background: hsl(var(--cmp-bg) / .8); }
 .cmp-shield { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; font-size: 12px; color: hsl(var(--cmp-dim)); padding: 4px 2px; }
 .cmp-shield[data-state='hidden'] { color: hsl(var(--cmp-fg)); }
 .cmp-shield[data-state='unavailable'] { color: hsl(var(--cmp-accent)); }
+
+/* ---------- Aether Bar: one glass input row that grows with the conversation (replaces the tall panel) ---------- */
+.cmp-shell { padding: 0; display: flex; align-items: flex-start; }
+.cmp-panel { height: auto; max-height: 100vh; border-radius: 22px; box-shadow: inset 0 0 0 1px hsl(0 0% 100% / .1); animation: none; }
+html.cmp-vibrant .cmp-panel { background: hsl(var(--cmp-bg) / .55); box-shadow: inset 0 0 0 1px hsl(0 0% 100% / .12); border-radius: 22px; }
+.cmp-head { padding: 8px 10px 0 18px; cursor: grab; min-height: 0; }
+.cmp-title, .cmp-status { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
+.cmp-body { flex: 0 1 auto; min-height: 0; padding: 4px 22px 8px; }
+.cmp-body:has(> .cmp-empty:only-child) { padding: 0; }
+.cmp-empty { margin: 0; flex-direction: row; flex-wrap: wrap; justify-content: center; gap: 2px 4px; padding: 0 12px; }
+.cmp-empty-orb, .cmp-empty h3 { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); margin: 0; }
+.cmp-empty .cmp-chip { width: auto; padding: 5px 11px; font-size: 13px; }
+.cmp-foot { padding: 4px 12px 12px; }
+.cmp-input-wrap { border-radius: 18px; padding: 9px 9px 9px 12px; background: hsl(var(--cmp-bg-2) / .7); }
+.cmp-input { font-size: 16px; }
+.cmp-head .cmp-dot { margin-top: 2px; }
+.cmp-panel[data-overlay='true'] { min-height: min(600px, 100vh); }
+.cmp-sight { display: flex; align-items: center; gap: 8px; padding: 2px 20px 6px; font-size: 12px; color: hsl(var(--cmp-dim)); }
+.cmp-sight[data-state='hidden'] { color: hsl(var(--cmp-fg)); }
+.cmp-sight[data-state='unchecked'] { color: hsl(var(--cmp-accent)); }
+.cmp-sight span { flex: 1; min-width: 0; }

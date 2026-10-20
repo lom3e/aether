@@ -4,7 +4,9 @@ import { AetherOrb } from '../orb/AetherOrb';
 import { MarkdownRenderer } from '../MarkdownRenderer';
 import { contextIsEmpty, type AttachedFile, type CompanionRuntime, type DesktopContext, type NotificationsSummary } from './useCompanionRuntime';
 import { STATUS_COLORS, STATUS_LABEL_KEYS, orbStateFor } from './status';
-import { startNativeDrag } from './windowControl';
+import { onSummon, resizeNativePanel, startNativeDrag } from './windowControl';
+import { takeSummonCapture } from './vision/captureBridge';
+import { shieldCapture, type ShieldedImage } from './vision/shield';
 import { useDictation } from './useDictation';
 import { showMainWindow } from '../desktop';
 import type { TranslationKey } from '../i18n';
@@ -34,17 +36,53 @@ export function CompanionPanel({ runtime, language, t, follow, onToggleFollow, o
   const [dragging, setDragging] = useState(false);
   const [visionOpen, setVisionOpen] = useState(false);
   const [menuOpen, setMenuOpen] = useState(false);
+  // What Aether saw when it was summoned: held in memory for the next message only, then dropped.
+  const [sight, setSight] = useState<ShieldedImage | null>(null);
+  const sightRef = useRef<ShieldedImage | null>(null);
+  const textRef = useRef('');
   const [busyTool, setBusyTool] = useState<'context' | 'attach' | 'notifications' | null>(null);
   const fileRef = useRef<HTMLInputElement>(null);
   const inputRef = useRef<HTMLTextAreaElement>(null);
   const bodyRef = useRef<HTMLDivElement>(null);
+  const panelRef = useRef<HTMLElement>(null);
   const { messages, approvals, tasks, missions, results, problem, submitting, status } = runtime;
   const dictation = useDictation(language, setText, runtime.setListening);
   const color = STATUS_COLORS[status];
+  sightRef.current = sight;
+  textRef.current = text;
 
   useEffect(() => {
     inputRef.current?.focus();
   }, []);
+
+  // The Bar is as tall as its content (one input row when empty) up to the native maximum; overlays ask for more room.
+  useEffect(() => {
+    const el = panelRef.current;
+    if (!el) return;
+    let last = 0;
+    const report = () => {
+      let natural = 0;
+      Array.from(el.children).forEach(c => {
+        const h = c as HTMLElement;
+        natural += h.classList.contains('cmp-body') ? h.scrollHeight : h.offsetHeight;
+      });
+      const wanted = Math.ceil(Math.max(natural, visionOpen ? 600 : 0, menuOpen ? 330 : 0, dragging ? 200 : 0));
+      if (Math.abs(wanted - last) > 1) {
+        last = wanted;
+        resizeNativePanel(wanted);
+      }
+    };
+    const ro = new ResizeObserver(report);
+    ro.observe(el);
+    Array.from(el.children).forEach(c => ro.observe(c));
+    const mo = new MutationObserver(report);
+    mo.observe(el, { childList: true, subtree: true, characterData: true });
+    report();
+    return () => {
+      ro.disconnect();
+      mo.disconnect();
+    };
+  }, [visionOpen, menuOpen, dragging]);
 
   useEffect(() => {
     const el = bodyRef.current;
@@ -94,8 +132,45 @@ export function CompanionPanel({ runtime, language, t, follow, onToggleFollow, o
     if (!v || submitting) return;
     if (dictation.supported) dictation.stop();
     setText('');
-    runtime.send(v, language);
+    const seen = sightRef.current;
+    if (!seen) {
+      runtime.send(v, language);
+      return;
+    }
+    setSight(null); // one-shot: the next message does not carry the old screen
+    void (async () => {
+      const vs = await runtime.fetchVisionStatus();
+      if (vs?.supported) {
+        await runtime.askAboutImage({ prompt: v, imageBase64: seen.base64, mediaType: seen.mediaType, displayUrl: seen.url, width: seen.width, height: seen.height, language, annotate: false });
+      } else {
+        // The model cannot see images: give it the text the local OCR read instead (it is masked like any outgoing text).
+        runtime.send(v, language, seen.text ? `${t('cmpSightTextHeader')}\n${seen.text}` : undefined);
+      }
+    })();
   };
+  const submitRef = useRef(submit);
+  submitRef.current = submit;
+
+  // Hold the shortcut and talk: the native side read the screen first, then the Bar came up and told us.
+  useEffect(() => {
+    return onSummon(phase => {
+      if (phase === 'press') {
+        setSight(null);
+        takeSummonCapture().then(cap => (cap ? shieldCapture(cap) : null)).then(img => { if (img) setSight(img); });
+        if (dictation.supported) dictation.start();
+      } else if (phase === 'release') {
+        if (dictation.supported) dictation.stop();
+        window.setTimeout(() => { if (textRef.current.trim()) submitRef.current(textRef.current); }, 450);
+      } else if (phase === 'tap') {
+        if (dictation.supported) dictation.stop();
+        inputRef.current?.focus();
+      } else if (phase === 'cancel') {
+        if (dictation.supported) dictation.stop();
+        setSight(null);
+      }
+    });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [dictation.supported]);
 
   const addToInput = (snippet: string) => setText(prev => (prev ? `${prev}\n\n${snippet}` : snippet));
 
@@ -169,9 +244,11 @@ export function CompanionPanel({ runtime, language, t, follow, onToggleFollow, o
   return (
     <div className="cmp-shell">
       <section
+        ref={panelRef}
         className="cmp-panel"
         data-testid="companion-panel"
         data-status={status}
+        data-overlay={visionOpen ? 'true' : undefined}
         style={{ ['--cmp-ring' as any]: color }}
         aria-label="Aether Companion"
         onDragOver={e => {
@@ -360,6 +437,13 @@ export function CompanionPanel({ runtime, language, t, follow, onToggleFollow, o
           </div>
         )}
 
+        {sight && (
+          <div className="cmp-sight" data-testid="companion-sight" data-state={sight.ran ? (sight.hidden ? 'hidden' : 'clean') : 'unchecked'}>
+            <Eye size={13} aria-hidden="true" />
+            <span>{!sight.ran ? t('cmpSightUnchecked') : sight.hidden > 0 ? t('cmpSightHidden', { count: sight.hidden }) : t('cmpSightSeeing')}</span>
+            <button className="cmp-link" onClick={() => setSight(null)} data-testid="companion-sight-drop">{t('cmpSightDrop')}</button>
+          </div>
+        )}
         {visionOpen && <ScreenAssist runtime={runtime} language={language} t={t} onClose={() => { setVisionOpen(false); inputRef.current?.focus(); }} notify={notify} />}
         <footer className="cmp-foot">
           <input ref={fileRef} type="file" multiple hidden data-testid="companion-file-input" onChange={e => { if (e.target.files) doAttach(e.target.files); e.target.value = ''; }} />

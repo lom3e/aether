@@ -73,6 +73,7 @@ def _stub(permission: str = "granted", capture: dict | None = None, supported: b
         if (cmd === 'screen_capture_status') return {{platform: 'macos', supported: {json.dumps(supported)}, permission: window.__perm}};
         if (cmd === 'screen_capture_request_permission') return {{platform: 'macos', supported: {json.dumps(supported)}, permission: window.__perm}};
         if (cmd === 'screen_capture_take') return window.__capture;
+        if (cmd === 'companion_take_context') {{ const c = window.__summon || null; window.__summon = null; return c; }}
         return null;
       }},
     }};
@@ -415,4 +416,70 @@ def test_without_local_ocr_the_user_is_told_nothing_was_hidden(browser_context, 
     page.get_by_test_id("vision-capture-screen").click()
     expect(page.get_by_test_id("vision-shield")).to_have_attribute("data-state", "unavailable", timeout=10000)
     expect(page.get_by_test_id("vision-shield")).to_contain_text("not available")
+    page.close()
+
+
+def _summon(page, phase):
+    page.evaluate("(p) => window.dispatchEvent(new CustomEvent('aether-companion-summon', {detail: {phase: p}}))", phase)
+
+
+def _summoned_page(browser_context, vision_supported=True):
+    page = _open(browser_context, _stub())
+    page.evaluate("(c) => { window.__summon = c; }", _ocr_capture())
+    sent: list = []
+    _mock_vision(page, supported=vision_supported, reply=OK_REPLY, record=sent)
+    chats: list = []
+    page.route("**/api/personal/chat", lambda r: (chats.append(json.loads(r.request.post_data or "{}")), r.fulfill(status=200, content_type="application/json", body=json.dumps(
+        {"id": "m1", "session_id": "s1", "role": "assistant", "content": "ok, noted", "metadata": {}, "created_at": "2026-01-01T00:00:00Z"})))[1])
+    return page, sent, chats
+
+
+def test_hold_and_ask_sends_the_shielded_screen_with_the_spoken_question(browser_context, workspace_ready):
+    # The native summon is simulated (the key events and the screen it read); OCR words are the helper's output shape,
+    # the shield route and the image pixelation are the real ones.
+    page, sent, chats = _summoned_page(browser_context)
+    _summon(page, "press")
+    sight = page.get_by_test_id("companion-sight")
+    expect(sight).to_have_attribute("data-state", "hidden", timeout=10000)
+    expect(sight).to_contain_text("1 sensitive area(s) hidden")
+    page.get_by_test_id("companion-input").fill("What is on my screen?")  # what dictation would have typed while the key was held
+    _summon(page, "release")
+    expect(page.get_by_test_id("companion-msg-assistant").last).to_contain_text("colour gradient", timeout=10000)
+    assert len(sent) == 1 and sent[0]["prompt"] == "What is on my screen?" and chats == []
+    before_in, before_out = _read_pixel(page, _png_b64(), 0.5, 0.5), _read_pixel(page, _png_b64(), 0.1, 0.9)
+    after_in, after_out = _read_pixel(page, sent[0]["image_base64"], 0.5, 0.5), _read_pixel(page, sent[0]["image_base64"], 0.1, 0.9)
+    assert after_out == before_out and after_in < before_in * 0.7, "the IBAN was hidden in the image that left"
+    expect(page.get_by_test_id("companion-sight")).to_have_count(0)  # one message only: the next one does not carry the old screen
+    assert [c[0] for c in page.evaluate("window.__native_calls")].count("companion_take_context") == 1
+    page.close()
+
+
+def test_a_model_without_vision_gets_the_text_read_locally_not_an_image(browser_context, workspace_ready):
+    page, sent, chats = _summoned_page(browser_context, vision_supported=False)
+    _summon(page, "press")
+    expect(page.get_by_test_id("companion-sight")).to_have_attribute("data-state", "hidden", timeout=10000)
+    page.get_by_test_id("companion-input").fill("Summarise this")
+    _summon(page, "release")
+    expect(page.get_by_test_id("companion-msg-assistant").last).to_contain_text("ok, noted", timeout=10000)
+    assert sent == [] and len(chats) == 1
+    assert chats[0]["prompt"].startswith("Summarise this") and "[Text read from the screen]" in chats[0]["prompt"] and "Fattura" in chats[0]["prompt"]
+    expect(page.get_by_test_id("companion-msg-user").last).to_have_text("Summarise this")  # the dump is not shown as the user's message
+    page.close()
+
+
+def test_tap_cancel_and_dont_look_never_send_the_screen(browser_context, workspace_ready):
+    page, sent, chats = _summoned_page(browser_context)
+    _summon(page, "press")
+    expect(page.get_by_test_id("companion-sight")).to_be_visible(timeout=10000)
+    page.get_by_test_id("companion-sight-drop").click()
+    expect(page.get_by_test_id("companion-sight")).to_have_count(0)
+    page.get_by_test_id("companion-input").fill("hello")
+    page.get_by_test_id("companion-send").click()
+    expect(page.get_by_test_id("companion-msg-assistant").last).to_contain_text("ok, noted", timeout=10000)
+    assert sent == [] and "[Text read from the screen]" not in chats[0]["prompt"]
+    page.evaluate("(c) => { window.__summon = c; }", _ocr_capture())
+    _summon(page, "press")
+    expect(page.get_by_test_id("companion-sight")).to_be_visible(timeout=10000)
+    _summon(page, "cancel")
+    expect(page.get_by_test_id("companion-sight")).to_have_count(0)
     page.close()

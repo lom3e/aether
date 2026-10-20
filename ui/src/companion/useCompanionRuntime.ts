@@ -170,7 +170,8 @@ export interface CompanionRuntime {
   submitting: boolean;
   status: CompanionStatus;
   decidingId: string | null;
-  send: (text: string, language: string) => Promise<void>;
+  /** `hiddenContext` is sent to the model with the message but not shown as part of it (e.g. text read from the screen). */
+  send: (text: string, language: string, hiddenContext?: string) => Promise<void>;
   retryLast: (language: string) => Promise<void>;
   decide: (approval: PendingApproval, decision: 'approve' | 'reject', reason: string) => Promise<{ message: string; kind: 'success' | 'error' | 'info' | 'warning' }>;
   newConversation: () => void;
@@ -368,7 +369,7 @@ export function useCompanionRuntime(): CompanionRuntime {
   }, [workspace, fetchOverview]);
 
   const send = useCallback(
-    async (text: string, language: string) => {
+    async (text: string, language: string, hiddenContext?: string) => {
       const prompt = text.trim();
       if (!prompt || submitting) return;
       lastPrompt.current = prompt;
@@ -385,7 +386,7 @@ export function useCompanionRuntime(): CompanionRuntime {
         const res = await fetch(apiUrl('/api/personal/chat'), {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ prompt, session_id: sessionId, workspace_id: ws, language }),
+          body: JSON.stringify({ prompt: hiddenContext ? `${prompt}\n\n${hiddenContext}` : prompt, session_id: sessionId, workspace_id: ws, language }),
         });
         if (!res.ok) {
           let detail = `HTTP ${res.status}`;

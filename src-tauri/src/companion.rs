@@ -17,10 +17,14 @@ use serde::Serialize;
 use tauri::{AppHandle, LogicalSize, Manager, PhysicalPosition, State, WebviewWindow};
 #[cfg(target_os = "macos")]
 use tauri::utils::config::WindowEffectsConfig;
+#[cfg(target_os = "macos")]
+use tauri::window::{Effect, EffectState};
 
 pub const ORB_SIZE: f64 = 88.0;
-pub const PANEL_W: f64 = 408.0;
-pub const PANEL_H: f64 = 604.0;
+/// The "Bar" (a Spotlight-like glass chat): starts as one input row and grows with the conversation up to PANEL_MAX_H.
+pub const PANEL_W: f64 = 680.0;
+pub const PANEL_H: f64 = 132.0;
+pub const PANEL_MAX_H: f64 = 640.0;
 /// Space kept free around the window when it is clamped to a screen (logical px).
 const SCREEN_MARGIN: f64 = 8.0;
 /// Where the orb settles relative to the pointer when it comes to it (logical px, right/below).
@@ -61,8 +65,27 @@ impl Mode {
     }
 }
 
+/// A key held at least this long is "hold to talk"; anything shorter is a tap.
+pub const HOLD_THRESHOLD: Duration = Duration::from_millis(250);
+/// A summon capture nobody collected within this long is discarded (it is never kept around).
+const CONTEXT_TTL: Duration = Duration::from_secs(120);
+
+/// Pure: is this press-and-release a hold-to-talk (versus a tap)?
+pub fn is_hold(held: Duration) -> bool {
+    held >= HOLD_THRESHOLD
+}
+
 pub struct CompanionState {
     pub mode: Mutex<Mode>,
+    /// When the summon key went down (None = not down).
+    pub pressed: Mutex<Option<Instant>>,
+    pub released: Mutex<Option<Instant>>,
+    /// The Bar was already open when the key went down (a tap then collapses it).
+    pub was_open: AtomicBool,
+    /// The summon flow has shown the Bar and sent `press` to the page.
+    pub shown: AtomicBool,
+    /// The screen taken when summoned, in memory only, handed over once to the page.
+    pub pending: Mutex<Option<(Instant, crate::screen_capture::CaptureResult)>>,
     pub follow: AtomicBool,
     pub last_user_move: Mutex<Instant>,
 }
@@ -70,7 +93,12 @@ pub struct CompanionState {
 impl CompanionState {
     pub fn new() -> Self {
         CompanionState {
-            mode: Mutex::new(Mode::Panel),
+            mode: Mutex::new(Mode::Orb),
+            pressed: Mutex::new(None),
+            released: Mutex::new(None),
+            was_open: AtomicBool::new(false),
+            shown: AtomicBool::new(false),
+            pending: Mutex::new(None),
             follow: AtomicBool::new(false),
             last_user_move: Mutex::new(Instant::now() - USER_MOVE_BACKOFF),
         }
@@ -111,14 +139,18 @@ fn notify_mode(win: &WebviewWindow, mode: Mode) {
     ));
 }
 
-/// No native shadow and no vibrancy: a blurred halo behind a rounded transparent window read as a smudge. Both modes are
-/// plain transparent glass; the page draws its own crisp, solid surface.
+/// The orb is plain transparent glass. The Bar is a frosted-glass sheet (vibrancy) WITHOUT any native shadow: the blurred
+/// halo behind a rounded window read as a smudge before, so there is none; the page draws a thin crisp edge instead.
 pub fn apply_chrome(win: &WebviewWindow, mode: Mode) {
     #[cfg(target_os = "macos")]
     {
-        let _ = mode;
         let _ = win.set_shadow(false);
-        let _ = win.set_effects(None::<WindowEffectsConfig>);
+        let effects = if mode == Mode::Panel {
+            Some(WindowEffectsConfig { effects: vec![Effect::Popover], state: Some(EffectState::Active), radius: Some(22.0), color: None })
+        } else {
+            None
+        };
+        let _ = win.set_effects(effects);
     }
     #[cfg(not(target_os = "macos"))]
     {
@@ -132,12 +164,12 @@ pub fn set_mode(app: &AppHandle, mode: Mode) {
     let Some(win) = window(app) else { return };
     let scale = win.scale_factor().unwrap_or(1.0);
     let (lw, lh) = mode.logical_size();
-    let pos = win.outer_position().unwrap_or(PhysicalPosition::new(0, 0));
-    let (pw, ph) = ((lw * scale) as i32, (lh * scale) as i32);
-    let (x, y) = clamp_to_monitor(app, pos.x, pos.y, pw, ph, pos.x as f64 + 10.0, pos.y as f64 + 10.0, scale);
-    // Resize first, then move: the clamped position was computed for the final size.
     let _ = win.set_size(LogicalSize::new(lw, lh));
-    let _ = win.set_position(PhysicalPosition::new(x, y));
+    if mode == Mode::Panel {
+        place_bar(app, &win, lw, lh, scale);
+    } else {
+        place_near_cursor(app, &win, lw, lh, scale, FOLLOW_OFFSET, FOLLOW_OFFSET);
+    }
     if let Some(state) = app.try_state::<CompanionState>() {
         *state.mode.lock().unwrap() = mode;
     }
@@ -157,7 +189,7 @@ pub fn toggle(app: &AppHandle) {
         let (lw, lh) = Mode::Panel.logical_size();
         let scale = win.scale_factor().unwrap_or(1.0);
         let _ = win.set_size(LogicalSize::new(lw, lh));
-        place_near_cursor(app, &win, lw, lh, scale, 12.0, 16.0);
+        place_bar(app, &win, lw, lh, scale);
         if let Some(state) = app.try_state::<CompanionState>() {
             *state.mode.lock().unwrap() = Mode::Panel;
         }
@@ -185,9 +217,125 @@ pub fn summon_panel(app: &AppHandle) {
     }
 }
 
+fn notify_summon(win: &WebviewWindow, phase: &str) {
+    let _ = win.eval(&format!("window.dispatchEvent(new CustomEvent('aether-companion-summon',{{detail:{{phase:'{}'}}}}))", phase));
+}
+
+fn show_bar(app: &AppHandle, win: &WebviewWindow) {
+    let (lw, lh) = Mode::Panel.logical_size();
+    let scale = win.scale_factor().unwrap_or(1.0);
+    let _ = win.set_size(LogicalSize::new(lw, lh));
+    place_bar(app, win, lw, lh, scale);
+    if let Some(state) = app.try_state::<CompanionState>() {
+        *state.mode.lock().unwrap() = Mode::Panel;
+    }
+    apply_chrome(win, Mode::Panel);
+    let _ = win.show();
+    let _ = win.unminimize();
+    let _ = win.set_focus();
+    notify_mode(win, Mode::Panel);
+}
+
+/// The summon key went down. On macOS the screen is read FIRST (before anything shows), then the Bar appears and the page
+/// starts listening; releasing it later decides between hold-to-talk and a tap. Other platforms keep the plain toggle.
+pub fn summon_press(app: &AppHandle) {
+    if !cfg!(target_os = "macos") {
+        toggle(app);
+        return;
+    }
+    let Some(win) = window(app) else { return };
+    let Some(state) = app.try_state::<CompanionState>() else { return };
+    {
+        let mut p = state.pressed.lock().unwrap();
+        if p.is_some() {
+            return; // key auto-repeat
+        }
+        *p = Some(Instant::now());
+    }
+    *state.released.lock().unwrap() = None;
+    state.shown.store(false, Ordering::SeqCst);
+    let open = win.is_visible().unwrap_or(false) && *state.mode.lock().unwrap() == Mode::Panel;
+    state.was_open.store(open, Ordering::SeqCst);
+    let app2 = app.clone();
+    thread::spawn(move || {
+        if !open {
+            let shot = crate::screen_capture::capture_screen_blocking();
+            if shot.ok {
+                if let Some(st) = app2.try_state::<CompanionState>() {
+                    *st.pending.lock().unwrap() = Some((Instant::now(), shot));
+                }
+            }
+        }
+        let Some(win) = window(&app2) else { return };
+        if !open {
+            show_bar(&app2, &win);
+        }
+        notify_summon(&win, "press");
+        if let Some(st) = app2.try_state::<CompanionState>() {
+            st.shown.store(true, Ordering::SeqCst);
+            // The key may have been released while the screen was being read.
+            if st.released.lock().unwrap().is_some() {
+                finish_summon(&app2, &win);
+            }
+        }
+    });
+}
+
+pub fn summon_release(app: &AppHandle) {
+    if !cfg!(target_os = "macos") {
+        return;
+    }
+    let Some(state) = app.try_state::<CompanionState>() else { return };
+    if state.pressed.lock().unwrap().is_none() {
+        return;
+    }
+    *state.released.lock().unwrap() = Some(Instant::now());
+    if state.shown.load(Ordering::SeqCst) {
+        if let Some(win) = window(app) {
+            finish_summon(app, &win);
+        }
+    }
+}
+
+/// Key is up and the page knows the key went down: tell it hold vs tap (and collapse an already-open Bar on a tap).
+fn finish_summon(app: &AppHandle, win: &WebviewWindow) {
+    let Some(state) = app.try_state::<CompanionState>() else { return };
+    let (down, up) = (state.pressed.lock().unwrap().take(), state.released.lock().unwrap().take());
+    let held = match (down, up) {
+        (Some(d), Some(u)) => u.saturating_duration_since(d),
+        _ => Duration::ZERO,
+    };
+    if is_hold(held) {
+        notify_summon(win, "release");
+    } else if state.was_open.load(Ordering::SeqCst) {
+        notify_summon(win, "cancel");
+        set_mode(app, Mode::Orb);
+    } else {
+        notify_summon(win, "tap");
+    }
+}
+
 pub fn hide(app: &AppHandle) {
     if let Some(win) = window(app) {
         let _ = win.hide();
+    }
+}
+
+/// Centres the Bar horizontally on the monitor under the pointer, a fifth of the way down (where Spotlight sits).
+fn place_bar(app: &AppHandle, win: &WebviewWindow, lw: f64, lh: f64, scale: f64) {
+    let (w, h) = ((lw * scale) as i32, (lh * scale) as i32);
+    let cursor = app.cursor_position().ok();
+    let monitor = cursor.as_ref().and_then(|c| app.monitor_from_point(c.x, c.y).ok().flatten()).or_else(|| app.primary_monitor().ok().flatten());
+    match monitor {
+        Some(m) => {
+            let (mp, ms) = (m.position(), m.size());
+            let x = mp.x + (ms.width as i32 - w) / 2;
+            let y = mp.y + (ms.height as f64 * 0.2) as i32;
+            let (px, py) = cursor.map(|c| (c.x, c.y)).unwrap_or((x as f64, y as f64));
+            let (x, y) = clamp_to_monitor(app, x, y, w, h, px, py, scale);
+            let _ = win.set_position(PhysicalPosition::new(x, y));
+        }
+        None => crate::center_window_on_active_monitor(win, lw as u32, lh as u32),
     }
 }
 
@@ -230,11 +378,34 @@ pub fn companion_get_state(app: AppHandle, state: State<CompanionState>) -> Comp
     }
 }
 
+/// The screen read when the Companion was summoned, handed over ONCE (None if there is none or it is stale).
+#[tauri::command]
+pub fn companion_take_context(state: State<CompanionState>) -> Option<crate::screen_capture::CaptureResult> {
+    let taken = state.pending.lock().unwrap().take();
+    taken.filter(|(at, _)| at.elapsed() < CONTEXT_TTL).map(|(_, c)| c)
+}
+
 #[tauri::command]
 pub fn companion_set_mode(app: AppHandle, mode: String) -> Result<(), String> {
     let m = Mode::parse(&mode).ok_or_else(|| format!("unknown companion mode '{}'", mode))?;
     set_mode(&app, m);
     Ok(())
+}
+
+/// The Bar grows and shrinks with its content (the page reports the height it needs). Only meaningful in Panel mode.
+#[tauri::command]
+pub fn companion_resize_panel(app: AppHandle, state: State<CompanionState>, height: f64) {
+    if *state.mode.lock().unwrap() != Mode::Panel || !height.is_finite() {
+        return;
+    }
+    let Some(win) = window(&app) else { return };
+    let h = height.clamp(PANEL_H.min(96.0), PANEL_MAX_H);
+    let scale = win.scale_factor().unwrap_or(1.0);
+    let pos = win.outer_position().unwrap_or(PhysicalPosition::new(0, 0));
+    let (pw, ph) = ((PANEL_W * scale) as i32, (h * scale) as i32);
+    let (x, y) = clamp_to_monitor(&app, pos.x, pos.y, pw, ph, pos.x as f64 + 10.0, pos.y as f64 + 10.0, scale);
+    let _ = win.set_size(LogicalSize::new(PANEL_W, h));
+    let _ = win.set_position(PhysicalPosition::new(x, y));
 }
 
 /// Starts a native window drag (called on mouse-down on a drag handle). Following pauses afterwards.
@@ -348,6 +519,14 @@ mod tests {
         assert!(!follow(true, Mode::Orb, false, REST, LONG, false, 400.0), "never while hidden");
         assert!(!follow(true, Mode::Orb, true, REST, LONG, true, 400.0), "pointer on the orb = user is interacting");
         assert!(!follow(true, Mode::Orb, true, REST, Duration::from_secs(2), false, 400.0), "backs off after a manual drag");
+    }
+
+    #[test]
+    fn a_short_press_is_a_tap_and_a_long_one_is_hold_to_talk() {
+        assert!(!is_hold(Duration::from_millis(0)));
+        assert!(!is_hold(Duration::from_millis(249)));
+        assert!(is_hold(Duration::from_millis(250)));
+        assert!(is_hold(Duration::from_secs(3)));
     }
 
     #[test]

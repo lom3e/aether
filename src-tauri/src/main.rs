@@ -798,6 +798,8 @@ fn main() {
             quit_aether,
             companion::companion_get_state,
             companion::companion_set_mode,
+            companion::companion_resize_panel,
+            companion::companion_take_context,
             companion::companion_start_drag,
             companion::companion_set_follow,
             screen_capture::screen_capture_status,
@@ -935,8 +937,9 @@ fn main() {
             app.handle().plugin(
                 tauri_plugin_global_shortcut::Builder::new()
                     .with_handler(|app, _shortcut, event| {
-                        if event.state() == ShortcutState::Pressed {
-                            toggle_companion_window(app);
+                        match event.state() {
+                            ShortcutState::Pressed => companion::summon_press(app),
+                            ShortcutState::Released => companion::summon_release(app),
                         }
                     })
                     .build(),
