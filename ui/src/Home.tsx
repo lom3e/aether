@@ -11,6 +11,7 @@ import { ToastContext } from './toast';
 import { AutoArchitectModal } from './AutoArchitectModal';
 import './home.css';
 import { FirstRunModel } from './FirstRunModel';
+import { Today } from './Today';
 import { TopHeader } from './TopHeader';
 import { NotificationCenter } from './NotificationCenter';
 import { submitApprovalDecision, approvalToastKind, approvalIsFinished, approvalIsInProgress } from './canonicalNotification';
@@ -631,6 +632,8 @@ export function Home({
           <button type="button" onClick={() => handleSendPrompt(t('homeUiCheckMyCalendarAppointmentsForTomorrow'))}>{t('homeUiCheckSchedule')}</button>
           <button type="button" onClick={() => handleSendPrompt(t('homeUiCreateADocumentWithTheProject'))}>{t('homeUiCreateDocument')}</button>
         </div>
+
+        <Today navigate={navigate} />
 
         {/* Live Conversation Stream (if any) */}
         {messages.length > 0 && (

@@ -7140,6 +7140,200 @@ async def second_opinion_route(request: Request, payload: SecondOpinionPayload):
     return await asyncio.to_thread(ask, ws, payload.question[:8000], providers=payload.providers, context=payload.context[:8000], language=payload.language or "it")
 
 
+# ---- Life: people & clients, jobs, reminders, Today -------------------------------------------------------------------
+class ContactPayload(BaseModel):
+    name: str | None = None
+    kind: str | None = None
+    company: str | None = None
+    email: str | None = None
+    phone: str | None = None
+    notes: str | None = None
+
+
+class JobPayload(BaseModel):
+    title: str | None = None
+    contact_id: str | None = None
+    due_at: float | None = None
+    notes: str | None = None
+    status: str | None = None
+    source: str | None = None
+
+
+class ReminderPayload(BaseModel):
+    text: str | None = None
+    due_at: float | None = None
+    contact_id: str | None = None
+    job_id: str | None = None
+    source: str | None = None
+
+
+class LifeCapturePayload(BaseModel):
+    text: str
+    language: str | None = None
+
+
+def _life(request: Request):
+    ws = getattr(request.app.state, "workspace", None)
+    if not ws:
+        raise HTTPException(status_code=503, detail="Workspace not initialized.")
+    from aether.life.store import life_store_for
+
+    return ws, life_store_for(ws)
+
+
+def _life_value_error(exc: ValueError) -> HTTPException:
+    return HTTPException(status_code=422, detail={"code": "invalid", "message": str(exc)})
+
+
+@router.get("/life/contacts")
+async def life_contacts_list(request: Request, kind: str | None = None):
+    _, store = _life(request)
+    return {"items": await asyncio.to_thread(store.list_contacts, kind)}
+
+
+@router.post("/life/contacts", status_code=status.HTTP_201_CREATED)
+async def life_contacts_create(request: Request, payload: ContactPayload):
+    ws, store = _life(request)
+    from aether.life import service as life
+
+    try:
+        c = await asyncio.to_thread(store.add_contact, payload.name or "", kind=payload.kind or "person", company=payload.company or "", email=payload.email or "", phone=payload.phone or "", notes=payload.notes or "")
+    except ValueError as exc:
+        raise _life_value_error(exc) from exc
+    await asyncio.to_thread(life.sync_contact, ws, store, c)
+    return store.get_contact(c["id"])
+
+
+@router.patch("/life/contacts/{contact_id}")
+async def life_contacts_update(request: Request, contact_id: str, payload: ContactPayload):
+    ws, store = _life(request)
+    from aether.life import service as life
+
+    try:
+        c = await asyncio.to_thread(store.update_contact, contact_id, **payload.model_dump())
+    except ValueError as exc:
+        raise _life_value_error(exc) from exc
+    if not c:
+        raise HTTPException(status_code=404, detail="Contact not found.")
+    await asyncio.to_thread(life.sync_contact, ws, store, c)
+    return store.get_contact(contact_id)
+
+
+@router.delete("/life/contacts/{contact_id}")
+async def life_contacts_delete(request: Request, contact_id: str):
+    ws, store = _life(request)
+    from aether.life import service as life
+
+    if not await asyncio.to_thread(life.forget_contact, ws, store, contact_id):
+        raise HTTPException(status_code=404, detail="Contact not found.")
+    return {"deleted": True, "id": contact_id}
+
+
+@router.get("/life/jobs")
+async def life_jobs_list(request: Request, status: str | None = None, contact_id: str | None = None):
+    _, store = _life(request)
+    return {"items": await asyncio.to_thread(store.list_jobs, status=status, contact_id=contact_id)}
+
+
+@router.post("/life/jobs", status_code=status.HTTP_201_CREATED)
+async def life_jobs_create(request: Request, payload: JobPayload):
+    ws, store = _life(request)
+    from aether.life import service as life
+
+    try:
+        j = await asyncio.to_thread(store.add_job, payload.title or "", contact_id=payload.contact_id, due_at=payload.due_at, notes=payload.notes or "", source=payload.source or "manual")
+    except ValueError as exc:
+        raise _life_value_error(exc) from exc
+    await asyncio.to_thread(life.sync_job, ws, store, j)
+    return store.get_job(j["id"])
+
+
+@router.patch("/life/jobs/{job_id}")
+async def life_jobs_update(request: Request, job_id: str, payload: JobPayload):
+    ws, store = _life(request)
+    from aether.life import service as life
+
+    fields = {k: v for k, v in payload.model_dump().items() if k in payload.model_fields_set}
+    try:
+        j = await asyncio.to_thread(store.update_job, job_id, **fields)
+    except ValueError as exc:
+        raise _life_value_error(exc) from exc
+    if not j:
+        raise HTTPException(status_code=404, detail="Job not found.")
+    await asyncio.to_thread(life.sync_job, ws, store, j)
+    return store.get_job(job_id)
+
+
+@router.delete("/life/jobs/{job_id}")
+async def life_jobs_delete(request: Request, job_id: str):
+    ws, store = _life(request)
+    from aether.life import service as life
+
+    if not await asyncio.to_thread(life.forget_job, ws, store, job_id):
+        raise HTTPException(status_code=404, detail="Job not found.")
+    return {"deleted": True, "id": job_id}
+
+
+@router.get("/life/reminders")
+async def life_reminders_list(request: Request, include_done: bool = False):
+    _, store = _life(request)
+    return {"items": await asyncio.to_thread(store.list_reminders, include_done=include_done)}
+
+
+@router.post("/life/reminders", status_code=status.HTTP_201_CREATED)
+async def life_reminders_create(request: Request, payload: ReminderPayload):
+    _, store = _life(request)
+    try:
+        return await asyncio.to_thread(store.add_reminder, payload.text or "", due_at=payload.due_at, contact_id=payload.contact_id, job_id=payload.job_id, source=payload.source or "manual")
+    except ValueError as exc:
+        raise _life_value_error(exc) from exc
+
+
+@router.post("/life/reminders/{reminder_id}/done")
+async def life_reminders_done(request: Request, reminder_id: str, done: bool = True):
+    _, store = _life(request)
+    r = await asyncio.to_thread(store.complete_reminder, reminder_id, done)
+    if not r:
+        raise HTTPException(status_code=404, detail="Reminder not found.")
+    return r
+
+
+@router.delete("/life/reminders/{reminder_id}")
+async def life_reminders_delete(request: Request, reminder_id: str):
+    _, store = _life(request)
+    if not await asyncio.to_thread(store.delete_reminder, reminder_id):
+        raise HTTPException(status_code=404, detail="Reminder not found.")
+    return {"deleted": True, "id": reminder_id}
+
+
+@router.get("/life/today")
+async def life_today(request: Request, language: str = "it"):
+    """Appointments (read-only calendar), jobs and reminders due, overdue and soon, plus what waits for approval."""
+    ws, store = _life(request)
+    from aether.life import service as life
+
+    events, err = await asyncio.to_thread(life.fetch_events, ws)
+    pending = 0
+    try:
+        from aether.actions.models import ActionExecutionStatus
+
+        pending = len(ws.action_executor.store.list_executions(workspace_id=ws.id, status=ActionExecutionStatus.WAITING_APPROVAL.value)) if ws.action_executor else 0
+    except Exception:  # noqa: BLE001
+        pending = 0
+    today = life.build_today(store, events=events, pending_approvals=pending, calendar_error=err)
+    today["brief"] = life.brief_text(today, language)
+    return today
+
+
+@router.post("/life/capture")
+async def life_capture(request: Request, payload: LifeCapturePayload):
+    """Turns one sentence into a PROPOSAL (nothing is saved): the page shows it and saves through the endpoints above on accept."""
+    ws, store = _life(request)
+    from aether.life import capture
+
+    return await asyncio.to_thread(capture.propose, ws, store, payload.text, language=payload.language or "it")
+
+
 @router.get("/screen-memory")
 async def screen_memory_list_route(request: Request):
     ws = getattr(request.app.state, "workspace", None)

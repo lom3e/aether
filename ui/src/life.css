@@ -1,0 +1,42 @@
+.life-today { max-width: 680px; margin: 0 auto 36px; padding: 0 4px; display: flex; flex-direction: column; gap: 8px; }
+.life-today header { display: flex; align-items: baseline; justify-content: space-between; }
+.life-today h2 { font-size: 15px; font-weight: 600; letter-spacing: -0.01em; }
+.life-today h3 { font-size: 12.5px; font-weight: 500; color: hsl(var(--muted-fg)); margin-top: 8px; }
+.life-today h3.late { color: hsl(var(--destructive)); }
+.life-brief { font-size: 14px; line-height: 1.5; color: hsl(var(--fg)); }
+.life-empty, .life-note { font-size: 13px; color: hsl(var(--muted-fg)); }
+.life-list { list-style: none; display: flex; flex-direction: column; }
+.life-list li { display: flex; align-items: center; gap: 10px; padding: 8px 0; font-size: 14px; }
+.life-list li + li { box-shadow: 0 -1px 0 hsl(var(--border) / .45); }
+.life-list li.late time { color: hsl(var(--destructive)); }
+.life-main { flex: 1; min-width: 0; overflow-wrap: anywhere; }
+.life-main small { display: block; color: hsl(var(--muted-fg)); font-size: 12px; }
+.life-list time { color: hsl(var(--muted-fg)); font-size: 12px; white-space: nowrap; }
+.life-dot { width: 7px; height: 7px; border-radius: 50%; background: hsl(var(--primary)); flex: none; margin: 0 4px; }
+.life-check { width: 18px; height: 18px; border-radius: 50%; border: 1.5px solid hsl(var(--muted-fg) / .6); background: transparent; cursor: pointer; flex: none; transition: background .2s, border-color .2s; }
+.life-check:hover { background: hsl(var(--primary) / .2); border-color: hsl(var(--primary)); }
+.life-check:focus-visible, .life-link:focus-visible { outline: 2px solid hsl(var(--ring)); outline-offset: 2px; }
+.life-link { background: none; border: 0; font: inherit; font-size: 13px; color: hsl(var(--primary)); cursor: pointer; padding: 4px 8px; border-radius: 8px; align-self: flex-start; }
+.life-link:hover { background: hsl(var(--muted)); }
+.life-capture { display: flex; gap: 8px; margin-top: 10px; }
+.life-capture input { flex: 1; min-width: 0; font: inherit; font-size: 14px; padding: 10px 14px; border: 0; border-radius: 12px; background: hsl(var(--muted) / .6); color: hsl(var(--fg)); outline: none; }
+.life-capture input:focus { box-shadow: 0 0 0 2px hsl(var(--ring) / .5); }
+.life-proposal { display: flex; flex-direction: column; gap: 4px; padding: 12px 14px; border-radius: 14px; background: hsl(var(--muted) / .6); font-size: 14px; }
+.life-proposal small { color: hsl(var(--muted-fg)); font-size: 12.5px; }
+.life-actions { display: flex; justify-content: flex-end; gap: 8px; align-items: center; margin-top: 4px; }
+
+/* People & jobs */
+.people-page { flex: 1; display: flex; flex-direction: column; min-width: 0; overflow: hidden; }
+.people-body { flex: 1; overflow-y: auto; padding: 8px 32px 48px; width: 100%; max-width: 860px; margin: 0 auto; display: grid; grid-template-columns: minmax(200px, 280px) 1fr; gap: 28px; align-items: start; }
+.people-side { display: flex; flex-direction: column; gap: 6px; }
+.people-side button.row { display: flex; flex-direction: column; align-items: flex-start; gap: 1px; text-align: left; background: none; border: 0; font: inherit; font-size: 14px; color: hsl(var(--fg)); padding: 8px 12px; border-radius: 12px; cursor: pointer; }
+.people-side button.row small { color: hsl(var(--muted-fg)); font-size: 12px; }
+.people-side button.row:hover, .people-side button.row[aria-current='true'] { background: hsl(var(--muted)); }
+.people-detail { display: flex; flex-direction: column; gap: 14px; }
+.people-detail input, .people-detail textarea, .people-new input, .people-new select { font: inherit; font-size: 14px; padding: 9px 12px; border: 0; border-radius: 10px; background: hsl(var(--muted) / .6); color: hsl(var(--fg)); outline: none; width: 100%; }
+.people-detail input:focus, .people-detail textarea:focus, .people-new input:focus { box-shadow: 0 0 0 2px hsl(var(--ring) / .5); }
+.people-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+.people-new { display: flex; gap: 6px; margin-top: 6px; }
+.people-empty { color: hsl(var(--muted-fg)); font-size: 13.5px; line-height: 1.6; }
+@media (max-width: 760px) { .people-body { grid-template-columns: 1fr; padding: 8px 16px 40px; } }
+@media (prefers-reduced-motion: reduce) { .life-check { transition: none; } }

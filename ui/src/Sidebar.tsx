@@ -639,6 +639,18 @@ export function Sidebar({
 
             {(advancedOpen || collapsed) && (
               <div style={{ display: 'flex', flexDirection: 'column', gap: '2px' }}>
+                <Tooltip content={t('navPeople')} position={collapsed ? 'right' : 'top'} disabled={!collapsed}>
+                  <button
+                    data-testid="nav-people"
+                    className={`btn btn-ghost ${currentView === 'people' ? 'active' : ''}`}
+                    style={{ width: '100%', justifyContent: collapsed ? 'center' : 'flex-start', padding: '6px 8px', fontSize: '12.5px' }}
+                    onClick={() => onNavigate('people')}
+                  >
+                    <Users size={14} />
+                    {!collapsed && <span>{t('navPeople')}</span>}
+                  </button>
+                </Tooltip>
+
                 <Tooltip content={t('navComputerResourcesTooltip')} position={collapsed ? 'right' : 'top'} disabled={!collapsed}>
                   <button
                     data-testid="nav-fabric"

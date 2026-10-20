@@ -1,5 +1,6 @@
 import { useState, useEffect, useCallback, useContext } from 'react';
 import { Privacy } from './Privacy';
+import { People } from './People';
 import { Sidebar } from './Sidebar';
 import { Chat } from './Chat';
 import { Knowledge } from './Knowledge';
@@ -479,6 +480,7 @@ function MainApp() {
         {hasWorkspace && currentView === 'proactive' && <ProactiveWatchersView />}
         {hasWorkspace && currentView === 'fabric' && <ExecutionFabricView />}
         {hasWorkspace && currentView === 'privacy' && <Privacy />}
+        {hasWorkspace && currentView === 'people' && <People />}
         {hasWorkspace && currentView === 'settings' && <Settings onWorkspaceSwitched={handleWorkspaceSwitched} />}
         {currentView === 'marketplace' && <Marketplace />}
       </div>
