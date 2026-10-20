@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <key>NSMicrophoneUsageDescription</key>
+  <string>Aether listens only while you hold the shortcut (or press the microphone button) so you can ask by voice. / Aether ascolta solo mentre tieni premuta la scorciatoia (o premi il microfono) per le richieste vocali.</string>
+  <key>NSSpeechRecognitionUsageDescription</key>
+  <string>Aether turns your voice into text while you hold the shortcut. / Aether trasforma la tua voce in testo mentre tieni premuta la scorciatoia.</string>
+</dict>
+</plist>

@@ -171,8 +171,8 @@ def companion_checks(pid: int) -> None:
     w = companion_window(pid)
     if not check("B: companion window exists and starts hidden", bool(w) and not w["on"]):
         return
-    check("B: companion window starts at the panel size (408x604)", (round(w["b"]["Width"]), round(w["b"]["Height"])) == (408, 604))
-    cx, cy = 640, 240  # high enough that the 604-px panel is not clamped by the bottom of a laptop screen
+    check("B: companion window starts at the Bar size (680 wide, one input row)", round(w["b"]["Width"]) == 680 and round(w["b"]["Height"]) < 200)
+    cx, cy = 640, 240
     subprocess.run(["osascript", "-l", "JavaScript", "-e", _JXA_MOVE, str(cx), str(cy)], capture_output=True)
     time.sleep(0.4)
     r = subprocess.run(["osascript", "-e", 'tell application "System Events" to key code 49 using option down'], capture_output=True, text=True)
@@ -180,21 +180,25 @@ def companion_checks(pid: int) -> None:
         record("B: companion shortcut / orb / panel transitions", "SKIP", "Accessibility permission missing for this terminal")
         return
     shown = wait_companion(pid, lambda x: x["on"])
-    ok = bool(shown) and shown["on"] and (round(shown["b"]["Width"]), round(shown["b"]["Height"])) == (408, 604)
-    check("B: Option+Space shows the Companion as the expanded panel", ok)
+    ok = bool(shown) and shown["on"] and round(shown["b"]["Width"]) == 680
+    check("B: Option+Space shows the Companion as the Bar", ok)
     if not ok:
         return
-    near = abs(shown["b"]["X"] - (cx + 12)) <= 3 and abs(shown["b"]["Y"] - (cy + 16)) <= 3
-    check("B: panel appears next to the real pointer (+12,+16)", near, f"window at {shown['b']['X']:.0f},{shown['b']['Y']:.0f} for pointer {cx},{cy}")
-    top_left = (shown["b"]["X"], shown["b"]["Y"])
+    screen = subprocess.run(["osascript", "-l", "JavaScript", "-e", "ObjC.import('AppKit'); const f = $.NSScreen.mainScreen.frame; f.size.width + ',' + f.size.height"], capture_output=True, text=True).stdout.strip().split(",")
+    try:
+        sw, sh = float(screen[0]), float(screen[1])
+        centred = abs((shown["b"]["X"] + shown["b"]["Width"] / 2) - sw / 2) <= 4 and shown["b"]["Y"] < sh * 0.45
+        detail = f"window at {shown['b']['X']:.0f},{shown['b']['Y']:.0f} on a {sw:.0f}x{sh:.0f} screen"
+    except (ValueError, IndexError):
+        centred, detail = False, f"could not read the screen size ({screen})"
+    check("B: the Bar appears centred in the upper part of the screen (Spotlight-like)", centred, detail)
     time.sleep(0.8)
     subprocess.run(["osascript", "-e", 'tell application "System Events" to key code 53'], capture_output=True)  # Esc
     orb = wait_companion(pid, lambda x: round(x["b"]["Width"]) == 88)
-    check("B: Esc collapses the panel to the 88x88 orb, keeping its top-left", bool(orb) and (round(orb["b"]["Width"]), round(orb["b"]["Height"])) == (88, 88)
-          and abs(orb["b"]["X"] - top_left[0]) <= 2 and abs(orb["b"]["Y"] - top_left[1]) <= 2)
+    check("B: Esc collapses the Bar to the 88x88 orb", bool(orb) and (round(orb["b"]["Width"]), round(orb["b"]["Height"])) == (88, 88))
     subprocess.run(["osascript", "-e", 'tell application "System Events" to key code 49 using option down'], capture_output=True)
-    back = wait_companion(pid, lambda x: round(x["b"]["Width"]) == 408)
-    check("B: Option+Space on the orb expands it again", bool(back) and round(back["b"]["Height"]) == 604)
+    back = wait_companion(pid, lambda x: round(x["b"]["Width"]) == 680)
+    check("B: Option+Space on the orb opens the Bar again", bool(back))
 
 
 def app_checks(skip_window: bool) -> None:
