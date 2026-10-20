@@ -4,7 +4,7 @@ import { ToastContext } from './toast';
 import { useTranslation } from './i18n';
 
 const PROVIDERS: { id: string; label: string; model: string }[] = [
-  { id: 'groq', label: 'Groq', model: 'llama-3.3-70b-versatile' },
+  { id: 'groq', label: 'Groq', model: 'openai/gpt-oss-120b' },
   { id: 'openai', label: 'OpenAI', model: 'gpt-4o-mini' },
   { id: 'anthropic', label: 'Anthropic', model: 'claude-sonnet-5-5' },
   { id: 'gemini', label: 'Gemini', model: 'gemini-2.0-flash' },

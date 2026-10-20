@@ -15,6 +15,7 @@ import { useTranslation } from './i18n';
 import { ToastContext } from './toast';
 import { submitApprovalDecision, approvalToastKind } from './canonicalNotification';
 import { MarkdownRenderer } from './MarkdownRenderer';
+import { FirstRunModel } from './FirstRunModel';
 import './assistant-v2.css';
 
 interface AssistantV2Props {
@@ -1147,6 +1148,7 @@ export function AssistantV2({
 
       {/* Main Interactive Stage */}
       <main className="aether-v2-stage">
+        <div className="v2-frm"><FirstRunModel /></div>
         {/* Living 3D Point Sphere */}
         <div className={`orb-stage-wrapper ${isFieldVisible ? 'orb-stage-elevated' : ''}`}>
           <AetherOrb

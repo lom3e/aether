@@ -201,3 +201,16 @@ def test_06_first_run_model_card_replaces_the_workspace_form(browser_context):
     assert "sk-test-not-a-real-key" not in page.content(), "the key is never left in the page"
     assert page.locator("[data-testid='workspace-switcher-button']").count() == 0 and page.locator("text=/new workspace/i").count() == 0
     page.close()
+
+
+def test_07_the_orb_interface_offers_the_model_card_too(browser_context):
+    """The default (Orb) experience has no Home page: without a model it must show the same Connect-a-model card."""
+    import json
+
+    page = browser_context.new_page()
+    page.add_init_script("localStorage.setItem('aether_experience_mode', 'v2');")
+    page.route("**/api/settings/provider", lambda r: r.fulfill(status=200, content_type="application/json", body=json.dumps(
+        {"provider": "", "model": "", "configured": {"groq": False, "openai": False, "anthropic": False, "gemini": False, "ollama": True}})))
+    page.goto(_base_url())
+    expect(page.get_by_test_id("first-run-model")).to_be_visible(timeout=15000)
+    page.close()
