@@ -10,7 +10,7 @@ type Tab = 'out' | 'knows' | 'undo';
 
 interface LedgerEntry { id: string; ts: number; provider: string; model?: string | null; local: boolean; purpose?: string | null; chars: number; images: number; redactions: Record<string, number>; unmasked: boolean; status: string }
 interface Summary { requests: number; cloud_requests: number; local_requests: number; images_sent: number; redactions_total: number; providers: string[] }
-interface Mem { id: string; category: string; summary?: string; content: string }
+interface Mem { id: string; category: string; summary?: string; content: string; provenance?: { source_entity?: string } }
 interface ScreenNote { id: string; title?: string; created_at: number; expires_at: number }
 interface UndoItem { execution_id: string; title: string; created_at: number | string; reversible: boolean; reason: string; undone: boolean; kind?: string }
 
@@ -35,6 +35,7 @@ export function Privacy() {
   const [mems, setMems] = useState<Mem[]>([]);
   const [notes, setNotes] = useState<ScreenNote[]>([]);
   const [undo, setUndo] = useState<UndoItem[]>([]);
+  const [editing, setEditing] = useState<{ id: string; text: string } | null>(null);
 
   const load = useCallback(async () => {
     const [s, l, m, n, u] = await Promise.all([
@@ -57,6 +58,18 @@ export function Privacy() {
   const forgetMem = async (id: string) => {
     const res = await fetch(apiUrl(`/api/memories/${encodeURIComponent(id)}?hard=true`), { method: 'DELETE' });
     if (res.ok) { setMems(prev => prev.filter(x => x.id !== id)); toast(t('pvForgot'), 'success'); }
+  };
+  const saveEdit = async () => {
+    if (!editing || !editing.text.trim()) return;
+    const text = editing.text.trim();
+    const res = await fetch(apiUrl(`/api/memories/${encodeURIComponent(editing.id)}`), { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ summary: text, content: text }) });
+    if (res.ok) {
+      setMems(prev => prev.map(x => (x.id === editing.id ? { ...x, summary: text, content: text } : x)));
+      setEditing(null);
+      toast(t('pvEdited'), 'success');
+    } else {
+      toast(t('pvEditFailed'), 'error');
+    }
   };
   const forgetNote = async (id: string) => {
     const res = await fetch(apiUrl(`/api/screen-memory/${encodeURIComponent(id)}`), { method: 'DELETE' });
@@ -128,8 +141,21 @@ export function Privacy() {
                 <h3>{cat} <span>{list.length}</span></h3>
                 <ul className="pv-list">
                   {list.map(m => (
-                    <li key={m.id}><span className="pv-main">{m.summary || m.content.slice(0, 120)}</span>
-                      <button className="pv-link" onClick={() => forgetMem(m.id)}>{t('pvForget')}</button></li>
+                    <li key={m.id}>
+                      {editing?.id === m.id ? (
+                        <span className="pv-main">
+                          <textarea className="pv-edit" rows={2} autoFocus value={editing.text} onChange={e => setEditing({ id: m.id, text: e.target.value })} data-testid="privacy-edit-input" />
+                          <button className="pv-link" onClick={saveEdit} data-testid="privacy-edit-save">{t('pvSave')}</button>
+                          <button className="pv-link" onClick={() => setEditing(null)}>{t('pvCancel')}</button>
+                        </span>
+                      ) : (
+                        <>
+                          <span className="pv-main">{m.summary || m.content.slice(0, 120)}{m.provenance?.source_entity && <small>{t('pvSource')}: {m.provenance.source_entity}</small>}</span>
+                          <button className="pv-link" onClick={() => setEditing({ id: m.id, text: m.summary || m.content })} data-testid={`privacy-edit-${m.id}`}>{t('pvEdit')}</button>
+                          <button className="pv-link" onClick={() => forgetMem(m.id)}>{t('pvForget')}</button>
+                        </>
+                      )}
+                    </li>
                   ))}
                 </ul>
               </div>

@@ -64,6 +64,13 @@ def test_privacy_screen_tabs_forget_undo_and_the_real_toggle(browser_context):
 
     page.get_by_test_id("privacy-tab-knows").click()
     expect(page.get_by_test_id("privacy-knows")).to_contain_text("Prefers short answers")
+    edits: list = []
+    page.route("**/api/memories/mem-1", lambda r: (edits.append((r.request.method, json.loads(r.request.post_data or "{}"))), r.fulfill(status=200, content_type="application/json", body='{"id":"mem-1"}'))[1] if r.request.method == "PATCH" else r.fallback())
+    page.get_by_test_id("privacy-edit-mem-1").click()
+    page.get_by_test_id("privacy-edit-input").fill("Prefers detailed answers")
+    page.get_by_test_id("privacy-edit-save").click()
+    expect(page.get_by_test_id("privacy-knows")).to_contain_text("Prefers detailed answers")
+    assert edits == [("PATCH", {"summary": "Prefers detailed answers", "content": "Prefers detailed answers"})]
     page.get_by_role("button", name="Forget").first.click()
     expect(page.get_by_test_id("privacy-knows")).not_to_contain_text("Prefers short answers")
     assert calls and calls[0][0] == "DELETE" and "hard=true" in calls[0][1]

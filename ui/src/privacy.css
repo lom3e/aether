@@ -26,3 +26,5 @@
 .pv-empty, .pv-limits { color: hsl(var(--muted-fg)); font-size: 13.5px; line-height: 1.6; }
 .pv-limits { margin-top: 28px; }
 @media (max-width: 640px) { .pv-body { padding: 8px 16px 40px; } .pv-lead { font-size: 19px; } }
+.pv-edit { width: 100%; font: inherit; font-size: 14px; color: hsl(var(--fg)); background: hsl(var(--muted) / .6); border: 0; border-radius: 12px; padding: 8px 10px; resize: vertical; outline: none; }
+.pv-edit:focus { box-shadow: 0 0 0 2px hsl(var(--ring) / .5); }
