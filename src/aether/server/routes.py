@@ -8270,6 +8270,55 @@ async def start_provider_oauth_route(
     return {"auth_url": auth_url, "state": state, "redirect_uri": redirect_uri}
 
 
+@router.post("/connections/{provider}/oauth/flow")
+async def start_oauth_flow_route(provider: str, request: Request, payload: GenericOAuthStartPayload | None = None):
+    """One-click connect: starts a loopback listener for this flow and returns the URL to open in the system browser."""
+    ws = getattr(request.app.state, "workspace", None)
+    if not ws:
+        raise HTTPException(status_code=503, detail="Workspace not initialized.")
+    ws_id = _ws_key(ws, payload.workspace_id if payload else None)
+    from aether.connections.oauth_flow import FlowRegistry
+
+    try:
+        return await asyncio.to_thread(FlowRegistry.start, ws, provider.lower().strip(), ws_id)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+
+
+@router.post("/connections/github/oauth/device")
+async def start_github_device_route(request: Request, payload: GenericOAuthStartPayload | None = None):
+    """GitHub without any pasted key: shows a short code to enter at github.com/login/device; poll the flow status for the outcome."""
+    ws = getattr(request.app.state, "workspace", None)
+    if not ws:
+        raise HTTPException(status_code=503, detail="Workspace not initialized.")
+    ws_id = _ws_key(ws, payload.workspace_id if payload else None)
+    from aether.connections.oauth_flow import start_github_device_flow
+
+    try:
+        return await asyncio.to_thread(start_github_device_flow, ws, ws_id)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+
+
+@router.get("/connections/oauth/flows/{state}")
+async def oauth_flow_status_route(state: str):
+    from aether.connections.oauth_flow import FlowRegistry
+
+    st = FlowRegistry.status(state)
+    if st is None:
+        raise HTTPException(status_code=404, detail="Unknown or expired flow.")
+    return st
+
+
+@router.delete("/connections/oauth/flows/{state}")
+async def oauth_flow_cancel_route(state: str):
+    from aether.connections.oauth_flow import FlowRegistry
+
+    if not FlowRegistry.cancel(state):
+        raise HTTPException(status_code=404, detail="Unknown or expired flow.")
+    return {"cancelled": True}
+
+
 @router.get("/connections/{provider}/oauth/callback")
 async def generic_oauth_callback_route(
     provider: str,

@@ -28,6 +28,9 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger(__name__)
 
+GITHUB_USER_URL = "https://api.github.com/user"
+GITHUB_DEVICE_CODE_URL = "https://github.com/login/device/code"
+
 # Standard OAuth Endpoints & Configuration
 OAUTH_SPECS: dict[str, dict[str, Any]] = {
     "google_calendar": {
@@ -86,6 +89,17 @@ OAUTH_SPECS: dict[str, dict[str, Any]] = {
 }
 
 
+def _bundled_clients() -> dict[str, dict[str, str]]:
+    """Public client ids shipped with the app (oauth_clients.json next to this module). Missing/invalid file = none."""
+    try:
+        from pathlib import Path
+
+        raw = json.loads((Path(__file__).with_name("oauth_clients.json")).read_text(encoding="utf-8"))
+        return {k: v for k, v in raw.items() if isinstance(v, dict)}
+    except Exception:  # noqa: BLE001
+        return {}
+
+
 @dataclass(slots=True)
 class OAuthStateData:
     workspace_id: str
@@ -96,6 +110,31 @@ class OAuthStateData:
     redirect_uri: str
     created_at: float
     extra: dict[str, Any] = field(default_factory=dict)
+
+
+def github_tokens(access_token: str, client_id: str, client_secret: str = "", scope: str = "", token_type: str = "bearer") -> dict[str, Any]:
+    """The connection record for a GitHub access token (web flow or device flow): who it belongs to, plus the token."""
+    user_login = "github-user"
+    user_email = ""
+    try:
+        u_req = urllib.request.Request(
+            GITHUB_USER_URL,
+            headers={"Authorization": f"Bearer {access_token}", "Accept": "application/vnd.github.v3+json", "User-Agent": "Aether/1.0"},
+            method="GET",
+        )
+        with urllib.request.urlopen(u_req, timeout=10.0) as u_resp:
+            u_data = json.loads(u_resp.read().decode("utf-8"))
+            user_login = u_data.get("login") or user_login
+            user_email = u_data.get("email") or ""
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("Could not fetch GitHub user info: %s", type(exc).__name__)
+    out = {
+        "token": access_token, "login": user_login, "email": user_email, "account_name": f"@{user_login}",
+        "scope": scope, "token_type": token_type, "client_id": client_id,
+    }
+    if client_secret:
+        out["client_secret"] = client_secret
+    return out
 
 
 def generate_code_verifier(length: int = 64) -> str:
@@ -171,7 +210,12 @@ class OAuthManager:
                     client_secret = val
                     break
 
-        # 3. Fallback to default client_id if specified (e.g. Google desktop PKCE)
+        # 3. Client ids shipped with the app (one-click connect), then the spec default
+        bundled = _bundled_clients().get(provider, {})
+        if not client_id and str(bundled.get("client_id") or "").strip():
+            client_id = str(bundled["client_id"]).strip()
+            if not client_secret:
+                client_secret = str(bundled.get("client_secret") or "").strip()
         if not client_id and spec.get("default_client_id"):
             client_id = spec["default_client_id"]
 
@@ -316,6 +360,7 @@ class OAuthManager:
                 f"OAuth Client Secret is required for {spec['name']}. Please complete the initial developer setup first."
             )
 
+        # Legacy callers (manual redirect) may omit it; the one-click flow always passes its own loopback URI.
         r_uri = (redirect_uri or f"http://127.0.0.1:8000/api/connections/{provider}/oauth/callback").strip()
         state = secrets.token_urlsafe(32)
         verifier = generate_code_verifier()
@@ -373,6 +418,13 @@ class OAuthManager:
                 "response_type": "code",
                 "owner": "user",
                 "state": state,
+            }
+            auth_url = f"{spec['auth_url']}?{urllib.parse.urlencode(params)}"
+
+        elif spec.get("exchange") == "standard":
+            params = {
+                "client_id": cid, "redirect_uri": r_uri, "response_type": "code", "scope": " ".join(effective_scopes), "state": state,
+                "code_challenge": challenge, "code_challenge_method": "S256",
             }
             auth_url = f"{spec['auth_url']}?{urllib.parse.urlencode(params)}"
 
@@ -447,36 +499,7 @@ class OAuthManager:
             if not access_token:
                 raise RuntimeError("GitHub OAuth exchange did not return an access token.")
 
-            # Fetch user info
-            user_login = "github-user"
-            user_email = ""
-            try:
-                u_req = urllib.request.Request(
-                    "https://api.github.com/user",
-                    headers={
-                        "Authorization": f"Bearer {access_token}",
-                        "Accept": "application/vnd.github.v3+json",
-                        "User-Agent": "Aether/1.0",
-                    },
-                    method="GET",
-                )
-                with urllib.request.urlopen(u_req, timeout=10.0) as u_resp:
-                    u_data = json.loads(u_resp.read().decode("utf-8"))
-                    user_login = u_data.get("login") or user_login
-                    user_email = u_data.get("email") or ""
-            except Exception as exc:
-                logger.warning("Could not fetch GitHub user info: %s", exc)
-
-            return {
-                "token": access_token,
-                "login": user_login,
-                "email": user_email,
-                "account_name": f"@{user_login}",
-                "scope": data.get("scope", ""),
-                "token_type": data.get("token_type", "bearer"),
-                "client_id": state_data.client_id,
-                "client_secret": state_data.client_secret,
-            }
+            return github_tokens(access_token, state_data.client_id, state_data.client_secret, data.get("scope", ""), data.get("token_type", "bearer"))
 
         elif provider == "slack":
             # Slack OAuth v2 Access Code Exchange
@@ -556,5 +579,29 @@ class OAuthManager:
                 "client_id": state_data.client_id,
                 "client_secret": state_data.client_secret,
             }
+
+        if spec.get("exchange") == "standard":
+            payload = {"grant_type": "authorization_code", "code": code, "redirect_uri": state_data.redirect_uri,
+                       "client_id": state_data.client_id, "code_verifier": state_data.code_verifier}
+            if state_data.client_secret:
+                payload["client_secret"] = state_data.client_secret
+            req = urllib.request.Request(spec["token_url"], data=urllib.parse.urlencode(payload).encode("utf-8"), method="POST",
+                                         headers={"Content-Type": "application/x-www-form-urlencoded", "Accept": "application/json", "User-Agent": "Aether/1.0"})
+            try:
+                with urllib.request.urlopen(req, timeout=15.0) as resp:
+                    data = json.loads(resp.read().decode("utf-8"))
+            except urllib.error.HTTPError as http_err:  # providers explain a refusal in the body
+                try:
+                    data = json.loads(http_err.read().decode("utf-8"))
+                except Exception:  # noqa: BLE001
+                    data = {"error": f"HTTP {http_err.code}"}
+            if "error" in data or not data.get("access_token"):
+                raise RuntimeError(f"{spec['name']} OAuth error: {data.get('error_description') or data.get('error') or 'no access token'}")
+            out = {"access_token": data["access_token"], "token": data["access_token"], "refresh_token": data.get("refresh_token", ""),
+                   "token_type": data.get("token_type", "bearer"), "scope": data.get("scope", ""), "account_name": data.get("account_name") or spec["name"],
+                   "client_id": state_data.client_id}
+            if data.get("expires_in"):
+                out["expires_at"] = time.time() + float(data["expires_in"])
+            return out
 
         raise ValueError(f"Exchange not implemented for {provider}")

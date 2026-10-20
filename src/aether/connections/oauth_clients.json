@@ -1,0 +1,5 @@
+{
+  "_comment": "Public OAuth client ids shipped with Aether so users connect with one click and paste nothing. A Google *Desktop app* client id/secret is not confidential (Google documents this); GitHub's device flow needs only the client id. Environment variables and per-connection settings still override these. Fill in after registering the apps.",
+  "google_calendar": {"client_id": "", "client_secret": ""},
+  "github": {"client_id": ""}
+}
