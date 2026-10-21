@@ -64,7 +64,7 @@ export interface Copy {
     free: string;
   };
   faq: { title: string; items: { q: string; a: string }[] };
-  footer: { tagline: string; taglinePc: string; product: string; project: string; legal: string; builders: string; about: string; privacy: string; cookies: string; cookieSettings: string; github: string; changelog: string; copy: string; built: string };
+  footer: { tagline: string; taglinePc: string; product: string; project: string; legal: string; builders: string; about: string; privacy: string; terms: string; cookies: string; cookieSettings: string; github: string; changelog: string; copy: string; built: string };
 }
 
 export const it: Copy = {
@@ -247,6 +247,7 @@ export const it: Copy = {
     builders: "Per sviluppatori",
     about: "Chi siamo",
     privacy: "Privacy",
+    terms: "Termini",
     cookies: "Cookie",
     cookieSettings: "Preferenze cookie",
     github: "GitHub",
@@ -436,6 +437,7 @@ export const en: Copy = {
     builders: "For developers",
     about: "About",
     privacy: "Privacy",
+    terms: "Terms",
     cookies: "Cookies",
     cookieSettings: "Cookie preferences",
     github: "GitHub",

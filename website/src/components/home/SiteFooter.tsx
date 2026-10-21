@@ -30,6 +30,7 @@ export function SiteFooter() {
           <div>
             <p className="ae-foot-h">{f.legal}</p>
             <Link href={`${base}/privacy`}>{f.privacy}</Link>
+            <Link href={`${base}/terms`}>{f.terms}</Link>
             <Link href={`${base}/cookies`}>{f.cookies}</Link>
             <button onClick={() => window.dispatchEvent(new CustomEvent("aether-open-cookie-preferences"))}>{f.cookieSettings}</button>
           </div>

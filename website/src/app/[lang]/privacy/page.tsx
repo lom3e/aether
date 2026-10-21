@@ -46,8 +46,8 @@ export default function PrivacyPage() {
           </h1>
           <p style={{ fontSize: "1.0625rem", color: "var(--text-muted)", marginBottom: 40, lineHeight: 1.6 }}>
             {isIt
-              ? "Ultimo aggiornamento: 30 Agosto 2026 • Conforme al Regolamento Generale sulla Protezione dei Dati (GDPR - Reg. UE 2016/679)"
-              : "Last updated: August 30, 2026 • Compliant with General Data Protection Regulation (GDPR - EU Reg. 2016/679)"}
+              ? "Ultimo aggiornamento: 21 ottobre 2026 • Conforme al Regolamento Generale sulla Protezione dei Dati (GDPR - Reg. UE 2016/679)"
+              : "Last updated: October 21, 2026 • Compliant with General Data Protection Regulation (GDPR - EU Reg. 2016/679)"}
           </p>
 
           {/* Highlight Box: Privacy-by-Design Philosophy */}
@@ -214,7 +214,24 @@ export default function PrivacyPage() {
               </ul>
             </div>
 
-            {/* Section 7 */}
+            {/* Section 6b: the desktop app and Google user data */}
+            <div>
+              <h2 style={{ fontSize: "1.35rem", fontWeight: 700, color: "var(--text-primary)", marginBottom: 12, letterSpacing: "-0.02em" }}>
+                {isIt ? "7. L'app Aether e i dati dei servizi Google" : "7. The Aether app and Google user data"}
+              </h2>
+              <p>
+                {isIt
+                  ? "Se colleghi il tuo account Google ad Aether (per ora per leggere e creare eventi su Google Calendar), l'autorizzazione avviene nel tuo browser e il token di accesso viene salvato cifrato sul tuo computer. I dati di Google Calendar vengono letti dall'app sul tuo computer e non vengono inviati ai server di Aether né a terzi: non abbiamo server che li ricevano. Se usi un modello di intelligenza artificiale esterno, a quel provider arriva solo il testo necessario alla tua richiesta, dopo la mascheratura dei dati sensibili e con un registro locale di cosa è uscito."
+                  : "If you connect your Google account to Aether (currently to read and create events in Google Calendar), authorisation happens in your browser and the access token is stored encrypted on your computer. Google Calendar data is read by the app on your computer and is not sent to Aether servers or to third parties: we operate no servers that receive it. If you use an external AI model, that provider receives only the text your request needs, after sensitive data is masked and with a local record of what left."}
+              </p>
+              <p style={{ marginTop: 10 }}>
+                {isIt
+                  ? "L'uso e il trasferimento delle informazioni ricevute dalle API di Google da parte di Aether rispetta la Google API Services User Data Policy, inclusi i requisiti di Limited Use. Usiamo i dati di Google solo per fornire la funzione che richiedi, non li usiamo per pubblicità e non li usiamo per addestrare modelli. Puoi revocare l'accesso in qualsiasi momento da Collegamenti in Aether o da myaccount.google.com/permissions."
+                  : "Aether's use and transfer of information received from Google APIs adheres to the Google API Services User Data Policy, including the Limited Use requirements. We use Google data only to provide the feature you request, never for advertising and never to train models. You can revoke access at any time from Connections in Aether or at myaccount.google.com/permissions."}
+              </p>
+            </div>
+
+            {/* Section 8 */}
             <div style={{ borderTop: "1px solid var(--border-subtle)", paddingTop: 24, marginTop: 12 }}>
               <p style={{ fontSize: "0.95rem", color: "var(--text-muted)", margin: 0 }}>
                 {isIt
