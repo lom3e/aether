@@ -54,6 +54,7 @@ aether = [
     "presets/builtin/**/*.md",
     "presets/builtin/**/*.json",
     "server/static/**/*",
+    "connections/oauth_clients.json",
 ]
 
 

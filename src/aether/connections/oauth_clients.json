@@ -1,5 +1,9 @@
 {
-  "_comment": "Public OAuth client ids shipped with Aether so users connect with one click and paste nothing. A Google *Desktop app* client id/secret is not confidential (Google documents this); GitHub's device flow needs only the client id. Environment variables and per-connection settings still override these. Fill in after registering the apps.",
-  "google_calendar": {"client_id": "", "client_secret": ""},
-  "github": {"client_id": ""}
+  "_comment": "Public OAuth client ids shipped with Aether so users connect with one click and paste nothing. Only ids live here. The Google desktop client secret (not confidential by Google's docs, but kept out of the public repo) goes in oauth_clients.local.json next to this file: git-ignored, bundled into the app at build time. Environment variables and per-connection settings still override these.",
+  "google_calendar": {
+    "client_id": "1098324439709-if6e73vsi1r0ng1b58f078nbfk3snrs0.apps.googleusercontent.com"
+  },
+  "github": {
+    "client_id": ""
+  }
 }

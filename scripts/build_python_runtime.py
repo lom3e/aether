@@ -175,6 +175,13 @@ def build_runtime() -> Path:
     if builtin_presets.exists():
         cmd.extend(["--add-data", f"{builtin_presets}{data_sep}aether/presets/builtin"])
 
+    # The OAuth client ids are data files (collect-submodules only gathers modules). The .local file carries the Google desktop
+    # client secret and is git-ignored: it is bundled when present on the build machine.
+    for oauth_file in ("oauth_clients.json", "oauth_clients.local.json"):
+        oauth_path = SRC_DIR / "aether" / "connections" / oauth_file
+        if oauth_path.exists():
+            cmd.extend(["--add-data", f"{oauth_path}{data_sep}aether/connections"])
+
     # Include server static directory if present
     server_static = SRC_DIR / "aether" / "server" / "static"
     if server_static.exists():

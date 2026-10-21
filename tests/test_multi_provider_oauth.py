@@ -22,6 +22,14 @@ from aether.server.routes import (
     generic_oauth_callback_route,
 )
 
+@pytest.fixture(autouse=True)
+def _no_bundled_client_ids(monkeypatch):
+    """These tests describe an install with no shipped client ids; the real ones must not leak in."""
+    import aether.connections.oauth as _oauth
+
+    monkeypatch.setattr(_oauth, "_bundled_clients", lambda: {})
+
+
 
 @pytest.fixture
 def temp_store(tmp_path):

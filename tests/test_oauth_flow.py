@@ -20,6 +20,18 @@ from aether.connections.oauth import OAUTH_SPECS, OAuthManager
 from aether.connections.oauth_flow import FlowRegistry
 from aether.workspace.workspace import Workspace
 
+_REAL: dict = {}
+
+
+@pytest.fixture(autouse=True)
+def _no_bundled_client_ids(monkeypatch):
+    """These tests describe an install with no shipped client ids; the real ones must not leak in."""
+    import aether.connections.oauth as _oauth
+
+    _REAL["fn"] = _oauth._bundled_clients
+    monkeypatch.setattr(_oauth, "_bundled_clients", lambda: {})
+
+
 
 class FakeProvider(http.server.BaseHTTPRequestHandler):
     seen: list[dict] = []
@@ -241,3 +253,21 @@ def test_github_device_flow_without_a_client_id_says_so(github, monkeypatch):
     monkeypatch.delenv("GITHUB_CLIENT_ID")
     with pytest.raises(ValueError, match="client ID"):
         oauth_flow.start_github_device_flow(github, github.id)
+
+
+def test_bundled_clients_overlay_the_git_ignored_local_file(tmp_path, monkeypatch):
+    """Ids are committed; the desktop client secret lives in a git-ignored file that is merged over them at run time."""
+    import json
+
+    import aether.connections.oauth as oauth
+
+    (tmp_path / "oauth_clients.json").write_text(json.dumps({"_comment": "x", "google_calendar": {"client_id": "id-1", "client_secret": ""}, "github": {"client_id": "gh-1"}}))
+    monkeypatch.setattr(oauth, "__file__", str(tmp_path / "oauth.py"))
+    monkeypatch.setattr(oauth, "_bundled_clients", _REAL["fn"])
+    assert oauth._bundled_clients()["google_calendar"] == {"client_id": "id-1"}  # no local file: id only, the empty secret is dropped
+    (tmp_path / "oauth_clients.local.json").write_text(json.dumps({"google_calendar": {"client_secret": "s-1"}}))
+    merged = oauth._bundled_clients()
+    assert merged["google_calendar"] == {"client_id": "id-1", "client_secret": "s-1"}
+    assert merged["github"] == {"client_id": "gh-1"}
+    (tmp_path / "oauth_clients.local.json").write_text("{not json")
+    assert oauth._bundled_clients()["google_calendar"] == {"client_id": "id-1"}  # a broken local file never breaks the app

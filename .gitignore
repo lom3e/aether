@@ -139,3 +139,6 @@ src-tauri/resources/
 Loghi Aether/
 .vercel
 .env*
+
+# --- OAuth desktop client secret (bundled at build time, never committed) ---
+src/aether/connections/oauth_clients.local.json

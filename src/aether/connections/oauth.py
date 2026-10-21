@@ -90,14 +90,20 @@ OAUTH_SPECS: dict[str, dict[str, Any]] = {
 
 
 def _bundled_clients() -> dict[str, dict[str, str]]:
-    """Public client ids shipped with the app (oauth_clients.json next to this module). Missing/invalid file = none."""
-    try:
-        from pathlib import Path
+    """Public client ids shipped with the app: oauth_clients.json (committed, ids only) overlaid with the optional
+    oauth_clients.local.json (git-ignored, added at build time, may carry the desktop client secret). Missing/invalid = none."""
+    from pathlib import Path
 
-        raw = json.loads((Path(__file__).with_name("oauth_clients.json")).read_text(encoding="utf-8"))
-        return {k: v for k, v in raw.items() if isinstance(v, dict)}
-    except Exception:  # noqa: BLE001
-        return {}
+    merged: dict[str, dict[str, str]] = {}
+    for name in ("oauth_clients.json", "oauth_clients.local.json"):
+        try:
+            raw = json.loads((Path(__file__).with_name(name)).read_text(encoding="utf-8"))
+        except Exception:  # noqa: BLE001
+            continue
+        for key, value in raw.items():
+            if isinstance(value, dict):
+                merged.setdefault(key, {}).update({k: v for k, v in value.items() if v})
+    return merged
 
 
 @dataclass(slots=True)
