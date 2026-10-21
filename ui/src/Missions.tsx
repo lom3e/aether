@@ -1264,7 +1264,7 @@ export function Missions({ navigate, initialMissionId }: MissionsProps) {
           <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', fontSize: '11px', color: 'hsl(var(--muted-fg))' }}>
             <div style={{ display: 'flex', alignItems: 'center', gap: '4px' }}>
               <Users size={12} />
-              <span>{m.team_name || t('defaultWorkforce')}</span>
+              <span>{m.team_name && !/^starter-workforce$/i.test(m.team_name) ? m.team_name : t('defaultWorkforce')}</span>
             </div>
             <div style={{ display: 'flex', alignItems: 'center', gap: '4px' }}>
               <span>{completedCount} {t('ofMilestones')} {totalCount} {completedCount === 1 ? t('completedCountSingular') : t('completedCount')}</span>
@@ -2209,7 +2209,7 @@ export function Missions({ navigate, initialMissionId }: MissionsProps) {
                     <h3 style={{ fontSize: '14px', fontWeight: 600, margin: 0, color: 'hsl(var(--fg))' }}>
                       {t('assignedWorkforceLabel')}
                     </h3>
-                    {selectedMission.team_name && (
+                    {selectedMission.team_name && !/^starter-workforce$/i.test(selectedMission.team_name) && (
                       <span style={{ fontSize: '13px', color: 'hsl(var(--muted-fg))' }}>
                         ({selectedMission.team_name})
                       </span>

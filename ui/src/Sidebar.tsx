@@ -399,7 +399,8 @@ export function Sidebar({
     const matchesArchive = showArchived ? c.status === 'archived' : c.status !== 'archived';
     const matchesProject = !selectedProjectId ||
       (selectedProjectId === 'none' ? (!c.project_id) : c.project_id === selectedProjectId);
-    return matchesSearch && matchesArchive && matchesProject;
+    const isMissionThread = (c.title || '').startsWith('Mission: ') && !searchQuery.trim(); // a job's own chat opens from the job, it is not listed twice
+    return matchesSearch && matchesArchive && matchesProject && !isMissionThread;
   });
 
   return (
@@ -550,11 +551,6 @@ export function Sidebar({
         <div style={{ flex: 1, overflowY: 'auto', padding: '6px 8px 16px', display: 'flex', flexDirection: 'column', gap: '12px' }}>
           {/* Main Product Navigation — Unified Hierarchy */}
           <div>
-            {!collapsed && (
-              <div style={{ fontSize: '10px', color: 'hsl(var(--muted-fg))', padding: '2px 8px', fontWeight: 500 }}>
-                {t('workspace')}
-              </div>
-            )}
 
             {/* Primary Product Navigation — Calm & Human-Centric */}
             <Tooltip content={t('navHome') || 'Ufficio'} position={collapsed ? 'right' : 'top'} disabled={!collapsed}>
