@@ -779,7 +779,10 @@ class GoogleCalendarConnector(BaseConnector):
         Lists events from the specified calendar, or across all accessible calendars
         if calendar_id is 'all' / '*' / None.
         """
-        effective_cal = calendar_id or self.auth_metadata.get("selected_calendar_id")
+        # Reading covers every calendar on the account (a shared "UNI" calendar included). The default "selected calendar"
+        # set at connect time is only where new events go; reading is narrowed only when the user chose a calendar on purpose.
+        chosen = self.auth_metadata.get("selected_calendar_id") if self.auth_metadata.get("calendar_selected_by_user") else None
+        effective_cal = calendar_id or chosen
         if not effective_cal or effective_cal in ("all", "*", "all_calendars"):
             return self.list_events_multi_calendar(time_min=time_min, time_max=time_max, query=query, limit=limit)
 

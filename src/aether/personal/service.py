@@ -249,7 +249,13 @@ def format_calendar_response(
     events_to_show = events
     other_events: list[dict[str, Any]] = []
 
-    if is_academic:
+    # A calendar that is itself the university timetable ("UNI", "Orario ...") wins over words that merely appear in a title.
+    timetable_cal = re.compile(r"\b(orario|lezion\w*|uni|universit\w*)\b", re.IGNORECASE)
+    from_timetable = [e for e in events if timetable_cal.search(e.get("calendar_summary") or "")]
+    if is_academic and from_timetable:
+        events_to_show = from_timetable
+        other_events = [e for e in events if e not in from_timetable]
+    elif is_academic:
         ac_matches = [
             e for e in events
             if any(k in (e.get("calendar_summary") or "").lower() for k in academic_keywords)
@@ -283,7 +289,7 @@ def format_calendar_response(
 
     count = len(events_to_show)
     # "lezioni" only when the events really come from a class timetable; a personal calendar named "UNI" holds tasks.
-    lesson_mode = is_academic and any(k in (e.get("calendar_summary") or "").lower() for e in events_to_show for k in ("orario", "lezion"))
+    lesson_mode = is_academic and all(timetable_cal.search(e.get("calendar_summary") or "") for e in events_to_show)
     if lesson_mode:
         noun = "lezione" if count == 1 else "lezioni"
         header = f"{target_label.capitalize()} hai {count} {noun} in programma:"

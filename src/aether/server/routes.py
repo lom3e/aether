@@ -9055,6 +9055,7 @@ async def select_google_calendar_route(request: Request, payload: GoogleSelectCa
         raise HTTPException(status_code=404, detail="Google Calendar connection not found.")
 
     conn.auth_metadata["selected_calendar_id"] = payload.calendar_id
+    conn.auth_metadata["calendar_selected_by_user"] = True
     if payload.calendar_summary:
         conn.auth_metadata["selected_calendar_summary"] = payload.calendar_summary
     conn.updated_at = datetime.now(timezone.utc).isoformat()

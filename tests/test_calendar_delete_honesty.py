@@ -98,11 +98,11 @@ def test_honest_messages_when_nothing_matches_or_google_is_not_connected():
 
 def test_listing_shows_the_day_of_each_event_and_hides_duplicates():
     now = datetime(2026, 10, 22, 9, 0, tzinfo=timezone.utc)
-    evs = [_ev("a", "Piano Carriera", now), _ev("b", "Piano Carriera", now), _ev("c", "Piano Carriera", now + timedelta(days=1))]
+    evs = [_ev("a", "Piano Carriera", now, cal="Personale"), _ev("b", "Piano Carriera", now, cal="Personale"), _ev("c", "Piano Carriera", now + timedelta(days=1), cal="Personale")]
     assert len(dedupe_calendar_events(evs)) == 2
     text = format_calendar_response(events=evs, scope="upcoming", target_day_label=None, is_academic=True, tzinfo=timezone.utc)
     assert "**Giovedì 22 ottobre**" in text and "**Venerdì 23 ottobre**" in text
-    assert "lezioni" not in text, "a personal calendar named UNI holds tasks, not lessons"
+    assert "lezion" not in text, "tasks in the personal calendar are not lessons"
 
 
 def test_deleting_runs_only_after_approval_and_reports_what_was_removed(tmp_path, accepted_authority_factory):
@@ -128,3 +128,13 @@ def test_deleting_runs_only_after_approval_and_reports_what_was_removed(tmp_path
     res = ws.actions.approve(res.id)
     assert res.status == ActionExecutionStatus.SUCCEEDED
     assert removed == [("e1", "uni")] and res.output_data["deleted"] == 1 and res.output_data["events"][0]["title"] == "Piano Carriera"
+
+
+def test_lessons_come_from_the_uni_calendar_not_from_personal_tasks_with_uni_in_the_title():
+    start = datetime(2026, 10, 22, 8, 0, tzinfo=timezone.utc)
+    lesson = _ev("l1", "Analisi 1", start, cal="UNI")
+    task = _ev("t1", "Controllare tasse UniTo", start + timedelta(hours=2), cal="Personale", primary=True)
+    text = format_calendar_response(events=[lesson, task], scope="tomorrow", target_day_label="domani", is_academic=True, tzinfo=timezone.utc)
+    assert "Domani hai 1 lezione in programma:" in text and "Analisi 1" in text
+    assert "Controllare tasse UniTo" not in text.split("*(")[0], "personal tasks are not listed as lessons"
+    assert "1 altro impegno in altri calendari" in text

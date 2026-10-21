@@ -240,3 +240,25 @@ def test_empty_calendar_response_formatting():
         is_academic=True,
     )
     assert resp == "Non risultano lezioni in programma per lunedì 12 ottobre sul tuo calendario."
+
+
+def test_reading_covers_every_calendar_unless_the_user_chose_one_on_purpose():
+    """The default 'primary' set at connect time is where new events go; it must not hide a shared 'UNI' calendar."""
+    calendars = [
+        {"id": "primary", "summary": "Personale", "primary": True, "accessRole": "owner"},
+        {"id": "uni-shared", "summary": "UNI", "primary": False, "accessRole": "reader"},
+    ]
+
+    def fetch(calendar_id, limit=50, time_min=None, time_max=None, query=None):
+        return [{"id": f"e-{calendar_id}", "title": f"evento {calendar_id}", "start_time": "2026-10-22T10:00:00Z"}]
+
+    def make(meta):
+        c = GoogleCalendarConnector(auth_metadata={"access_token": "t", "refresh_token": "r", **meta}, workspace_id="ws")
+        c.list_calendars = MagicMock(return_value=calendars)
+        c._fetch_calendar_events_raw = MagicMock(side_effect=fetch)
+        return c
+
+    default = make({"selected_calendar_id": "primary"})
+    assert {e["calendar_summary"] for e in default.list_events()} == {"Personale", "UNI"}
+    chosen = make({"selected_calendar_id": "primary", "calendar_selected_by_user": True})
+    assert [e["id"] for e in chosen.list_events()] == ["e-primary"], "an explicit choice still narrows reading"
