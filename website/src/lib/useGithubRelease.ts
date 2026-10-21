@@ -1,51 +1,28 @@
 "use client";
 
-import { useState, useEffect } from "react";
+import { useEffect, useState } from "react";
 import { AETHER_VERSION } from "./version";
+import { RELEASES_URL } from "./site";
 
-export function useGithubLatestRelease(): { version: string; releaseTag: string; releaseUrl: string } {
-  const [release, setRelease] = useState({
-    version: AETHER_VERSION,
-    releaseTag: `Release ${AETHER_VERSION}`,
-    releaseUrl: `https://github.com/lom3e/aether/releases/tag/${AETHER_VERSION}-workforce-platform`,
-  });
+/** The latest published release. Falls back to the build-time constant and the generic /releases/latest page (no guessed tags). */
+export function useGithubLatestRelease(): { version: string; releaseUrl: string } {
+  const [release, setRelease] = useState({ version: AETHER_VERSION, releaseUrl: RELEASES_URL });
 
   useEffect(() => {
-    // Check cached release
-    const cached = sessionStorage.getItem("aether_latest_release");
-    if (cached) {
-      try {
-        const parsed = JSON.parse(cached);
-        if (parsed.version) {
-          setRelease(parsed);
-          return;
-        }
-      } catch {
-        // ignore
-      }
-    }
-
+    let cancelled = false;
     fetch("https://api.github.com/repos/lom3e/aether/releases/latest")
-      .then((res) => {
-        if (!res.ok) throw new Error("Unable to fetch latest release");
-        return res.json();
-      })
+      .then((res) => (res.ok ? res.json() : Promise.reject(new Error("release unavailable"))))
       .then((data) => {
-        if (data && data.tag_name) {
-          const rawTag = data.tag_name;
-          const cleanVersion = rawTag.split("-")[0] || rawTag;
-          const newRel = {
-            version: cleanVersion,
-            releaseTag: `Release ${cleanVersion}`,
-            releaseUrl: data.html_url || `https://github.com/lom3e/aether/releases/tag/${rawTag}`,
-          };
-          setRelease(newRel);
-          sessionStorage.setItem("aether_latest_release", JSON.stringify(newRel));
-        }
+        if (cancelled || !data?.tag_name) return;
+        const clean = String(data.tag_name).split("-")[0] || String(data.tag_name);
+        setRelease({ version: clean, releaseUrl: data.html_url || RELEASES_URL });
       })
       .catch(() => {
-        // fallback silently to hardcoded constant
+        /* keep the fallback */
       });
+    return () => {
+      cancelled = true;
+    };
   }, []);
 
   return release;

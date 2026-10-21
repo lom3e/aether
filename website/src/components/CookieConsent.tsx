@@ -18,7 +18,7 @@ const STORAGE_KEY = "aether_cookie_consent";
 const CURRENT_VERSION = "1.0";
 
 export function CookieConsent() {
-  const { t } = useLanguage();
+  const { t, lang } = useLanguage();
   const [mounted, setMounted] = useState(false);
   const [bannerVisible, setBannerVisible] = useState(false);
   const [modalVisible, setModalVisible] = useState(false);
@@ -30,6 +30,8 @@ export function CookieConsent() {
     marketing: false,
   });
 
+  /* Reads the stored consent after hydration; state cannot be initialised from localStorage during SSR. */
+  /* eslint-disable react-hooks/set-state-in-effect */
   useEffect(() => {
     setMounted(true);
     try {
@@ -73,6 +75,7 @@ export function CookieConsent() {
       // ignore
     }
     setPreferences(payload);
+    window.dispatchEvent(new CustomEvent("aether-consent-changed"));
     setBannerVisible(false);
     setModalVisible(false);
   };
@@ -173,7 +176,7 @@ export function CookieConsent() {
             <span>
               {t.cookieConsent.footerNotice}{" "}
               <Link
-                href="/privacy"
+                href={`/${lang}/privacy`}
                 style={{
                   color: "var(--accent-violet)",
                   textDecoration: "underline",
@@ -184,7 +187,7 @@ export function CookieConsent() {
               </Link>{" "}
               e la{" "}
               <Link
-                href="/cookies"
+                href={`/${lang}/cookies`}
                 style={{
                   color: "var(--accent-violet)",
                   textDecoration: "underline",
