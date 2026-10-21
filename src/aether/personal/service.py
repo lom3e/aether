@@ -188,6 +188,38 @@ def format_event_time(start_str: str, end_str: str | None, is_all_day: bool, tzi
         return start_str[:16] if len(start_str) >= 16 else start_str
 
 
+_IT_DAYS = ["lunedì", "martedì", "mercoledì", "giovedì", "venerdì", "sabato", "domenica"]
+_IT_MONTHS = ["gennaio", "febbraio", "marzo", "aprile", "maggio", "giugno", "luglio", "agosto", "settembre", "ottobre", "novembre", "dicembre"]
+
+
+def _event_start(e: dict[str, Any], tzinfo: Any = None) -> datetime | None:
+    raw = e.get("start_time") or e.get("start_date") or ""
+    try:
+        dt = datetime.fromisoformat(str(raw).replace("Z", "+00:00"))
+    except ValueError:
+        return None
+    if tzinfo and dt.tzinfo:
+        dt = dt.astimezone(tzinfo)
+    return dt
+
+
+def _day_label(dt: datetime) -> str:
+    return f"{_IT_DAYS[dt.weekday()]} {dt.day} {_IT_MONTHS[dt.month - 1]}"
+
+
+def dedupe_calendar_events(events: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """The same appointment can sit in two calendars (an invite copied into a shared one): show it once."""
+    seen: set[tuple[str, str, str]] = set()
+    out: list[dict[str, Any]] = []
+    for e in events:
+        key = ((e.get("title") or "").strip().lower(), str(e.get("start_time") or e.get("start_date") or ""), str(e.get("end_time") or ""))
+        if key in seen:
+            continue
+        seen.add(key)
+        out.append(e)
+    return out
+
+
 def format_calendar_response(
     events: list[dict[str, Any]],
     scope: str,
@@ -196,13 +228,14 @@ def format_calendar_response(
     prompt: str = "",
     tzinfo: Any = None,
 ) -> str:
-    """Formats retrieved calendar events into concise, natural Italian text."""
+    """Formats retrieved calendar events into concise, natural Italian text, one line per event with its day."""
     target_label = target_day_label or (
         "domani" if scope == "tomorrow"
         else ("oggi" if scope == "today"
         else ("i prossimi giorni" if scope == "upcoming" else scope))
     )
 
+    events = dedupe_calendar_events(events)
     if not events:
         if is_academic:
             return f"Non risultano lezioni in programma per {target_label} sul tuo calendario."
@@ -227,8 +260,14 @@ def format_calendar_response(
             events_to_show = ac_matches
             other_events = [e for e in events if e not in ac_matches]
 
+    starts = [_event_start(e, tzinfo) for e in events_to_show]
+    multi_day = len({d.date() for d in starts if d}) > 1
     lines: list[str] = []
-    for e in events_to_show:
+    last_day = ""
+    for e, st in zip(events_to_show, starts):
+        if multi_day and st and _day_label(st) != last_day:
+            last_day = _day_label(st)
+            lines.append(f"\n**{last_day.capitalize()}**")
         title = e.get("title", "Senza titolo").strip()
         time_str = format_event_time(
             e.get("start_time", ""),
@@ -238,22 +277,79 @@ def format_calendar_response(
         )
         location = (e.get("location") or "").strip()
         loc_str = f" ({location})" if location else ""
-        lines.append(f"- **{title}** — {time_str}{loc_str}")
+        cal = (e.get("calendar_summary") or "").strip()
+        cal_str = f" · {cal}" if cal and not e.get("is_primary") else ""
+        lines.append(f"- **{title}** — {time_str}{loc_str}{cal_str}")
 
     count = len(events_to_show)
-    if is_academic:
+    # "lezioni" only when the events really come from a class timetable; a personal calendar named "UNI" holds tasks.
+    lesson_mode = is_academic and any(k in (e.get("calendar_summary") or "").lower() for e in events_to_show for k in ("orario", "lezion"))
+    if lesson_mode:
         noun = "lezione" if count == 1 else "lezioni"
         header = f"{target_label.capitalize()} hai {count} {noun} in programma:"
     else:
         noun = "impegno" if count == 1 else "impegni"
         header = f"Ecco i tuoi {noun} in programma per {target_label}:"
 
-    response = header + "\n\n" + "\n".join(lines)
+    response = header + "\n" + "\n".join(lines)
     if other_events:
         o_count = len(other_events)
-        response += f"\n\n*(Hai anche {o_count} {'altro impegno' if o_count == 1 else 'altri impegni'} registrati in calendario)*"
+        response += f"\n\n*(Hai anche {o_count} {'altro impegno' if o_count == 1 else 'altri impegni'} in altri calendari)*"
 
     return response
+
+
+_CAL_DELETE_RE = re.compile(r"\b(cancell\w*|elimin\w*|rimuov\w*|rimuover\w*|togli\w*|annull\w*)\b", re.IGNORECASE)
+_CAL_WORDS_RE = re.compile(r"\b(calendario|calendar|appuntament\w*|impegn\w*|event\w*|riunion\w*|meeting|agenda)\b", re.IGNORECASE)
+_PLURAL_REF_RE = re.compile(r"\b(cancellarli|cancellali|eliminarli|eliminali|rimuoverli|rimuovili|toglierli|toglili|cancellarle|cancellale)\b", re.IGNORECASE)
+_QUOTED_RE = re.compile(r"[\"“”«](.+?)[\"“”»]")
+_BOLD_RE = re.compile(r"\*\*(.+?)\*\*")
+
+
+def _norm_title(text: str) -> str:
+    return re.sub(r"[^\w]+", " ", (text or "").lower()).strip()
+
+
+def parse_calendar_delete_request(prompt: str, history: list[Any] | None) -> list[str] | None:
+    """Titles the user wants removed from the calendar, or None when this is not a calendar deletion.
+
+    Triggers only when the sentence has a deletion verb AND is clearly about the calendar: it names the calendar/an
+    appointment, or quotes a title, or refers ("cancellali") to the list Aether just showed."""
+    text = (prompt or "").strip()
+    if not text or not _CAL_DELETE_RE.search(text):
+        return None
+    last_assistant = next((m.content for m in reversed(history or []) if getattr(m, "role", "") == "assistant"), "")
+    listed = [t.strip() for t in _BOLD_RE.findall(last_assistant or "") if t.strip()]
+    showed_calendar = bool(listed) and bool(re.search(r"in programma|impegn|appuntament|\d{2}:\d{2}|Tutto il giorno", last_assistant or ""))
+    quoted = [q.strip() for q in _QUOTED_RE.findall(text) if q.strip()]
+    if quoted and (_CAL_WORDS_RE.search(text) or showed_calendar):
+        return quoted
+    if _PLURAL_REF_RE.search(text) and showed_calendar:
+        return list(dict.fromkeys(listed))
+    if _CAL_WORDS_RE.search(text):
+        m = re.search(r"(?:cancell\w*|elimin\w*|rimuov\w*|togli\w*|annull\w*)\s+(?:l['’]|il |lo |la |i |gli |le |un |uno |una )?(?:evento|appuntamento|impegno|riunione|meeting)?\s*(?:chiamato |intitolato |dal titolo |di |del |\"|“)?\s*(.+?)(?:\s+(?:dal|nel|sul)\s+(?:mio\s+)?calendario.*)?$", text, re.IGNORECASE)
+        if m and m.group(1).strip(" \"“”.?!"):
+            return [m.group(1).strip(" \"“”.?!")]
+    return None
+
+
+def match_calendar_events(events: list[dict[str, Any]], titles: list[str], now: datetime) -> list[dict[str, Any]]:
+    """For each requested title, the next upcoming event whose title matches (exact first, then contains)."""
+    picked: list[dict[str, Any]] = []
+    upcoming = sorted(dedupe_calendar_events(events), key=lambda e: str(e.get("start_time") or e.get("start_date") or ""))
+    for want in titles:
+        w = _norm_title(want)
+        if not w:
+            continue
+        cands = [e for e in upcoming if _norm_title(e.get("title", "")) == w] or [e for e in upcoming if w in _norm_title(e.get("title", "")) or _norm_title(e.get("title", "")) in w]
+        future = [e for e in cands if (_event_start(e) or now) >= now - timedelta(hours=12)]
+        chosen = (future or cands)[:1]
+        for e in chosen:
+            if e not in picked:
+                e = dict(e)
+                e["_same_title_count"] = len(cands)
+                picked.append(e)
+    return picked
 
 
 def has_preliminary_review_request(prompt: str) -> bool:
@@ -1014,6 +1110,41 @@ class PersonalAgentService:
             logger.debug("Advisory intent check skipped: %s", exc)
             return "informational"
 
+    def _resolve_calendar_deletion(self, intent: "UserIntent", workspace_id: str) -> tuple["UserIntent", str]:
+        """Turns "delete these titles" into the exact events (ids, times) to confirm, or an honest explanation. Reads only."""
+        from aether.actions.models import ActionExecutionStatus
+
+        titles = intent.action_args.get("target_titles") or []
+        if not self.action_executor:
+            return intent, "Non riesco ad accedere al calendario da qui."
+        now = datetime.now().astimezone()
+        ex = self.action_executor.execute(
+            action_id="calendar.list_events",
+            workspace_id=workspace_id,
+            input_data={"time_min": (now - timedelta(days=1)).isoformat(), "time_max": (now + timedelta(days=90)).isoformat(), "limit": 250},
+            auto_approve=True,
+        )
+        if ex.status != ActionExecutionStatus.SUCCEEDED:
+            return intent, f"Non riesco a leggere il calendario, quindi non cancello nulla: {ex.error_message or 'collegamento non disponibile'}. Controlla Collegamenti."
+        if (ex.output_data or {}).get("provider") != "google_calendar":
+            return intent, "Per cancellare eventi serve Google Calendar collegato (Collegamenti). Non ho cancellato nulla."
+        found = match_calendar_events(ex.output_data.get("events", []), titles, now)
+        if not found:
+            return intent, f"Non trovo nei prossimi 90 giorni un evento che si chiami «{'», «'.join(titles)}». Non ho cancellato nulla."
+        tz = now.tzinfo
+        rows = []
+        for e in found:
+            st = _event_start(e, tz)
+            rows.append({
+                "event_id": e.get("id"), "calendar_id": e.get("calendar_id"), "title": e.get("title", ""),
+                "start_time": e.get("start_time") or e.get("start_date"), "end_time": e.get("end_time"), "location": e.get("location", ""),
+                "when": (f"{_day_label(st)} {format_event_time(e.get('start_time', ''), e.get('end_time'), e.get('is_all_day', False), tzinfo=tz)}" if st else ""),
+                "calendar": e.get("calendar_summary", ""), "same_title_count": e.get("_same_title_count", 1),
+            })
+        intent.action_args = {"events": rows, "title": ", ".join(r["title"] for r in rows)}
+        intent.summary = "Delete calendar events: " + intent.action_args["title"]
+        return intent, ""
+
     def classify_intent(
         self,
         prompt: str,
@@ -1048,6 +1179,18 @@ class PersonalAgentService:
         recent_history: list[PersonalMessage] | None = None,
     ) -> UserIntent:
         p_lower = prompt.lower().strip()
+
+        # Calendar deletion comes first: with a conversation going, "cancella"/"annulla" would otherwise read as a refusal of a
+        # proposal. Never answered by the model alone; resolved against the real calendar and confirmed by the user.
+        del_titles = parse_calendar_delete_request(prompt, recent_history)
+        if del_titles:
+            return UserIntent(
+                raw_prompt=prompt,
+                tier=IntentTier.ACT,
+                summary="Delete calendar events: " + ", ".join(del_titles),
+                action_id="google_calendar.delete_event",
+                action_args={"target_titles": del_titles},
+            )
 
         # Multi-turn context resolution: if short prompt or follow-up, resolve referents
         effective_prompt = prompt
@@ -2467,6 +2610,11 @@ class PersonalAgentService:
 
         # 4. Intent classification (with multi-turn context)
         intent = self.classify_intent(prompt, recent_history=recent_history)
+        if intent.action_id == "google_calendar.delete_event" and "events" not in (intent.action_args or {}):
+            intent, _explain = self._resolve_calendar_deletion(intent, workspace_id)
+            if _explain:  # nothing to confirm: say so plainly instead of letting the model improvise
+                intent = UserIntent(raw_prompt=prompt, tier=IntentTier.ANSWER, summary="Calendar deletion not possible",
+                                    action_id="calendar.explain", action_args={"message": _explain}, intent_type="query")
         if provider_id and (intent.action_id == "coding.delegate" or "coding" in (intent.action_id or "")):
             if intent.action_args is None:
                 intent.action_args = {}
@@ -2494,7 +2642,7 @@ class PersonalAgentService:
         #    ONE retrieval per request: the same AssembledContext feeds the model answer, document drafting,
         #    workforce delegation and the coding-agent handoff (no duplicate or divergent lookups).
         intel_context = None
-        if not is_casual_conv and intent.action_id not in ("calendar.list_events", "files.read_document"):
+        if not is_casual_conv and intent.action_id not in ("calendar.list_events", "calendar.explain", "files.read_document"):
             try:
                 _purpose = {
                     IntentTier.ANSWER: "answer", IntentTier.DO: "document", IntentTier.DELEGATE: "delegate",
@@ -2779,6 +2927,17 @@ class PersonalAgentService:
                     msg_metadata["designated_provider_id"] = prov_id
                     msg_metadata["action_id"] = "coding.delegate"
                     msg_metadata["action_args"] = intent.action_args
+                elif intent.action_id == "google_calendar.delete_event" and intent.action_args.get("events"):
+                    rows = intent.action_args["events"]
+                    lines = []
+                    for r in rows:
+                        extra = f" — ce ne sono altri {r['same_title_count'] - 1} con lo stesso nome, non li tocco" if r.get("same_title_count", 1) > 1 else ""
+                        lines.append(f"- **{r['title']}** — {r.get('when') or r.get('start_time') or ''}" + (f" · {r['calendar']}" if r.get("calendar") else "") + extra)
+                    response_text = (
+                        ("Sto per cancellare questo evento dal tuo Google Calendar:\n\n" if len(rows) == 1 else f"Sto per cancellare questi {len(rows)} eventi dal tuo Google Calendar:\n\n")
+                        + "\n".join(lines)
+                        + "\n\nNon ho cancellato niente finché non confermi qui sotto."
+                    )
                 else:
                     response_text = runtime_res.output or (
                         f"I've prepared to **{action_name}** ({intent.action_args.get('title', '')}).\n\n"
@@ -3248,6 +3407,9 @@ class PersonalAgentService:
                             )
                         )
                         response_text = f"Errore durante l'accesso al calendario: {execution.error_message or 'Operazione fallita.'}"
+
+            elif intent.action_id == "calendar.explain":
+                response_text = str(intent.action_args.get("message") or "")
 
             elif intent.action_id == "files.read_document":
                 if not self.action_executor:

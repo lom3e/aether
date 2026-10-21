@@ -1000,7 +1000,12 @@ class ActionExecutor:
                         calendar_id=inp.get("calendar_id"),
                     )
                 elif action_id == "google_calendar.delete_event":
-                    res = {"deleted": connector.delete_event(event_id=inp.get("event_id", ""), calendar_id=inp.get("calendar_id"))}
+                    targets = inp.get("events") or [{"event_id": inp.get("event_id", ""), "calendar_id": inp.get("calendar_id")}]
+                    removed: list[dict[str, Any]] = []
+                    for t in targets:
+                        connector.delete_event(event_id=t.get("event_id", ""), calendar_id=t.get("calendar_id"))
+                        removed.append({k: t.get(k) for k in ("event_id", "calendar_id", "title", "start_time", "end_time", "location") if t.get(k)})
+                    res = {"deleted": len(removed), "events": removed}
                 elif action_id == "google_calendar.list_calendars":
                     res = {"calendars": connector.list_calendars()}
                 else:

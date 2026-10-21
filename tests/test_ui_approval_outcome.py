@@ -91,7 +91,7 @@ def test_client_uses_the_canonical_route_and_the_backend_success_flag():
 
 
 def test_components_do_not_hardcode_success_toasts_for_approvals():
-    for name in ("Home.tsx", "companion/useCompanionRuntime.ts", "NotificationCenter.tsx", "Connections.tsx", "AssistantV2.tsx"):
+    for name in ("Home.tsx", "companion/useCompanionRuntime.ts", "NotificationCenter.tsx", "ConnectionsAdvanced.tsx", "AssistantV2.tsx"):
         text = (UI_SRC / name).read_text(encoding="utf-8")
         assert "approvalToastKind" in text, f"{name} must derive the toast kind from the outcome"
         assert not re.search(r"showToast\([^)]*,\s*['\"]success['\"]\)", "\n".join(

@@ -82,6 +82,24 @@ class ActionRegistry:
                 output_schema={"type": "object", "properties": {"event_id": {"type": "string"}}},
             )
         )
+        for gid, gname, gdesc in (
+            ("google_calendar.create_event", "Create Google Calendar Event", "Creates an event in the connected Google Calendar."),
+            ("google_calendar.update_event", "Update Google Calendar Event", "Changes the title or time of an event in the connected Google Calendar."),
+            ("google_calendar.delete_event", "Delete Google Calendar Event", "Deletes one or more events from the connected Google Calendar."),
+        ):
+            self.register(
+                ActionDefinition(
+                    id=gid,
+                    name=gname,
+                    description=gdesc,
+                    tier=ActionTier.ACT,
+                    permission_level=ActionPermissionLevel.EXTERNAL_MUTATION,
+                    requires_confirmation=True,
+                    provider="google_calendar",
+                    input_schema={"type": "object", "properties": {"event_id": {"type": "string"}, "calendar_id": {"type": "string"}, "events": {"type": "array"}, "title": {"type": "string"}, "start_time": {"type": "string"}, "end_time": {"type": "string"}}},
+                    output_schema={"type": "object"},
+                )
+            )
         self.register(
             ActionDefinition(
                 id="calendar.list_events",
