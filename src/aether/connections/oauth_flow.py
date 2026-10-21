@@ -27,7 +27,7 @@ FLOW_TTL_SECONDS = 180
 _PAGE = """<!doctype html><html><head><meta charset="utf-8"><title>Aether</title><meta name="viewport" content="width=device-width,initial-scale=1">
 <style>body{{font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;background:#0b0b0d;color:#f4f4f5;display:flex;align-items:center;justify-content:center;height:100vh;margin:0}}
 main{{max-width:420px;text-align:center;padding:0 24px}}h1{{font-size:20px;font-weight:600;margin:0 0 8px}}p{{color:#a1a1aa;line-height:1.5;margin:0}}
-.dot{{width:10px;height:10px;border-radius:50%;background:{color};margin:0 auto 18px}}</style></head><body><main><div class="dot"></div><h1>{title}</h1><p>{body}</p></main></body></html>"""
+.dot{{width:10px;height:10px;border-radius:50%;background:{color};margin:0 auto 18px}}</style></head><body><main><div class="dot"></div><h1>{title}</h1><p>{body}</p></main><script>setTimeout(function(){{try{{window.close()}}catch(e){{}}}},1500)</script></body></html>"""
 
 
 @dataclass

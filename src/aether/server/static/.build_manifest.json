@@ -1,13 +1,13 @@
 {
   "manifest_version": "1.0",
-  "generated_at": "2026-10-21T07:15:08.136323+00:00",
+  "generated_at": "2026-10-21T08:15:59.226457+00:00",
   "source": "ui/dist",
   "target": "src/aether/server/static",
   "file_count": 13,
-  "total_bytes": 5652198,
+  "total_bytes": 5652203,
   "files": {
     "icon.png": "658495e9568c6f0258ab16b69755d7bba43cc0766c7748bf6e05f0b23cacdb2f",
-    "index.html": "7bcb8489e6f22897d90a180cb11ed7fcab9a1b63a61fa827e1b4f535ec210c86",
+    "index.html": "b28b952e2d8efc2da3851c29695635678da44a0f9eed31ffa912384df6e2614a",
     "logo.png": "658495e9568c6f0258ab16b69755d7bba43cc0766c7748bf6e05f0b23cacdb2f",
     "icons.svg": "b45fa506195cfcdef406ba9f0c77b36ddc1a7c224040926ec70abc2fdea7b93a",
     "favicon.svg": "5e49bf20d68aa517195aa596b7444eb0db060da2ade6598ad523182ebde42eac",
@@ -18,6 +18,6 @@
     "brand/logo_nero.svg": "57f24ea0a4fb899d494e9666a0d916103fcf9258ef77d80183c00e0341057285",
     "brand/favicon.svg": "5e49bf20d68aa517195aa596b7444eb0db060da2ade6598ad523182ebde42eac",
     "assets/index-BxwmiluY.css": "87b3ba3be537b264405ad5c2750a61f1c205727a95d1f36e40983c13057850d0",
-    "assets/index-4DmaAPGo.js": "487b194917f74eaaedd68c0178f97a2428b63348317358117471ef9a7ffdfb8c"
+    "assets/index-BY_kv5FO.js": "2777e14003764887e9f2c182d98bcab06c033615205c9cfadbc702dbea8b7785"
   }
 }

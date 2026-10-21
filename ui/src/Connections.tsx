@@ -1,7 +1,7 @@
 import { useCallback, useContext, useEffect, useRef, useState } from 'react';
 import { Link2 } from 'lucide-react';
 import { apiUrl } from './api';
-import { openExternalUrl } from './desktop';
+import { openExternalUrl, showMainWindow } from './desktop';
 import { ToastContext } from './toast';
 import { useTranslation, type TranslationKey } from './i18n';
 import { TopHeader } from './TopHeader';
@@ -65,6 +65,7 @@ export function Connections({ navigate, initialExecutionId, initialTab }: Connec
         if (st.status === 'pending') return;
         stopPolling();
         setFlow(null);
+        void showMainWindow(); // the browser tab did the approval: bring Aether back to the front
         if (st.status === 'success') { toast(t('cnConnectedToast', { account: st.account || '' }), 'success'); }
         else if (st.status === 'error' || st.status === 'expired') setError({ provider, text: t(reason(st.status === 'expired' ? 'expired' : st.error || '')) });
         void load();
