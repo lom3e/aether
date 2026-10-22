@@ -73,7 +73,7 @@ function Steps({ steps, t }: { steps: ChatStep[]; t: T }) {
   const lastFailed = [...shown].reverse().find(s => s.status === 'failed');
   const failed = !!lastFailed;
   // The summary says what matters: what is happening now, or what went wrong (e.g. "Proposal declined"), else how many steps
-  const label = running ? translateStepTitle(running.title, t) : lastFailed ? translateStepTitle(lastFailed.title, t) : t('chStepsDone', { count: shown.length });
+  const label = running ? translateStepTitle(running.title, t) : lastFailed ? translateStepTitle(lastFailed.title, t) : shown.length === 1 ? t('chStepsDoneOne') : t('chStepsDone', { count: shown.length });
   return (
     <div className={`ch-steps ${open ? 'open' : ''}`}>
       <button type="button" className="ch-steps-head" aria-expanded={open} onClick={() => setOpen(o => !o)}>
@@ -97,7 +97,7 @@ export function ConfirmCard({ title, busy, onConfirm, onDecline, confirmLabel, d
   title: string; busy: boolean; onConfirm: () => void; onDecline: () => void; confirmLabel: string; declineLabel: string; children?: ReactNode; testId?: string;
 }) {
   return (
-    <div className="ch-confirm" data-testid={testId}>
+    <div className={`ch-confirm ${children ? '' : 'compact'}`} data-testid={testId}>
       <div className="ch-confirm-title">{title}</div>
       {children}
       <div className="ch-confirm-actions">

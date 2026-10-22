@@ -79,6 +79,7 @@
 .ch-confirm-title { font-size: 13px; font-weight: 600; color: hsl(var(--muted-fg)); display: flex; align-items: center; gap: 7px; }
 .ch-confirm-title::before { content: ''; width: 7px; height: 7px; border-radius: 50%; background: hsl(var(--warning)); box-shadow: 0 0 0 3px hsl(var(--warning) / .18); }
 .ch-confirm-actions { display: flex; justify-content: flex-end; gap: 8px; }
+.ch-confirm.compact { flex-direction: row; align-items: center; justify-content: space-between; flex-wrap: wrap; padding: 10px 10px 10px 16px; }
 .ch-confirm ul { margin: 0 0 0 18px; font-size: 14px; }
 .ch-confirm input { font: inherit; font-size: 14px; padding: 9px 12px; border-radius: 10px; border: 0; box-shadow: inset 0 0 0 1px hsl(var(--border)); background: hsl(var(--bg)); color: hsl(var(--fg)); outline: none; }
 .ch-confirm input:focus { box-shadow: inset 0 0 0 1.5px hsl(var(--ring) / .6); }

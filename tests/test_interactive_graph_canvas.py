@@ -207,7 +207,7 @@ def test_playwright_interactive_execution_graph_canvas(tmp_path: Path, monkeypat
 
             # 1. Open UI
             page.goto("http://localhost:8994/?ui=v1")
-            page.wait_for_selector("text=Interactive Canvas Workspace", timeout=10000)
+            page.wait_for_selector(".sidebar", timeout=10000)  # one personal Aether: no space name heading
 
             # 2. Click Missions
             page.click("[data-testid='nav-missions']")

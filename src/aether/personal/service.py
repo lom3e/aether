@@ -2997,6 +2997,9 @@ class PersonalAgentService:
                 else:
                     # Preliminary review mode (Principle 3.2):
                     response_text = calendar_confirmation_text(intent) or (
+                        # an automation has its own human summary (when, what, where the result goes)
+                        intent.action_args.get("proposal_summary") if intent.action_id == "automations.create_draft" and intent.action_args.get("proposal_summary") else None
+                    ) or (
                         # one action: a short plain confirmation; a whole mission keeps its full plan
                         proposal.to_plain_text(english=looks_english(prompt)) if intent.tier == IntentTier.ACT else proposal.to_human_markdown()
                     )

@@ -620,7 +620,7 @@ def test_playwright_deliverables_viewer_and_explain(tmp_path, monkeypatch):
 
             # 1. Open UI
             page.goto("http://localhost:8996/?ui=v1")
-            page.wait_for_selector("text=Playwright Explain Workspace", timeout=10000)
+            page.wait_for_selector(".sidebar", timeout=10000)  # one personal Aether: no space name heading
 
             # 2. Click Missions
             page.click("[data-testid='nav-missions']")

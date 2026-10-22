@@ -80,6 +80,7 @@ def test_01_companion_home_and_task_execution(browser_context):
 
     # 3. Wait for stepper and background task progress card
     page.wait_for_selector("[data-testid='companion-messages-container']", timeout=12000)
+    page.locator(".ch-steps-head").first.click(timeout=12000)  # the steps are folded under a one-line summary
     expect(page.locator("text=Understanding intent").first).to_be_visible()
 
     page.wait_for_timeout(1000)
