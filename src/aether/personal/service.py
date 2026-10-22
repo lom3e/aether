@@ -416,6 +416,20 @@ def calendar_confirmation_text(intent: Any) -> str:
     return ""
 
 
+def calendar_done_text(intent: Any, result: dict[str, Any]) -> str:
+    """What happened, in plain words, after a confirmed calendar change, and how to take it back."""
+    aid, a = getattr(intent, "action_id", ""), (getattr(intent, "action_args", None) or {})
+    if aid == "google_calendar.create_event":
+        head = f"Fatto: ho creato **{a.get('title', '')}** — {a.get('when', '')}."
+    elif aid == "google_calendar.update_event":
+        head = f"Fatto: ho spostato **{a.get('title', '')}** a {a.get('when', '')}."
+    else:
+        n = int(result.get("deleted") or len(a.get("events") or []))
+        names = ", ".join(f"**{e.get('title', '')}**" for e in (a.get("events") or []))
+        head = f"Fatto: ho cancellato {names}." if n == 1 else f"Fatto: ho cancellato {n} eventi ({names})."
+    return head + "\n\nSe hai cambiato idea puoi annullarlo."
+
+
 def has_preliminary_review_request(prompt: str) -> bool:
     """Detects if the user explicitly requested a preliminary review/proposal before execution."""
     p_lower = prompt.lower().strip()
@@ -2908,6 +2922,11 @@ class PersonalAgentService:
                 proposal_constraints = []
                 if intent.action_id:
                     proposal_constraints.append(f"allow:{intent.action_id}")
+                    if calendar_confirmation_text(intent):
+                        # The card shows exactly these arguments: accepting it approves them and nothing else, once.
+                        from aether.core.execution import compute_args_digest
+                        proposal_constraints += [f"args_digest:{intent.action_id}:{compute_args_digest(intent.action_args)}",
+                                                 "single_use", "confirm_exact_args"]
                     if is_coding_delegation and intent.action_args and intent.action_args.get("project_path"):
                         # The accepted proposal authorises work only inside the project the user named.
                         proposal_constraints.append(f"allow_path:{Path(intent.action_args['project_path']).resolve()}")
@@ -3075,7 +3094,18 @@ class PersonalAgentService:
             )
             steps.append(step_prep)
 
-            runtime_res = self.runtime.execute(exec_request)
+            from aether.core.execution import ExecutionResult, UnauthorizedExecutionError
+            try:
+                runtime_res = self.runtime.execute(exec_request)
+            except UnauthorizedExecutionError as auth_err:
+                # A spent, revoked or mismatching consent: nothing runs, and the person is told why in plain words.
+                logger.info("Refused an action whose consent is not valid any more: %s", auth_err)
+                runtime_res = ExecutionResult(
+                    success=False, status=ExecutionStatus.FAILED, execution_id=exec_request.id, metadata={},
+                    error=("Questa conferma è già stata usata o non vale più, quindi non ho fatto nulla. Chiedimelo di nuovo e ti mostro una nuova conferma."
+                           if not looks_english(prompt) else
+                           "This confirmation was already used or is no longer valid, so I did nothing. Ask again and I'll show a new confirmation."),
+                )
             action_execution_id = runtime_res.metadata.get("action_execution_id")
 
             if runtime_res.status == ExecutionStatus.WAITING_FOR_APPROVAL:
@@ -3194,7 +3224,10 @@ class PersonalAgentService:
                         category="action",
                     )
                 )
-                if intent.action_id == "agents.delegate_external":
+                if calendar_confirmation_text(intent):
+                    response_text = calendar_done_text(intent, runtime_res.metadata.get("action_result") or {})
+                    msg_metadata["undo_execution_id"] = action_execution_id
+                elif intent.action_id == "agents.delegate_external":
                     res_data = runtime_res.metadata.get("action_result") or {}
                     out = res_data.get("output") or runtime_res.output or "Task executed successfully."
                     worker_name = intent.action_args.get("agent_name", "external_worker")

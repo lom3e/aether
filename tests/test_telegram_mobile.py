@@ -94,3 +94,15 @@ def test_a_change_is_confirmed_with_a_button_and_then_runs_with_the_authority(mo
     mobile.handle({"callback_query": {"id": "c1", "data": "ok:p1:2", "message": {"chat": {"id": 42}}}})
     assert accepted and accepted[0]["proposal_id"] == "p1" and accepted[0]["expected_version"] == 2
     assert calls[-1]["authority"] == "AUTH" and calls[-1]["prompt"] == "sposta la riunione a venerdì"
+
+
+def test_a_done_change_offers_undo_and_undo_runs_the_inverse(mobile, monkeypatch):
+    code = mobile.setup("123456789:" + "A" * 35)["code"]
+    mobile.handle(_msg(42, "/start " + code))
+    monkeypatch.setattr(mobile.ws.personal, "process_prompt", lambda **k: SimpleNamespace(session_id="s", content="Fatto: ho spostato **Riunione**", metadata={"undo_execution_id": "ax-1"}, steps=[], action_execution_id="ax-1"))
+    assert mobile.handle(_msg(42, "sposta"))["status"] == "done_with_undo"
+    assert mobile.fake.sent[-1]["markup"]["inline_keyboard"][0][0]["callback_data"] == "undo:ax-1"
+    undone = []
+    monkeypatch.setattr("aether.actions.undo.undo", lambda ws, ex_id: undone.append(ex_id) or {"result": "moved_back"})
+    assert mobile.handle({"callback_query": {"id": "c", "data": "undo:ax-1", "message": {"chat": {"id": 42}}}})["status"] == "undone"
+    assert undone == ["ax-1"] and "come prima" in mobile.fake.sent[-1]["text"]

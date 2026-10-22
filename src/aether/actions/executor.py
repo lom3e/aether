@@ -189,6 +189,7 @@ class ActionExecutor:
 
         is_read_only = definition.permission_level == ActionPermissionLevel.READ_ONLY
         authorised_paths: list[str] = []
+        user_confirmed_exact = False
 
         # HARD BOUNDARY: All non-read-only actions require persistently validated authority
         # This check must occur BEFORE any queueing, approval path, or execution.
@@ -216,6 +217,7 @@ class ActionExecutor:
                 canonicalize=getattr(self.workspace, "canonical_id", None),
             )
             authorised_paths = self._allowed_paths_from(proposal_obj)
+            user_confirmed_exact = self._user_confirmed_exact_args(authority, proposal_obj, input_data, p_store)
 
         # Persist authority context into execution metadata for later revalidation (approve path)
         exec_meta = dict(metadata or {})
@@ -260,6 +262,11 @@ class ActionExecutor:
             else:
                 can_auto_run = bool(auto_approve and self.safety_policy.can_auto_approve(definition, auto_approve, workspace_id=workspace_id))
 
+        if not can_auto_run and user_confirmed_exact:
+            # The person already approved these exact arguments on the confirmation card (a human consent bound to the
+            # argument digest, single use). Asking again would be the same question twice. Policy denials still win above.
+            can_auto_run = True
+            execution.approved_by = "user_confirmation_card"
         if not can_auto_run:
             execution.status = ActionExecutionStatus.WAITING_APPROVAL
             execution.metadata["requires_approval"] = True
@@ -287,6 +294,22 @@ class ActionExecutor:
         self.store.save_execution(execution)
 
         return self._dispatch_and_run(definition, execution)
+
+    @staticmethod
+    def _user_confirmed_exact_args(authority: Any, proposal: Any, input_data: dict[str, Any], store: Any) -> bool:
+        """True only when a HUMAN accepted a proposal that is bound to exactly these arguments and asked for it."""
+        from aether.core.execution import compute_args_digest
+
+        constraints = [str(c).strip() for c in (getattr(proposal, "constraints", None) or [])]
+        if "confirm_exact_args" not in constraints or not getattr(authority, "args_digest", None):
+            return False
+        if authority.args_digest != compute_args_digest(input_data):
+            return False
+        try:
+            consent = store.get_consent(authority.proposal_id, authority.proposal_version) if store else None
+        except Exception:  # noqa: BLE001
+            consent = None
+        return bool(consent and getattr(consent, "actor_kind", "") == "human" and not getattr(consent, "revoked_at", None))
 
     _CODING_INTERACTION_ACTIONS = ("coding.interact", "coding.send_message", "coding.run_tests", "coding.release_project")
 

@@ -211,6 +211,10 @@ class TelegramMobile:
             tg.send_message(chat_id=chat_id, parse_mode="", text=plain(reply.content), reply_markup={"inline_keyboard": [[
                 {"text": "Approva", "callback_data": f"approve:{reply.action_execution_id}"}, {"text": "Rifiuta", "callback_data": f"reject:{reply.action_execution_id}"}]]})
             return {"status": "approval_sent", "execution_id": reply.action_execution_id}
+        if meta.get("undo_execution_id"):
+            tg.send_message(chat_id=chat_id, parse_mode="", text=plain(reply.content), reply_markup={"inline_keyboard": [[
+                {"text": "Annulla", "callback_data": f"undo:{meta['undo_execution_id']}"}]]})
+            return {"status": "done_with_undo"}
         tg.send_message(chat_id=chat_id, parse_mode="", text=plain(reply.content))
         return {"status": "answered"}
 
@@ -235,6 +239,17 @@ class TelegramMobile:
             ok = str(getattr(res.status, "value", res.status)) in ("succeeded", "completed")
             tg.send_message(chat_id=chat_id, parse_mode="", text="Fatto." if ok else f"Non è riuscito: {getattr(res, 'error_message', '') or 'errore'}")
             return {"status": "approved" if ok else "failed"}
+        if data.startswith("undo:"):
+            from aether.actions import undo as undo_mod
+
+            try:
+                undo_mod.undo(self.ws, data.split(":", 1)[1])
+                tg.send_message(chat_id=chat_id, parse_mode="", text="Annullato: è tutto come prima.")
+                return {"status": "undone"}
+            except undo_mod.UndoError as exc:
+                why = {"changed_since": "l'evento è stato cambiato di nuovo nel frattempo", "already_undone": "era già stato annullato"}.get(exc.code, "non è stato possibile")
+                tg.send_message(chat_id=chat_id, parse_mode="", text=f"Non ho annullato: {why}.")
+                return {"status": "undo_refused", "code": exc.code}
         if data.startswith("reject:"):
             self.ws.action_executor.reject_execution(data.split(":", 1)[1])
             tg.send_message(chat_id=chat_id, parse_mode="", text="Va bene, non faccio niente.")
