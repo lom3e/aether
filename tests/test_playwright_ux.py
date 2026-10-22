@@ -1,7 +1,7 @@
 """
 Playwright End-to-End browser test for Aether Workspace & Conversation UX.
 Tests UI interaction, message editing/resending, message deletion, conversation lifecycle,
-workspace creation/switching, and complete workspace data isolation.
+and conversation persistence across a reload.
 """
 import subprocess
 import time
@@ -57,8 +57,7 @@ def test_playwright_workspace_and_conversation_flow(tmp_path, monkeypatch):
 
             # 1. Open UI
             page.goto("http://localhost:8992/?ui=v1")
-            page.wait_for_selector("text=Workspace Alpha", timeout=10000)
-            assert page.is_visible("text=Workspace Alpha")
+            page.wait_for_selector(".sidebar", timeout=10000)  # one personal Aether: no workspace switcher any more
 
             # 2. Click New Task button
             page.click("button:has-text('New Task')")
@@ -94,33 +93,10 @@ def test_playwright_workspace_and_conversation_flow(tmp_path, monkeypatch):
             page.wait_for_selector("text=Local Persistence Metrics", timeout=5000)
             assert page.is_visible("text=Conversations DB")
 
-            # 7. Create a second workspace via Workspace Dropdown
-            page.click("text=Workspace Alpha")
-            page.wait_for_selector("text=+ New Workspace", timeout=5000)
-            page.click("text=+ New Workspace")
-
-            page.wait_for_selector("input[placeholder*='Acme Robotics']", timeout=5000)
-            page.fill("input[placeholder*='Acme Robotics']", "Workspace Beta")
-            page.click("button:has-text('Create & Open Workspace')")
-            
-            # Wait for switch to Workspace Beta
-            page.wait_for_selector("text=Workspace Beta", timeout=10000)
-            assert page.is_visible("text=Workspace Beta")
-
-            # In Workspace Beta, conversations list should be completely empty (isolated)
-            page.wait_for_selector("text=Workspace Beta", timeout=5000)
-            # The list reloads asynchronously after the switch: retry until it no longer shows Alpha's conversation.
-            expect(page.locator("button:has-text('Analyze competitor')")).to_have_count(0, timeout=8000)
-
-            # 8. Switch back to Workspace Alpha
-            page.click("text=Workspace Beta")
-            page.wait_for_selector("text=Workspace Alpha", timeout=5000)
-            # Wait for switch back
-            with page.expect_response("**/api/workspaces/switch"):
-                page.click("button:has-text('Workspace Alpha')")
-            time.sleep(1.0)
-            page.wait_for_selector("button:has-text('Analyze competitor')", timeout=5000)
-            assert page.is_visible("button:has-text('Analyze competitor')")
+            # 7. The conversation survives a reload and is listed again (workspace switching was removed with the
+            #    single personal space; isolation between old spaces is covered by the backend workspace tests).
+            page.reload()
+            page.wait_for_selector("button:has-text('Analyze competitor')", timeout=10000)
 
             # 9. Click on the conversation to load it
             page.click("button:has-text('Analyze competitor')")
