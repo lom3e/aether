@@ -5,6 +5,7 @@ import {
 } from 'lucide-react';
 import { useTranslation, type TranslationKey } from './i18n';
 import { apiUrl } from './api';
+import { localizeActivity } from './activityText';
 
 export interface ActivityItem {
   id: string;
@@ -41,7 +42,7 @@ export function ActivityFeed({ activities, isLive = false, taskStatus = 'complet
   const [events, setEvents] = useState<StoredActivityEvent[]>([]);
   const [selectedCategory, setSelectedCategory] = useState<string>('all');
   const [loading, setLoading] = useState(false);
-  const { t } = useTranslation();
+  const { t, language } = useTranslation();
 
   // If used as standalone view (activities not provided)
   const isStandalone = !activities;
@@ -160,10 +161,10 @@ export function ActivityFeed({ activities, isLive = false, taskStatus = 'complet
                     </div>
                     <div>
                       <div style={{ fontWeight: 600, fontSize: '15px', color: 'hsl(var(--fg))' }}>
-                        {evt.title}
+                        {localizeActivity(evt.title, language)}
                       </div>
                       <div style={{ fontSize: '13px', color: 'hsl(var(--muted-fg))', marginTop: '3px', lineHeight: 1.4 }}>
-                        {evt.description}
+                        {localizeActivity(evt.description, language)}
                       </div>
                       <div style={{ fontSize: '11.5px', color: 'hsl(var(--muted-fg))', marginTop: '6px', display: 'flex', alignItems: 'center', gap: '6px' }}>
                         <Clock size={12} /> {new Date(evt.created_at).toLocaleString()}

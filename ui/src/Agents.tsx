@@ -6,12 +6,33 @@ import { apiUrl } from './api';
 import { useTranslation } from './i18n';
 import { IdentityBadge } from './identity';
 
+// The built-in assistants' cards show what they do for the user, never their internal model instructions (English prompts).
+const BUILTIN_COPY: Record<string, { it: { role: string; desc: string }; en: { role: string; desc: string } }> = {
+  manager: {
+    it: { role: 'Coordina il lavoro', desc: 'Capisce cosa ti serve, divide il lavoro tra gli assistenti e ti consegna il risultato finale.' },
+    en: { role: 'Coordinates the work', desc: 'Understands what you need, splits the work between assistants and hands you the final result.' },
+  },
+  researcher: {
+    it: { role: 'Cerca nelle tue informazioni', desc: 'Trova fatti e fonti nei tuoi documenti e nella conoscenza di Aether.' },
+    en: { role: 'Searches your information', desc: 'Finds facts and sources in your documents and in Aether\'s knowledge.' },
+  },
+  writer: {
+    it: { role: 'Scrive documenti e testi', desc: 'Trasforma appunti e ricerche in report, documenti e testi chiari.' },
+    en: { role: 'Writes documents and text', desc: 'Turns notes and research into clear reports, documents and text.' },
+  },
+};
+
+function builtinCopy(name: string, language: string) {
+  const c = BUILTIN_COPY[(name || '').toLowerCase()];
+  return c ? (language === 'it' ? c.it : c.en) : undefined;
+}
+
 export function Agents({ navigate }: { navigate: (view: string, params?: any) => void }) {
   const [agents, setAgents] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
   const [isBuilding, setIsBuilding] = useState(false);
   const [expandedTech, setExpandedTech] = useState<Record<string, boolean>>({});
-  const { t } = useTranslation();
+  const { t, language } = useTranslation();
 
   const toggleTech = (name: string, e: React.MouseEvent) => {
     e.stopPropagation();
@@ -69,7 +90,7 @@ export function Agents({ navigate }: { navigate: (view: string, params?: any) =>
                   />
                   <div>
                     <h3 style={{ fontSize: '15px', margin: 0, fontWeight: 600 }}>{agent.name}</h3>
-                    <div style={{ fontSize: '12px', color: 'hsl(var(--muted-fg))' }}>{agent.role || t('syAutonomousAssistant')}</div>
+                    <div style={{ fontSize: '12px', color: 'hsl(var(--muted-fg))' }}>{builtinCopy(agent.name, language)?.role || agent.role || t('syAutonomousAssistant')}</div>
                   </div>
                 </div>
                 <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
@@ -79,7 +100,7 @@ export function Agents({ navigate }: { navigate: (view: string, params?: any) =>
               </div>
 
               <div style={{ marginBottom: '14px', fontSize: '13px', color: 'hsl(var(--muted-fg))', display: '-webkit-box', WebkitLineClamp: 2, WebkitBoxOrient: 'vertical', overflow: 'hidden', minHeight: '38px', lineHeight: 1.5 }}>
-                {agent.description || agent.instructions || t('syAssistantSetUpToCollaborateOn')}
+                {builtinCopy(agent.name, language)?.desc || agent.description || t('syAssistantSetUpToCollaborateOn')}
               </div>
 
               {agent.skills && agent.skills.length > 0 && (

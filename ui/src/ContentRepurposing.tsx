@@ -122,19 +122,9 @@ export function ContentRepurposing({ navigate }: { navigate: (view: string) => v
   const [activeMainTab, setActiveMainTab] = useState<'repurpose' | 'bi' | 'clients'>('repurpose');
 
   // Input State
-  const [title, setTitle] = useState('Autonomous Agent Workforces in Production');
-  const [sourceText, setSourceText] = useState(
-    `Autonomous multi-agent systems are revolutionizing modern engineering workflows. However, running agents at scale reveals critical architectural challenges.
-
-Key takeaways and lessons learned:
-* True leverage comes from deterministic state machines combined with adaptive model routing.
-* Resilient fallback chains prevent cascading failures when upstream LLM providers suffer degradation.
-* Deep knowledge ingestion with SQLite FTS5 BM25 search outperforms brittle naive vector lookups.
-* Continuous workforce memory injection prevents knowledge regression across distributed teams.
-* Every mission deliverable must produce verifiable, replayable flight recorder lineage.
-
-By standardizing on self-healing execution and strict safety policies, engineering velocity increased by 400% while reducing manual triage time to near zero.`
-  );
+  // Start empty: a prefilled English sample (with an invented "+400%" figure) read as if it were the user's content.
+  const [title, setTitle] = useState('');
+  const [sourceText, setSourceText] = useState('');
   const [tone, setTone] = useState('thought_leadership');
   const [selectedPlatforms, setSelectedPlatforms] = useState<string[]>([
     'linkedin',
