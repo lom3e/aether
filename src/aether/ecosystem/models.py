@@ -158,7 +158,7 @@ class PackageManifest:
             contents=dict(data.get("contents") or {}),
             verified=bool(data.get("verified", True)),
             downloads_count=int(data.get("downloads_count", 0)),
-            rating=float(data.get("rating", 5.0)),
+            rating=float(data.get("rating", 0.0)),
             created_at=data.get("created_at") or datetime.now(timezone.utc).isoformat(),
             updated_at=data.get("updated_at") or datetime.now(timezone.utc).isoformat(),
         )

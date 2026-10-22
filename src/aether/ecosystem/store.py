@@ -138,8 +138,8 @@ class EcosystemStore:
                         },
                     ],
                 },
-                downloads_count=1240,
-                rating=4.95,
+                downloads_count=0,
+                rating=0.0,
             ),
             # 2. Workforce: Full-Stack Web
             PackageManifest(
@@ -179,8 +179,8 @@ class EcosystemStore:
                         },
                     ],
                 },
-                downloads_count=3420,
-                rating=4.98,
+                downloads_count=0,
+                rating=0.0,
             ),
             # 3. Skill: Kubernetes & Container Orchestration
             PackageManifest(
@@ -207,8 +207,8 @@ class EcosystemStore:
                         "template_dockerfile.txt": "FROM python:3.11-slim\nWORKDIR /app\nCOPY . .\nCMD [\"python\", \"main.py\"]\n",
                     },
                 },
-                downloads_count=2150,
-                rating=4.88,
+                downloads_count=0,
+                rating=0.0,
             ),
             # 4. Skill: API Stress Tester
             PackageManifest(
@@ -234,8 +234,8 @@ class EcosystemStore:
                         "SKILL.md": "# API Stress Tester\nBenchmarks REST endpoints and outputs latency histograms.",
                     },
                 },
-                downloads_count=890,
-                rating=4.79,
+                downloads_count=0,
+                rating=0.0,
             ),
             # 5. Tool: Relational Database Introspector
             PackageManifest(
@@ -261,8 +261,8 @@ class EcosystemStore:
                         "read_only": True,
                     },
                 },
-                downloads_count=1780,
-                rating=4.91,
+                downloads_count=0,
+                rating=0.0,
             ),
             # 6. Connector: Slack Ops Alerting
             PackageManifest(
@@ -287,8 +287,8 @@ class EcosystemStore:
                     "protocol": "webhook",
                     "endpoint_template": "https://hooks.slack.com/services/{webhook_token}",
                 },
-                downloads_count=2980,
-                rating=4.92,
+                downloads_count=0,
+                rating=0.0,
             ),
             # 7. Workflow Template: Continuous Security Audit
             PackageManifest(
@@ -352,8 +352,8 @@ class EcosystemStore:
                         },
                     },
                 },
-                downloads_count=1650,
-                rating=4.94,
+                downloads_count=0,
+                rating=0.0,
             ),
         ]
 

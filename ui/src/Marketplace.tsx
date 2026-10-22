@@ -1,7 +1,7 @@
 import { useState, useEffect, useCallback, useContext } from 'react';
 import {
   ShoppingBag, Users, Puzzle, Wrench, Link2, Workflow as WorkflowIcon,
-  ShieldCheck, ShieldAlert, Check, Trash2, Download, Search, Star,
+  ShieldCheck, ShieldAlert, Check, Trash2, Download, Search,
   Info, X
 } from 'lucide-react';
 import { ToastContext } from './toast';
@@ -42,8 +42,18 @@ export interface PackageManifest {
   is_installed?: boolean;
 }
 
+const IT_DESC: Record<string, string> = {
+  'workforce-secops-defense': 'Squadra per la sicurezza: controlla vulnerabilità note, chiavi esposte e conformità.',
+  'workforce-fullstack-dev': 'Squadra di sviluppo per funzionalità complete con React, TypeScript e FastAPI.',
+  'skill-docker-k8s': 'Genera Dockerfile multi-stage, chart Helm e manifest Kubernetes.',
+  'skill-api-stress-tester': 'Misura latenze (p50, p95, p99), limiti di concorrenza e rate limit di un\'API.',
+  'tool-sql-introspect': 'Analizza schemi PostgreSQL, MySQL e SQLite con le relazioni tra tabelle.',
+  'connector-slack-ops': 'Collega Slack a missioni e avvisi: notifiche nei canali e risposte dagli utenti.',
+  'workflow-continuous-security': 'Flusso pronto: controllo settimanale, scansione di sicurezza, approvazione, report PDF.',
+};
+
 export function Marketplace() {
-  const { t } = useTranslation();
+  const { t, language } = useTranslation();
   const showToast = useContext(ToastContext);
 
   const [packages, setPackages] = useState<PackageManifest[]>([]);
@@ -243,7 +253,7 @@ export function Marketplace() {
                   {pkg.name}
                 </h3>
                 <p style={{ fontSize: '13px', color: 'hsl(var(--muted-fg))', lineHeight: 1.45, marginBottom: '14px', minHeight: '38px' }}>
-                  {pkg.description}
+                  {language === 'it' && IT_DESC[pkg.id] ? IT_DESC[pkg.id] : pkg.description}
                 </p>
 
                 {/* Tags */}
@@ -264,14 +274,8 @@ export function Marketplace() {
                   ))}
                 </div>
 
-                {/* Metrics */}
+                {/* No download counts or ratings: these packages ship with Aether, there is no community registry to count them. */}
                 <div style={{ display: 'flex', alignItems: 'center', gap: '14px', fontSize: '11px', color: 'hsl(var(--muted-fg))', marginBottom: '16px' }}>
-                  <span style={{ display: 'flex', alignItems: 'center', gap: '3px' }}>
-                    <Download size={12} /> {pkg.downloads_count.toLocaleString()}
-                  </span>
-                  <span style={{ display: 'flex', alignItems: 'center', gap: '3px' }}>
-                    <Star size={12} className="text-amber-500 fill-amber-500" /> {pkg.rating.toFixed(1)}
-                  </span>
                   <button
                     className="btn btn-ghost"
                     style={{ padding: '2px 4px', fontSize: '11px', textDecoration: 'underline', color: 'hsl(var(--primary))' }}
