@@ -394,6 +394,28 @@ def honest_no_action_reply(original: str, prompt: str) -> str:
             "Ask me directly, e.g. «delete \"Title\" from my calendar», and I'll show you a confirmation before acting.")
 
 
+def calendar_confirmation_text(intent: Any) -> str:
+    """The plain confirmation shown before Aether changes the calendar: what, when, and that nothing happened yet."""
+    aid, a = getattr(intent, "action_id", ""), (getattr(intent, "action_args", None) or {})
+    if aid == "google_calendar.create_event" and a.get("title"):
+        return (f"Sto per creare questo evento nel tuo Google Calendar:\n\n- **{a.get('title', '')}** — {a.get('when', '')}"
+                "\n\nNon ho creato niente finché non confermi.")
+    if aid == "google_calendar.update_event" and a.get("event_id"):
+        prev = (a.get("previous") or {}).get("when", "")
+        extra = f"\n\n(Ci sono altri {a['same_title_count'] - 1} eventi con lo stesso nome: sposto solo questo.)" if a.get("same_title_count", 1) > 1 else ""
+        return (f"Sto per spostare **{a.get('title', '')}**:\n\n- da: {prev}\n- a: **{a.get('when', '')}**{extra}"
+                "\n\nNon ho spostato niente finché non confermi.")
+    if aid == "google_calendar.delete_event" and a.get("events"):
+        rows = a["events"]
+        lines = []
+        for r in rows:
+            extra = f" — ce ne sono altri {r['same_title_count'] - 1} con lo stesso nome, non li tocco" if r.get("same_title_count", 1) > 1 else ""
+            lines.append(f"- **{r['title']}** — {r.get('when') or r.get('start_time') or ''}" + (f" · {r['calendar']}" if r.get("calendar") else "") + extra)
+        head = "Sto per cancellare questo evento dal tuo Google Calendar:\n\n" if len(rows) == 1 else f"Sto per cancellare questi {len(rows)} eventi dal tuo Google Calendar:\n\n"
+        return head + "\n".join(lines) + "\n\nNon ho cancellato niente finché non confermi."
+    return ""
+
+
 def has_preliminary_review_request(prompt: str) -> bool:
     """Detects if the user explicitly requested a preliminary review/proposal before execution."""
     p_lower = prompt.lower().strip()
@@ -1151,6 +1173,99 @@ class PersonalAgentService:
         except Exception as exc:
             logger.debug("Advisory intent check skipped: %s", exc)
             return "informational"
+
+    def _approved_action(self, session_id: str | None, authority: Any) -> "UserIntent | None":
+        """When the user accepted a proposal that showed an exact action, that action (and nothing re-guessed) runs."""
+        if not authority or not session_id:
+            return None
+        pid = getattr(authority, "proposal_id", None)
+        try:
+            msgs = self.store.get_messages(session_id)
+        except Exception:  # noqa: BLE001
+            return None
+        for m in reversed(msgs):
+            meta = getattr(m, "metadata", None) or {}
+            ra = meta.get("resolved_action")
+            if meta.get("proposal_id") == pid and isinstance(ra, dict) and ra.get("action_id"):
+                return UserIntent(raw_prompt=getattr(m, "content", ""), tier=IntentTier.ACT, summary=f"Approved action: {ra['action_id']}",
+                                  action_id=ra["action_id"], action_args=dict(ra.get("args") or {}))
+        return None
+
+    def _routing_provider(self) -> Any:
+        """The configured model, used only to understand a request (never to act). None when none is configured."""
+        override = getattr(self, "_router_provider_override", None)
+        if override is not None:
+            return override
+        try:
+            from aether.providers.resolution import resolve_provider
+
+            return resolve_provider(workspace=self.workspace)
+        except Exception:  # noqa: BLE001
+            return None
+
+    def _google_calendar_ready(self, workspace_id: str) -> bool:
+        cs = self.connection_service
+        if not cs:
+            return False
+        try:
+            conn = cs.get_connection(workspace_id, "google_calendar")
+        except Exception:  # noqa: BLE001
+            return False
+        meta = getattr(conn, "auth_metadata", None) or {}
+        return bool(conn) and str(getattr(conn, "status", "")) not in ("disconnected", "not_configured") and bool(meta.get("access_token") or meta.get("refresh_token"))
+
+    def _route_with_model(self, prompt: str, workspace_id: str, history: list[Any] | None) -> "UserIntent | None":
+        """Asks the model what the request means among the actions Aether has. Returns None when it is none of them."""
+        from aether.personal import tool_router
+
+        routed = tool_router.route(prompt, provider=self._routing_provider(), history=history)
+        action = routed.get("action")
+        if action == "calendar_list":
+            st = _event_start({"start_time": routed["time_min"]})
+            en = _event_start({"start_time": routed["time_max"]})
+            label = _day_label(st) if st and en and (en - st) <= timedelta(days=1) else "il periodo richiesto"
+            return UserIntent(raw_prompt=prompt, tier=IntentTier.ANSWER, summary="Query calendar events (model-routed)",
+                              action_id="calendar.list_events", intent_type="query",
+                              action_args={"limit": 50, "scope": "custom", "target_day": label, "time_min": routed["time_min"],
+                                           "time_max": routed["time_max"], "is_academic": bool(re.search(r"\b(lezion\w*|uni|universit\w*|corso|corsi)\b", prompt, re.I)), "raw_query": prompt})
+        if action not in ("calendar_create", "calendar_move", "calendar_delete"):
+            return None
+        if not self._google_calendar_ready(workspace_id):
+            return UserIntent(raw_prompt=prompt, tier=IntentTier.ANSWER, summary="Calendar not connected", action_id="calendar.explain",
+                              intent_type="query", action_args={"message": "Per modificare il calendario serve Google Calendar collegato: aprilo da Collegamenti. Non ho fatto nessuna modifica."})
+        if action == "calendar_create":
+            st = _event_start({"start_time": routed["start_time"]})
+            when = f"{_day_label(st)} {format_event_time(routed['start_time'], routed['end_time'], False, tzinfo=st.tzinfo if st else None)}" if st else ""
+            return UserIntent(raw_prompt=prompt, tier=IntentTier.ACT, summary=f"Create calendar event: {routed['title']}",
+                              action_id="google_calendar.create_event",
+                              action_args={"title": routed["title"], "start_time": routed["start_time"], "end_time": routed["end_time"], "when": when})
+        if action == "calendar_delete":
+            return UserIntent(raw_prompt=prompt, tier=IntentTier.ACT, summary=f"Delete calendar events: {routed['target']}",
+                              action_id="google_calendar.delete_event", action_args={"target_titles": [routed["target"]]})
+        return UserIntent(raw_prompt=prompt, tier=IntentTier.ACT, summary=f"Move calendar event: {routed['target']}",
+                          action_id="google_calendar.update_event",
+                          action_args={"target_titles": [routed["target"]], "new_start": routed["start_time"], "new_end": routed["end_time"]})
+
+    def _resolve_calendar_move(self, intent: "UserIntent", workspace_id: str) -> tuple["UserIntent", str]:
+        """Finds the event to move and keeps its length when no new end was given. Reads only."""
+        probe = UserIntent(raw_prompt=intent.raw_prompt, tier=IntentTier.ACT, summary="", action_id="google_calendar.delete_event",
+                           action_args={"target_titles": intent.action_args.get("target_titles") or []})
+        probe, explain = self._resolve_calendar_deletion(probe, workspace_id)
+        if explain:
+            return intent, explain.replace("Non ho cancellato nulla", "Non ho spostato nulla").replace("non cancello nulla", "non sposto nulla").replace("Per cancellare eventi", "Per spostare eventi")
+        ev = probe.action_args["events"][0]
+        new_start = intent.action_args["new_start"]
+        new_end = intent.action_args.get("new_end") or ""
+        old_s, old_e = _event_start({"start_time": ev.get("start_time")}), _event_start({"start_time": ev.get("end_time")})
+        ns = _event_start({"start_time": new_start})
+        if not new_end and old_s and old_e and ns:
+            new_end = (ns + (old_e - old_s)).isoformat()
+        when_new = f"{_day_label(ns)} {format_event_time(new_start, new_end, False, tzinfo=ns.tzinfo)}" if ns else new_start
+        intent.action_args = {"event_id": ev["event_id"], "calendar_id": ev.get("calendar_id"), "title": ev["title"], "start_time": new_start,
+                              "end_time": new_end or None, "previous": {"start_time": ev.get("start_time"), "end_time": ev.get("end_time"), "when": ev.get("when")},
+                              "when": when_new, "same_title_count": ev.get("same_title_count", 1)}
+        intent.summary = f"Move calendar event: {ev['title']}"
+        return intent, ""
 
     def _resolve_calendar_deletion(self, intent: "UserIntent", workspace_id: str) -> tuple["UserIntent", str]:
         """Turns "delete these titles" into the exact events (ids, times) to confirm, or an honest explanation. Reads only."""
@@ -2652,6 +2767,30 @@ class PersonalAgentService:
 
         # 4. Intent classification (with multi-turn context)
         intent = self.classify_intent(prompt, recent_history=recent_history)
+        _approved = self._approved_action(session_id, authority)
+        if _approved is not None:
+            intent = _approved
+        # The keyword rules cover common phrasings only. When they are unsure (plain answer, the old "create at now" calendar
+        # rule, or a calendar read that actually contains a change verb), the model maps the request to a real action.
+        from aether.personal import tool_router as _tr
+        _change_verb = re.search(r"\b(spost\w*|mett\w*l[ao]|anticip\w*|posticip\w*|rimand\w*|aggiung\w*|cre[ai]\w*|fiss\w*|prenot\w*|move|reschedule|book|add)\b", prompt, re.I)
+        _rules_unsure = (
+            (intent.tier == IntentTier.ANSWER and not intent.action_id and getattr(intent, "intent_type", "") != "conversation")
+            or (intent.action_id == "calendar.create_event" and self._google_calendar_ready(workspace_id))
+            or (intent.action_id == "calendar.list_events" and _change_verb is not None)
+            # a calendar change phrased freely can look like a big task to the rules; the model decides
+            or (intent.tier in (IntentTier.DELEGATE, IntentTier.DO) and _change_verb is not None
+                and re.search(r"\b(calendari\w*|agenda|appuntament\w*|impegn\w*|riunion\w*|event\w*|meeting|lezion\w*|call)\b", prompt, re.I) is not None)
+        )
+        if _approved is None and _rules_unsure and _tr.worth_routing(prompt):
+            _routed = self._route_with_model(prompt, workspace_id, recent_history)
+            if _routed is not None:
+                intent = _routed
+        if intent.action_id == "google_calendar.update_event" and "event_id" not in (intent.action_args or {}):
+            intent, _explain = self._resolve_calendar_move(intent, workspace_id)
+            if _explain:
+                intent = UserIntent(raw_prompt=prompt, tier=IntentTier.ANSWER, summary="Calendar move not possible",
+                                    action_id="calendar.explain", action_args={"message": _explain}, intent_type="query")
         if intent.action_id == "google_calendar.delete_event" and "events" not in (intent.action_args or {}):
             intent, _explain = self._resolve_calendar_deletion(intent, workspace_id)
             if _explain:  # nothing to confirm: say so plainly instead of letting the model improvise
@@ -2809,8 +2948,10 @@ class PersonalAgentService:
                     )
                 else:
                     # Preliminary review mode (Principle 3.2):
-                    response_text = proposal.to_human_markdown()
+                    response_text = calendar_confirmation_text(intent) or proposal.to_human_markdown()
                     msg_metadata = {
+                        # The exact action the user is shown; after acceptance it runs as is, never re-interpreted.
+                        **({"resolved_action": {"action_id": intent.action_id, "args": intent.action_args}} if calendar_confirmation_text(intent) else {}),
                         "status": "proposal_pending",
                         "proposal_id": proposal.id,
                         "proposal_version": proposal.version,
@@ -2969,17 +3110,8 @@ class PersonalAgentService:
                     msg_metadata["designated_provider_id"] = prov_id
                     msg_metadata["action_id"] = "coding.delegate"
                     msg_metadata["action_args"] = intent.action_args
-                elif intent.action_id == "google_calendar.delete_event" and intent.action_args.get("events"):
-                    rows = intent.action_args["events"]
-                    lines = []
-                    for r in rows:
-                        extra = f" — ce ne sono altri {r['same_title_count'] - 1} con lo stesso nome, non li tocco" if r.get("same_title_count", 1) > 1 else ""
-                        lines.append(f"- **{r['title']}** — {r.get('when') or r.get('start_time') or ''}" + (f" · {r['calendar']}" if r.get("calendar") else "") + extra)
-                    response_text = (
-                        ("Sto per cancellare questo evento dal tuo Google Calendar:\n\n" if len(rows) == 1 else f"Sto per cancellare questi {len(rows)} eventi dal tuo Google Calendar:\n\n")
-                        + "\n".join(lines)
-                        + "\n\nNon ho cancellato niente finché non confermi qui sotto."
-                    )
+                elif calendar_confirmation_text(intent):
+                    response_text = calendar_confirmation_text(intent)
                 else:
                     response_text = runtime_res.output or (
                         f"I've prepared to **{action_name}** ({intent.action_args.get('title', '')}).\n\n"
