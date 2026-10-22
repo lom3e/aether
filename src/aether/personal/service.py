@@ -358,6 +358,42 @@ def match_calendar_events(events: list[dict[str, Any]], titles: list[str], now: 
     return picked
 
 
+_UNRUN_ACTION_CLAIM_RE = re.compile(
+    r"(?:^|[.!?\n]\s*|\b(?:certo|ok|okay|perfetto|fatto|va bene|sure|done|alright)[,!.]?\s+)"
+    r"(?:"
+    r"(?:ho|abbiamo)\s+(?:gi[aà]\s+|appena\s+)?(?:cancellat|eliminat|rimoss|inviat|mandat|spedit|spostat|prenotat|aggiunt[oaie]\s+(?:al|nel)\s+calendario|creat[oaie]\s+(?:l['’]|un['’]?\s*)?(?:evento|appuntamento|promemoria)|pubblicat|pagat|archiviat|inoltrat)\w*"
+    r"|provved[oi]\s+(?:subito\s+)?a\b|lo\s+faccio\s+subito|procedo\s+(?:subito\s+)?(?:a|con)\b|ti\s+far[oò]\s+sapere"
+    r"|devo\s+delegare|sto\s+(?:cancellando|eliminando|inviando|spostando)"
+    r"|i(?:'ve| have)\s+(?:just\s+|already\s+)?(?:deleted|removed|sent|moved|booked|scheduled|added\s+it\s+to\s+your\s+calendar|published|paid|forwarded)"
+    r"|i(?:'ll| will)\s+(?:now\s+)?(?:delete|remove|send|move|book|let\s+you\s+know)"
+    r")",
+    re.IGNORECASE,
+)
+
+
+_DRAFTING_RE = re.compile(r"\b(scriv\w*|bozza|riscriv\w*|redig\w*|testo|traduc\w*|draft|write|rewrite|translate|compose)\b", re.IGNORECASE)
+_QUOTED_SPAN_RE = re.compile(r"«[^»]*»|\"[^\"]*\"|“[^”]*”|```.*?```|^>.*$", re.DOTALL | re.MULTILINE)
+
+
+def claims_unexecuted_action(text: str, prompt: str = "") -> bool:
+    """True when a reply says an action was (or is being) done. Only meaningful when no action ran in the turn.
+
+    Drafting requests are exempt (a draft may well say "ho inviato il preventivo"), and quoted text never counts."""
+    if prompt and _DRAFTING_RE.search(prompt):
+        return False
+    return bool(_UNRUN_ACTION_CLAIM_RE.search(_QUOTED_SPAN_RE.sub(" ", text or "")))
+
+
+def honest_no_action_reply(original: str, prompt: str) -> str:
+    italian = not re.search(r"\b(the|please|can you|delete|send|move|my)\b", prompt or "", re.IGNORECASE)
+    if italian:
+        return ("Non ho eseguito nessuna azione: da questa risposta non posso modificare calendario, email, file o account. "
+                "Chiedimelo in modo diretto, per esempio «cancella \"Titolo\" dal calendario» o «sposta \"Titolo\" a domani alle 10», "
+                "e ti mostro una conferma prima di agire.")
+    return ("I haven't done anything: from this reply I can't change your calendar, email, files or accounts. "
+            "Ask me directly, e.g. «delete \"Title\" from my calendar», and I'll show you a confirmation before acting.")
+
+
 def has_preliminary_review_request(prompt: str) -> bool:
     """Detects if the user explicitly requested a preliminary review/proposal before execution."""
     p_lower = prompt.lower().strip()
@@ -3589,6 +3625,12 @@ class PersonalAgentService:
                         response_text = runtime_res.error or "Error generating response from AI model provider."
                     else:
                         response_text = runtime_res.output or ""
+
+        # Nothing ran in this turn, yet the reply says it did (or is doing) something in the real world: never let that through.
+        if not action_execution_id and not mission_id and intent.tier == IntentTier.ANSWER and claims_unexecuted_action(response_text, prompt):
+            logger.warning("Replaced a reply that claimed an action no execution backed.")
+            msg_metadata["honesty_guard"] = "unexecuted_action_claim"
+            response_text = honest_no_action_reply(response_text, prompt)
 
         # Guard against deceptive delegation claims when no actual action execution was created
         if not action_execution_id and not mission_id:

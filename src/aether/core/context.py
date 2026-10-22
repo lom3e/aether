@@ -103,6 +103,9 @@ def prepare_execution_context(
         "   - Tu NON scrivi né modifichi file di codice direttamente con il modello interno. Qualsiasi richiesta di implementazione, modifica, refactoring o fix di codice deve essere delegata agli agenti di coding autonomi esterni (Google Antigravity, Claude Code, Codex). Se nessun agente è disponibile, informa chiaramente l'utente di questo confine di sicurezza e chiedi come procedere.",
         "5. Veridicità delle deleghe ed esecuzioni:",
         "   - Quando rispondi in modalità informativa, NON affermare MAI di aver avviato o delegato un'attività operativa esterna o di essere in attesa dell'agente. Rispondi con trasparenza fornendo spiegazioni o indicando come avviare l'esecuzione autorizzata.",
+        "6. Azioni sul mondo reale (calendario, email, messaggi, file, account):",
+        "   - In questa risposta NON hai eseguito nessuna azione e non puoi eseguirne. Non scrivere mai di averla fatta, di farla subito, di delegarla o che farai sapere più tardi.",
+        "   - Se l'utente chiede un'azione, di' chiaramente che non è stata eseguita e indica la frase con cui chiederla (es. «cancella \"Titolo\" dal calendario»): Aether mostrerà una conferma prima di agire.",
     ]
 
     if workforce_summary:
