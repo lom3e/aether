@@ -19,3 +19,9 @@
 .cn-advanced-body { margin-top: 18px; padding-top: 12px; box-shadow: 0 -1px 0 hsl(var(--border) / .5); }
 @media (max-width: 640px) { .cn-body { padding: 8px 16px 40px; } .cn-list li { flex-wrap: wrap; } }
 @media (prefers-reduced-motion: reduce) { .cn-dot { transition: none; } }
+
+.cn-tg-steps { display: flex; flex-direction: column; gap: 8px; margin-top: 10px; font-size: 13px; color: hsl(var(--fg)); }
+.cn-tg-steps ol { margin: 0; padding-left: 18px; display: flex; flex-direction: column; gap: 4px; color: hsl(var(--muted-fg)); }
+.cn-tg-form { display: flex; gap: 8px; }
+.cn-tg-form input { flex: 1; min-width: 0; padding: 8px 10px; border-radius: 8px; border: 1px solid hsl(var(--border)); background: hsl(var(--card)); color: hsl(var(--fg)); font-family: var(--font-mono, ui-monospace, monospace); font-size: 12px; }
+.cn-tg-steps code { word-break: break-all; }

@@ -6,6 +6,7 @@ import { ToastContext } from './toast';
 import { useTranslation, type TranslationKey } from './i18n';
 import { TopHeader } from './TopHeader';
 import { ConnectionsAdvanced } from './ConnectionsAdvanced';
+import { TelegramRow } from './TelegramRow';
 import './connections.css';
 
 interface ConnectionsProps {
@@ -152,6 +153,7 @@ export function Connections({ navigate, initialExecutionId, initialTab }: Connec
               </li>
             );
           })}
+          <TelegramRow />
         </ul>
 
         <div className="cn-advanced">

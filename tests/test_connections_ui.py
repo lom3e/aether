@@ -120,3 +120,41 @@ def test_github_shows_the_device_code_instead_of_asking_for_keys(browser_context
     expect(page.get_by_test_id("conn-row-github")).to_contain_text("github.com/login/device")
     assert calls["device"] and not calls["flow"], "GitHub uses the device flow: no redirect and no secret"
     page.close()
+
+
+def test_telegram_is_set_up_with_a_token_and_paired_with_a_one_time_link(browser_context):
+    import test_personal_agent_ui as base
+
+    base._state.update(_state)
+    page = browser_context.new_page()
+    _ensure_workspace(page)
+    status = {"configured": False}
+    sent = []
+    page.route("**/api/connections/telegram/mobile", lambda r: r.fulfill(status=200, content_type="application/json", body=json.dumps(status)))
+
+    def setup(route):
+        sent.append(json.loads(route.request.post_data or "{}"))
+        if sent[-1].get("bot_token") == "bad":
+            route.fulfill(status=400, content_type="application/json", body=json.dumps({"detail": {"code": "invalid_token"}}))
+            return
+        status.update({"configured": True, "bot_username": "aether_test_bot", "paired": []})
+        route.fulfill(status=200, content_type="application/json", body=json.dumps({"status": "ok", "bot_username": "aether_test_bot", "code": "abc", "link": "https://t.me/aether_test_bot?start=abc"}))
+
+    page.route("**/api/connections/telegram/mobile/setup", setup)
+    if not page.locator("[data-testid='nav-connections']").count():
+        page.locator("[data-testid='nav-advanced']").click()
+    page.locator("[data-testid='nav-connections']").click()
+    row = page.get_by_test_id("conn-row-telegram")
+    expect(row).to_contain_text("Write to Aether from your phone")
+    row.get_by_test_id("tg-open").click()
+    expect(row).to_contain_text("BotFather")
+    row.get_by_test_id("tg-token-input").fill("bad")
+    row.get_by_test_id("tg-setup-btn").click()
+    expect(row.get_by_role("alert")).to_contain_text("did not accept")
+    row.get_by_test_id("tg-token-input").fill("123456789:" + "A" * 35)
+    row.get_by_test_id("tg-setup-btn").click()
+    expect(row.get_by_test_id("tg-link")).to_have_text("https://t.me/aether_test_bot?start=abc")
+    status["paired"] = [{"chat_id": "42", "name": "Matteo"}]
+    expect(row).to_contain_text("Paired with Matteo", timeout=8000)
+    assert row.get_attribute("data-state") == "connected"
+    page.close()

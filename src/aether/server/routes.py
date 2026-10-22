@@ -9155,6 +9155,61 @@ async def telegram_webhook_route(request: Request):
     return result
 
 
+class TelegramSetupPayload(BaseModel):
+    bot_token: str
+
+
+@router.post("/connections/telegram/mobile/setup")
+async def telegram_mobile_setup_route(request: Request, payload: TelegramSetupPayload):
+    """Checks the bot token with Telegram, stores it in the secret store, starts polling, returns a one-time pairing link."""
+    ws = getattr(request.app.state, "workspace", None)
+    if not ws:
+        raise HTTPException(status_code=503, detail="Workspace not initialized.")
+    from aether.connections.telegram_mobile import for_workspace
+
+    res = await asyncio.to_thread(for_workspace(ws).setup, payload.bot_token)
+    if res.get("status") != "ok":
+        raise HTTPException(status_code=400, detail={"code": "invalid_token", "message": res.get("message", "")})
+    return res
+
+
+@router.get("/connections/telegram/mobile")
+async def telegram_mobile_status_route(request: Request):
+    ws = getattr(request.app.state, "workspace", None)
+    if not ws:
+        return {"configured": False}
+    from aether.connections.telegram_mobile import for_workspace
+
+    return for_workspace(ws).status()
+
+
+@router.post("/connections/telegram/mobile/pairing")
+async def telegram_mobile_pairing_route(request: Request):
+    """A new one-time link (valid 10 minutes) that pairs the chat that opens it."""
+    ws = getattr(request.app.state, "workspace", None)
+    if not ws:
+        raise HTTPException(status_code=503, detail="Workspace not initialized.")
+    from aether.connections.telegram_mobile import for_workspace
+
+    mobile = for_workspace(ws)
+    if not mobile.status().get("configured"):
+        raise HTTPException(status_code=409, detail={"code": "not_configured"})
+    mobile.start()
+    return mobile.pairing_link()
+
+
+@router.delete("/connections/telegram/mobile/pairing")
+async def telegram_mobile_unpair_route(request: Request):
+    """Removes every paired chat: the bot answers nobody until a new link is used."""
+    ws = getattr(request.app.state, "workspace", None)
+    if not ws:
+        raise HTTPException(status_code=503, detail="Workspace not initialized.")
+    from aether.connections.telegram_mobile import for_workspace
+
+    await asyncio.to_thread(for_workspace(ws).unpair_all)
+    return {"status": "unpaired"}
+
+
 @router.get("/connections/telegram/status")
 async def telegram_status_route(request: Request, workspace_id: str | None = None):
     """

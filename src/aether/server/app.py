@@ -277,6 +277,15 @@ async def startup_event():
         except Exception as exc:
             print(f"Warning: could not start the morning brief loop: {exc}")
 
+        # Aether on the phone: poll Telegram from this computer when a bot was set up (nothing runs otherwise)
+        try:
+            from aether.connections.telegram_mobile import for_workspace as _tg_mobile
+
+            if os.environ.get("AETHER_DISABLE_TELEGRAM_POLLING") != "1":
+                _tg_mobile(app.state.workspace).start()
+        except Exception as exc:
+            print(f"Warning: could not start Telegram: {exc}")
+
         # Initialize Mission Runtime
         try:
             from aether.missions.runtime import MissionRuntime
