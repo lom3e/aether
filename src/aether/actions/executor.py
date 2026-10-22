@@ -977,6 +977,21 @@ class ActionExecutor:
                 self.connection_service.record_operation_success(ws_id, "calendar", action_id)
             return {"events": events, "provider": "calendar"}
 
+        # 5a. Gmail, read-only
+        elif action_id == "gmail.search":
+            if not self.connection_service:
+                raise RuntimeError("Connection service not available.")
+            connector = self.connection_service.get_gmail_connector(ws_id)
+            try:
+                messages = connector.search(query=str(inp.get("query") or "in:inbox"), limit=int(inp.get("limit", 10)))
+            except Exception as exc:
+                if hasattr(self.connection_service, "record_operation_failure"):
+                    self.connection_service.record_operation_failure(ws_id, "gmail", action_id, str(exc), is_auth_error="auth" in str(exc).lower())
+                raise
+            if hasattr(self.connection_service, "record_operation_success"):
+                self.connection_service.record_operation_success(ws_id, "gmail", action_id)
+            return {"messages": messages, "query": inp.get("query") or "in:inbox"}
+
         # 5b. Google Calendar actions (Macro-pass P0.2)
         elif action_id.startswith("google_calendar."):
             if not self.connection_service:

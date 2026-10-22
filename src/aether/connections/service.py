@@ -559,6 +559,15 @@ class ConnectionService:
             store=self.store,
         )
 
+    def get_gmail_connector(self, workspace_id: str) -> Any:
+        """Gmail (read-only) with the workspace's Google token for Gmail."""
+        from aether.connections.gmail import GmailConnector
+
+        conn = self.store.get_connection_by_provider(workspace_id, "gmail")
+        if not conn or conn.status == ConnectionStatus.DISCONNECTED:
+            raise RuntimeError("Gmail is not connected.")
+        return GmailConnector(auth_metadata=resolve_secrets_in_dict(conn.auth_metadata, self.secret_store), workspace_id=workspace_id, store=self.store)
+
     def get_notion_connector(self, workspace_id: str) -> NotionConnector:
         """Returns NotionConnector configured with the workspace's credentials."""
         conn = self.store.get_connection_by_provider(workspace_id, "notion")

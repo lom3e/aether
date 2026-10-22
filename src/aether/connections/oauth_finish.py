@@ -33,6 +33,11 @@ def _verify(prov: str, tokens: dict[str, Any], ws: Any, ws_id: str) -> tuple[boo
         c = GoogleCalendarConnector(auth_metadata=tokens, workspace_id=ws_id, store=ws.connections.store if ws else None)
         valid, message = c.verify(tokens, live_check=True)
         return valid, message, tokens.get("email") or "Google User"
+    if prov == "gmail":
+        from aether.connections.gmail import GmailConnector
+
+        valid, message = GmailConnector(auth_metadata=tokens, workspace_id=ws_id).verify(tokens, live_check=True)
+        return valid, message, tokens.get("email") or "Gmail"
     if prov == "github":
         from aether.connections.github import GitHubConnector
 

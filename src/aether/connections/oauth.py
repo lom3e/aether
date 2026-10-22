@@ -50,6 +50,23 @@ OAUTH_SPECS: dict[str, dict[str, Any]] = {
         "uses_pkce": True,
         "requires_secret": False,  # Google Desktop client uses PKCE without required secret
     },
+    "gmail": {
+        "name": "Gmail",
+        "auth_url": "https://accounts.google.com/o/oauth2/v2/auth",
+        "token_url": "https://oauth2.googleapis.com/token",
+        "scopes": [
+            "openid",
+            "https://www.googleapis.com/auth/userinfo.email",
+            "https://www.googleapis.com/auth/gmail.readonly",
+        ],
+        "default_client_id": None,
+        "env_client_id": ["GOOGLE_CLIENT_ID", "AETHER_GOOGLE_CLIENT_ID"],
+        "env_client_secret": ["GOOGLE_CLIENT_SECRET", "AETHER_GOOGLE_CLIENT_SECRET"],
+        "setup_url": "https://console.cloud.google.com/apis/credentials",
+        "uses_pkce": True,
+        "requires_secret": False,
+        "client_from": "google_calendar",  # same Google desktop client as Calendar
+    },
     "github": {
         "name": "GitHub",
         "auth_url": "https://github.com/login/oauth/authorize",
@@ -217,7 +234,7 @@ class OAuthManager:
                     break
 
         # 3. Client ids shipped with the app (one-click connect), then the spec default
-        bundled = _bundled_clients().get(provider, {})
+        bundled = _bundled_clients().get(spec.get("client_from") or provider, {})
         if not client_id and str(bundled.get("client_id") or "").strip():
             client_id = str(bundled["client_id"]).strip()
             if not client_secret:
@@ -384,7 +401,7 @@ class OAuthManager:
 
         effective_scopes = scopes or spec.get("scopes", [])
 
-        if provider == "google_calendar":
+        if provider in ("google_calendar", "gmail"):
             params = {
                 "client_id": cid,
                 "redirect_uri": r_uri,
@@ -464,7 +481,7 @@ class OAuthManager:
         if not spec:
             raise ValueError(f"Unknown provider '{provider}'")
 
-        if provider == "google_calendar":
+        if provider in ("google_calendar", "gmail"):
             from aether.connections.google_calendar import GoogleOAuthManager, OAuthStateData as GState
             g_state = GState(
                 workspace_id=state_data.workspace_id,

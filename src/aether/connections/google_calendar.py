@@ -319,6 +319,8 @@ class GoogleCalendarConnector(BaseConnector):
     Requires real OAuth 2.0 authorization with PKCE.
     """
 
+    api_base = GOOGLE_CALENDAR_API_BASE  # subclasses for other Google APIs reuse the token refresh and error handling
+
     def __init__(
         self,
         auth_metadata: dict[str, Any] | None = None,
@@ -471,7 +473,7 @@ class GoogleCalendarConnector(BaseConnector):
 
         # Persist updated tokens directly in connection store
         if self.store and self.workspace_id:
-            conn = self.store.get_connection_by_provider(self.workspace_id, "google_calendar")
+            conn = self.store.get_connection_by_provider(self.workspace_id, self.provider)
             if conn:
                 conn.auth_metadata.update(self.auth_metadata)
                 conn.status = ConnectionStatus.VERIFIED
@@ -501,7 +503,7 @@ class GoogleCalendarConnector(BaseConnector):
     def _record_auth_revocation(self, message: str) -> None:
         """Marks connection as VERIFICATION_FAILED due to revoked credentials."""
         if self.store and self.workspace_id:
-            conn = self.store.get_connection_by_provider(self.workspace_id, "google_calendar")
+            conn = self.store.get_connection_by_provider(self.workspace_id, self.provider)
             if conn:
                 conn.status = ConnectionStatus.VERIFICATION_FAILED
                 conn.last_verification_error = message
@@ -521,7 +523,7 @@ class GoogleCalendarConnector(BaseConnector):
         retry_on_401: bool = True,
     ) -> Any:
         token = self._ensure_access_token()
-        url = f"{GOOGLE_CALENDAR_API_BASE}/{endpoint.lstrip('/')}"
+        url = f"{self.api_base}/{endpoint.lstrip('/')}"
         if params:
             query = urllib.parse.urlencode({k: v for k, v in params.items() if v is not None})
             if query:

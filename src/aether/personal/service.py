@@ -430,6 +430,26 @@ def calendar_done_text(intent: Any, result: dict[str, Any]) -> str:
     return head + "\n\nSe hai cambiato idea puoi annullarlo."
 
 
+def format_mail_response(messages: list[dict[str, Any]] | None, query: str, error: str = "") -> str:
+    """Mail listed on this computer: sender, subject, when. The content is not sent to any model to build this answer."""
+    if messages is None:
+        return f"Non riesco a leggere la posta adesso ({error or 'errore di collegamento'}). Controlla Gmail in Collegamenti."
+    if not messages:
+        return "Nessuna mail trovata." + (f" (ricerca: `{query}`)" if query and query != "in:inbox" else "")
+    lines = []
+    for m in messages:
+        ts = m.get("internal_ts")
+        when = ""
+        if ts:
+            d = datetime.fromtimestamp(int(ts)).astimezone()
+            when = f" · {d.day} {_IT_MONTHS[d.month - 1][:3]} {d.strftime('%H:%M')}"
+        dot = "● " if m.get("unread") else ""
+        snippet = (m.get("snippet") or "").strip()
+        lines.append(f"- {dot}**{m.get('from') or m.get('from_raw') or 'Sconosciuto'}** — {m.get('subject', '')}{when}" + (f"\n  {snippet[:140]}" if snippet else ""))
+    head = "Ecco la mail più recente" if len(messages) == 1 else f"Ecco le {len(messages)} mail più recenti"
+    return head + (f" (ricerca: `{query}`)" if query and query != "in:inbox" else "") + ":\n\n" + "\n".join(lines)
+
+
 def has_preliminary_review_request(prompt: str) -> bool:
     """Detects if the user explicitly requested a preliminary review/proposal before execution."""
     p_lower = prompt.lower().strip()
@@ -1218,11 +1238,14 @@ class PersonalAgentService:
             return None
 
     def _google_calendar_ready(self, workspace_id: str) -> bool:
+        return self._provider_ready(workspace_id, "google_calendar")
+
+    def _provider_ready(self, workspace_id: str, provider: str) -> bool:
         cs = self.connection_service
         if not cs:
             return False
         try:
-            conn = cs.get_connection(workspace_id, "google_calendar")
+            conn = cs.get_connection(workspace_id, provider)
         except Exception:  # noqa: BLE001
             return False
         meta = getattr(conn, "auth_metadata", None) or {}
@@ -1242,6 +1265,12 @@ class PersonalAgentService:
                               action_id="calendar.list_events", intent_type="query",
                               action_args={"limit": 50, "scope": "custom", "target_day": label, "time_min": routed["time_min"],
                                            "time_max": routed["time_max"], "is_academic": bool(re.search(r"\b(lezion\w*|uni|universit\w*|corso|corsi)\b", prompt, re.I)), "raw_query": prompt})
+        if action == "mail_search":
+            if not self._provider_ready(workspace_id, "gmail"):
+                return UserIntent(raw_prompt=prompt, tier=IntentTier.ANSWER, summary="Gmail not connected", action_id="calendar.explain",
+                                  intent_type="query", action_args={"message": "Per leggere la posta collega Gmail da Collegamenti (solo lettura: Aether non può inviare né cancellare mail)."})
+            return UserIntent(raw_prompt=prompt, tier=IntentTier.ANSWER, summary="Search mail (model-routed)", action_id="gmail.search",
+                              intent_type="query", action_args={"query": routed["query"], "limit": 10})
         if action not in ("calendar_create", "calendar_move", "calendar_delete"):
             return None
         if not self._google_calendar_ready(workspace_id):
@@ -2837,7 +2866,7 @@ class PersonalAgentService:
         #    ONE retrieval per request: the same AssembledContext feeds the model answer, document drafting,
         #    workforce delegation and the coding-agent handoff (no duplicate or divergent lookups).
         intel_context = None
-        if not is_casual_conv and intent.action_id not in ("calendar.list_events", "calendar.explain", "files.read_document"):
+        if not is_casual_conv and intent.action_id not in ("calendar.list_events", "calendar.explain", "gmail.search", "files.read_document"):
             try:
                 _purpose = {
                     IntentTier.ANSWER: "answer", IntentTier.DO: "document", IntentTier.DELEGATE: "delegate",
@@ -3617,6 +3646,14 @@ class PersonalAgentService:
 
             elif intent.action_id == "calendar.explain":
                 response_text = str(intent.action_args.get("message") or "")
+
+            elif intent.action_id == "gmail.search":
+                from aether.actions.models import ActionExecutionStatus
+                ex = self.action_executor.execute(action_id="gmail.search", workspace_id=workspace_id, input_data=intent.action_args, auto_approve=True) if self.action_executor else None
+                ok = bool(ex) and ex.status == ActionExecutionStatus.SUCCEEDED
+                steps.append(PersonalStep(id=f"step-{uuid.uuid4().hex[:8]}", title="Reading mail", status="completed" if ok else "failed", category="action"))
+                response_text = format_mail_response((ex.output_data or {}).get("messages", []) if ok else None, intent.action_args.get("query", ""),
+                                                     error=(ex.error_message if ex else "") or "")
 
             elif intent.action_id == "files.read_document":
                 if not self.action_executor:

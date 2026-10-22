@@ -4,6 +4,7 @@ export type Language = 'en' | 'it';
 
 export const translations = {
   en: {
+    cnGmailDesc: 'Read your mail (read-only: Aether cannot send or delete).',
     voiceTitle: 'Spoken answers',
     voiceDesc: 'When you ask by voice (hold the shortcut and talk), Aether answers out loud with this computer\'s voices. Offline, nothing to download.',
     voiceToggle: 'Answer out loud when I speak',
@@ -2978,6 +2979,7 @@ export const translations = {
     orbAetherDialogue: 'Aether Dialogue',
   },
   it: {
+    cnGmailDesc: 'Legge la tua posta (solo lettura: Aether non può inviare né cancellare).',
     voiceTitle: 'Risposte a voce',
     voiceDesc: 'Quando chiedi a voce (tieni premuta la scorciatoia e parla), Aether risponde ad alta voce con le voci di questo computer. Funziona offline, niente da scaricare.',
     voiceToggle: 'Rispondi a voce quando parlo',

@@ -102,6 +102,19 @@ class ActionRegistry:
             )
         self.register(
             ActionDefinition(
+                id="gmail.search",
+                name="Search Gmail",
+                description="Lists your newest Gmail messages matching a search (read-only).",
+                tier=ActionTier.ANSWER,
+                permission_level=ActionPermissionLevel.READ_ONLY,
+                requires_confirmation=False,
+                provider="gmail",
+                input_schema={"type": "object", "properties": {"query": {"type": "string"}, "limit": {"type": "integer"}}},
+                output_schema={"type": "object", "properties": {"messages": {"type": "array"}}},
+            )
+        )
+        self.register(
+            ActionDefinition(
                 id="calendar.list_events",
                 name="List Calendar Events",
                 description="Queries calendar events for a given time range.",

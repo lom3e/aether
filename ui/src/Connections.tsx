@@ -21,6 +21,7 @@ interface FlowStatus { status: 'pending' | 'success' | 'error' | 'expired' | 'ca
 
 const ROWS: { id: string; name: string; desc: TranslationKey; device?: boolean }[] = [
   { id: 'google_calendar', name: 'Google Calendar', desc: 'cnCalendarDesc' },
+  { id: 'gmail', name: 'Gmail', desc: 'cnGmailDesc' },
   { id: 'github', name: 'GitHub', desc: 'cnGithubDesc', device: true },
   { id: 'slack', name: 'Slack', desc: 'cnSlackDesc' },
   { id: 'notion', name: 'Notion', desc: 'cnNotionDesc' },
