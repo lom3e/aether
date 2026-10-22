@@ -28,3 +28,9 @@
 @media (max-width: 640px) { .pv-body { padding: 8px 16px 40px; } .pv-lead { font-size: 19px; } }
 .pv-edit { width: 100%; font: inherit; font-size: 14px; color: hsl(var(--fg)); background: hsl(var(--muted) / .6); border: 0; border-radius: 12px; padding: 8px 10px; resize: vertical; outline: none; }
 .pv-edit:focus { box-shadow: 0 0 0 2px hsl(var(--ring) / .5); }
+
+.pv-add { display: flex; gap: 8px; margin: 4px 0 20px; }
+.pv-add input { flex: 1; min-width: 0; padding: 10px 12px; border-radius: 10px; border: 1px solid hsl(var(--border)); background: hsl(var(--card)); color: hsl(var(--fg)); font-size: 14px; }
+.pv-add button { padding: 0 16px; border-radius: 10px; border: 0; background: hsl(var(--primary)); color: hsl(var(--primary-fg, 0 0% 100%)); font-weight: 600; font-size: 13px; cursor: pointer; }
+.pv-add button:disabled { opacity: .5; cursor: default; }
+.mh-docs { margin: 0 -24px; }

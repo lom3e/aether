@@ -44,8 +44,9 @@ export function TopHeader({
         {Icon && <Icon size={18} className="text-primary" />}
         <div style={{ display: 'flex', alignItems: 'center', gap: '8px', minWidth: 0 }}>
           {typeof title === 'string' ? (
-            <span
+            <h1
               style={{
+                margin: 0,
                 fontSize: '15px',
                 fontWeight: 600,
                 color: 'hsl(var(--fg))',
@@ -55,7 +56,7 @@ export function TopHeader({
               }}
             >
               {title}
-            </span>
+            </h1>
           ) : (
             title
           )}

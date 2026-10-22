@@ -12,6 +12,7 @@ import { Marketplace } from './Marketplace';
 import { AgentProfile } from './AgentProfile';
 import { Connections } from './Connections';
 import { WorkforceHub } from './WorkforceHub';
+import { MemoryHome } from './MemoryHome';
 import { ActivityFeed } from './ActivityFeed';
 import { CommandPalette } from './CommandPalette';
 import { ShortcutsProvider, useKeyboardShortcuts, ShortcutsModal } from './shortcuts';
@@ -471,7 +472,7 @@ function MainApp() {
         {hasWorkspace && currentView === 'agent' && <AgentProfile name={viewParams} navigate={navigate} />}
         {hasWorkspace && currentView === 'teams' && <WorkforceHub initialTab="teams" navigate={navigate} />}
         {hasWorkspace && currentView === 'knowledge' && <Knowledge />}
-        {hasWorkspace && currentView === 'memory' && <WorkforceHub initialTab="memory" navigate={navigate} />}
+        {hasWorkspace && currentView === 'memory' && <MemoryHome />}
         {hasWorkspace && currentView === 'learning' && <WorkforceHub initialTab="learning" navigate={navigate} />}
         {hasWorkspace && currentView === 'automations' && <Automations initialAutomationId={viewParams} />}
         {hasWorkspace && currentView === 'workflows' && <WorkflowBuilder navigate={navigate} />}
