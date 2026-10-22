@@ -563,3 +563,35 @@ def test_layout_with_all_recovered_sections_stays_inside_the_window(browser_cont
         assert b and 0 <= b["x"] and b["x"] + b["width"] <= 409 and 0 <= b["y"] and b["y"] + b["height"] <= 605, (tid, b)
     page.screenshot(path=str(SHOTS / "companion2_full_sections.png"))
     page.close()
+
+
+def test_a_spoken_question_gets_a_spoken_answer_and_a_typed_one_does_not(browser_context, workspace_ready):
+    """Hold-to-talk → the reply is read aloud (Markdown stripped, Italian voice); a typed question stays silent."""
+    page = browser_context.new_page()
+    page.set_viewport_size({"width": 680, "height": 600})
+    page.add_init_script("""
+      localStorage.setItem('aether_language', 'it');
+      window.__said = [];
+      const Fake = function () { window.__speech = this; this.start = () => { setTimeout(() => this.onstart && this.onstart(), 0); }; this.stop = () => { this.onend && this.onend(); }; this.abort = () => {}; };
+      window.SpeechRecognition = Fake; window.webkitSpeechRecognition = Fake;
+      Object.defineProperty(window, 'speechSynthesis', { configurable: true, value: { speak: (u) => window.__said.push({ text: u.text, lang: u.lang }), cancel: () => {}, getVoices: () => [] } });
+      Object.defineProperty(window, 'SpeechSynthesisUtterance', { configurable: true, writable: true, value: function (t) { this.text = t; } });
+    """)
+    page.route("**/api/personal/chat", lambda r: r.fulfill(status=200, content_type="application/json", body=json.dumps(
+        {"id": "a1", "role": "assistant", "content": "**Domani** hai `due` impegni.", "session_id": "s1", "metadata": {}, "steps": []})))
+    page.goto(f"{_state['base_url']}/?surface=companion")
+    expect(page.get_by_test_id("companion-input")).to_be_visible(timeout=15000)
+    page.evaluate("window.dispatchEvent(new CustomEvent('aether-companion-summon', {detail: {phase: 'press'}}))")
+    page.wait_for_function("!!window.__speech")
+    page.evaluate("window.__speech.onresult({resultIndex: 0, results: [[{transcript: 'che impegni ho domani'}]]})")
+    expect(page.get_by_test_id("companion-input")).to_have_value("che impegni ho domani")
+    page.evaluate("window.dispatchEvent(new CustomEvent('aether-companion-summon', {detail: {phase: 'release'}}))")
+    expect(page.get_by_text("impegni.").first).to_be_visible(timeout=8000)
+    page.wait_for_function("window.__said.length > 0", timeout=8000)
+    said = page.evaluate("window.__said")
+    assert said == [{"text": "Domani hai due impegni.", "lang": "it-IT"}]
+    page.get_by_test_id("companion-input").fill("e dopodomani?")
+    page.get_by_test_id("companion-input").press("Enter")
+    page.wait_for_timeout(1500)
+    assert len(page.evaluate("window.__said")) == 1, "a typed question is answered in writing only"
+    page.close()

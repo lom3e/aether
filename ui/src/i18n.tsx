@@ -4,6 +4,11 @@ export type Language = 'en' | 'it';
 
 export const translations = {
   en: {
+    voiceTitle: 'Spoken answers',
+    voiceDesc: 'When you ask by voice (hold the shortcut and talk), Aether answers out loud with this computer\'s voices. Offline, nothing to download.',
+    voiceToggle: 'Answer out loud when I speak',
+    voiceTry: 'Try the voice',
+    voiceSample: 'Hi, I\'m Aether. Ask me anything.',
     tgDesc: 'Write to Aether from your phone. Works while Aether is open on this computer.',
     tgBotReady: 'Bot @{bot} ready: pair your phone.',
     tgPairedWith: 'Paired with {names}. Works while Aether is open on this computer.',
@@ -2973,6 +2978,11 @@ export const translations = {
     orbAetherDialogue: 'Aether Dialogue',
   },
   it: {
+    voiceTitle: 'Risposte a voce',
+    voiceDesc: 'Quando chiedi a voce (tieni premuta la scorciatoia e parla), Aether risponde ad alta voce con le voci di questo computer. Funziona offline, niente da scaricare.',
+    voiceToggle: 'Rispondi a voce quando parlo',
+    voiceTry: 'Prova la voce',
+    voiceSample: 'Ciao, sono Aether. Chiedimi quello che ti serve.',
     tgDesc: 'Scrivi ad Aether dal telefono. Funziona mentre Aether è aperto su questo computer.',
     tgBotReady: 'Bot @{bot} pronto: abbina il telefono.',
     tgPairedWith: 'Abbinato con {names}. Funziona mentre Aether è aperto su questo computer.',

@@ -6,6 +6,7 @@ import {
   Mic, MicOff, Volume2, VolumeX, ExternalLink, Loader2
 } from 'lucide-react';
 import { apiUrl } from './api';
+import { speak } from './voiceOut';
 import { useTranslation } from './i18n';
 import { ToastContext } from './toast';
 import { AutoArchitectModal } from './AutoArchitectModal';
@@ -244,19 +245,12 @@ export function Home({
       setSpeakingMessageId(null);
       return;
     }
-    window.speechSynthesis.cancel();
-    const utterance = new SpeechSynthesisUtterance(text);
-    utterance.onend = () => {
-      setIsSpeaking(false);
-      setSpeakingMessageId(null);
-    };
-    utterance.onerror = () => {
-      setIsSpeaking(false);
-      setSpeakingMessageId(null);
-    };
     setIsSpeaking(true);
     setSpeakingMessageId(msgId);
-    window.speechSynthesis.speak(utterance);
+    speak(text, language, () => {
+      setIsSpeaking(false);
+      setSpeakingMessageId(null);
+    });
   };
 
   const handleSendPrompt = async (promptText: string) => {

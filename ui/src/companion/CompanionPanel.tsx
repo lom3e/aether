@@ -14,6 +14,7 @@ import { ScreenAssist } from './vision/ScreenAssist';
 import { AnnotatedImage } from './vision/AnnotatedImage';
 import { Receipts } from './Receipts';
 import { SecondOpinion } from './SecondOpinion';
+import { speak, speakVoiceAnswersEnabled, stopSpeaking } from '../voiceOut';
 
 interface Props {
   runtime: CompanionRuntime;
@@ -50,6 +51,16 @@ export function CompanionPanel({ runtime, language, t, follow, onToggleFollow, o
   const color = STATUS_COLORS[status];
   sightRef.current = sight;
   textRef.current = text;
+  // Asked by voice → answered by voice: remember that the next answer belongs to a spoken question.
+  const voiceTurnRef = useRef<{ after: number } | null>(null);
+  useEffect(() => {
+    const turn = voiceTurnRef.current;
+    if (!turn || messages.length <= turn.after) return;
+    const last = messages[messages.length - 1];
+    if (last.role !== 'assistant' || !last.content) return;
+    voiceTurnRef.current = null;
+    if (speakVoiceAnswersEnabled()) speak(last.content, language);
+  }, [messages, language]);
 
   useEffect(() => {
     inputRef.current?.focus();
@@ -150,17 +161,24 @@ export function CompanionPanel({ runtime, language, t, follow, onToggleFollow, o
   };
   const submitRef = useRef(submit);
   submitRef.current = submit;
+  const messagesRef = useRef(messages);
+  messagesRef.current = messages;
 
   // Hold the shortcut and talk: the native side read the screen first, then the Bar came up and told us.
   useEffect(() => {
     return onSummon(phase => {
       if (phase === 'press') {
+        stopSpeaking(); // a new question interrupts the previous spoken answer
         setSight(null);
         takeSummonCapture().then(cap => (cap ? shieldCapture(cap) : null)).then(img => { if (img) setSight(img); });
         if (dictation.supported) dictation.start();
       } else if (phase === 'release') {
         if (dictation.supported) dictation.stop();
-        window.setTimeout(() => { if (textRef.current.trim()) submitRef.current(textRef.current); }, 450);
+        window.setTimeout(() => {
+          if (!textRef.current.trim()) return;
+          voiceTurnRef.current = { after: messagesRef.current.length };
+          submitRef.current(textRef.current);
+        }, 450);
       } else if (phase === 'tap') {
         if (dictation.supported) dictation.stop();
         inputRef.current?.focus();
