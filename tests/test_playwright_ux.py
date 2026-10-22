@@ -86,7 +86,7 @@ def test_playwright_workspace_and_conversation_flow(tmp_path, monkeypatch):
 
             # 6. Test Settings -> Workspace tab
             page.click("button[title='Settings']")
-            page.wait_for_selector("text=General Workspace", timeout=5000)
+            page.wait_for_selector("text=Danger Zone", timeout=5000)
             assert page.is_visible("text=Danger Zone")
 
             # Click Storage & Data tab

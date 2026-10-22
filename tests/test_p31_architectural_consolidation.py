@@ -56,7 +56,9 @@ from aether.automation.models import AutomationRunRecord, RunStatus
 # 1. SecretStore: Encryption, File Permissions, Extraction, Resolution
 # ============================================================================
 
-def test_secret_store_encryption_and_posix_permissions():
+def test_secret_store_encryption_and_posix_permissions(monkeypatch):
+    # Hermetic master key: reopening must not depend on the machine's keychain (tests run with the null keyring).
+    monkeypatch.setenv("AETHER_MASTER_KEY", "ab" * 32)
     with tempfile.TemporaryDirectory() as tmp_dir:
         vault_path = Path(tmp_dir) / ".secrets"
         store = EncryptedVaultSecretStore(vault_path=vault_path)

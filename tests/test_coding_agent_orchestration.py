@@ -151,7 +151,9 @@ def test_claude_code_authenticated_mock():
 def test_codex_availability_and_session_probing():
     """Validates OpenAI Codex live diagnosis and session detection."""
     provider = CodexCodingProvider()
-    status = provider.probe_status()
+    # Hermetic: the developer machine may have the codex CLI installed; this test describes a machine without it.
+    with patch.object(CodexCodingProvider, "resolve_binary", return_value=None):
+        status = provider.probe_status()
     assert status.id == "codex"
     # CLI codex is not in PATH on host, but ~/.codex session is detected
     assert status.installed is False
@@ -584,7 +586,8 @@ def test_list_providers_status_diagnostics(tmp_path: Path):
     mock_ws.personal_store = store
 
     orch = CodingAgentOrchestrator()
-    statuses = orch.list_providers_status(workspace=mock_ws)
+    with patch.object(CodexCodingProvider, "resolve_binary", return_value=None):  # hermetic: no codex CLI on this machine
+        statuses = orch.list_providers_status(workspace=mock_ws)
 
     assert len(statuses) == 3
     p_map = {s.id: s for s in statuses}

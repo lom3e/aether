@@ -82,7 +82,7 @@ def test_runtime_execute_answer_mode_provider_failure():
 
     assert result.success is False
     assert result.status == ExecutionStatus.FAILED
-    assert "AI provider" in result.error
+    assert "AI provider" in result.error or "provider AI" in result.error  # the message follows the request language
 
 
 def test_runtime_execute_do_mode(tmp_path, accepted_authority_factory):

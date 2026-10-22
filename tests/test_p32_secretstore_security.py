@@ -42,7 +42,8 @@ from aether.core.secrets import (
 )
 
 
-def test_aes_gcm_encryption_and_aad_integrity(tmp_path: Path):
+def test_aes_gcm_encryption_and_aad_integrity(tmp_path: Path, monkeypatch):
+    monkeypatch.setenv("AETHER_MASTER_KEY", "ab" * 32)  # hermetic: no dependency on the machine's keychain
     """Verify that records are encrypted with AES-256-GCM and bound to their secret_ref via AAD."""
     vault_file = tmp_path / "secrets.vault"
     store = EncryptedVaultSecretStore(vault_file)

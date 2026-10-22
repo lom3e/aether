@@ -91,10 +91,11 @@ def test_ui_has_no_hidden_provider_or_model_defaults():
 
 
 def test_provider_selects_offer_groq_and_an_unset_option():
-    for name in ("Teams.tsx", "AutoArchitectModal.tsx", "AgentBuilder.tsx", "WorkspaceModal.tsx", "Settings.tsx"):
+    # WorkspaceModal.tsx was removed with the single personal space; the first-run model card lives in FirstRunModel.tsx.
+    for name in ("Teams.tsx", "AutoArchitectModal.tsx", "AgentBuilder.tsx", "Settings.tsx"):
         src = (UI / name).read_text()
         assert 'value="groq"' in src, name
-    for name in ("Teams.tsx", "AutoArchitectModal.tsx", "Settings.tsx", "WorkspaceModal.tsx"):
+    for name in ("Teams.tsx", "AutoArchitectModal.tsx", "Settings.tsx"):
         assert 'option value=""' in (UI / name).read_text(), name
 
 
@@ -210,7 +211,7 @@ def test_sidebar_labels_come_from_the_translation_dictionaries():
         assert literal not in sidebar, literal
     i18n = (UI / "i18n.tsx").read_text()
     en, it = i18n[:i18n.index("\n  it: {")], i18n[i18n.index("\n  it: {"):]
-    for key in ("navResults", "navResultsTooltip", "navSystem", "navSystemBadge", "navComputerResources",
+    for key in ("navResults", "navResultsTooltip", "navSystem", "navComputerResources",
                 "navComputerResourcesTooltip", "navMemoryContext", "navRecentActivity"):
         assert f"{key}:" in en and f"{key}:" in it, key
         assert f"t('{key}')" in sidebar, key

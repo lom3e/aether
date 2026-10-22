@@ -50,7 +50,9 @@ def test_provider_capabilities():
     assert caps.thinking is False
 
 
-def test_ollama_capabilities():
+def test_ollama_capabilities(monkeypatch):
+    # Capabilities are static; never probe a local Ollama server from a unit test.
+    monkeypatch.setattr(OllamaProvider, "get_available_models", lambda self: [])
     provider = OllamaProvider()
     caps = provider.capabilities
     assert caps.tools is True
