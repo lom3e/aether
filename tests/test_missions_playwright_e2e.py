@@ -65,8 +65,7 @@ def test_playwright_missions_e2e_flow(tmp_path, monkeypatch):
 
             # 1. Open UI
             page.goto("http://localhost:8993/?ui=v1")
-            page.wait_for_selector("text=Missions Workspace", timeout=10000)
-            assert page.is_visible("text=Missions Workspace")
+            page.wait_for_selector(".sidebar", timeout=10000)  # one personal Aether: the space name is not a heading any more
 
             # 2. Click Missions button in Sidebar using robust data-testid
             page.click("[data-testid='nav-missions']")
@@ -168,7 +167,7 @@ def test_playwright_missions_e2e_flow(tmp_path, monkeypatch):
 
             # 11. Backward compatibility test: Navigate to Chat and verify normal conversation flow
             page.click("button:has-text('Home')")
-            page.click("button:has-text('New Task')")
+            page.evaluate("document.querySelector('[data-testid=nav-new-team-chat]').click()")
             page.wait_for_selector("textarea", timeout=5000)
             page.fill("textarea", "Quick inquiry without any mission")
             page.click("button:has-text('Run Task')")

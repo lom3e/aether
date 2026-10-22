@@ -59,8 +59,8 @@ def test_playwright_workspace_and_conversation_flow(tmp_path, monkeypatch):
             page.goto("http://localhost:8992/?ui=v1")
             page.wait_for_selector(".sidebar", timeout=10000)  # one personal Aether: no workspace switcher any more
 
-            # 2. Click New Task button
-            page.click("button:has-text('New Task')")
+            # 2. Open a new team conversation (the sidebar's "New chat" now starts a chat with Aether itself)
+            page.evaluate("document.querySelector('[data-testid=nav-new-team-chat]').click()")
             page.wait_for_selector("textarea", timeout=5000)
 
             # 3. Type user message and send
@@ -78,10 +78,11 @@ def test_playwright_workspace_and_conversation_flow(tmp_path, monkeypatch):
             page.click("button:has-text('Save & Resend')")
             page.wait_for_selector("text=Analyze competitor pricing strategies updated", timeout=5000)
 
-            # 5. Search filter in sidebar
-            page.fill("input[placeholder='Search...']", "pricing")
+            # 5. Search filter in sidebar (team conversations live under "Advanced tools")
+            page.locator("[data-testid='nav-advanced']").click()
+            page.fill("[data-testid='sidebar-search-input']", "pricing")
             assert page.is_visible("button:has-text('Analyze competitor')")
-            page.fill("input[placeholder='Search...']", "")
+            page.fill("[data-testid='sidebar-search-input']", "")
 
             # 6. Test Settings -> Workspace tab
             page.click("button[title='Settings']")

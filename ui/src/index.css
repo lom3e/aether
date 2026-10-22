@@ -1,32 +1,36 @@
 @import './design-system/design-system.css';
 
 :root {
-  --font-sans: -apple-system, BlinkMacSystemFont, 'SF Pro Text', 'Segoe UI', system-ui, sans-serif;
+  color-scheme: light;
+  --font-sans: -apple-system, BlinkMacSystemFont, 'SF Pro Text', 'Inter', 'Segoe UI', system-ui, sans-serif;
   --font-mono: ui-monospace, 'SF Mono', Menlo, Consolas, monospace;
 
-  /* Light Theme — Clean Slate & Aether Violet */
-  --bg: 40 14% 97%;
-  --fg: 220 20% 12%;
+  /* Light — neutral paper, near-black ink, one violet accent (ChatGPT/Claude family) */
+  --bg: 0 0% 100%;
+  --fg: 0 0% 9%;
   --card: 0 0% 100%;
   --card-bg: 0 0% 100%;
-  --card-fg: 220 20% 12%;
-  --card-hover: 220 15% 97%;
-  --card-border: 30 8% 90%;
+  --card-fg: 0 0% 9%;
+  --card-hover: 0 0% 97%;
+  --card-border: 0 0% 90%;
   --popover: 0 0% 100%;
-  --popover-fg: 220 20% 12%;
+  --popover-fg: 0 0% 9%;
+  --sidebar: 0 0% 97.6%;
+  --sidebar-hover: 0 0% 92.5%;
+  --sidebar-active: 0 0% 90%;
 
   /* Aether Violet Accent */
   --primary: 262 83% 58%;
   --primary-fg: 0 0% 100%;
 
-  --muted: 220 14% 94%;
-  --muted-fg: 220 10% 46%;
+  --muted: 0 0% 95.3%;
+  --muted-fg: 0 0% 42%;
   --accent: 262 83% 96%;
   --accent-fg: 262 83% 40%;
   --destructive: 0 72% 51%;
   --destructive-fg: 210 40% 98%;
-  --border: 30 8% 89%;
-  --input: 30 8% 89%;
+  --border: 0 0% 90%;
+  --input: 0 0% 90%;
   --ring: 262 83% 58%;
   --radius: 14px;
   --radius-lg: 22px;
@@ -47,29 +51,33 @@
 }
 
 .dark {
-  /* Obsidian Graphite Dark Theme + Aether Violet */
-  --bg: 240 6% 4.5%;
-  --fg: 210 20% 96%;
-  --card: 240 4% 8.5%;
-  --card-bg: 240 4% 8.5%;
-  --card-fg: 210 20% 96%;
-  --card-hover: 240 6% 12%;
-  --card-border: 240 4% 14%;
-  --popover: 240 6% 9%;
-  --popover-fg: 210 20% 96%;
+  color-scheme: dark;
+  /* Dark — soft graphite (not pure black), readable grey text, the same violet */
+  --bg: 0 0% 12.9%;
+  --fg: 0 0% 93%;
+  --card: 0 0% 17%;
+  --card-bg: 0 0% 17%;
+  --card-fg: 0 0% 93%;
+  --card-hover: 0 0% 20%;
+  --card-border: 0 0% 22%;
+  --popover: 0 0% 18.5%;
+  --popover-fg: 0 0% 93%;
+  --sidebar: 0 0% 9%;
+  --sidebar-hover: 0 0% 15%;
+  --sidebar-active: 0 0% 18.5%;
 
   /* Aether Violet Accent */
   --primary: 263 70% 66%;
   --primary-fg: 0 0% 100%;
 
-  --muted: 240 5% 14%;
-  --muted-fg: 220 14% 65%;
+  --muted: 0 0% 19%;
+  --muted-fg: 0 0% 64%;
   --accent: 263 70% 15%;
   --accent-fg: 263 70% 80%;
   --destructive: 0 62% 45%;
   --destructive-fg: 210 40% 98%;
-  --border: 240 4% 14%;
-  --input: 240 4% 14%;
+  --border: 0 0% 21%;
+  --input: 0 0% 21%;
   --ring: 263 70% 66%;
 
   --success: 142 69% 58%;

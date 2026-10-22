@@ -39,7 +39,7 @@ def _proposals():
 
 
 def _send(page, text):
-    box = page.locator("textarea[placeholder*='What would you like Aether to take care of']")
+    box = page.locator("[data-testid='companion-input-field']")
     box.fill(text)
     page.locator("[data-testid='companion-submit-btn']").click()
 

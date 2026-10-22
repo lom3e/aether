@@ -2996,7 +2996,10 @@ class PersonalAgentService:
                     )
                 else:
                     # Preliminary review mode (Principle 3.2):
-                    response_text = calendar_confirmation_text(intent) or proposal.to_human_markdown()
+                    response_text = calendar_confirmation_text(intent) or (
+                        # one action: a short plain confirmation; a whole mission keeps its full plan
+                        proposal.to_plain_text(english=looks_english(prompt)) if intent.tier == IntentTier.ACT else proposal.to_human_markdown()
+                    )
                     msg_metadata = {
                         # The exact action the user is shown; after acceptance it runs as is, never re-interpreted.
                         **({"resolved_action": {"action_id": intent.action_id, "args": intent.action_args}} if calendar_confirmation_text(intent) else {}),

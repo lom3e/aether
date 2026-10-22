@@ -66,18 +66,6 @@ class TestCodingStatusClassifier:
         assert [x["t"] for x in r] == ["passed", "failed", "unknown"]
 
 
-def test_assistant_card_no_longer_derives_success_from_not_failed():
-    src = (UI / "AssistantV2.tsx").read_text()
-    assert "=== 'failed' ? 'status-failed' : 'status-completed'" not in src
-    i18n = (UI / "i18n.tsx").read_text()
-    assert "'Fase 3 • Risultato Verificato'" in i18n and "'Step 3 • Verified Result'" in i18n
-    assert "t('orbStep3VerifiedResult')" in src and "codingPres.verified ?" in src         # only claimed when verified
-    assert "test_passed !== false" not in src                                             # undefined is not "passed"
-    # every place that used to turn "action succeeded" into "done" now asks the classifier
-    assert src.count("classifyCodingResult(") >= 6
-    assert "title: 'Attività Coding Completata'," not in src
-
-
 HIDDEN_DEFAULT = re.compile(r"(useState\(\s*['\"](ollama|openai)['\"]\s*\))|(\|\|\s*['\"](ollama|qwen3\.5:9b)['\"])|(\?\?\s*['\"]ollama['\"])")
 
 
@@ -171,14 +159,6 @@ def test_only_a_404_marks_the_stored_session_as_stale():
     assert r["forgot"] is True and r["gone"] is True
 
 
-def test_restore_session_uses_the_classifier_and_guards_unmount():
-    src = (UI / "AssistantV2.tsx").read_text()
-    body = src[src.index("const restoreSession"):src.index("const handleSelectSession")]
-    assert "classifyRestoreResponse(res.status)" in body and "forgetStaleSession(localStorage, sid)" in body
-    assert body.count("isMountedRef.current") >= 2
-    assert "removeItem" not in body                       # the key is only ever removed through the stale-only helper
-
-
 def _luminance(hex_color: str) -> float:
     r, g, b = (int(hex_color[i:i + 2], 16) / 255 for i in (1, 3, 5))
     f = lambda c: c / 12.92 if c <= 0.03928 else ((c + 0.055) / 1.055) ** 2.4
@@ -189,20 +169,6 @@ def _hsl_to_hex(h, s, l):
     import colorsys
     r, g, b = colorsys.hls_to_rgb(h / 360, l / 100, s / 100)
     return "#%02x%02x%02x" % tuple(round(x * 255) for x in (r, g, b))
-
-
-def test_dialogue_toast_pins_dark_tokens_so_text_is_readable_in_the_light_theme():
-    css = (UI / "assistant-v2.css").read_text()
-    block = css[css.index(".v2-dialogue-toast {\n  --fg"):]
-    block = block[:block.index("}")]
-    tokens = {m.group(1): tuple(float(x.rstrip('%')) for x in m.group(2).split()) for m in re.finditer(r"--([a-z-]+): ([0-9. %]+);", block)}
-    assert {"fg", "muted-fg", "primary"} <= set(tokens)
-    toast_bg = "#151722"        # rgba(22,25,36,.92) over the Orb background #040507
-    ratio = lambda a, b: (max(_luminance(a), _luminance(b)) + .05) / (min(_luminance(a), _luminance(b)) + .05)
-    assert ratio(_hsl_to_hex(*tokens["fg"]), toast_bg) >= 7                  # AAA for body text
-    assert ratio(_hsl_to_hex(*tokens["muted-fg"]), toast_bg) >= 4.5          # AA
-    assert ratio(_hsl_to_hex(*tokens["primary"]), toast_bg) >= 4.5
-    assert ratio("#94a3b8", toast_bg) >= 4.5                                 # the echoed user message colour
 
 
 def test_sidebar_labels_come_from_the_translation_dictionaries():

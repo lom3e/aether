@@ -29,42 +29,11 @@ import { ContentRepurposing } from './ContentRepurposing';
 import { ProactiveWatchersView } from './ProactiveWatchersView';
 import ExecutionFabricView from './ExecutionFabricView';
 import { ResultsView } from './ResultsView';
-import { AssistantV2 } from './AssistantV2';
 import { useTranslation } from './i18n';
 
 
 function MainApp() {
   const { t } = useTranslation();
-  // Experience Mode: 'v2' (Assistant-First with Living Orb) or 'v1' (Classic Multi-Tab Workspace)
-  const [experienceMode, setExperienceMode] = useState<'v1' | 'v2'>(() => {
-    if (typeof window !== 'undefined') {
-      try {
-        const params = new URLSearchParams(window.location.search);
-        const urlMode = params.get('ui');
-        if (urlMode === 'v1' || urlMode === 'v2') return urlMode;
-        const saved = localStorage.getItem('aether_experience_mode');
-        if (saved === 'v1' || saved === 'v2') return saved;
-      } catch {
-        // ignore
-      }
-    }
-    return 'v2';
-  });
-
-  const handleSwitchExperience = useCallback((mode: 'v1' | 'v2') => {
-    setExperienceMode(mode);
-    if (typeof window !== 'undefined') {
-      try {
-        localStorage.setItem('aether_experience_mode', mode);
-        const url = new URL(window.location.href);
-        url.searchParams.set('ui', mode);
-        window.history.replaceState({}, '', url.toString());
-      } catch {
-        // ignore
-      }
-    }
-  }, []);
-
   const [currentView, setCurrentView] = useState('home');
   const [viewParams, setViewParams] = useState<any>(null);
   const [workspaceName, setWorkspaceName] = useState<string>('');
@@ -79,6 +48,37 @@ function MainApp() {
   const [isCommandPaletteOpen, setIsCommandPaletteOpen] = useState(false);
 
   const showToast = useContext(ToastContext);
+
+  // Chats with Aether (personal sessions): what the sidebar lists, like ChatGPT/Claude. null = a new chat.
+  const [chats, setChats] = useState<any[]>([]);
+  const [activeChatId, setActiveChatId] = useState<string | null>(null);
+  const fetchChats = useCallback(() => {
+    fetch(apiUrl('/api/personal/sessions?limit=60'))
+      .then(res => (res.ok ? res.json() : []))
+      .then(data => { if (Array.isArray(data)) setChats(data); })
+      .catch(() => undefined);
+  }, []);
+  const startNewChat = useCallback(() => {
+    setActiveChatId(null);
+    setCurrentView('home');
+    setViewParams(null);
+  }, []);
+  const openChat = useCallback((id: string) => {
+    setActiveChatId(id);
+    setCurrentView('home');
+    setViewParams(null);
+  }, []);
+  const deleteChat = useCallback(async (id: string) => {
+    await fetch(apiUrl(`/api/personal/sessions/${encodeURIComponent(id)}`), { method: 'DELETE' }).catch(() => undefined);
+    setChats(prev => prev.filter(c => c.id !== id));
+    setActiveChatId(prev => (prev === id ? null : prev));
+  }, []);
+  const renameChat = useCallback(async (id: string, title: string) => {
+    const res = await fetch(apiUrl(`/api/personal/sessions/${encodeURIComponent(id)}`), {
+      method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ title }),
+    }).catch(() => null);
+    if (res && res.ok) setChats(prev => prev.map(c => (c.id === id ? { ...c, title } : c)));
+  }, []);
 
   const fetchConversations = useCallback(() => {
     fetch(apiUrl('/api/conversations'))
@@ -99,6 +99,7 @@ function MainApp() {
           setWorkspaceName(data.name);
           setIsInitialized(true);
           fetchConversations();
+          fetchChats();
         } else {
           setWorkspaceName('');
           setIsInitialized(false);
@@ -113,7 +114,7 @@ function MainApp() {
         setConversations([]);
         setActiveConversationId(null);
       });
-  }, [fetchConversations]);
+  }, [fetchConversations, fetchChats]);
 
   useEffect(() => {
     fetchWorkspace();
@@ -205,10 +206,7 @@ function MainApp() {
     }
     setCurrentView(targetView);
     setViewParams(params);
-    if (targetView && targetView !== 'home') {
-      handleSwitchExperience('v1');
-    }
-  }, [handleSwitchExperience]);
+  }, []);
 
   // Listen for Tauri IPC navigation events (triggered when clicking native macOS notifications or dock reopen)
   useEffect(() => {
@@ -380,32 +378,6 @@ function MainApp() {
 
   const hasWorkspace = Boolean(workspaceName && isInitialized);
 
-  if (experienceMode === 'v2') {
-    return (
-      <div className="app-container" style={{ padding: 0, overflow: 'hidden' }}>
-        <AssistantV2
-          workspaceName={workspaceName}
-          navigate={navigate}
-          onSwitchToV1={() => handleSwitchExperience('v1')}
-        />
-
-        <CommandPalette
-          isOpen={isCommandPaletteOpen}
-          onClose={() => setIsCommandPaletteOpen(false)}
-          onNavigate={navigate}
-          onNewConversation={handleNewConversation}
-          conversations={conversations}
-          onSelectConversation={handleSelectConversation}
-        />
-
-        <ShortcutsModal
-          isOpen={isShortcutsModalOpen}
-          onClose={closeShortcutsModal}
-        />
-      </div>
-    );
-  }
-
   return (
     <div className="app-container">
       <Sidebar
@@ -420,7 +392,12 @@ function MainApp() {
         onDeleteConversation={handleDeleteConversation}
         onOpenCommandPalette={() => setIsCommandPaletteOpen(true)}
         onRefreshConversations={fetchConversations}
-        onSwitchToV2={() => handleSwitchExperience('v2')}
+        chats={chats}
+        activeChatId={currentView === 'home' ? activeChatId : null}
+        onNewChat={startNewChat}
+        onOpenChat={openChat}
+        onDeleteChat={deleteChat}
+        onRenameChat={renameChat}
       />
 
       <div className="main-content">
@@ -442,6 +419,8 @@ function MainApp() {
             onNewTask={handleNewConversation}
             onSelectConversation={handleSelectConversation}
             conversations={conversations}
+            sessionId={activeChatId}
+            onSessionChange={id => { setActiveChatId(id); fetchChats(); }}
           />
         )}
         {hasWorkspace && (currentView === 'missions' || currentView === 'work') && (

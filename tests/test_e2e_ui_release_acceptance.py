@@ -85,7 +85,7 @@ def test_01_home_and_branding(browser_context):
 
     # Navigation buttons
     expect(page.locator(".sidebar button:has-text('Home')").first).to_be_visible()
-    expect(page.locator(".sidebar button:has-text('New Task'), .sidebar button:has-text('Nuovo Task')").first).to_be_visible()
+    expect(page.locator(".sidebar button:has-text('New chat'), .sidebar button:has-text('Nuova chat')").first).to_be_visible()
     expect(page.locator("[data-testid='nav-agents']").first).to_be_attached()  # alias block is hidden by design
     expect(page.locator("[data-testid='nav-teams']").first).to_be_attached()  # alias block is hidden by design
     expect(page.locator("[data-testid='nav-knowledge']").first).to_be_attached()  # alias block is hidden by design
@@ -227,7 +227,7 @@ def test_09_chat_draft_lifecycle(browser_context):
 
     # Click + New Task / Nuovo Task to navigate to chat view
     new_task_btn = page.locator(
-        "button:has-text('New Task'), button:has-text('Nuovo Task'), .btn-new-task"
+        "[data-testid='sidebar-new-chat']"
     ).first
     if new_task_btn.is_visible():
         new_task_btn.click()

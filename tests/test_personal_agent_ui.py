@@ -59,16 +59,17 @@ def test_01_personal_agent_companion_flow(browser_context):
     page.wait_for_timeout(500)
 
     expect(page.locator("h1:has-text('What do you need today?')")).to_be_visible()
-    expect(page.locator("textarea[placeholder*='What would you like Aether to take care of']")).to_be_visible()
+    expect(page.locator("[data-testid='companion-input-field']")).to_be_visible()
 
     # 2. Click suggestion chip or type prompt
-    prompt_area = page.locator("textarea[placeholder*='What would you like Aether to take care of']")
+    prompt_area = page.locator("[data-testid='companion-input-field']")
     prompt_area.fill("Create a document named project_plan.md with key milestones")
 
     # Send prompt
     page.locator("[data-testid='companion-submit-btn']").click()
 
-    # 3. Wait for response and stepper
+    # 3. Wait for response; the steps are folded under a one-line summary, open it
+    page.locator(".ch-steps-head").first.click(timeout=10000)
     page.wait_for_selector("text=Understanding intent", timeout=10000)
     expect(page.locator("text=Understanding intent").first).to_be_visible()
     expect(page.locator("text=project_plan.md").first).to_be_visible()
@@ -89,7 +90,7 @@ def test_02_action_safety_gating_flow(browser_context):
     page.wait_for_timeout(500)
 
     # Ask to schedule meeting (triggers ACT tier requiring confirmation)
-    prompt_area = page.locator("textarea[placeholder*='What would you like Aether to take care of']")
+    prompt_area = page.locator("[data-testid='companion-input-field']")
     prompt_area.fill("Schedule a meeting with the Architecture Team for Friday at 10am")
 
     page.locator("[data-testid='companion-submit-btn']").click()

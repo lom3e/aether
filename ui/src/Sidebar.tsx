@@ -4,13 +4,15 @@ import {
   Plus, ChevronLeft, Moon, Sun, Globe, Trash2, Search,
   ChevronDown, ChevronRight, MoreVertical, Archive, Copy, Edit2, Check,
   Pin, Folder, GitBranch, ExternalLink, RefreshCw, X, Target,
-  Link2, Activity as ActivityIcon, Cpu, Clock, FileCheck, ShieldCheck
+  Link2, Activity as ActivityIcon, Cpu, Clock, FileCheck, ShieldCheck, SquarePen
 } from 'lucide-react';
 import { useTranslation } from './i18n';
 import { useTheme } from './theme';
 import { apiUrl } from './api';
 import { Tooltip } from './Tooltip';
 import { ToastContext } from './toast';
+import { ChatList, type ChatItem } from './ChatList';
+import './sidebar.css';
 
 interface SidebarProps {
   currentView: string;
@@ -24,7 +26,12 @@ interface SidebarProps {
   onOpenCommandPalette: () => void;
   onRefreshConversations?: () => void;
   workspaceVersion?: number;
-  onSwitchToV2?: () => void;
+  chats?: ChatItem[];
+  activeChatId?: string | null;
+  onNewChat?: () => void;
+  onOpenChat?: (id: string) => void;
+  onDeleteChat?: (id: string) => void;
+  onRenameChat?: (id: string, title: string) => void;
 }
 
 export function Sidebar({
@@ -39,7 +46,12 @@ export function Sidebar({
   onDeleteConversation,
   onOpenCommandPalette,
   onRefreshConversations,
-  onSwitchToV2
+  chats = [],
+  activeChatId = null,
+  onNewChat,
+  onOpenChat,
+  onDeleteChat,
+  onRenameChat,
 }: SidebarProps) {
   // A phone-width window cannot afford a 260px sidebar next to the content: start collapsed and fold it whenever the
   // window shrinks below that width (the user can still expand it with the toggle).
@@ -422,7 +434,6 @@ export function Sidebar({
         {/* Workspace Switcher Header */}
         <div style={{
           padding: collapsed ? '10px 8px' : '12px 14px',
-          borderBottom: '1px solid hsl(var(--border)/0.6)',
           display: 'flex',
           alignItems: 'center',
           justifyContent: collapsed ? 'center' : 'space-between',
@@ -487,30 +498,15 @@ export function Sidebar({
 
         {/* Assistant V2 Mode Switcher & New Task */}
         <div style={{ padding: '10px 12px 6px', display: 'flex', flexDirection: 'column', gap: '6px' }}>
-          {onSwitchToV2 && (
-            <Tooltip content={t('seSwitchToAssistantV2ModeAether')} position={collapsed ? 'right' : 'top'}>
-              <button
-                type="button"
-                data-testid="sidebar-switch-to-v2"
-                onClick={onSwitchToV2}
-                className="btn btn-ghost"
-                style={{ width: '100%', justifyContent: collapsed ? 'center' : 'flex-start', padding: '7px 8px', fontSize: '13px', gap: '8px' }}
-              >
-                <div style={{ display: 'flex', alignItems: 'center', gap: '7px' }}>
-                  <Sparkles size={15} style={{ color: 'hsl(var(--primary))', flexShrink: 0 }} />
-                  {!collapsed && <span>Orb</span>}
-                </div>
-              </button>
-            </Tooltip>
-          )}
-
-          <Tooltip content={t('newTask')} position={collapsed ? 'right' : 'top'}>
+          <Tooltip content={t('newTask')} position={collapsed ? 'right' : 'top'} disabled={!collapsed}>
             <button
-              className="btn btn-primary"
-              style={{ width: '100%', padding: collapsed ? '8px' : '8px 12px', fontSize: '13px' }}
-              onClick={() => onNewConversation()}
+              type="button"
+              data-testid="sidebar-new-chat"
+              className="sb-new"
+              style={{ justifyContent: collapsed ? 'center' : 'flex-start' }}
+              onClick={() => (onNewChat ? onNewChat() : onNewConversation())}
             >
-              <Plus size={15} />
+              <SquarePen size={17} />
               {!collapsed && <span>{t('newTask')}</span>}
             </button>
           </Tooltip>
@@ -726,6 +722,7 @@ export function Sidebar({
         {/* Compatibility alias elements for E2E tests */}
         <div style={{ display: 'none' }}>
           <button data-testid="nav-work" onClick={() => onNavigate('missions')}>Work</button>
+          <button data-testid="nav-new-team-chat" onClick={() => onNewConversation()}>Team chat</button>
           <button data-testid="nav-deliverables" onClick={() => onNavigate('results')}>Deliverables</button>
           <button data-testid="nav-agents" onClick={() => onNavigate('agents')}>Agents</button>
           <button data-testid="nav-teams" onClick={() => onNavigate('teams')}>Teams</button>
@@ -739,6 +736,9 @@ export function Sidebar({
         </div>
           </div>
 
+          {advancedOpen && !collapsed && (
+            <div className="sb-team" data-testid="sidebar-team-section">
+              <div className="sb-label">{t('chTeamSection')}</div>
           {/* Projects Section */}
           <div ref={projectSectionRef}>
             {!collapsed && (
@@ -1152,39 +1152,37 @@ export function Sidebar({
             </div>
           </div>
 
-          {/* Platform Settings */}
-          <div>
-            {!collapsed && (
-              <div style={{ fontSize: '10px', color: 'hsl(var(--muted-fg))', padding: '2px 8px', fontWeight: 500 }}>
-                {t('platform')}
-              </div>
-            )}
-            <div style={{ display: 'flex', flexDirection: 'column', gap: '2px', marginTop: '2px' }}>
-              <Tooltip content={t('navSettings')} position={collapsed ? 'right' : 'top'} disabled={!collapsed}>
-                <button
-                  data-testid="nav-settings"
-                  className={`btn btn-ghost ${currentView === 'settings' ? 'active' : ''}`}
-                  style={{ width: '100%', justifyContent: collapsed ? 'center' : 'flex-start', padding: '7px 8px', fontSize: '13px' }}
-                  onClick={() => onNavigate('settings')}
-                >
-                  <Settings size={15} />
-                  {!collapsed && <span>{t('navSettings')}</span>}
-                </button>
-              </Tooltip>
-
             </div>
-          </div>
+          )}
+
+          {/* Chats with Aether */}
+          {!collapsed && onOpenChat && (
+            <ChatList chats={chats} activeId={activeChatId} query={searchQuery} onOpen={onOpenChat}
+              onDelete={id => onDeleteChat?.(id)} onRename={(id, title) => onRenameChat?.(id, title)} />
+          )}
         </div>
       </div>
 
-      {/* Bottom Footer: Language & Theme */}
+      {/* Bottom Footer: Settings, Language & Theme */}
+      <div className="sb-settings">
+        <Tooltip content={t('navSettings')} position={collapsed ? 'right' : 'top'} disabled={!collapsed}>
+          <button
+            data-testid="nav-settings"
+            className={`btn btn-ghost ${currentView === 'settings' ? 'active' : ''}`}
+            style={{ width: '100%', justifyContent: collapsed ? 'center' : 'flex-start', padding: '7px 8px' }}
+            onClick={() => onNavigate('settings')}
+          >
+            <Settings size={16} />
+            {!collapsed && <span>{t('navSettings')}</span>}
+          </button>
+        </Tooltip>
+      </div>
       <div style={{
-        padding: '10px',
-        borderTop: '1px solid hsl(var(--border)/0.6)',
+        padding: '6px 10px 10px',
         display: 'flex',
         alignItems: 'center',
         justifyContent: collapsed ? 'center' : 'space-between',
-        backgroundColor: 'hsl(var(--card))'
+        backgroundColor: 'transparent'
       }}>
         {!collapsed ? (
           <>

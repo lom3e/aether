@@ -1,19 +1,15 @@
 import { useState, useEffect, useContext, useRef } from 'react';
-import { translateStepTitle } from './stepTitles';
-import {
-  Send, CheckCircle2, Clock, AlertTriangle, ArrowRight,
-  FileText, Check, X, Shield,
-  Mic, MicOff, Volume2, VolumeX, ExternalLink, Loader2
-} from 'lucide-react';
+import { CalendarDays, FileText, Loader2, Mail, Sparkles } from 'lucide-react';
+import { AssistantMessage, Composer, ConfirmCard, Thinking, UserMessage } from './chat/ChatParts';
+import './home.css';
+import './chat/chat.css';
 import { apiUrl } from './api';
 import { speak } from './voiceOut';
 import { useTranslation } from './i18n';
 import { ToastContext } from './toast';
 import { AutoArchitectModal } from './AutoArchitectModal';
-import './home.css';
 import { FirstRunModel } from './FirstRunModel';
 import { Today } from './Today';
-import { TopHeader } from './TopHeader';
 import { NotificationCenter } from './NotificationCenter';
 import { submitApprovalDecision, approvalToastKind, approvalIsFinished, approvalIsInProgress } from './canonicalNotification';
 
@@ -24,6 +20,9 @@ interface HomeProps {
   onNewTask?: () => void;
   onSelectConversation?: (id: string) => void;
   conversations?: any[];
+  /** The chat to show (null = a new one), chosen in the sidebar; reported back when a new chat gets its id. */
+  sessionId?: string | null;
+  onSessionChange?: (id: string | null) => void;
 }
 
 interface StepItem {
@@ -51,12 +50,17 @@ export function Home({
   navigate,
   workspaceName,
   initialApprovalId,
+  sessionId = null,
+  onSessionChange,
 }: HomeProps) {
   const [promptInput, setPromptInput] = useState('');
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [actionLoading, setActionLoading] = useState<string | null>(null);
   const [currentSessionId, setCurrentSessionId] = useState<string | null>(null);
   const [messages, setMessages] = useState<PersonalMsg[]>([]);
+  const [sessionTitle, setSessionTitle] = useState('');
+  const [undoStates, setUndoStates] = useState<Record<string, 'busy' | 'done'>>({});
+  const scrollRef = useRef<HTMLDivElement>(null);
   const [overview, setOverview] = useState<any>({
     pending_approvals: [],
     recent_activities: [],
@@ -94,6 +98,36 @@ export function Home({
       fetchOverview();
     }
   }, [workspaceName]);
+
+  // The sidebar chooses the chat: load its history, or start empty for a new one.
+  useEffect(() => {
+    if (!sessionId) {
+      setMessages([]);
+      setCurrentSessionId(null);
+      setSessionTitle('');
+      return;
+    }
+    if (sessionId === currentSessionId) return;
+    let cancelled = false;
+    fetch(apiUrl(`/api/personal/sessions/${encodeURIComponent(sessionId)}`))
+      .then(res => (res.ok ? res.json() : null))
+      .then(data => {
+        if (cancelled || !data) return;
+        setCurrentSessionId(sessionId);
+        setSessionTitle(data.title || '');
+        setMessages(Array.isArray(data.messages) ? data.messages.map((m: any) => ({ ...m, steps: m.steps || [] })) : []);
+        setUndoStates({});
+      })
+      .catch(() => undefined);
+    return () => { cancelled = true; };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [sessionId]);
+
+  // Follow the conversation: the newest message (or "thinking") stays in view.
+  useEffect(() => {
+    const el = scrollRef.current;
+    if (el) el.scrollTo({ top: el.scrollHeight, behavior: messages.length > 2 ? 'smooth' : 'auto' });
+  }, [messages.length, isSubmitting]);
 
   // Deep-link auto-scroll and focus for pending approvals
   useEffect(() => {
@@ -191,7 +225,7 @@ export function Home({
       const rec = new SpeechRecognition();
       rec.continuous = false;
       rec.interimResults = true;
-      rec.lang = 'en-US';
+      rec.lang = language === 'it' ? 'it-IT' : 'en-US'; // dictation in the interface language
 
       rec.onresult = (event: any) => {
         let transcript = '';
@@ -213,7 +247,7 @@ export function Home({
 
       recognitionRef.current = rec;
     }
-  }, []);
+  }, [language]);
 
   const toggleListening = () => {
     if (!recognitionRef.current) {
@@ -289,8 +323,12 @@ export function Home({
 
       if (res.ok) {
         const data = await res.json();
+        if (data.session_id && data.session_id !== currentSessionId) {
+          setSessionTitle(text.slice(0, 60));
+          onSessionChange?.(data.session_id);
+        }
         setCurrentSessionId(data.session_id);
-        setMessages(prev => [...prev, data]);
+        setMessages(prev => [...prev, { ...data, steps: data.steps || [] }]);
         fetchOverview();
       } else {
         const errData = await res.json().catch(() => ({}));
@@ -299,7 +337,7 @@ export function Home({
         setMessages(prev => [...prev, {
           id: `err-${Date.now()}`,
           role: 'assistant',
-          content: `⚠️ **Request failed:** ${errMsg}`,
+          content: `${t('chRequestFailed')} ${errMsg}`,
           tier: 'answer',
           steps: [{
             id: `step-err-${Date.now()}`,
@@ -318,7 +356,7 @@ export function Home({
       setMessages(prev => [...prev, {
         id: `err-${Date.now()}`,
         role: 'assistant',
-        content: `⚠️ **Network error:** ${errMsg}`,
+        content: `${t('chNetworkFailed')} ${errMsg}`,
         tier: 'answer',
         steps: [{
           id: `step-err-${Date.now()}`,
@@ -561,523 +599,194 @@ export function Home({
     }
   };
 
+  const handleUndo = async (msg: PersonalMsg) => {
+    const exId = msg.metadata?.undo_execution_id;
+    if (!exId || undoStates[msg.id]) return;
+    setUndoStates(prev => ({ ...prev, [msg.id]: 'busy' }));
+    try {
+      const res = await fetch(apiUrl(`/api/undo/${encodeURIComponent(exId)}`), { method: 'POST' });
+      if (res.ok) {
+        setUndoStates(prev => ({ ...prev, [msg.id]: 'done' }));
+        showToast(t('chUndoneToast'), 'success');
+        fetchOverview();
+      } else {
+        const err = await res.json().catch(() => ({}));
+        const code = err?.detail?.code;
+        setUndoStates(prev => { const n = { ...prev }; delete n[msg.id]; return n; });
+        showToast(code === 'changed_since' ? t('chUndoChanged') : code === 'already_undone' ? t('chUndoAlready') : t('chUndoFailed'), 'error');
+      }
+    } catch {
+      setUndoStates(prev => { const n = { ...prev }; delete n[msg.id]; return n; });
+      showToast(t('chUndoFailed'), 'error');
+    }
+  };
+
   // The personal space is created by the runtime at launch; until it is there App shows the calm "getting ready" notice.
   if (!workspaceName) return null;
 
+  const hasChat = messages.length > 0;
+  const needsAnswer = (msg: PersonalMsg) => msg.steps.some(s => s.status === 'pending_approval' || s.status === 'waiting_approval');
+  const composer = (
+    <Composer
+      value={promptInput}
+      onChange={setPromptInput}
+      onSend={() => handleSendPrompt(promptInput)}
+      onMic={toggleListening}
+      listening={isListening}
+      busy={isSubmitting}
+      placeholder={isListening ? t('homeUiListeningSpeakClearly') : t('chPlaceholder')}
+      t={t}
+      autoFocus
+    />
+  );
+
   return (
-    <div style={{ display: 'flex', flexDirection: 'column', width: '100%', minHeight: '100%' }}>
-      <TopHeader
-        title={workspaceName || 'Aether'}
-        actions={<NotificationCenter workspaceName={workspaceName} onNavigate={navigate} />}
-      />
-      <div style={{ padding: '32px 28px 64px 28px', maxWidth: '1080px', margin: '0 auto', width: '100%', boxSizing: 'border-box' }}>
-        {/* Greeting + one composer. Everything else lives in the rail and the command palette. */}
-        <div className="home-hero">
-          <h1 className="home-greeting">{t('homeUiWhatDoYouNeedToday')}</h1>
-          {overview.pending_approvals?.length > 0 && (
-            <button type="button" className="home-quiet" onClick={() => navigate('home')} data-testid="home-approvals-hint">
-              {overview.pending_approvals.length} {t('homeUiNeedsApproval')}
-            </button>
-          )}
-        </div>
+    <div className="ch-shell">
+      <header className="ch-top" data-testid="top-header">
+        {hasChat ? <h2 className="ch-top-title">{sessionTitle || t('chUntitled')}</h2> : <span />}
+        <NotificationCenter workspaceName={workspaceName} onNavigate={navigate} />
+      </header>
 
-        <FirstRunModel />
+      <div className="ch-scroll" ref={scrollRef}>
+        {!hasChat ? (
+          <div className="ch-empty">
+            <div className="ch-hello">
+              <div className="ch-orb" aria-hidden />
+              <h1 className="ch-greeting">{t('homeUiWhatDoYouNeedToday')}</h1>
+              {overview.pending_approvals?.length > 0 && (
+                <button type="button" className="ch-quiet" onClick={() => document.getElementById('ch-approvals')?.scrollIntoView({ behavior: 'smooth' })} data-testid="home-approvals-hint">
+                  {overview.pending_approvals.length} {t('homeUiNeedsApproval')}
+                </button>
+              )}
+            </div>
 
-        <div className="home-composer" data-listening={isListening ? 'true' : 'false'}>
-          <textarea
-            data-testid="companion-input-field"
-            rows={2}
-            placeholder={isListening ? t('homeUiListeningSpeakClearly') : t('homeUiWhatWouldYouLikeAetherTo')}
-            value={promptInput}
-            onChange={e => setPromptInput(e.target.value)}
-            onKeyDown={e => {
-              if (e.key === 'Enter' && !e.shiftKey) {
-                e.preventDefault();
-                handleSendPrompt(promptInput);
-              }
-            }}
-          />
-          <div className="home-composer-tools">
-            <button
-              type="button"
-              data-testid="voice-mic-btn"
-              onClick={toggleListening}
-              title={isListening ? t('homeUiStopListening') : t('homeUiVoiceInputClickToSpeak')}
-              aria-label={isListening ? t('homeUiStopListening') : t('homeUiVoiceInputClickToSpeak')}
-              className="home-icon-btn"
-            >
-              {isListening ? <MicOff size={17} /> : <Mic size={17} />}
-            </button>
-            <button
-              data-testid="companion-submit-btn"
-              className="home-send"
-              disabled={!promptInput.trim() || isSubmitting}
-              onClick={() => handleSendPrompt(promptInput)}
-              aria-label={isSubmitting ? t('homeUiProcessing') : t('homeUiTakeCareOfIt')}
-              title={isSubmitting ? t('homeUiProcessing') : t('homeUiTakeCareOfIt')}
-            >
-              <Send size={16} />
-            </button>
-          </div>
-        </div>
+            <FirstRunModel />
+            {composer}
 
-        <div className="home-suggestions">
-          <button type="button" onClick={() => handleSendPrompt(t('homeUiAetherGiveMeAStatusUpdate'))}>{t('homeUiAetherHandleIt')}</button>
-          <button type="button" onClick={() => handleSendPrompt(t('homeUiCheckMyCalendarAppointmentsForTomorrow'))}>{t('homeUiCheckSchedule')}</button>
-          <button type="button" onClick={() => handleSendPrompt(t('homeUiCreateADocumentWithTheProject'))}>{t('homeUiCreateDocument')}</button>
-        </div>
+            <div className="ch-suggest">
+              <button type="button" onClick={() => handleSendPrompt(t('homeUiCheckMyCalendarAppointmentsForTomorrow'))}><CalendarDays size={15} />{t('homeUiCheckSchedule')}</button>
+              <button type="button" onClick={() => handleSendPrompt(t('chSuggestMailPrompt'))}><Mail size={15} />{t('chSuggestMail')}</button>
+              <button type="button" onClick={() => handleSendPrompt(t('homeUiCreateADocumentWithTheProject'))}><FileText size={15} />{t('homeUiCreateDocument')}</button>
+              <button type="button" onClick={() => handleSendPrompt(t('homeUiAetherGiveMeAStatusUpdate'))}><Sparkles size={15} />{t('homeUiAetherHandleIt')}</button>
+            </div>
 
-        <Today navigate={navigate} />
+            <Today navigate={navigate} />
 
-        {/* Live Conversation Stream (if any) */}
-        {messages.length > 0 && (
-          <div data-testid="companion-messages-container" style={{ display: 'flex', flexDirection: 'column', gap: '16px', marginBottom: '32px' }}>
-            {messages.map(msg => (
-              <div
-                key={msg.id}
-                className="card"
-                style={{
-                  padding: '18px 22px',
-                  borderRadius: '14px',
-                  backgroundColor: msg.role === 'user' ? 'hsl(var(--muted)/0.3)' : 'hsl(var(--card))',
-                  border: msg.role === 'user' ? '1px solid hsl(var(--border))' : '1px solid hsl(var(--primary)/0.25)',
-                }}
-              >
-                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '8px' }}>
-                  <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-                    <span style={{ fontWeight: 600, fontSize: '13px', color: msg.role === 'user' ? 'hsl(var(--fg))' : 'hsl(var(--primary))' }}>
-                      {msg.role === 'user' ? t('homeUiYou') : 'Aether'}
-                    </span>
-                    <span style={{ fontSize: '11px', color: 'hsl(var(--muted-fg))' }}>
-                      {msg.created_at ? new Date(msg.created_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : ''}
-                    </span>
-                  </div>
+            {overview.pending_approvals && overview.pending_approvals.length > 0 && (
+              <section className="ch-section" id="ch-approvals" data-testid="needs-attention-section">
+                <h2>{t('chWaitingForYou', { count: overview.pending_approvals.length })}</h2>
+                <div className="ch-list">
+                  {overview.pending_approvals.map((appr: any) => {
+                    const isLoading = actionLoading === appr.execution_id;
+                    const details = appr.action_id === 'email.send' ? `${appr.input_data?.to || ''} · ${appr.input_data?.subject || ''}`
+                      : appr.action_id === 'slack.send_message' ? `${appr.input_data?.channel || '#general'} · ${appr.input_data?.text || ''}`
+                      : appr.action_id === 'github.create_issue' ? `${appr.input_data?.owner ? `${appr.input_data.owner}/` : ''}${appr.input_data?.repository || ''} · ${appr.input_data?.title || ''}`
+                      : appr.input_data?.when || appr.input_data?.start_time || '';
+                    return (
+                      <div key={appr.execution_id} id={`approval-card-${appr.execution_id}`} className="ch-item" data-targeted={initialApprovalId === appr.execution_id ? 'true' : undefined}>
+                        <span className="ch-item-main"><b>{appr.human_summary || appr.action_name}</b>{details && <small>{details}</small>}</span>
+                        <span className="ch-item-actions">
+                          <button type="button" className="ch-btn ghost" disabled={isLoading} onClick={() => handleRejectAction(appr.execution_id)}>{t('reject')}</button>
+                          <button type="button" className="ch-btn primary" disabled={isLoading} onClick={() => handleApproveAction(appr.execution_id)}>
+                            {isLoading && <Loader2 size={14} className="ch-spin" />}{isLoading ? t('homeUiApproving') : t('approve')}
+                          </button>
+                        </span>
+                      </div>
+                    );
+                  })}
+                </div>
+              </section>
+            )}
 
-                  {msg.role === 'assistant' && (
-                    <button
-                      type="button"
-                      onClick={() => handleSpeakText(msg.id, msg.content)}
-                      title={isSpeaking && speakingMessageId === msg.id ? t('homeUiStopAudio') : t('homeUiReadAloud')}
-                      className="btn btn-ghost"
-                      style={{ padding: '4px', height: 'auto', color: 'hsl(var(--muted-fg))' }}
-                    >
-                      {isSpeaking && speakingMessageId === msg.id ? <VolumeX size={15} color="hsl(var(--primary))" /> : <Volume2 size={15} />}
+            {((overview.background_tasks?.length || 0) + (overview.active_works?.length || 0)) > 0 && (
+              <section className="ch-section" data-testid="background-tasks-section">
+                <h2>{t('homeWorkInProgress')} <button type="button" className="ch-link" onClick={() => navigate('missions')}>{t('homeUiViewAllJobs')}</button></h2>
+                <div className="ch-list">
+                  {overview.background_tasks?.map((task: any) => (
+                    <div key={task.id} className="ch-item" data-testid="background-task-card">
+                      <span className="ch-item-main">
+                        <b>{task.title || t('homeUiBackgroundOperation')}</b>
+                        <small>{task.status === 'completed' ? t('homeUiCompleted') : task.status === 'running' ? (task.current_step || t('homeUiRunning')) : task.status}</small>
+                        <span className="ch-bar"><i style={{ width: `${task.progress_pct || (task.status === 'completed' ? 100 : 25)}%` }} /></span>
+                      </span>
+                      {task.deliverable_path && <button type="button" className="ch-link" onClick={() => navigate('missions')}>{t('homeViewDocument')}</button>}
+                    </div>
+                  ))}
+                  {overview.active_works?.map((w: any) => (
+                    <div key={w.id || w.title} className="ch-item">
+                      <span className="ch-item-main"><b>{w.title || w.goal}</b><small>{w.status}</small></span>
+                    </div>
+                  ))}
+                </div>
+              </section>
+            )}
+
+            {overview.recent_deliverables && overview.recent_deliverables.length > 0 && (
+              <section className="ch-section">
+                <h2>{t('chRecentDocs')} <button type="button" className="ch-link" onClick={() => navigate('results')}>{t('homeUiOpenInResults')}</button></h2>
+                <div className="ch-list">
+                  {overview.recent_deliverables.slice(0, 5).map((d: any) => (
+                    <button type="button" key={d.id || d.file_path} className="ch-item" style={{ background: 'none', border: 0, font: 'inherit', textAlign: 'left', cursor: 'pointer', color: 'inherit' }} onClick={() => navigate('results')}>
+                      <FileText size={16} color="hsl(var(--muted-fg))" />
+                      <span className="ch-item-main"><b>{d.title || d.name}</b>{d.summary && <small>{d.summary}</small>}</span>
                     </button>
-                  )}
+                  ))}
                 </div>
-
-                {/* Steps Stepper */}
-                {msg.steps && msg.steps.length > 0 && (
-                  <div style={{ display: 'flex', flexDirection: 'column', gap: '6px', margin: '10px 0 14px', padding: '10px 14px', backgroundColor: 'hsl(var(--muted)/0.2)', borderRadius: '8px' }}>
-                    {msg.steps.map(st => (
-                      <div key={st.id} style={{ display: 'flex', alignItems: 'center', gap: '8px', fontSize: '12px' }}>
-                        {st.status === 'completed' ? (
-                          <CheckCircle2 size={14} color="#10b981" />
-                        ) : (st.status === 'pending_approval' || st.status === 'waiting_approval') ? (
-                          <AlertTriangle size={14} color="#f59e0b" />
-                        ) : (
-                          <Clock size={14} color="hsl(var(--primary))" />
-                        )}
-                        <span style={{ fontWeight: 500, color: (st.status === 'pending_approval' || st.status === 'waiting_approval') ? '#f59e0b' : 'hsl(var(--fg))' }}>
-                          {translateStepTitle(st.title, t)}
-                        </span>
-                      </div>
-                    ))}
-                  </div>
+              </section>
+            )}
+          </div>
+        ) : (
+          <div className="ch-column" data-testid="companion-messages-container">
+            {messages.map(msg => msg.role === 'user' ? <UserMessage key={msg.id} msg={msg} /> : (
+              <AssistantMessage
+                key={msg.id}
+                msg={msg}
+                t={t}
+                notify={showToast}
+                speaking={isSpeaking && speakingMessageId === msg.id}
+                onSpeak={() => handleSpeakText(msg.id, msg.content)}
+                onUndo={() => handleUndo(msg)}
+                undoState={undoStates[msg.id] || 'idle'}
+              >
+                {msg.action_execution_id && needsAnswer(msg) && (
+                  <ConfirmCard title={t('homeUiConfirmationRequired')} busy={actionLoading === msg.action_execution_id}
+                    onConfirm={() => handleApproveAction(msg.action_execution_id!)} onDecline={() => handleRejectAction(msg.action_execution_id!)}
+                    confirmLabel={actionLoading === msg.action_execution_id ? t('homeUiApproving') : t('approve')} declineLabel={t('reject')} />
                 )}
-
-                <div style={{ fontSize: '14px', lineHeight: 1.6, color: 'hsl(var(--fg))', whiteSpace: 'pre-wrap' }}>
-                  {msg.content}
-                </div>
-                {msg.role === 'assistant' && msg.metadata?.model && (
-                  <div data-testid="answer-model" style={{ marginTop: '6px', fontSize: '11px', color: 'hsl(var(--muted-fg))' }}>
-                    {msg.metadata.provider ? `${msg.metadata.provider} · ` : ''}{msg.metadata.model}
-                  </div>
-                )}
-
-                {/* Pending Approval Action Card in Message */}
-                {msg.action_execution_id && msg.steps.some(s => s.status === 'pending_approval' || s.status === 'waiting_approval') && (
-                  <div style={{ marginTop: '14px', padding: '12px 16px', borderRadius: '10px', backgroundColor: '#f59e0b10', border: '1px solid #f59e0b40', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                    <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-                      <Shield size={16} color="#f59e0b" />
-                      <span style={{ fontSize: '13px', fontWeight: 600, color: '#f59e0b' }}>{t('homeUiConfirmationRequired')}</span>
-                    </div>
-                    <div style={{ display: 'flex', gap: '8px' }}>
-                      <button
-                        className="btn btn-ghost"
-                        disabled={actionLoading === msg.action_execution_id}
-                        onClick={() => handleRejectAction(msg.action_execution_id!)}
-                        style={{
-                          fontSize: '12px',
-                          padding: '4px 10px',
-                          color: 'hsl(var(--destructive))',
-                          opacity: actionLoading === msg.action_execution_id ? 0.6 : 1,
-                        }}
-                      >
-                        <X size={13} style={{ marginRight: '4px' }} /> {t('reject')}
-                      </button>
-                      <button
-                        className="btn btn-primary"
-                        disabled={actionLoading === msg.action_execution_id}
-                        onClick={() => handleApproveAction(msg.action_execution_id!)}
-                        style={{
-                          fontSize: '12px',
-                          padding: '4px 14px',
-                          backgroundColor: '#10b981',
-                          borderColor: '#10b981',
-                          opacity: actionLoading === msg.action_execution_id ? 0.6 : 1,
-                        }}
-                      >
-                        {actionLoading === msg.action_execution_id ? (
-                          <Loader2 size={13} className="animate-spin" style={{ marginRight: '4px' }} />
-                        ) : (
-                          <Check size={13} style={{ marginRight: '4px' }} />
-                        )}
-                        {actionLoading === msg.action_execution_id ? t('homeUiApproving') : t('approve')}
-                      </button>
-                    </div>
-                  </div>
-                )}
-
-                {/* Proposal waiting for the user's answer: the answer resumes the same request */}
                 {msg.metadata?.proposal_id && msg.metadata?.status === 'proposal_pending' && msg.metadata?.proposal?.status === 'needs_clarification' && (
-                  <div data-testid="proposal-clarification" style={{ marginTop: '14px', padding: '12px 16px', borderRadius: '10px', backgroundColor: '#f59e0b10', border: '1px solid #f59e0b40' }}>
-                    <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '8px' }}>
-                      <Shield size={16} color="#f59e0b" />
-                      <span style={{ fontSize: '13px', fontWeight: 600, color: '#f59e0b' }}>{t('homeUiClarificationNeeded')}</span>
-                    </div>
-                    <ul style={{ margin: '0 0 10px 18px', fontSize: '13px', color: 'hsl(var(--fg))' }}>
-                      {(msg.metadata.proposal.clarification_requirements || []).map((c: any, i: number) => (
-                        <li key={i}>{c.question || c.context_key}</li>
-                      ))}
-                    </ul>
-                    <div style={{ display: 'flex', gap: '8px' }}>
-                      <input
-                        className="input"
-                        style={{ flex: 1, fontSize: '13px' }}
-                        placeholder={t('homeUiClarificationPlaceholder')}
-                        value={clarifyDrafts[msg.metadata.proposal_id] || ''}
-                        onChange={(e) => setClarifyDrafts(prev => ({ ...prev, [msg.metadata!.proposal_id]: e.target.value }))}
-                        onKeyDown={(e) => { if (e.key === 'Enter') handleClarifyProposal(msg.metadata!.proposal_id, msg.session_id); }}
-                      />
-                      <button
-                        className="btn btn-ghost"
-                        disabled={actionLoading === msg.metadata.proposal_id}
-                        onClick={() => handleRejectProposal(msg.metadata!.proposal_id)}
-                        style={{ fontSize: '12px', padding: '4px 10px', color: 'hsl(var(--destructive))' }}
-                      >
-                        <X size={13} style={{ marginRight: '4px' }} /> {t('reject')}
-                      </button>
-                      <button
-                        className="btn btn-primary"
-                        disabled={actionLoading === msg.metadata.proposal_id || !(clarifyDrafts[msg.metadata.proposal_id] || '').trim()}
-                        onClick={() => handleClarifyProposal(msg.metadata!.proposal_id, msg.session_id)}
-                        style={{ fontSize: '12px', padding: '4px 14px' }}
-                      >
-                        {t('homeUiClarificationSend')}
-                      </button>
-                    </div>
-                  </div>
+                  <ConfirmCard testId="proposal-clarification" title={t('homeUiClarificationNeeded')} busy={actionLoading === msg.metadata.proposal_id}
+                    onConfirm={() => handleClarifyProposal(msg.metadata!.proposal_id, msg.session_id)} onDecline={() => handleRejectProposal(msg.metadata!.proposal_id)}
+                    confirmLabel={t('homeUiClarificationSend')} declineLabel={t('reject')}>
+                    <ul>{(msg.metadata.proposal.clarification_requirements || []).map((c: any, i: number) => <li key={i}>{c.question || c.context_key}</li>)}</ul>
+                    <input placeholder={t('homeUiClarificationPlaceholder')} aria-label={t('homeUiClarificationPlaceholder')} value={clarifyDrafts[msg.metadata.proposal_id] || ''}
+                      onChange={e => setClarifyDrafts(prev => ({ ...prev, [msg.metadata!.proposal_id]: e.target.value }))}
+                      onKeyDown={e => { if (e.key === 'Enter') handleClarifyProposal(msg.metadata!.proposal_id, msg.session_id); }} />
+                  </ConfirmCard>
                 )}
-
-                {/* Pending Proposal Acceptance Card in Message */}
                 {msg.metadata?.proposal_id && msg.metadata?.proposal?.status !== 'needs_clarification' && (msg.metadata?.status === 'proposal_pending' || msg.steps.some(s => s.status === 'waiting_acceptance')) && (
-                  <div style={{ marginTop: '14px', padding: '12px 16px', borderRadius: '10px', backgroundColor: '#f59e0b10', border: '1px solid #f59e0b40', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                    <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-                      <Shield size={16} color="#f59e0b" />
-                      <span style={{ fontSize: '13px', fontWeight: 600, color: '#f59e0b' }}>{t('homeUiConfirmationRequired')}</span>
-                    </div>
-                    <div style={{ display: 'flex', gap: '8px' }}>
-                      <button
-                        className="btn btn-ghost"
-                        disabled={actionLoading === msg.metadata!.proposal_id}
-                        onClick={() => handleRejectProposal(msg.metadata!.proposal_id)}
-                        style={{
-                          fontSize: '12px',
-                          padding: '4px 10px',
-                          color: 'hsl(var(--destructive))',
-                          opacity: actionLoading === msg.metadata!.proposal_id ? 0.6 : 1,
-                        }}
-                      >
-                        <X size={13} style={{ marginRight: '4px' }} /> {t('reject')}
-                      </button>
-                      <button
-                        className="btn btn-primary"
-                        disabled={actionLoading === msg.metadata!.proposal_id}
-                        onClick={() => handleApproveProposal(msg.metadata!.proposal_id)}
-                        style={{
-                          fontSize: '12px',
-                          padding: '4px 14px',
-                          backgroundColor: '#10b981',
-                          borderColor: '#10b981',
-                          opacity: actionLoading === msg.metadata!.proposal_id ? 0.6 : 1,
-                        }}
-                      >
-                        {actionLoading === msg.metadata!.proposal_id ? (
-                          <Loader2 size={13} className="animate-spin" style={{ marginRight: '4px' }} />
-                        ) : (
-                          <Check size={13} style={{ marginRight: '4px' }} />
-                        )}
-                        {actionLoading === msg.metadata!.proposal_id ? t('homeUiApproving') : t('approve')}
-                      </button>
-                    </div>
-                  </div>
+                  <ConfirmCard title={t('homeUiConfirmationRequired')} busy={actionLoading === msg.metadata.proposal_id}
+                    onConfirm={() => handleApproveProposal(msg.metadata!.proposal_id)} onDecline={() => handleRejectProposal(msg.metadata!.proposal_id)}
+                    confirmLabel={actionLoading === msg.metadata.proposal_id ? t('homeUiApproving') : t('approve')} declineLabel={t('reject')} />
                 )}
-              </div>
+              </AssistantMessage>
             ))}
+            {isSubmitting && <Thinking t={t} />}
           </div>
-        )}
-
-        {/* 2. IN ATTESA DI APPROVAZIONE (SE PRESENTI) */}
-        {overview.pending_approvals && overview.pending_approvals.length > 0 && (
-          <div data-testid="needs-attention-section" style={{ marginBottom: '28px' }}>
-            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '12px' }}>
-              <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-                <Shield size={18} color="#f59e0b" />
-                <h2 style={{ fontSize: '16px', fontWeight: 700, margin: 0, color: 'hsl(var(--fg))' }}>
-                  In attesa di approvazione ({overview.pending_approvals.length})
-                </h2>
-              </div>
-              <span style={{ fontSize: '12px', color: '#f59e0b', fontWeight: 500 }}>
-                {t('homeUiOperationsPausedWaitingForYourConfirmation')}
-              </span>
-            </div>
-            <div style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
-              {overview.pending_approvals.map((appr: any) => {
-                const isTargeted = initialApprovalId === appr.execution_id;
-                const isLoading = actionLoading === appr.execution_id;
-                return (
-                  <div
-                    key={appr.execution_id}
-                    id={`approval-card-${appr.execution_id}`}
-                    className="card"
-                    style={{
-                      padding: '16px 20px',
-                      borderRadius: '12px',
-                      border: isTargeted ? '2px solid #f59e0b' : '1px solid #f59e0b50',
-                      boxShadow: isTargeted ? '0 0 16px rgba(245, 158, 11, 0.3)' : '0 2px 8px rgba(0,0,0,0.04)',
-                      backgroundColor: isTargeted ? '#f59e0b14' : '#f59e0b08',
-                      display: 'flex',
-                      justifyContent: 'space-between',
-                      alignItems: 'center',
-                      transition: 'all 0.3s ease',
-                    }}
-                  >
-                    <div style={{ flex: 1, marginRight: '16px' }}>
-                      <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-                        <span style={{ fontSize: '10px', fontWeight: 700, padding: '2px 7px', borderRadius: '4px', backgroundColor: '#f59e0b20', color: '#f59e0b', textTransform: 'uppercase', letterSpacing: '0.04em' }}>
-                          {t('homeUiConfirmationRequired')}
-                        </span>
-                        <span style={{ fontWeight: 600, fontSize: '14.5px' }}>{appr.human_summary || appr.action_name}</span>
-                      </div>
-                      {appr.action_id === 'email.send' && (
-                        <div style={{ fontSize: '12.5px', color: 'hsl(var(--fg)/0.85)', marginTop: '6px', padding: '8px 12px', backgroundColor: 'hsl(var(--muted)/0.3)', borderRadius: '6px' }}>
-                          <div><strong>A:</strong> {appr.input_data?.to}</div>
-                          <div><strong>{t('homeUiSubjectLabel')}</strong> {appr.input_data?.subject}</div>
-                          {appr.input_data?.body && <div style={{ marginTop: '4px', whiteSpace: 'pre-wrap', color: 'hsl(var(--muted-fg))' }}>{appr.input_data.body}</div>}
-                        </div>
-                      )}
-                      {appr.action_id === 'github.create_issue' && (
-                        <div style={{ fontSize: '12.5px', color: 'hsl(var(--fg)/0.85)', marginTop: '6px', padding: '8px 12px', backgroundColor: 'hsl(var(--muted)/0.3)', borderRadius: '6px' }}>
-                          <div><strong>Repository:</strong> {appr.input_data?.owner ? `${appr.input_data.owner}/${appr.input_data.repository}` : (appr.input_data?.repository || 'repository')}</div>
-                          <div><strong>{t('homeUiTitleLabel')}</strong> {appr.input_data?.title}</div>
-                          {appr.input_data?.body && <div style={{ marginTop: '4px', whiteSpace: 'pre-wrap', color: 'hsl(var(--muted-fg))' }}>{appr.input_data.body}</div>}
-                        </div>
-                      )}
-                      {appr.action_id === 'slack.send_message' && (
-                        <div style={{ fontSize: '12.5px', color: 'hsl(var(--fg)/0.85)', marginTop: '6px', padding: '8px 12px', backgroundColor: 'hsl(var(--muted)/0.3)', borderRadius: '6px' }}>
-                          <div><strong>{t('homeUiChannelLabel')}</strong> {appr.input_data?.channel || '#general'}</div>
-                          {appr.input_data?.text && <div style={{ marginTop: '4px', whiteSpace: 'pre-wrap', color: 'hsl(var(--muted-fg))' }}>{appr.input_data.text}</div>}
-                        </div>
-                      )}
-                      {appr.action_id === 'calendar.create_event' && (
-                        <div style={{ fontSize: '12.5px', color: 'hsl(var(--muted-fg))', marginTop: '4px' }}>
-                          {appr.input_data?.start_time ? `${t('homeUiTimeLabel')} ${appr.input_data.start_time}` : ''} {appr.input_data?.location ? `• ${t('homeUiLocationLabel')} ${appr.input_data.location}` : ''}
-                        </div>
-                      )}
-                    </div>
-                    <div style={{ display: 'flex', gap: '8px', alignItems: 'center' }}>
-                      <button
-                        className="btn btn-ghost"
-                        disabled={isLoading}
-                        onClick={() => handleRejectAction(appr.execution_id)}
-                        style={{ fontSize: '12px', padding: '6px 12px', color: 'hsl(var(--destructive))', opacity: isLoading ? 0.6 : 1 }}
-                      >
-                        {t('reject')}
-                      </button>
-                      <button
-                        className="btn btn-primary"
-                        disabled={isLoading}
-                        onClick={() => handleApproveAction(appr.execution_id)}
-                        style={{
-                          fontSize: '12px',
-                          padding: '6px 16px',
-                          backgroundColor: '#10b981',
-                          borderColor: '#10b981',
-                          display: 'flex',
-                          alignItems: 'center',
-                          gap: '6px',
-                          opacity: isLoading ? 0.6 : 1,
-                        }}
-                      >
-                        {isLoading && <Loader2 size={13} className="animate-spin" />}
-                        {isLoading ? t('homeUiApproving') : t('approve')}
-                      </button>
-                    </div>
-                  </div>
-                );
-              })}
-            </div>
-          </div>
-        )}
-
-        {/* 3. LAVORI IN CORSO */}
-        {((overview.background_tasks && overview.background_tasks.length > 0) || (overview.active_works && overview.active_works.length > 0)) && (
-          <div data-testid="background-tasks-section" style={{ marginBottom: '28px' }}>
-            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '12px' }}>
-              <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-                <Clock size={16} className="text-primary" />
-                <h2 style={{ fontSize: '16px', fontWeight: 700, margin: 0, color: 'hsl(var(--fg))' }}>
-                  {t('homeWorkInProgress')} ({(overview.background_tasks?.length || 0) + (overview.active_works?.length || 0)})
-                </h2>
-              </div>
-              <button
-                className="btn btn-ghost"
-                onClick={() => navigate('missions')}
-                style={{ fontSize: '12px', padding: '2px 8px', color: 'hsl(var(--primary))' }}
-              >
-                {t('homeUiViewAllJobs')}
-              </button>
-            </div>
-            <div style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
-              {overview.background_tasks?.map((task: any) => (
-                <div
-                  key={task.id}
-                  className="card"
-                  data-testid="background-task-card"
-                  style={{
-                    padding: '16px 20px',
-                    borderRadius: '12px',
-                    border: '1px solid hsl(var(--border))',
-                    display: 'flex',
-                    flexDirection: 'column',
-                    gap: '8px',
-                  }}
-                >
-                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                    <div>
-                      <span style={{ fontWeight: 600, fontSize: '14px' }}>{task.title || t('homeUiBackgroundOperation')}</span>
-                      <div style={{ fontSize: '12px', color: 'hsl(var(--muted-fg))', marginTop: '2px' }}>
-                        {task.current_step || task.status}
-                      </div>
-                    </div>
-                    <span
-                      className={`badge ${task.status === 'completed' ? 'badge-success' : task.status === 'running' ? 'badge-primary' : 'badge-warning'}`}
-                      style={{ fontSize: '11px', textTransform: 'capitalize' }}
-                    >
-                      {task.status === 'completed' ? t('homeUiCompleted') : task.status === 'running' ? t('homeUiRunning') : task.status}
-                    </span>
-                  </div>
-
-                  {/* Progress Bar */}
-                  <div style={{ width: '100%', height: '6px', borderRadius: '3px', backgroundColor: 'hsl(var(--muted))', overflow: 'hidden' }}>
-                    <div
-                      style={{
-                        width: `${task.progress_pct || (task.status === 'completed' ? 100 : 25)}%`,
-                        height: '100%',
-                        backgroundColor: task.status === 'completed' ? '#10b981' : 'hsl(var(--primary))',
-                        transition: 'width 0.4s ease',
-                      }}
-                    />
-                  </div>
-
-                  {task.deliverable_path && (
-                    <div style={{ display: 'flex', justifyContent: 'flex-end', marginTop: '4px' }}>
-                      <button
-                        className="btn btn-ghost"
-                        onClick={() => navigate('missions')}
-                        style={{ fontSize: '12px', padding: '4px 8px', color: 'hsl(var(--primary))', display: 'inline-flex', alignItems: 'center', gap: '4px' }}
-                      >
-                        <ExternalLink size={12} /> {t('homeViewDocument')}
-                      </button>
-                    </div>
-                  )}
-                </div>
-              ))}
-            </div>
-          </div>
-        )}
-
-        {/* 4. RISULTATI E DOCUMENTI RECENTI */}
-        {overview.recent_deliverables && overview.recent_deliverables.length > 0 && (
-          <div style={{ marginBottom: '28px' }}>
-            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '12px' }}>
-              <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-                <FileText size={16} className="text-primary" />
-                <h2 style={{ fontSize: '16px', fontWeight: 700, margin: 0, color: 'hsl(var(--fg))' }}>
-                  Risultati e documenti recenti ({overview.recent_deliverables.length})
-                </h2>
-              </div>
-              <button
-                className="btn btn-ghost"
-                onClick={() => navigate('results')}
-                style={{ fontSize: '12px', padding: '2px 8px', color: 'hsl(var(--primary))' }}
-              >
-                {t('homeUiOpenInResults')}
-              </button>
-            </div>
-            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(min(280px, 100%), 1fr))', gap: '12px' }}>
-              {overview.recent_deliverables.map((deliv: any) => (
-                <div
-                  key={deliv.id || deliv.file_path}
-                  className="card"
-                  onClick={() => navigate('results')}
-                  style={{
-                    padding: '14px 16px',
-                    borderRadius: '10px',
-                    border: '1px solid hsl(var(--border))',
-                    cursor: 'pointer',
-                    display: 'flex',
-                    flexDirection: 'column',
-                    gap: '6px',
-                    transition: 'border-color 0.15s ease',
-                  }}
-                >
-                  <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
-                    <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-                      <FileText size={15} color="hsl(var(--primary))" />
-                      <span style={{ fontSize: '13.5px', fontWeight: 600 }}>{deliv.title || deliv.name}</span>
-                    </div>
-                    <span className="badge" style={{ fontSize: '10px', textTransform: 'uppercase' }}>
-                      {deliv.file_type || 'documento'}
-                    </span>
-                  </div>
-                  {deliv.summary && (
-                    <p style={{ margin: 0, fontSize: '12px', color: 'hsl(var(--muted-fg))', lineHeight: 1.4 }}>
-                      {deliv.summary}
-                    </p>
-                  )}
-                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginTop: '4px', fontSize: '11px', color: 'hsl(var(--muted-fg))' }}>
-                    <span>{deliv.created_at ? new Date(deliv.created_at).toLocaleDateString([], { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' }) : ''}</span>
-                    <span style={{ color: 'hsl(var(--primary))', display: 'inline-flex', alignItems: 'center', gap: '3px' }}>
-                      {t('syViewResult')} <ArrowRight size={10} />
-                    </span>
-                  </div>
-                </div>
-              ))}
-            </div>
-          </div>
-        )}
-
-        {/* AutoArchitect Modal */}
-        {isAutoArchitectOpen && (
-          <AutoArchitectModal
-            isOpen={isAutoArchitectOpen}
-            onClose={() => setIsAutoArchitectOpen(false)}
-            onSuccess={() => fetchOverview()}
-          />
         )}
       </div>
+
+      {hasChat && (
+        <div className="ch-dock">
+          <div className="ch-dock-inner">
+            {composer}
+            <p className="ch-note">{t('chNote')}</p>
+          </div>
+        </div>
+      )}
+
+      {isAutoArchitectOpen && (
+        <AutoArchitectModal isOpen={isAutoArchitectOpen} onClose={() => setIsAutoArchitectOpen(false)} onSuccess={() => fetchOverview()} />
+      )}
     </div>
   );
 }

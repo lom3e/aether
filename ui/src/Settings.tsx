@@ -354,7 +354,7 @@ export function Settings({ onWorkspaceSwitched }: SettingsProps) {
             <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '12px' }}>
               <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
                 <Folder size={18} className="text-primary" />
-                <h3 style={{ fontSize: '16px', fontWeight: 600 }}>{language === 'it' ? 'Progetto Collegato' : 'Connected Project'}</h3>
+                <h3 style={{ fontSize: '16px', fontWeight: 600 }}>{language === 'it' ? 'Cartella di lavoro' : 'Working folder'}</h3>
               </div>
               {workspaceInfo?.project && (
                 <span
@@ -375,7 +375,7 @@ export function Settings({ onWorkspaceSwitched }: SettingsProps) {
 
             <p className="text-muted" style={{ fontSize: '13px', marginBottom: '16px', lineHeight: 1.5 }}>
               {language === 'it'
-                ? 'Collega una directory locale al workspace. Gli agenti utilizzeranno in sicurezza i filesystem tools direttamente dentro questa cartella.'
+                ? 'Scegli una cartella del tuo computer in cui Aether può leggere e scrivere file per te. Fuori da qui non tocca nulla.'
                 : 'Connect a local directory to this workspace. Agents will securely access and edit files directly within this project folder.'}
             </p>
 
@@ -411,7 +411,7 @@ export function Settings({ onWorkspaceSwitched }: SettingsProps) {
               </div>
             ) : (
               <div>
-                <label className="form-label">{language === 'it' ? 'Percorso directory locale' : 'Local directory path'}</label>
+                <label className="form-label">{language === 'it' ? 'Cartella' : 'Folder'}</label>
                 <div style={{ display: 'flex', gap: '10px' }}>
                   <input
                     type="text"

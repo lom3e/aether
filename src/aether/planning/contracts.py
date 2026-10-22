@@ -726,6 +726,21 @@ class MissionProposal:
         else:
             return "Low / Degraded Evidence Coverage"
 
+    def to_plain_text(self, english: bool = False) -> str:
+        """A short confirmation for a single action: what will happen and that nothing happens before the person agrees.
+        The full technical view stays available as to_human_markdown() (and in the message metadata)."""
+        lines = [f"**{self.title}**"]
+        if self.objective and self.objective.strip() and self.objective.strip() != self.title.strip():
+            lines += ["", self.objective.strip()]
+        if self.proposed_steps:
+            lines += ["", "What I will do:" if english else "Cosa farò:"]
+            lines += [f"{st.order_idx + 1}. {st.title}" for st in self.proposed_steps]
+        if self.clarification_requirements:
+            lines += ["", "I need to know:" if english else "Mi serve sapere:"]
+            lines += [f"- {c.question}" for c in self.clarification_requirements]
+        lines += ["", "Nothing happens until you confirm." if english else "Non faccio niente finché non confermi."]
+        return "\n".join(lines)
+
     def to_human_markdown(self) -> str:
         """Renders an intuitive, transparent, human-readable markdown representation."""
         lines = [

@@ -132,24 +132,4 @@ def _attribute_words(page) -> list[str]:
     return [w.lower() for v in values for w in re.findall(r"[A-Za-zÀ-ÿ']+", v) if not (len(w) > 1 and w.isupper())]
 
 
-@pytest.mark.parametrize("language,foreign,tools_label", [
-    ("it", ENGLISH_ONLY, "Spazio & Strumenti"), ("en", ITALIAN_ONLY, "Space & Tools"),
-])
-def test_the_orb_interface_is_fully_in_the_selected_language(browser_context, language, foreign, tools_label):
-    import test_personal_agent_ui as base
-    base._state.update(_state)
-    page = browser_context.new_page()
-    _ensure_workspace(page); clear_pending_work(_state['base_url'], _state['token'])                      # needs the classic UI once, to create/select the workspace
-    page.evaluate(f"localStorage.setItem('aether_language', '{language}'); localStorage.setItem('aether_experience_mode', 'v2');")
-    page.goto(_state["base_url"] + "/?ui=v2")
-    page.wait_for_selector("textarea, input[type='text']", timeout=15000)
-    page.wait_for_timeout(800)
-    stray = {w for w in _visible_words(page) + _attribute_words(page) if w in foreign and w not in ALLOWED}
-    page.get_by_text(tools_label).first.click()
-    page.wait_for_timeout(500)
-    stray |= {w for w in _visible_words(page) + _attribute_words(page) if w in foreign and w not in ALLOWED}
-    lines = [ln.strip() for ln in page.evaluate("document.body.innerText").split("\n")
-             if set(re.findall(r"[A-Za-zÀ-ÿ']+", ln.lower())) & stray]
-    html = page.evaluate("Array.from(document.querySelectorAll('*')).filter(e => e.children.length === 0 && /%s/i.test(e.textContent)).slice(0,3).map(e => e.parentElement.className + '>' + e.className)" % "|".join(sorted(stray)) if stray else "[]")
-    page.close()
-    assert not stray, f"{language}: words of the other language in the Orb UI: {sorted(stray)} in {lines[:4]} / {html}"
+# The separate Orb interface was retired (one interface: sidebar + chat); its words are covered by the views above.

@@ -98,7 +98,7 @@ def test_03_no_workspace_empty_state_and_navigation(browser_context):
     expect(home_heading).to_be_visible()
 
     # Navigate to chat
-    page.locator(".sidebar button:has-text('New Task'), .sidebar button:has-text('Nuovo Task'), .sidebar button:has-text('Conversations'), .sidebar button:has-text('Conversazioni')").first.click()
+    page.locator("[data-testid='sidebar-new-chat']").first.click()
     page.wait_for_timeout(500)
 
     page.close()
@@ -203,8 +203,8 @@ def test_06_first_run_model_card_replaces_the_workspace_form(browser_context):
     page.close()
 
 
-def test_07_the_orb_interface_offers_the_model_card_too(browser_context):
-    """The default (Orb) experience has no Home page: without a model it must show the same Connect-a-model card."""
+def test_07_a_stored_orb_preference_still_opens_the_one_interface_with_the_model_card(browser_context):
+    """The separate Orb experience was retired: an old stored preference must land on the one interface (sidebar + chat)."""
     import json
 
     page = browser_context.new_page()
@@ -213,4 +213,5 @@ def test_07_the_orb_interface_offers_the_model_card_too(browser_context):
         {"provider": "", "model": "", "configured": {"groq": False, "openai": False, "anthropic": False, "gemini": False, "ollama": True}})))
     page.goto(_base_url())
     expect(page.get_by_test_id("first-run-model")).to_be_visible(timeout=15000)
+    expect(page.locator(".sidebar")).to_be_visible()
     page.close()

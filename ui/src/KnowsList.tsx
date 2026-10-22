@@ -108,7 +108,7 @@ export function KnowsList({ allowAdd = false }: { allowAdd?: boolean }) {
               <li key={m.id}>
                 {editing?.id === m.id ? (
                   <span className="pv-main">
-                    <textarea className="pv-edit" rows={2} autoFocus value={editing.text} onChange={e => setEditing({ id: m.id, text: e.target.value })} data-testid="privacy-edit-input" />
+                    <textarea className="pv-edit" rows={2} autoFocus aria-label={t('pvEdit')} value={editing.text} onChange={e => setEditing({ id: m.id, text: e.target.value })} data-testid="privacy-edit-input" />
                     <button className="pv-link" onClick={saveEdit} data-testid="privacy-edit-save">{t('pvSave')}</button>
                     <button className="pv-link" onClick={() => setEditing(null)}>{t('pvCancel')}</button>
                   </span>
