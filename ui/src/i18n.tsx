@@ -4,6 +4,10 @@ export type Language = 'en' | 'it';
 
 export const translations = {
   en: {
+    pvUndoCalCreated: 'Event created',
+    pvUndoCalMoved: 'Event moved',
+    pvUndoCalDeleted: 'Event deleted',
+    pvUndoDoc: 'Document',
     memHomeTitle: 'Memory',
     memHomeSub: 'What Aether remembers to help you. You can correct or forget anything.',
     memTabKnows: 'About you',
@@ -2955,6 +2959,10 @@ export const translations = {
     orbAetherDialogue: 'Aether Dialogue',
   },
   it: {
+    pvUndoCalCreated: 'Evento creato',
+    pvUndoCalMoved: 'Evento spostato',
+    pvUndoCalDeleted: 'Evento cancellato',
+    pvUndoDoc: 'Documento',
     memHomeTitle: 'Memoria',
     memHomeSub: 'Ciò che Aether ricorda per aiutarti. Puoi correggere o dimenticare tutto.',
     memTabKnows: 'Cosa so di te',

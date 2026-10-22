@@ -11,7 +11,7 @@ type Tab = 'out' | 'knows' | 'undo';
 
 interface LedgerEntry { id: string; ts: number; provider: string; model?: string | null; local: boolean; purpose?: string | null; chars: number; images: number; redactions: Record<string, number>; unmasked: boolean; status: string }
 interface Summary { requests: number; cloud_requests: number; local_requests: number; images_sent: number; redactions_total: number; providers: string[] }
-interface UndoItem { execution_id: string; title: string; created_at: number | string; reversible: boolean; reason: string; undone: boolean; kind?: string }
+interface UndoItem { execution_id: string; action_id?: string; title: string; created_at: number | string; reversible: boolean; reason: string; undone: boolean; kind?: string }
 
 const when = (ts: number | string) => new Date(typeof ts === 'number' ? ts * 1000 : ts).toLocaleString();
 
@@ -55,6 +55,10 @@ export function Privacy() {
     void load();
   };
 
+  const undoLabel = (u: UndoItem) => {
+    const k = u.action_id === 'google_calendar.create_event' ? 'pvUndoCalCreated' : u.action_id === 'google_calendar.update_event' ? 'pvUndoCalMoved' : u.action_id === 'google_calendar.delete_event' ? 'pvUndoCalDeleted' : 'pvUndoDoc';
+    return `${t(k)}: `;
+  };
   const reasonText = (r: string) => (r === 'changed_since' ? t('pvReasonChanged') : r === 'already_undone' ? t('pvReasonDone') : t('pvReasonNoUndo'));
 
   return (
@@ -103,7 +107,7 @@ export function Privacy() {
               <ul className="pv-list">
                 {undo.map(u => (
                   <li key={u.execution_id}>
-                    <span className="pv-main">{u.title}<small>{when(u.created_at)}{!u.reversible ? ` · ${reasonText(u.reason)}` : ''}</small></span>
+                    <span className="pv-main">{undoLabel(u)}{u.title}<small>{when(u.created_at)}{!u.reversible ? ` · ${reasonText(u.reason)}` : ''}</small></span>
                     {u.reversible && <button className="pv-link" data-testid={`undo-${u.execution_id}`} onClick={() => doUndo(u.execution_id)}>{t('pvUndoBtn')}</button>}
                   </li>
                 ))}

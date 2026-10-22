@@ -1,10 +1,14 @@
 """
-Undo for what Aether did to the user's files.
+Undo for what Aether did to the user's files and calendar.
 
 Only actions whose inverse is known and checkable are offered: a document Aether created (the inverse is deleting it)
 or overwrote (the inverse is putting the previous version back). Every undo refuses when the file has been changed since
 Aether wrote it (the user's later work is never destroyed), keeps what it replaces in the hidden history folder, and is
 itself recorded on the execution. Everything else is listed as "cannot be undone" rather than pretending.
+
+Calendar changes made through Google Calendar have exact inverses too: an event Aether created is removed, an event it
+moved goes back to its previous time (only if nobody moved it again since), an event it deleted is created again from the
+copy kept when it was deleted.
 """
 from __future__ import annotations
 
@@ -13,7 +17,8 @@ import hashlib
 from pathlib import Path
 from typing import Any
 
-REVERSIBLE_ACTIONS = {"files.create_document"}
+CALENDAR_ACTIONS = {"google_calendar.create_event", "google_calendar.update_event", "google_calendar.delete_event"}
+REVERSIBLE_ACTIONS = {"files.create_document"} | CALENDAR_ACTIONS
 
 
 class UndoError(Exception):
@@ -59,6 +64,8 @@ def describe(ws: Any, execution: Any) -> dict[str, Any]:
     if item["undone"]:
         item["reason"] = "already_undone"
         return item
+    if execution.action_id in CALENDAR_ACTIONS:
+        return _describe_calendar(execution, item)
     try:
         target, _ = _target(ws, execution)
     except UndoError as exc:
@@ -77,6 +84,59 @@ def describe(ws: Any, execution: Any) -> dict[str, Any]:
         item["reversible"] = True
         item["kind"] = "restore" if out.get("status") == "updated" else "delete"
     return item
+
+
+def _describe_calendar(execution: Any, item: dict[str, Any]) -> dict[str, Any]:
+    inp, out = execution.input_data or {}, execution.output_data or {}
+    if execution.action_id == "google_calendar.create_event":
+        item["title"] = out.get("title") or inp.get("title") or item["title"]
+        ok, kind = bool(out.get("event_id") or out.get("id")), "remove_event"
+    elif execution.action_id == "google_calendar.update_event":
+        item["title"] = inp.get("title") or item["title"]
+        prev = inp.get("previous") or {}
+        ok, kind = bool(inp.get("event_id") and prev.get("start_time")), "move_back"
+    else:
+        events = out.get("events") or []
+        item["title"] = ", ".join(e.get("title", "") for e in events if e.get("title")) or item["title"]
+        ok, kind = bool(events) and all(e.get("start_time") for e in events), "recreate"
+    if ok:
+        item["reversible"], item["kind"] = True, kind
+    else:
+        item["reason"] = "missing_backup"
+    return item
+
+
+def _undo_calendar(ws: Any, execution: Any, kind: str) -> dict[str, Any]:
+    inp, out = execution.input_data or {}, execution.output_data or {}
+    connector = ws.connections.get_google_calendar_connector(execution.workspace_id)
+    try:
+        if kind == "remove_event":
+            connector.delete_event(event_id=out.get("event_id") or out.get("id"), calendar_id=inp.get("calendar_id"))
+            return {"result": "removed"}
+        if kind == "move_back":
+            current = connector.get_event(event_id=inp["event_id"], calendar_id=inp.get("calendar_id")) or {}
+            now_start = str(current.get("start_time") or "")
+            if now_start and inp.get("start_time") and _same_instant(now_start, inp["start_time"]) is False:
+                raise UndoError("changed_since", "the event was moved again after Aether moved it")
+            prev = inp.get("previous") or {}
+            connector.update_event(event_id=inp["event_id"], start_time=prev.get("start_time"), end_time=prev.get("end_time"), calendar_id=inp.get("calendar_id"))
+            return {"result": "moved_back"}
+        recreated = []
+        for e in out.get("events") or []:
+            made = connector.create_event(title=e.get("title", ""), start_time=e["start_time"], end_time=e.get("end_time"), location=e.get("location", ""), calendar_id=e.get("calendar_id"))
+            recreated.append(made.get("event_id") or made.get("id"))
+        return {"result": "recreated", "event_ids": recreated}
+    except UndoError:
+        raise
+    except Exception as exc:  # noqa: BLE001 - a calendar error must surface as a refusal, not a 500
+        raise UndoError("failed", str(exc)) from exc
+
+
+def _same_instant(a: str, b: str) -> bool | None:
+    try:
+        return _dt.datetime.fromisoformat(a.replace("Z", "+00:00")) == _dt.datetime.fromisoformat(b.replace("Z", "+00:00"))
+    except ValueError:
+        return None
 
 
 def list_items(ws: Any, workspace_id: str, limit: int = 50) -> list[dict[str, Any]]:
@@ -100,6 +160,11 @@ def undo(ws: Any, execution_id: str) -> dict[str, Any]:
     info = describe(ws, execution)
     if not info["reversible"]:
         raise UndoError(info["reason"] or "not_reversible")
+    if execution.action_id in CALENDAR_ACTIONS:
+        done = _undo_calendar(ws, execution, info["kind"])
+        execution.metadata = {**(execution.metadata or {}), "undo": {"at": _dt.datetime.now(_dt.timezone.utc).isoformat(), **done}}
+        ws.action_store.save_execution(execution)
+        return {"execution_id": execution_id, **done}
     target, history = _target(ws, execution)
     out = execution.output_data
     try:
