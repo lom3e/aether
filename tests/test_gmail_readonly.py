@@ -1,4 +1,4 @@
-"""Gmail, read-only: listing is done on this computer; the request is routed by the model only when Gmail is connected."""
+"""Gmail reading: listing is done on this computer; the request is routed by the model only when Gmail is connected."""
 from __future__ import annotations
 
 import base64
@@ -12,11 +12,11 @@ from aether.personal.service import format_mail_response
 from aether.workspace.workspace import Workspace
 
 
-def test_only_the_read_only_scope_is_requested_and_the_calendar_client_is_reused():
-    assert "https://www.googleapis.com/auth/gmail.readonly" in OAUTH_SPECS["gmail"]["scopes"]
-    assert not [s for s in OAUTH_SPECS["gmail"]["scopes"] if "gmail" in s and not s.endswith("readonly")]
+def test_only_gmail_modify_is_requested_never_full_access_and_the_calendar_client_is_reused():
+    gmail_scopes = [s for s in OAUTH_SPECS["gmail"]["scopes"] if "gmail" in s]
+    assert gmail_scopes == ["https://www.googleapis.com/auth/gmail.modify"], "no https://mail.google.com/ (permanent delete), no send scope"
     assert OAUTH_SPECS["gmail"]["client_from"] == "google_calendar"
-    assert GMAIL_SCOPES[-1].endswith("gmail.readonly")
+    assert GMAIL_SCOPES[-1].endswith("gmail.modify")
 
 
 def test_search_returns_sender_subject_and_unread(monkeypatch):

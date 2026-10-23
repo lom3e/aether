@@ -13,18 +13,27 @@ from typing import Any
 
 from aether.core.execution import Message
 
-ACTIONS = ("none", "calendar_list", "calendar_create", "calendar_move", "calendar_delete", "mail_search", "life_note")
+MAIL_CHANGES = ("mail_trash", "mail_archive", "mail_mark_read")
+ACTIONS = ("none", "calendar_list", "calendar_create", "calendar_move", "calendar_delete", "mail_search", "mail_reply", "mail_compose", *MAIL_CHANGES, "life_note")
 NOTE_KINDS = ("job", "reminder", "contact")
 
 _SYSTEM = (
     "You map ONE user message to the single calendar, mail or note action it asks for. Reply with one JSON object and nothing else:\n"
-    '{"action":"none|calendar_list|calendar_create|calendar_move|calendar_delete|mail_search|life_note","mail_query":"Gmail search for mail_search, e.g. is:unread newer_than:1d, from:rossi, subject:fattura",'
+    '{"action":"none|calendar_list|calendar_create|calendar_move|calendar_delete|mail_search|mail_reply|mail_compose|mail_trash|mail_archive|mail_mark_read|life_note",'
+    '"mail_query":"Gmail search selecting exactly the mail meant, e.g. is:unread newer_than:1d, from:rossi, subject:fattura",'
+    '"instructions":"for mail_reply/mail_compose: what the email must say, in the user\'s words","to":"email address for mail_compose, only if the user wrote it",'
     '"note_kind":"job|reminder|contact for life_note","contact_name":"client or person for life_note, empty if none","due":"YYYY-MM-DD or YYYY-MM-DDTHH:MM for life_note, empty if none","email":"only if the user wrote it","phone":"only if the user wrote it",'
     '"title":"event title for create, or the job/reminder title for life_note, empty otherwise","target":"title of the EXISTING event for move/delete, empty otherwise",'
     '"start":"YYYY-MM-DDTHH:MM local time for create, or the new start for move","end":"YYYY-MM-DDTHH:MM or empty",'
     '"range_start":"YYYY-MM-DD for list","range_end":"YYYY-MM-DD for list (inclusive)"}\n'
     "calendar_list: the user asks what is on the calendar. calendar_create: add a new event. calendar_move: change the day/time "
     "of an existing event. calendar_delete: remove an existing event. mail_search: the user asks about their email (new mail, mail from someone, about something); write a Gmail query. "
+    "mail_reply: write a reply to an email they received (mail_query finds it, instructions = what to answer). mail_compose: write a NEW email "
+    "to someone (contact_name and/or to, instructions). mail_trash: delete / move to the Trash the mail selected by mail_query. "
+    "mail_archive: archive it. mail_mark_read: mark it as read. Never use a mail_query that selects the whole inbox for these. "
+    "In mail_query use from: for a sender and do not turn generic words (newsletter, mail, messaggi) into subject: filters: "
+    "'elimina le newsletter di Zalando' -> mail_trash, mail_query 'from:zalando'. "
+    "'scrivi a Bianchi per chiedergli la fattura di ottobre' -> {\"action\":\"mail_compose\",\"contact_name\":\"Bianchi\",\"instructions\":\"chiedere la fattura di ottobre\"}. "
     "life_note: the user states something to keep track of, not a timed meeting: work owed to or for someone (note_kind=job, title = short "
     "imperative like 'Inviare il preventivo', e.g. 'Rossi vuole il preventivo entro venerdì'), something to be reminded of (note_kind=reminder, "
     "e.g. 'ricordami di chiamare il commercialista domani alle 10'), or a new client/person to save (note_kind=contact). "
@@ -43,7 +52,8 @@ _SIGNAL_RE = re.compile(
     r"cancell\w*|elimin\w*|togli\w*|calendari\w*|agenda|appuntament\w*|impegn\w*|riunion\w*|event\w*|meeting|call|"
     r"schedule|reschedule|move|book|add|delete|remove|mail|email|e-mail|posta|messaggi|inbox|gmail|scritt\w*|rispost\w*|wrote|replied|"
     r"vuole|vogliono|entro|scadenz\w*|consegn\w*|preventiv\w*|fattur\w*|client\w*|ricordami|promemoria|segna\w*|annota\w*|devo|dobbiamo|"
-    r"wants|due|deadline|remind\w*|owe|quote|invoice|deliver\w*)\b",
+    r"wants|due|deadline|remind\w*|owe|quote|invoice|deliver\w*|"
+    r"rispond\w*|bozz\w*|cestin\w*|archivi\w*|lett[ae]|newsletter|spam|scrivi\w*|reply|draft|trash|archive|unread)\b",
     re.IGNORECASE,
 )
 
@@ -135,6 +145,24 @@ def route(prompt: str, *, provider: Any, history: list[Any] | None = None, now: 
         return {"action": action, "kind": kind, "title": title, "contact_name": name,
                 "email": email if email and email in (prompt or "") else "", "phone": phone if phone and phone in (prompt or "") else "",
                 "due_at": due.timestamp() if due else None, "due_has_time": "T" in str(data.get("due") or "")}
+    if action in ("mail_reply", "mail_compose") or action in MAIL_CHANGES:
+        q = re.sub(r"[\r\n]+", " ", str(data.get("mail_query") or "")).strip()[:200]
+        instructions = str(data.get("instructions") or "").strip()[:2000]
+        if action in MAIL_CHANGES:
+            # a change needs a search that picks specific mail, never "everything in the inbox"
+            broad = r"(?:in:inbox|in:anywhere|\*|is:read)?" if action == "mail_mark_read" else r"(?:in:inbox|in:anywhere|\*|is:read|is:unread)?"
+            if not q or re.fullmatch(broad, q, re.I):
+                return {"action": "none", "reason": "too_broad"}
+            return {"action": action, "query": q}
+        if not instructions:
+            return {"action": "none", "reason": "incomplete"}
+        if action == "mail_reply":
+            return {"action": action, "query": q or "in:inbox", "instructions": instructions} if q else {"action": "none", "reason": "incomplete"}
+        to = str(data.get("to") or "").strip()[:200]
+        name = str(data.get("contact_name") or "").strip()[:200]
+        if not to and not name:
+            return {"action": "none", "reason": "incomplete"}
+        return {"action": action, "to": to if to and to in (prompt or "") else "", "contact_name": name, "instructions": instructions}
     if action == "mail_search":
         q = re.sub(r"[\r\n]+", " ", str(data.get("mail_query") or "in:inbox")).strip()[:200] or "in:inbox"
         return {"action": action, "query": q}

@@ -256,6 +256,7 @@ class GoogleOAuthManager:
             "refresh_token": refresh_token,
             "token_expiry": token_expiry,
             "email": user_email,
+            "scope": token_resp.get("scope", ""),  # what the user actually granted (e.g. whether Gmail may change mail)
             "primary_calendar_id": "primary",
             "selected_calendar_id": "primary",
             "selected_calendar_summary": "Primary Calendar",

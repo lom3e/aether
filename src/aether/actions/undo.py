@@ -19,7 +19,8 @@ from typing import Any
 
 CALENDAR_ACTIONS = {"google_calendar.create_event", "google_calendar.update_event", "google_calendar.delete_event"}
 LIFE_ACTIONS = {"life.save"}
-REVERSIBLE_ACTIONS = {"files.create_document"} | CALENDAR_ACTIONS | LIFE_ACTIONS
+GMAIL_ACTIONS = {"gmail.create_draft", "gmail.trash", "gmail.modify_labels"}
+REVERSIBLE_ACTIONS = {"files.create_document"} | CALENDAR_ACTIONS | LIFE_ACTIONS | GMAIL_ACTIONS
 
 
 class UndoError(Exception):
@@ -67,6 +68,17 @@ def describe(ws: Any, execution: Any) -> dict[str, Any]:
         return item
     if execution.action_id in CALENDAR_ACTIONS:
         return _describe_calendar(execution, item)
+    if execution.action_id in GMAIL_ACTIONS:
+        out_, inp_ = execution.output_data or {}, execution.input_data or {}
+        msgs = inp_.get("messages") or []
+        item["title"] = inp_.get("subject") or ", ".join(m.get("subject", "") for m in msgs[:3] if m.get("subject")) or item["title"]
+        kind = {"gmail.create_draft": "remove_draft", "gmail.trash": "untrash", "gmail.modify_labels": "relabel"}[execution.action_id]
+        ok = bool(out_.get("draft_id")) if kind == "remove_draft" else bool(out_.get("trashed") or out_.get("ids"))
+        if ok:
+            item["reversible"], item["kind"] = True, kind
+        else:
+            item["reason"] = "missing_backup"
+        return item
     if execution.action_id in LIFE_ACTIONS:
         out_, inp_ = execution.output_data or {}, execution.input_data or {}
         item["title"] = inp_.get("title") or inp_.get("contact_name") or item["title"]
@@ -141,6 +153,28 @@ def _undo_calendar(ws: Any, execution: Any, kind: str) -> dict[str, Any]:
         raise UndoError("failed", str(exc)) from exc
 
 
+def _undo_gmail(ws: Any, execution: Any, kind: str) -> dict[str, Any]:
+    from aether.connections.gmail import LABEL_OPS
+
+    out = execution.output_data or {}
+    connector = ws.connections.get_gmail_connector(execution.workspace_id)
+    try:
+        if kind == "remove_draft":
+            if not connector.draft_exists(out["draft_id"]):
+                raise UndoError("changed_since", "the draft was sent or deleted in Gmail since")
+            connector.delete_draft(out["draft_id"])
+            return {"result": "draft_removed"}
+        if kind == "untrash":
+            return {"result": "untrashed", "ids": connector.untrash(list(out.get("trashed") or []))}
+        add, remove = LABEL_OPS[out.get("op", "")]
+        connector.modify_labels(list(out.get("ids") or []), add=remove, remove=add)  # the exact inverse
+        return {"result": "relabelled"}
+    except UndoError:
+        raise
+    except Exception as exc:  # noqa: BLE001 - a Gmail error must surface as a refusal, not a 500
+        raise UndoError("failed", str(exc)) from exc
+
+
 def _undo_life(ws: Any, execution: Any) -> dict[str, Any]:
     """Takes back what one confirmed note saved: the job or reminder, and the client only if this note created it and
     nothing else hangs on it since."""
@@ -191,8 +225,13 @@ def undo(ws: Any, execution_id: str) -> dict[str, Any]:
     info = describe(ws, execution)
     if not info["reversible"]:
         raise UndoError(info["reason"] or "not_reversible")
-    if execution.action_id in CALENDAR_ACTIONS or execution.action_id in LIFE_ACTIONS:
-        done = _undo_calendar(ws, execution, info["kind"]) if execution.action_id in CALENDAR_ACTIONS else _undo_life(ws, execution)
+    if execution.action_id in CALENDAR_ACTIONS | LIFE_ACTIONS | GMAIL_ACTIONS:
+        if execution.action_id in CALENDAR_ACTIONS:
+            done = _undo_calendar(ws, execution, info["kind"])
+        elif execution.action_id in GMAIL_ACTIONS:
+            done = _undo_gmail(ws, execution, info["kind"])
+        else:
+            done = _undo_life(ws, execution)
         execution.metadata = {**(execution.metadata or {}), "undo": {"at": _dt.datetime.now(_dt.timezone.utc).isoformat(), **done}}
         ws.action_store.save_execution(execution)
         return {"execution_id": execution_id, **done}

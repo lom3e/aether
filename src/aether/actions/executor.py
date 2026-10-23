@@ -992,6 +992,31 @@ class ActionExecutor:
                 self.connection_service.record_operation_success(ws_id, "gmail", action_id)
             return {"messages": messages, "query": inp.get("query") or "in:inbox"}
 
+        # 5a. Gmail changes the user confirmed: a draft (never sent), Trash, archive / mark read. Each has an exact inverse.
+        elif action_id in ("gmail.create_draft", "gmail.trash", "gmail.modify_labels"):
+            if not self.connection_service:
+                raise RuntimeError("Connection service not available.")
+            from aether.connections.gmail import LABEL_OPS
+
+            connector = self.connection_service.get_gmail_connector(ws_id)
+            if not connector.can_change_mail():
+                raise RuntimeError("Gmail è collegato in sola lettura: ricollegalo da Collegamenti per permettere bozze, cestino e archivio.")
+            if action_id == "gmail.create_draft":
+                made = connector.create_draft(to=str(inp.get("to") or ""), subject=str(inp.get("subject") or ""), body=str(inp.get("body") or ""),
+                                              thread_id=inp.get("thread_id"), in_reply_to=str(inp.get("in_reply_to") or ""), references=str(inp.get("references") or ""))
+                return {**made, "to": inp.get("to"), "subject": inp.get("subject")}
+            ids = [str(m.get("id")) for m in (inp.get("messages") or []) if m.get("id")]
+            if not ids:
+                raise ValueError("No messages to change.")
+            if action_id == "gmail.trash":
+                return {"trashed": connector.trash(ids), "messages": inp.get("messages")}
+            op = str(inp.get("op") or "")
+            if op not in LABEL_OPS:
+                raise ValueError(f"Unknown mail change: {op}")
+            add, remove = LABEL_OPS[op]
+            connector.modify_labels(ids, add=add, remove=remove)
+            return {"op": op, "ids": ids, "messages": inp.get("messages")}
+
         # 5a. People & jobs: a client, a job owed to them or a reminder, saved on this computer after the user confirmed it
         elif action_id == "life.save":
             from aether.life import service as life

@@ -100,6 +100,24 @@ class ActionRegistry:
                     output_schema={"type": "object"},
                 )
             )
+        for gid, gname, gdesc in (
+            ("gmail.create_draft", "Save a Gmail draft", "Saves a reply or a new email as a draft in Gmail. It is not sent."),
+            ("gmail.trash", "Move mail to the Trash", "Moves the listed Gmail messages to the Trash (recoverable for 30 days)."),
+            ("gmail.modify_labels", "Archive or mark mail read", "Archives the listed Gmail messages or marks them as read."),
+        ):
+            self.register(
+                ActionDefinition(
+                    id=gid,
+                    name=gname,
+                    description=gdesc,
+                    tier=ActionTier.ACT,
+                    permission_level=ActionPermissionLevel.EXTERNAL_MUTATION,
+                    requires_confirmation=True,
+                    provider="gmail",
+                    input_schema={"type": "object", "properties": {"messages": {"type": "array"}, "op": {"type": "string"}, "to": {"type": "string"}, "subject": {"type": "string"}, "body": {"type": "string"}}},
+                    output_schema={"type": "object"},
+                )
+            )
         self.register(
             ActionDefinition(
                 id="life.save",

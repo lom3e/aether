@@ -560,7 +560,7 @@ class ConnectionService:
         )
 
     def get_gmail_connector(self, workspace_id: str) -> Any:
-        """Gmail (read-only) with the workspace's Google token for Gmail."""
+        """Gmail with the workspace's Google token for Gmail (changes only when the user granted gmail.modify)."""
         from aether.connections.gmail import GmailConnector
 
         conn = self.store.get_connection_by_provider(workspace_id, "gmail")

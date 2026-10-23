@@ -297,8 +297,13 @@ def test_personal_task_manager_lifecycle(temp_dir):
 
     assert completed is True
 
-    # Verify notification was emitted
-    notifs = notif_service.list_notifications("ws_task")
+    # Verify notification was emitted (written right after the status flips to completed: wait for it, do not race it)
+    notifs = []
+    for _ in range(40):
+        notifs = notif_service.list_notifications("ws_task")
+        if notifs and personal_store.get_messages("session_task_1"):
+            break
+        time.sleep(0.05)
     assert len(notifs) >= 1
     assert any("CarShine" in n.title for n in notifs)
 

@@ -1,20 +1,27 @@
-"""Gmail, read-only: list and read your mail on this computer.
+"""Gmail: read your mail, and, only after you confirm each change, save reply drafts, move mail to the Trash, archive it
+or mark it read. Every change has an exact inverse (delete the draft, take out of the Trash, back to the inbox, unread),
+so it can be undone. Mail is never deleted for good and never sent by these methods.
 
-Built on the Google connector (same token refresh, same revocation handling). Only the gmail.readonly scope is requested:
-Aether can never send, delete or change mail through it. Listing mail does not send its content to any AI model; only an
-explicit request to summarise a message would, through the normal (masked, recorded) path.
+Built on the Google connector (same token refresh, same revocation handling). Scope: gmail.modify (read, drafts, labels,
+Trash; no permanent deletion). Connections made before carried gmail.readonly only: they keep reading, and a change asks
+to reconnect. Listing mail does not send its content to any AI model; writing a reply sends the one message being
+answered, through the normal (masked, recorded) path.
 """
 from __future__ import annotations
 
 import base64
 import html
 import re
+from email.message import EmailMessage
 from typing import Any
 
 from aether.connections.google_calendar import GoogleCalendarConnector
 
 GMAIL_API_BASE = "https://gmail.googleapis.com/gmail/v1"
-GMAIL_SCOPES = ["openid", "https://www.googleapis.com/auth/userinfo.email", "https://www.googleapis.com/auth/gmail.readonly"]
+GMAIL_MODIFY_SCOPE = "https://www.googleapis.com/auth/gmail.modify"
+GMAIL_SCOPES = ["openid", "https://www.googleapis.com/auth/userinfo.email", GMAIL_MODIFY_SCOPE]
+# What each confirmed change does to the labels, and its exact inverse for Undo.
+LABEL_OPS = {"archive": ([], ["INBOX"]), "mark_read": ([], ["UNREAD"])}
 
 
 def _header(headers: list[dict[str, Any]], name: str) -> str:
@@ -53,7 +60,11 @@ class GmailConnector(GoogleCalendarConnector):
 
     @property
     def capabilities(self) -> list[str]:
-        return ["gmail.search", "gmail.read"]
+        return ["gmail.search", "gmail.read", "gmail.create_draft", "gmail.trash", "gmail.modify_labels"]
+
+    def can_change_mail(self) -> bool:
+        """True when this connection was granted gmail.modify (older ones were read-only and must reconnect)."""
+        return GMAIL_MODIFY_SCOPE in str(self.auth_metadata.get("scope") or "")
 
     def verify(self, auth_metadata: dict[str, Any] | None = None, live_check: bool = False) -> tuple[bool, str]:
         meta = auth_metadata or self.auth_metadata
@@ -87,3 +98,57 @@ class GmailConnector(GoogleCalendarConnector):
         hs = (m.get("payload") or {}).get("headers") or []
         return {"id": m.get("id"), "from": _header(hs, "From"), "subject": _header(hs, "Subject"), "date": _header(hs, "Date"),
                 "text": _text_from_payload(m.get("payload") or {})[:20000]}
+
+    def reply_context(self, message_id: str) -> dict[str, Any]:
+        """What a reply needs: who to answer, the subject, the thread and the ids that keep it in the same conversation."""
+        m = self._api_request(f"users/me/messages/{message_id}", params={"format": "full"})
+        hs = (m.get("payload") or {}).get("headers") or []
+        return {"id": m.get("id"), "thread_id": m.get("threadId"), "from_raw": _header(hs, "Reply-To") or _header(hs, "From"),
+                "from": _sender_name(_header(hs, "From")), "subject": _header(hs, "Subject"), "message_id_header": _header(hs, "Message-ID"),
+                "references": _header(hs, "References"), "date": _header(hs, "Date"), "text": _text_from_payload(m.get("payload") or {})[:12000]}
+
+    def create_draft(self, *, to: str, subject: str, body: str, thread_id: str | None = None, in_reply_to: str = "", references: str = "") -> dict[str, Any]:
+        """Saves a draft in Gmail (it is NOT sent). Returns the draft id, used to remove it on Undo."""
+        msg = EmailMessage()
+        msg["To"] = to
+        msg["Subject"] = subject
+        if in_reply_to:
+            msg["In-Reply-To"] = in_reply_to
+            msg["References"] = f"{references} {in_reply_to}".strip()
+        msg.set_content(body)
+        raw = base64.urlsafe_b64encode(msg.as_bytes()).decode("ascii")
+        payload: dict[str, Any] = {"message": {"raw": raw}}
+        if thread_id:
+            payload["message"]["threadId"] = thread_id
+        d = self._api_request("users/me/drafts", method="POST", data=payload)
+        return {"draft_id": d.get("id"), "message_id": (d.get("message") or {}).get("id"), "thread_id": (d.get("message") or {}).get("threadId")}
+
+    def delete_draft(self, draft_id: str) -> None:
+        self._api_request(f"users/me/drafts/{draft_id}", method="DELETE")
+
+    def draft_exists(self, draft_id: str) -> bool:
+        try:
+            self._api_request(f"users/me/drafts/{draft_id}", params={"format": "minimal"})
+            return True
+        except Exception:  # noqa: BLE001 - gone (sent or deleted by the user)
+            return False
+
+    def trash(self, message_ids: list[str]) -> list[str]:
+        """Moves messages to the Trash (Gmail empties it after 30 days; nothing is deleted for good here)."""
+        done = []
+        for mid in message_ids:
+            self._api_request(f"users/me/messages/{mid}/trash", method="POST")
+            done.append(mid)
+        return done
+
+    def untrash(self, message_ids: list[str]) -> list[str]:
+        done = []
+        for mid in message_ids:
+            self._api_request(f"users/me/messages/{mid}/untrash", method="POST")
+            done.append(mid)
+        return done
+
+    def modify_labels(self, message_ids: list[str], *, add: list[str] | None = None, remove: list[str] | None = None) -> None:
+        if message_ids:
+            self._api_request("users/me/messages/batchModify", method="POST",
+                              data={"ids": list(message_ids), "addLabelIds": list(add or []), "removeLabelIds": list(remove or [])})

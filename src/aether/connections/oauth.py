@@ -57,7 +57,7 @@ OAUTH_SPECS: dict[str, dict[str, Any]] = {
         "scopes": [
             "openid",
             "https://www.googleapis.com/auth/userinfo.email",
-            "https://www.googleapis.com/auth/gmail.readonly",
+            "https://www.googleapis.com/auth/gmail.modify",  # read, drafts, labels, Trash; no permanent deletion, no sending here
         ],
         "default_client_id": None,
         "env_client_id": ["GOOGLE_CLIENT_ID", "AETHER_GOOGLE_CLIENT_ID"],
