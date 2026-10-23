@@ -25,7 +25,7 @@ Plus: talks back when you talk to it (system voices, offline) · Italian and Eng
 - Not notarized yet: first launch needs right click → Open (**strongly recommended to fix before a public launch**:
   Apple Developer Program, 99 USD/year; it removes the scary warning that costs most downloads).
 - Masking is pattern-based: it misses names and addresses; you can always see what was hidden.
-- Google sign-in shows "unverified app" until Google's review. Gmail (read, reply drafts, Trash, archive; never sends or deletes for good) uses a restricted scope: it works for test users only until Google's security assessment.
+- Google sign-in shows "unverified app" until Google's review. Gmail (read, drafts, send with a 10-second undo, Trash, archive; never deletes for good) uses a restricted scope: it works for test users only until Google's security assessment.
 - Needs a model: a free Groq key works; local models through Ollama are supported.
 
 ## Product Hunt (EN)
