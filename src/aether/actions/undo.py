@@ -18,7 +18,8 @@ from pathlib import Path
 from typing import Any
 
 CALENDAR_ACTIONS = {"google_calendar.create_event", "google_calendar.update_event", "google_calendar.delete_event"}
-REVERSIBLE_ACTIONS = {"files.create_document"} | CALENDAR_ACTIONS
+LIFE_ACTIONS = {"life.save"}
+REVERSIBLE_ACTIONS = {"files.create_document"} | CALENDAR_ACTIONS | LIFE_ACTIONS
 
 
 class UndoError(Exception):
@@ -66,6 +67,14 @@ def describe(ws: Any, execution: Any) -> dict[str, Any]:
         return item
     if execution.action_id in CALENDAR_ACTIONS:
         return _describe_calendar(execution, item)
+    if execution.action_id in LIFE_ACTIONS:
+        out_, inp_ = execution.output_data or {}, execution.input_data or {}
+        item["title"] = inp_.get("title") or inp_.get("contact_name") or item["title"]
+        if out_.get("job_id") or out_.get("reminder_id") or out_.get("created_contact_id"):
+            item["reversible"], item["kind"] = True, "remove_note"
+        else:
+            item["reason"] = "missing_backup"
+        return item
     try:
         target, _ = _target(ws, execution)
     except UndoError as exc:
@@ -132,6 +141,28 @@ def _undo_calendar(ws: Any, execution: Any, kind: str) -> dict[str, Any]:
         raise UndoError("failed", str(exc)) from exc
 
 
+def _undo_life(ws: Any, execution: Any) -> dict[str, Any]:
+    """Takes back what one confirmed note saved: the job or reminder, and the client only if this note created it and
+    nothing else hangs on it since."""
+    from aether.life import service as life
+    from aether.life.store import life_store_for
+
+    out = execution.output_data or {}
+    store = life_store_for(ws)
+    removed: list[str] = []
+    if out.get("job_id") and store.get_job(out["job_id"]):
+        life.forget_job(ws, store, out["job_id"])
+        removed.append("job")
+    if out.get("reminder_id") and store.get_reminder(out["reminder_id"]):
+        store.delete_reminder(out["reminder_id"])
+        removed.append("reminder")
+    cid = out.get("created_contact_id")
+    if cid and store.get_contact(cid) and not store.list_jobs(contact_id=cid):
+        life.forget_contact(ws, store, cid)
+        removed.append("contact")
+    return {"result": "removed", "removed": removed}
+
+
 def _same_instant(a: str, b: str) -> bool | None:
     try:
         return _dt.datetime.fromisoformat(a.replace("Z", "+00:00")) == _dt.datetime.fromisoformat(b.replace("Z", "+00:00"))
@@ -160,8 +191,8 @@ def undo(ws: Any, execution_id: str) -> dict[str, Any]:
     info = describe(ws, execution)
     if not info["reversible"]:
         raise UndoError(info["reason"] or "not_reversible")
-    if execution.action_id in CALENDAR_ACTIONS:
-        done = _undo_calendar(ws, execution, info["kind"])
+    if execution.action_id in CALENDAR_ACTIONS or execution.action_id in LIFE_ACTIONS:
+        done = _undo_calendar(ws, execution, info["kind"]) if execution.action_id in CALENDAR_ACTIONS else _undo_life(ws, execution)
         execution.metadata = {**(execution.metadata or {}), "undo": {"at": _dt.datetime.now(_dt.timezone.utc).isoformat(), **done}}
         ws.action_store.save_execution(execution)
         return {"execution_id": execution_id, **done}

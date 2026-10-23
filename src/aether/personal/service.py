@@ -387,16 +387,43 @@ def claims_unexecuted_action(text: str, prompt: str = "") -> bool:
 def honest_no_action_reply(original: str, prompt: str) -> str:
     italian = not re.search(r"\b(the|please|can you|delete|send|move|my)\b", prompt or "", re.IGNORECASE)
     if italian:
-        return ("Non ho eseguito nessuna azione: da questa risposta non posso modificare calendario, email, file o account. "
-                "Chiedimelo in modo diretto, per esempio «cancella \"Titolo\" dal calendario» o «sposta \"Titolo\" a domani alle 10», "
-                "e ti mostro una conferma prima di agire.")
-    return ("I haven't done anything: from this reply I can't change your calendar, email, files or accounts. "
-            "Ask me directly, e.g. «delete \"Title\" from my calendar», and I'll show you a confirmation before acting.")
+        return ("Non l'ho ancora fatto: calendario, email, file e account li tocco solo dopo una tua conferma. "
+                "Vuoi che proceda? Ti mostro prima esattamente cosa cambio.")
+    return ("I haven't done it yet: I only touch your calendar, email, files or accounts after you confirm. "
+            "Shall I go ahead? I'll show you exactly what changes first.")
+
+
+def _note_due_label(a: dict[str, Any]) -> str:
+    if not a.get("due_at"):
+        return ""
+    d = datetime.fromtimestamp(float(a["due_at"])).astimezone()
+    return _day_label(d) + (f" alle {d.strftime('%H:%M')}" if a.get("due_has_time") else "")
+
+
+def _note_sentence(a: dict[str, Any], done: bool) -> str:
+    """'Aggiungo Rossi ai clienti e segno «Inviare il preventivo» entro venerdì 24 ottobre' (or the past tense once done)."""
+    name, title, kind, due = a.get("contact_name") or "", a.get("title") or "", a.get("kind"), _note_due_label(a)
+    parts = []
+    if name and a.get("contact_new"):
+        details = ", ".join(x for x in (a.get("email"), a.get("phone")) if x)
+        parts.append(f"{'ho aggiunto' if done else 'aggiungo'} **{name}** ai clienti" + (f" ({details})" if details else ""))
+    if kind == "job":
+        who = f" per **{name}**" if name and not a.get("contact_new") else ""
+        parts.append(f"{'ho segnato' if done else 'segno'}{who} **{title}**" + (f" entro {due}" if due else ""))
+    elif kind == "reminder":
+        parts.append(f"{'ti ricorderò' if done else 'ti ricordo'} **{title}**" + (f" {due}" if due else ""))
+    elif kind == "contact" and not a.get("contact_new"):
+        parts.append(f"**{name}** è già tra le tue persone")
+    text = " e ".join(parts)
+    return text[:1].upper() + text[1:] if text else ""
 
 
 def calendar_confirmation_text(intent: Any) -> str:
-    """The plain confirmation shown before Aether changes the calendar: what, when, and that nothing happened yet."""
+    """The plain confirmation shown before Aether changes the calendar or your notes: what, when, and that nothing happened yet."""
     aid, a = getattr(intent, "action_id", ""), (getattr(intent, "action_args", None) or {})
+    if aid == "life.save" and a.get("kind"):
+        ask = "\n\nNon c'è una scadenza: se vuoi dimmi entro quando e la aggiungo." if a.get("kind") == "job" and not a.get("due_at") else ""
+        return f"{_note_sentence(a, done=False)}?{ask}\n\nLo trovi poi in Persone e lavori e nella card Oggi. Non salvo niente finché non confermi."
     if aid == "google_calendar.create_event" and a.get("title"):
         return (f"Sto per creare questo evento nel tuo Google Calendar:\n\n- **{a.get('title', '')}** — {a.get('when', '')}"
                 "\n\nNon ho creato niente finché non confermi.")
@@ -419,7 +446,9 @@ def calendar_confirmation_text(intent: Any) -> str:
 def calendar_done_text(intent: Any, result: dict[str, Any]) -> str:
     """What happened, in plain words, after a confirmed calendar change, and how to take it back."""
     aid, a = getattr(intent, "action_id", ""), (getattr(intent, "action_args", None) or {})
-    if aid == "google_calendar.create_event":
+    if aid == "life.save":
+        head = f"Fatto: {_note_sentence(a, done=True)[:1].lower()}{_note_sentence(a, done=True)[1:]}. Lo vedi in Persone e lavori."
+    elif aid == "google_calendar.create_event":
         head = f"Fatto: ho creato **{a.get('title', '')}** — {a.get('when', '')}."
     elif aid == "google_calendar.update_event":
         head = f"Fatto: ho spostato **{a.get('title', '')}** a {a.get('when', '')}."
@@ -1265,6 +1294,22 @@ class PersonalAgentService:
                               action_id="calendar.list_events", intent_type="query",
                               action_args={"limit": 50, "scope": "custom", "target_day": label, "time_min": routed["time_min"],
                                            "time_max": routed["time_max"], "is_academic": bool(re.search(r"\b(lezion\w*|uni|universit\w*|corso|corsi)\b", prompt, re.I)), "raw_query": prompt})
+        if action == "life_note":
+            from aether.life.store import life_store_for
+
+            name = routed.get("contact_name") or ""
+            existing = life_store_for(self.workspace).find_contact(name) if name and self.workspace is not None else None
+            if routed["kind"] == "reminder" and not existing:
+                name = ""  # a reminder links to someone you already have; it never creates a client by itself
+            args = {"kind": routed["kind"], "title": routed.get("title") or "", "contact_name": existing["name"] if existing else name,
+                    "contact_new": bool(name) and not existing, "due_at": routed.get("due_at"), "due_has_time": bool(routed.get("due_has_time")),
+                    "email": routed.get("email") or "", "phone": routed.get("phone") or "",
+                    "language": "en" if looks_english(prompt) else "it"}
+            if args["kind"] == "contact" and existing:
+                return UserIntent(raw_prompt=prompt, tier=IntentTier.ANSWER, summary="Contact already saved", action_id="calendar.explain",
+                                  intent_type="query", action_args={"message": f"**{existing['name']}** è già tra le tue persone: lo trovi in Persone e lavori."})
+            return UserIntent(raw_prompt=prompt, tier=IntentTier.ACT, summary=f"Save {args['kind']}: {args['title'] or args['contact_name']}",
+                              action_id="life.save", action_args=args)
         if action == "mail_search":
             if not self._provider_ready(workspace_id, "gmail"):
                 return UserIntent(raw_prompt=prompt, tier=IntentTier.ANSWER, summary="Gmail not connected", action_id="calendar.explain",
@@ -2825,7 +2870,15 @@ class PersonalAgentService:
             or (intent.tier in (IntentTier.DELEGATE, IntentTier.DO) and _change_verb is not None
                 and re.search(r"\b(calendari\w*|agenda|appuntament\w*|impegn\w*|riunion\w*|event\w*|meeting|lezion\w*|call)\b", prompt, re.I) is not None)
         )
-        if _approved is None and _rules_unsure and _tr.worth_routing(prompt):
+        # "sì" / "ok, fallo" right after Aether offered to do something: the model reads the offer and proposes that action
+        _last = recent_history[-1] if recent_history else None
+        _accepts_offer = (
+            re.fullmatch(r"\s*(?:s[iì]+|ok(?:ay)?|va\s+bene|certo|fallo|procedi|vai|perfetto|d'accordo|yes|sure|do\s+it|go\s+ahead)"
+                         r"(?:[\s,!.]+(?:grazie|pure|fallo|procedi|thanks))*[\s!.]*", prompt or "", re.I) is not None
+            and _last is not None and getattr(_last, "role", "") == "assistant" and "?" in str(getattr(_last, "content", ""))[-400:]
+            and not (getattr(_last, "metadata", None) or {}).get("proposal_id")
+        )
+        if _approved is None and ((_rules_unsure and _tr.worth_routing(prompt)) or _accepts_offer):
             _routed = self._route_with_model(prompt, workspace_id, recent_history)
             if _routed is not None:
                 intent = _routed

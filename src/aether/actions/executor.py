@@ -992,6 +992,46 @@ class ActionExecutor:
                 self.connection_service.record_operation_success(ws_id, "gmail", action_id)
             return {"messages": messages, "query": inp.get("query") or "in:inbox"}
 
+        # 5a. People & jobs: a client, a job owed to them or a reminder, saved on this computer after the user confirmed it
+        elif action_id == "life.save":
+            from aether.life import service as life
+            from aether.life.store import life_store_for
+
+            ws = self.workspace
+            if ws is None:
+                from aether.workspace.workspace import Workspace
+
+                ws = Workspace.get(ws_id)
+            if ws is None:
+                raise RuntimeError("Workspace not available.")
+            store = life_store_for(ws)
+            lang = str(inp.get("language") or "it")
+            kind = str(inp.get("kind") or "")
+            title = str(inp.get("title") or "").strip()
+            name = str(inp.get("contact_name") or "").strip()
+            due_at = inp.get("due_at")
+            out: dict[str, Any] = {"kind": kind}
+            contact_id = None
+            if name:
+                existing = store.find_contact(name)
+                if existing:
+                    contact_id = existing["id"]
+                elif kind != "reminder":
+                    c = store.add_contact(name, kind=str(inp.get("contact_kind") or "client"), email=str(inp.get("email") or ""), phone=str(inp.get("phone") or ""))
+                    life.sync_contact(ws, store, c, lang)
+                    contact_id = out["created_contact_id"] = c["id"]
+            out["contact_id"] = contact_id
+            if kind == "job":
+                j = store.add_job(title, contact_id=contact_id, due_at=due_at, source="chat")
+                life.sync_job(ws, store, store.get_job(j["id"]) or j, lang)
+                out["job_id"] = j["id"]
+            elif kind == "reminder":
+                r = store.add_reminder(title, due_at=due_at, contact_id=contact_id, source="chat")
+                out["reminder_id"] = r["id"]
+            elif kind != "contact":
+                raise ValueError(f"Unknown note kind: {kind}")
+            return out
+
         # 5b. Google Calendar actions (Macro-pass P0.2)
         elif action_id.startswith("google_calendar."):
             if not self.connection_service:

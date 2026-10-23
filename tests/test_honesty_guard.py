@@ -34,8 +34,8 @@ def test_ordinary_text_and_drafts_are_left_alone(text, prompt):
 
 
 def test_the_honest_reply_follows_the_language():
-    assert "Non ho eseguito nessuna azione" in honest_no_action_reply("x", "cancellalo")
-    assert "I haven't done anything" in honest_no_action_reply("x", "please delete my meeting")
+    assert "Non l'ho ancora fatto" in honest_no_action_reply("x", "cancellalo") and "Vuoi che proceda?" in honest_no_action_reply("x", "cancellalo")
+    assert "I haven't done it yet" in honest_no_action_reply("x", "please delete my meeting")
 
 
 def test_the_real_chat_path_replaces_a_fake_claim(tmp_path, monkeypatch):
@@ -45,7 +45,7 @@ def test_the_real_chat_path_replaces_a_fake_claim(tmp_path, monkeypatch):
         monkeypatch.setattr(ws.personal.runtime, "execute", lambda *a, **k: fake)
         msg = ws.personal.process_prompt(workspace_id=ws.name, prompt="quella cosa con Rossi spostala a dopo")
         assert msg.action_execution_id is None
-        assert "provvedo" not in msg.content and "Non ho eseguito nessuna azione" in msg.content
+        assert "provvedo" not in msg.content and "Non l'ho ancora fatto" in msg.content
         assert msg.metadata.get("honesty_guard") == "unexecuted_action_claim"
     finally:
         ws.close()

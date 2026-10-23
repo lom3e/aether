@@ -102,6 +102,19 @@ class ActionRegistry:
             )
         self.register(
             ActionDefinition(
+                id="life.save",
+                name="Save a client, job or reminder",
+                description="Saves a client or person, a job owed to them or a reminder in People & jobs on this computer.",
+                tier=ActionTier.ACT,
+                permission_level=ActionPermissionLevel.LOCAL_MUTATION,
+                requires_confirmation=True,
+                provider="local",
+                input_schema={"type": "object", "properties": {"kind": {"type": "string"}, "title": {"type": "string"}, "contact_name": {"type": "string"}, "due_at": {"type": ["number", "null"]}}, "required": ["kind"]},
+                output_schema={"type": "object"},
+            )
+        )
+        self.register(
+            ActionDefinition(
                 id="gmail.search",
                 name="Search Gmail",
                 description="Lists your newest Gmail messages matching a search (read-only).",
