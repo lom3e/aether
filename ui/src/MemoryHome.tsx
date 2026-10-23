@@ -1,5 +1,4 @@
 import { useState } from 'react';
-import { Brain } from 'lucide-react';
 import { useTranslation } from './i18n';
 import { TopHeader } from './TopHeader';
 import { KnowsList } from './KnowsList';
@@ -12,7 +11,7 @@ export function MemoryHome() {
   const [tab, setTab] = useState<'knows' | 'docs'>('knows');
   return (
     <div className="pv-page" data-testid="memory-home">
-      <TopHeader title={t('memHomeTitle')} subtitle={t('memHomeSub')} icon={Brain} />
+      <TopHeader variant="page" title={t('memHomeTitle')} subtitle={t('memHomeSub')} />
       <div className="pv-body">
         <div className="pv-tabs" role="tablist">
           <button role="tab" aria-selected={tab === 'knows'} className={tab === 'knows' ? 'on' : ''} onClick={() => setTab('knows')} data-testid="memory-tab-knows">{t('memTabKnows')}</button>

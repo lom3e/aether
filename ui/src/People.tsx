@@ -68,26 +68,44 @@ export function People() {
   const dropJob = async (j: Job) => { await lifeApi.deleteJob(j.id).catch(() => undefined); void load(); };
   const set = (k: keyof Contact, v: string) => setDraft(d => (d ? { ...d, [k]: v } : d));
 
+  const addForm = (
+    <div className="people-new">
+      <input aria-label={t('peopleNamePlaceholder')} placeholder={t('peopleNamePlaceholder')} value={newName} onChange={e => setNewName(e.target.value)} onKeyDown={e => { if (e.key === 'Enter') void addContact(); }} data-testid="people-new-name" />
+      <select aria-label={t('peopleKind')} value={newKind} onChange={e => setNewKind(e.target.value as 'client' | 'person')}>
+        <option value="client">{t('peopleClient')}</option>
+        <option value="person">{t('peoplePerson')}</option>
+      </select>
+      <button className="btn btn-primary" disabled={!newName.trim()} onClick={addContact} data-testid="people-add">{t('peopleAdd')}</button>
+    </div>
+  );
+
+  if (contacts.length === 0) {
+    return (
+      <div className="people-page" data-testid="people-view">
+        <TopHeader variant="page" title={t('peopleTitle')} subtitle={t('peopleSub')} />
+        <div className="people-scroll">
+          <div className="people-blank">
+            <span className="people-blank-icon" aria-hidden><Users size={22} /></span>
+            <p className="people-empty" data-testid="people-empty">{t('peopleEmpty')}</p>
+            {addForm}
+          </div>
+        </div>
+      </div>
+    );
+  }
+
   return (
     <div className="people-page" data-testid="people-view">
-      <TopHeader title={t('peopleTitle')} subtitle={t('peopleSub')} icon={Users} />
+      <TopHeader variant="page" className="wide" title={t('peopleTitle')} subtitle={t('peopleSub')} />
       <div className="people-body">
         <aside className="people-side">
-          {contacts.length === 0 && <p className="people-empty" data-testid="people-empty">{t('peopleEmpty')}</p>}
           {contacts.map(c => (
             <button key={c.id} className="row" aria-current={selected === c.id} onClick={() => setSelected(c.id)} data-testid={`person-${c.id}`}>
               {c.name}
               <small>{[c.kind === 'client' ? t('peopleClient') : c.kind === 'company' ? t('peopleCompany') : t('peoplePerson'), openCount(c.id) ? t('peopleOpenJobs', { count: openCount(c.id) }) : ''].filter(Boolean).join(' · ')}</small>
             </button>
           ))}
-          <div className="people-new">
-            <input aria-label={t('peopleNamePlaceholder')} placeholder={t('peopleNamePlaceholder')} value={newName} onChange={e => setNewName(e.target.value)} onKeyDown={e => { if (e.key === 'Enter') void addContact(); }} data-testid="people-new-name" />
-            <select aria-label={t('peopleKind')} value={newKind} onChange={e => setNewKind(e.target.value as 'client' | 'person')} style={{ width: 'auto' }}>
-              <option value="client">{t('peopleClient')}</option>
-              <option value="person">{t('peoplePerson')}</option>
-            </select>
-          </div>
-          <button className="btn btn-secondary" disabled={!newName.trim()} onClick={addContact} data-testid="people-add">{t('peopleAdd')}</button>
+          {addForm}
         </aside>
 
         <section className="people-detail">

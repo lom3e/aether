@@ -897,3 +897,23 @@ p {
 .btn:focus-visible, .form-input:focus-visible, input:focus-visible, textarea:focus-visible, select:focus-visible { outline: 2px solid hsl(var(--ring) / .6); outline-offset: 2px; }
 h1, h2, h3 { letter-spacing: -0.025em; }
 @media (prefers-reduced-motion: reduce) { * { transition-duration: 0.01ms !important; animation-duration: 0.01ms !important; } }
+
+/* Page header of the personal screens: a large title over the same centred column as the content (ChatGPT/Claude settings style) */
+.top-header.page-head { position: relative; height: auto; border: 0; padding: 40px 0 6px; background: transparent; display: block; }
+.page-head-inner { max-width: 720px; margin: 0 auto; padding: 0 32px; display: flex; align-items: flex-end; justify-content: space-between; gap: 16px; }
+.page-head-text { min-width: 0; }
+.page-head h1 { margin: 0; font-size: 26px; line-height: 1.2; font-weight: 600; letter-spacing: -0.025em; color: hsl(var(--fg)); text-wrap: balance; }
+.page-head p { margin: 6px 0 0; font-size: 14.5px; line-height: 1.5; color: hsl(var(--muted-fg)); text-wrap: pretty; }
+.page-head-actions { display: flex; align-items: center; gap: 8px; flex-shrink: 0; }
+.page-head-min { position: absolute; top: 12px; right: 16px; display: inline-flex; align-items: center; justify-content: center; width: 30px; height: 30px; border-radius: 8px; border: 0; background: transparent; color: hsl(var(--muted-fg)); cursor: pointer; }
+.page-head-min:hover { background: hsl(var(--muted)); color: hsl(var(--fg)); }
+.page-head.wide .page-head-inner { max-width: 1040px; }
+@media (max-width: 640px) { .top-header.page-head { padding-top: 24px; } .page-head-inner { padding: 0 16px; } .page-head h1 { font-size: 22px; } }
+
+/* A real on/off switch on top of a native checkbox (keeps keyboard, label and form semantics) */
+.ui-switch { appearance: none; -webkit-appearance: none; flex: none; position: relative; width: 38px; height: 22px; margin: 0; border-radius: 999px; background: hsl(var(--muted-fg) / .3); cursor: pointer; transition: background-color var(--dur, .2s) var(--ease, ease); }
+.ui-switch::after { content: ''; position: absolute; top: 2px; left: 2px; width: 18px; height: 18px; border-radius: 50%; background: #fff; box-shadow: 0 1px 2px rgb(0 0 0 / .25); transition: transform var(--dur, .2s) var(--ease, ease); }
+.ui-switch:checked { background: hsl(var(--primary)); }
+.ui-switch:checked::after { transform: translateX(16px); }
+.ui-switch:focus-visible { outline: 2px solid hsl(var(--ring) / .6); outline-offset: 2px; }
+.ui-switch:disabled { opacity: .5; cursor: default; }

@@ -73,8 +73,8 @@ def test_playwright_missions_e2e_flow(tmp_path, monkeypatch):
             assert page.is_visible("h1:has-text('Missions')")
 
             # 3. Verify Empty State
-            page.wait_for_selector("text=No missions formulated yet", timeout=5000)
-            assert page.is_visible("text=No missions formulated yet")
+            page.wait_for_selector("text=No missions yet", timeout=5000)
+            assert page.is_visible("text=No missions yet")
 
             # 4. Click "+ New Mission"
             page.click("button:has-text('New Mission')")

@@ -62,7 +62,7 @@ GOOGLE_READY = {"google_calendar": {"ready_for_user_connect": True, "has_client_
 def test_without_a_client_id_a_service_says_so_honestly_and_points_to_advanced(browser_context):
     page, _ = _open(browser_context, NONE_READY, {"list": []}, lambda u: {"status": "pending"})
     row = page.get_by_test_id("conn-row-google_calendar")
-    expect(row).to_contain_text("Not available in this version yet")
+    expect(row).to_contain_text("for now with your own key, under Advanced")
     expect(page.get_by_test_id("conn-connect-google_calendar")).to_have_count(0)
     page.get_by_test_id("conn-setup-google_calendar").click()
     expect(page.get_by_test_id("connections-advanced")).to_be_visible()

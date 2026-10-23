@@ -7251,7 +7251,7 @@ async def life_contacts_create(request: Request, payload: ContactPayload):
         c = await asyncio.to_thread(store.add_contact, payload.name or "", kind=payload.kind or "person", company=payload.company or "", email=payload.email or "", phone=payload.phone or "", notes=payload.notes or "")
     except ValueError as exc:
         raise _life_value_error(exc) from exc
-    await asyncio.to_thread(life.sync_contact, ws, store, c)
+    await asyncio.to_thread(life.sync_contact, ws, store, c, request.headers.get("x-aether-language", "it"))
     return store.get_contact(c["id"])
 
 
@@ -7266,7 +7266,7 @@ async def life_contacts_update(request: Request, contact_id: str, payload: Conta
         raise _life_value_error(exc) from exc
     if not c:
         raise HTTPException(status_code=404, detail="Contact not found.")
-    await asyncio.to_thread(life.sync_contact, ws, store, c)
+    await asyncio.to_thread(life.sync_contact, ws, store, c, request.headers.get("x-aether-language", "it"))
     return store.get_contact(contact_id)
 
 
@@ -7295,7 +7295,7 @@ async def life_jobs_create(request: Request, payload: JobPayload):
         j = await asyncio.to_thread(store.add_job, payload.title or "", contact_id=payload.contact_id, due_at=payload.due_at, notes=payload.notes or "", source=payload.source or "manual")
     except ValueError as exc:
         raise _life_value_error(exc) from exc
-    await asyncio.to_thread(life.sync_job, ws, store, j)
+    await asyncio.to_thread(life.sync_job, ws, store, j, request.headers.get("x-aether-language", "it"))
     return store.get_job(j["id"])
 
 
@@ -7311,7 +7311,7 @@ async def life_jobs_update(request: Request, job_id: str, payload: JobPayload):
         raise _life_value_error(exc) from exc
     if not j:
         raise HTTPException(status_code=404, detail="Job not found.")
-    await asyncio.to_thread(life.sync_job, ws, store, j)
+    await asyncio.to_thread(life.sync_job, ws, store, j, request.headers.get("x-aether-language", "it"))
     return store.get_job(job_id)
 
 

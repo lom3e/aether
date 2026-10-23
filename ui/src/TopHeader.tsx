@@ -11,6 +11,9 @@ export interface TopHeaderProps {
   leading?: ReactNode;
   style?: CSSProperties;
   children?: ReactNode;
+  /** 'page': a large title over a centred column (the personal screens); 'bar' (default): the compact tool bar. */
+  variant?: 'bar' | 'page';
+  className?: string;
 }
 
 export function TopHeader({
@@ -21,8 +24,35 @@ export function TopHeader({
   leading,
   style,
   children,
+  variant = 'bar',
+  className = '',
 }: TopHeaderProps) {
   const { t } = useTranslation();
+  const minimize = isTauri() && (
+    <button
+      onClick={() => minimizeToCompanion()}
+      title={t('topHeaderMinimizeShortcut')}
+      aria-label={t('topHeaderMinimizeCompanion')}
+      data-testid="minimize-to-companion-btn"
+      className="page-head-min"
+    >
+      <Minimize2 size={14} />
+    </button>
+  );
+  if (variant === 'page') {
+    return (
+      <header data-testid="top-header" className={`top-header page-head ${className}`} style={style}>
+        <div className="page-head-inner">
+          <div className="page-head-text">
+            {typeof title === 'string' ? <h1>{title}</h1> : title}
+            {subtitle && (typeof subtitle === 'string' ? <p>{subtitle}</p> : subtitle)}
+          </div>
+          {(actions || children) && <div className="page-head-actions">{actions}{children}</div>}
+        </div>
+        {minimize}
+      </header>
+    );
+  }
   return (
     <header
       data-testid="top-header"

@@ -6,8 +6,7 @@
 .pv-tabs button.on { background: hsl(var(--muted)); color: hsl(var(--fg)); }
 .pv-tabs button:focus-visible, .pv-link:focus-visible { outline: 2px solid hsl(var(--ring)); outline-offset: 2px; }
 .pv-lead { font-size: 22px; line-height: 1.35; letter-spacing: -0.02em; margin-bottom: 20px; }
-.pv-switch { display: flex; gap: 12px; align-items: flex-start; padding: 14px 0; margin-bottom: 8px; cursor: pointer; }
-.pv-switch input { margin-top: 4px; accent-color: hsl(var(--primary)); }
+.pv-switch { display: flex; gap: 16px; align-items: center; justify-content: space-between; padding: 16px 18px; margin-bottom: 20px; cursor: pointer; border-radius: 16px; background: hsl(var(--muted) / .4); }
 .pv-switch strong { display: block; font-weight: 500; font-size: 14px; }
 .pv-switch small, .pv-main small { display: block; color: hsl(var(--muted-fg)); font-size: 12.5px; margin-top: 2px; }
 .pv-list { list-style: none; display: flex; flex-direction: column; }
@@ -34,3 +33,8 @@
 .pv-add button { padding: 0 16px; border-radius: 10px; border: 0; background: hsl(var(--primary)); color: hsl(var(--primary-fg, 0 0% 100%)); font-weight: 600; font-size: 13px; cursor: pointer; }
 .pv-add button:disabled { opacity: .5; cursor: default; }
 .mh-docs { margin: 0 -24px; }
+.pv-tabs button { display: inline-flex; align-items: center; gap: 7px; white-space: nowrap; }
+.settings-tabs { overflow-x: auto; margin-top: 4px; }
+.settings-tabs button svg { opacity: .75; }
+.settings-body { max-width: 720px; margin: 0 auto; padding: 20px 32px 48px; }
+@media (max-width: 640px) { .settings-body { padding: 16px 16px 40px; } .settings-body .card { padding: 18px !important; } }

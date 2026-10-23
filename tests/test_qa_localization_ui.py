@@ -56,10 +56,11 @@ def browser_context(aether_server):
 
 
 def _visible_words(page) -> list[str]:
-    # Conversation titles and message bubbles are the user's own words (other tests in the session write in both languages).
+    # Conversation titles, message bubbles, jobs, memories and lessons (marked data-user-content) are the user's own words
+    # (other tests in the session write in both languages).
     text = page.evaluate(
         "(() => { const c = document.body.cloneNode(true);"
-        " c.querySelectorAll('.drawer-session-item, .v2-conversation-dock, .v2-bubble, .message-content').forEach(e => e.remove());"
+        " c.querySelectorAll('.drawer-session-item, .v2-conversation-dock, .v2-bubble, .message-content, .sb-chats, .life-main, .life-brief, [data-testid=privacy-knows] .pv-main, [data-user-content]').forEach(e => e.remove());"
         " document.body.appendChild(c); const t = c.innerText; c.remove(); return t; })()"
     )
     # ALL-CAPS tokens are protocol/acronym vocabulary (GET, DELETE, HTTP...), not interface copy.
@@ -125,7 +126,7 @@ def test_no_screen_mixes_in_the_other_language(browser_context, language, foreig
 def _attribute_words(page) -> list[str]:
     values = page.evaluate(
         "Array.from(document.querySelectorAll('[placeholder],[aria-label],[title]'))"
-        ".filter(e => !e.closest('.drawer-session-item, .v2-conversation-dock, .v2-bubble, .message-content')).flatMap(e => "
+        ".filter(e => !e.closest('.drawer-session-item, .v2-conversation-dock, .v2-bubble, .message-content, .sb-chats, [data-user-content]')).flatMap(e => "
         "[e.getAttribute('placeholder'), e.getAttribute('aria-label'), e.getAttribute('title')]).filter(Boolean)"
     )
     values = [re.sub(r"(?:/[\w.\-~]+){2,}", " ", v) for v in values]       # example file paths are not interface copy

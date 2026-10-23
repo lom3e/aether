@@ -461,10 +461,10 @@ export function Automations({ initialAutomationId }: AutomationsProps = {}) {
                   borderRadius: '50%',
                   backgroundColor: schedulerHealth?.running ? 'hsl(var(--success))' : 'hsl(var(--muted-fg))',
                 }} />
-                {schedulerHealth?.running ? 'Active & Healthy' : 'Offline'}
+                {schedulerHealth?.running ? t('autoSchedulerRunning') : t('autoSchedulerStopped')}
                 {schedulerHealth?.watchers_count ? (
                   <span style={{ fontSize: '11px', fontWeight: 400, color: 'hsl(var(--muted-fg))' }}>
-                    ({schedulerHealth.watchers_count} watchers)
+                    ({t('autoWatchers', { count: schedulerHealth.watchers_count })})
                   </span>
                 ) : null}
               </div>

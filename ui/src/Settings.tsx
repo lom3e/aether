@@ -2,7 +2,7 @@ import { useState, useEffect, useContext } from 'react';
 import { ToastContext } from './toast';
 import {
   Cpu, Globe, Moon, Sun,
-  HardDrive, Layers, AlertTriangle, Sliders, Folder, Keyboard
+  HardDrive, Layers, AlertTriangle, Folder, Keyboard
 } from 'lucide-react';
 import { apiError, apiUrl } from './api';
 import { MorningBriefSetting } from './MorningBriefSetting';
@@ -13,6 +13,7 @@ import { useTheme } from './theme';
 import { checkForUpdate, installUpdate, isTauri } from './desktop';
 import type { UpdateError, UpdateInfo } from './desktop';
 import { TopHeader } from './TopHeader';
+import './privacy.css';
 import { useKeyboardShortcuts, CATEGORY_ORDER } from './shortcuts';
 import { ModelSelector } from './ModelSelector';
 
@@ -292,54 +293,47 @@ export function Settings({ onWorkspaceSwitched }: SettingsProps) {
 
   return (
     <div style={{ flex: 1, overflowY: 'auto' }}>
-      <TopHeader
-        title={t('settingsTitle')}
-        icon={Sliders}
-      />
-      <div style={{ maxWidth: '840px', margin: '0 auto', padding: '32px 24px' }}>
-        <p className="text-muted" style={{ fontSize: '14px', marginBottom: '24px' }}>
-          {t('settingsIntro')}
-        </p>
+      <TopHeader variant="page" title={t('settingsTitle')} subtitle={t('settingsIntro')} />
+      <div className="settings-body">
 
       {/* Tabs */}
-      <div style={{
-        display: 'flex',
-        gap: '8px',
-        borderBottom: '1px solid hsl(var(--border))',
-        marginBottom: '28px',
-        overflowX: 'auto'
-      }}>
+      <div className="pv-tabs settings-tabs" role="tablist">
         <button
-          className={`btn btn-ghost ${activeTab === 'workspace' ? 'active' : ''}`}
-          style={{ borderRadius: '0', borderBottom: activeTab === 'workspace' ? '2px solid hsl(var(--primary))' : 'none', padding: '10px 16px', fontSize: '13.5px' }}
+          role="tab"
+          aria-selected={activeTab === 'workspace'}
+          className={activeTab === 'workspace' ? 'on' : ''}
           onClick={() => setActiveTab('workspace')}
         >
           <Layers size={16} /> {t('workspace')}
         </button>
         <button
-          className={`btn btn-ghost ${activeTab === 'providers' ? 'active' : ''}`}
-          style={{ borderRadius: '0', borderBottom: activeTab === 'providers' ? '2px solid hsl(var(--primary))' : 'none', padding: '10px 16px', fontSize: '13.5px' }}
+          role="tab"
+          aria-selected={activeTab === 'providers'}
+          className={activeTab === 'providers' ? 'on' : ''}
           onClick={() => setActiveTab('providers')}
         >
           <Cpu size={16} /> {t('providersTab')}
         </button>
         <button
-          className={`btn btn-ghost ${activeTab === 'storage' ? 'active' : ''}`}
-          style={{ borderRadius: '0', borderBottom: activeTab === 'storage' ? '2px solid hsl(var(--primary))' : 'none', padding: '10px 16px', fontSize: '13.5px' }}
+          role="tab"
+          aria-selected={activeTab === 'storage'}
+          className={activeTab === 'storage' ? 'on' : ''}
           onClick={() => setActiveTab('storage')}
         >
           <HardDrive size={16} /> {t('storageTab')}
         </button>
         <button
-          className={`btn btn-ghost ${activeTab === 'general' ? 'active' : ''}`}
-          style={{ borderRadius: '0', borderBottom: activeTab === 'general' ? '2px solid hsl(var(--primary))' : 'none', padding: '10px 16px', fontSize: '13.5px' }}
+          role="tab"
+          aria-selected={activeTab === 'general'}
+          className={activeTab === 'general' ? 'on' : ''}
           onClick={() => setActiveTab('general')}
         >
           <Globe size={16} /> {t('generalTab')}
         </button>
         <button
-          className={`btn btn-ghost ${activeTab === 'shortcuts' ? 'active' : ''}`}
-          style={{ borderRadius: '0', borderBottom: activeTab === 'shortcuts' ? '2px solid hsl(var(--primary))' : 'none', padding: '10px 16px', fontSize: '13.5px' }}
+          role="tab"
+          aria-selected={activeTab === 'shortcuts'}
+          className={activeTab === 'shortcuts' ? 'on' : ''}
           onClick={() => setActiveTab('shortcuts')}
         >
           <Keyboard size={16} /> {t('shortcutsTab')}
@@ -530,20 +524,22 @@ export function Settings({ onWorkspaceSwitched }: SettingsProps) {
                 />
               </div>
 
-              <div style={{ display: 'flex', alignItems: 'center', gap: '8px', padding: '6px 0' }}>
+              <label htmlFor="settings-apply-all-checkbox" style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '16px', padding: '6px 0', fontSize: '13.5px', cursor: 'pointer', userSelect: 'none' }}>
+                <span>
+                  {language === 'it' ? 'Usa questo modello per tutti gli assistenti' : 'Use this model for every assistant'}
+                  <small className="text-muted" style={{ display: 'block', fontSize: '12.5px', marginTop: '2px' }}>
+                    {language === 'it' ? 'Sostituisce le scelte fatte per i singoli assistenti.' : 'Replaces the choices made for single assistants.'}
+                  </small>
+                </span>
                 <input
                   type="checkbox"
+                  role="switch"
+                  className="ui-switch"
                   id="settings-apply-all-checkbox"
                   checked={applyToAllAgents}
                   onChange={e => setApplyToAllAgents(e.target.checked)}
-                  style={{ cursor: 'pointer', width: '16px', height: '16px' }}
                 />
-                <label htmlFor="settings-apply-all-checkbox" style={{ fontSize: '13px', cursor: 'pointer', color: 'hsl(var(--muted-fg))', userSelect: 'none' }}>
-                  {language === 'it'
-                    ? "Applica al Team e a tutti gli agenti (Rimuovi tutti gli override individuali e unifica l'intera workforce con questo modello.)"
-                    : "Apply to Team and all agents (Remove all individual agent overrides and unify the entire workforce with this model.)"}
-                </label>
-              </div>
+              </label>
 
               <div>
                 <label className="form-label">{t('providerTimeout')}</label>

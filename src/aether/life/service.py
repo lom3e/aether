@@ -56,21 +56,36 @@ def _fmt_due(ts: float | None) -> str:
     return dt.datetime.fromtimestamp(ts).astimezone().strftime("%Y-%m-%d") if ts else ""
 
 
-def sync_contact(ws: Any, store: LifeStore, contact: dict[str, Any]) -> None:
-    lines = [f"{contact['name']} ({contact['kind']})"]
+_MEMORY_WORDS = {
+    "it": {"client": "cliente", "person": "persona", "company": "azienda", "Company": "Azienda", "Notes": "Note",
+           "job": "Lavoro", "for": "per", "due": "entro il", "open": "da fare", "done": "fatto"},
+    "en": {"client": "client", "person": "person", "company": "company", "Company": "Company", "Notes": "Notes",
+           "job": "Job", "for": "for", "due": "due", "open": "open", "done": "done"},
+}
+
+
+def _words(language: str) -> dict[str, str]:
+    return _MEMORY_WORDS["en" if (language or "").lower().startswith("en") else "it"]
+
+
+def sync_contact(ws: Any, store: LifeStore, contact: dict[str, Any], language: str = "it") -> None:
+    w = _words(language)
+    head = f"{contact['name']} ({w.get(contact['kind'], contact['kind'])})"
+    lines = [head]
     for label, key in (("Company", "company"), ("Notes", "notes")):
         if contact.get(key):
-            lines.append(f"{label}: {contact[key]}")
-    mid = _upsert_memory(ws, contact.get("memory_id"), "person", f"{contact['name']} ({contact['kind']})", "\n".join(lines), contact["id"])
+            lines.append(f"{w[label]}: {contact[key]}")
+    mid = _upsert_memory(ws, contact.get("memory_id"), "person", head, "\n".join(lines), contact["id"])
     if mid != contact.get("memory_id"):
         store.set_memory_id("contacts", contact["id"], mid)
 
 
-def sync_job(ws: Any, store: LifeStore, job: dict[str, Any]) -> None:
-    who = f" for {job['contact_name']}" if job.get("contact_name") else ""
-    due = f", due {_fmt_due(job.get('due_at'))}" if job.get("due_at") else ""
-    state = "done" if job["status"] == "done" else "open"
-    summary = f"Job{who}: {job['title']}"
+def sync_job(ws: Any, store: LifeStore, job: dict[str, Any], language: str = "it") -> None:
+    w = _words(language)
+    who = f" {w['for']} {job['contact_name']}" if job.get("contact_name") else ""
+    due = f", {w['due']} {_fmt_due(job.get('due_at'))}" if job.get("due_at") else ""
+    state = w["done"] if job["status"] == "done" else w["open"]
+    summary = f"{w['job']}{who}: {job['title']}"
     mid = _upsert_memory(ws, job.get("memory_id"), "project", summary, f"{summary}{due} ({state}).{(' ' + job['notes']) if job.get('notes') else ''}", job["id"])
     if mid != job.get("memory_id"):
         store.set_memory_id("jobs", job["id"], mid)

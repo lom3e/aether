@@ -31,3 +31,7 @@
 .sidebar [data-testid='nav-advanced'] { font-weight: 500 !important; letter-spacing: 0 !important; color: hsl(var(--muted-fg)) !important; font-size: 13px !important; }
 .sidebar [data-testid='nav-advanced'] span { letter-spacing: 0 !important; font-weight: 500 !important; }
 .sb-settings { padding: 6px 8px 0; }
+.sb-subhead { display: flex; align-items: center; justify-content: space-between; gap: 8px; padding: 8px 10px 4px; font-size: 12px; font-weight: 500; color: hsl(var(--muted-fg)); }
+.sb-mini { display: inline-flex; align-items: center; gap: 4px; background: none; border: 0; font: inherit; font-size: 12px; color: hsl(var(--muted-fg)); padding: 3px 6px; border-radius: 6px; cursor: pointer; }
+.sb-mini:hover { background: hsl(var(--sidebar-hover, var(--muted))); color: hsl(var(--fg)); }
+.sb-mini:focus-visible { outline: 2px solid hsl(var(--ring) / .6); outline-offset: 1px; }

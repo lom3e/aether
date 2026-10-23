@@ -1,5 +1,4 @@
 import { useCallback, useContext, useEffect, useRef, useState } from 'react';
-import { Link2 } from 'lucide-react';
 import { apiUrl } from './api';
 import { openExternalUrl, showMainWindow } from './desktop';
 import { ToastContext } from './toast';
@@ -7,6 +6,8 @@ import { useTranslation, type TranslationKey } from './i18n';
 import { TopHeader } from './TopHeader';
 import { ConnectionsAdvanced } from './ConnectionsAdvanced';
 import { TelegramRow } from './TelegramRow';
+import { ServiceTile } from './ServiceTile';
+import { CalendarDays, GitBranch, Mail, MessageSquare, NotebookText } from 'lucide-react';
 import './connections.css';
 
 interface ConnectionsProps {
@@ -19,12 +20,12 @@ interface Conn { provider: string; status: string; account_name?: string }
 interface ProviderStatus { has_client_id?: boolean; ready_for_user_connect?: boolean }
 interface FlowStatus { status: 'pending' | 'success' | 'error' | 'expired' | 'cancelled'; account?: string; error?: string }
 
-const ROWS: { id: string; name: string; desc: TranslationKey; device?: boolean }[] = [
-  { id: 'google_calendar', name: 'Google Calendar', desc: 'cnCalendarDesc' },
-  { id: 'gmail', name: 'Gmail', desc: 'cnGmailDesc' },
-  { id: 'github', name: 'GitHub', desc: 'cnGithubDesc', device: true },
-  { id: 'slack', name: 'Slack', desc: 'cnSlackDesc' },
-  { id: 'notion', name: 'Notion', desc: 'cnNotionDesc' },
+const ROWS: { id: string; name: string; desc: TranslationKey; icon: typeof Mail; hue: number; device?: boolean }[] = [
+  { id: 'google_calendar', name: 'Google Calendar', desc: 'cnCalendarDesc', icon: CalendarDays, hue: 217 },
+  { id: 'gmail', name: 'Gmail', desc: 'cnGmailDesc', icon: Mail, hue: 4 },
+  { id: 'github', name: 'GitHub', desc: 'cnGithubDesc', icon: GitBranch, hue: 250, device: true },
+  { id: 'slack', name: 'Slack', desc: 'cnSlackDesc', icon: MessageSquare, hue: 320 },
+  { id: 'notion', name: 'Notion', desc: 'cnNotionDesc', icon: NotebookText, hue: 30 },
 ];
 
 /**
@@ -120,7 +121,7 @@ export function Connections({ navigate, initialExecutionId, initialTab }: Connec
 
   return (
     <div className="cn-page" data-testid="connections-view">
-      <TopHeader title={t('cnTitle')} subtitle={t('cnSub')} icon={Link2} />
+      <TopHeader variant="page" title={t('cnTitle')} subtitle={t('cnSub')} />
       <div className="cn-body">
         <ul className="cn-list">
           {ROWS.map(row => {
@@ -129,14 +130,14 @@ export function Connections({ navigate, initialExecutionId, initialTab }: Connec
             const ok = available(row);
             return (
               <li key={row.id} data-testid={`conn-row-${row.id}`} data-state={waiting ? 'waiting' : s.kind}>
-                <span className={`cn-dot ${s.kind === 'connected' ? 'on' : s.kind === 'reconnect' ? 'warn' : ''}`} aria-hidden />
+                <ServiceTile icon={row.icon} hue={row.hue} state={s.kind === 'connected' ? 'on' : s.kind === 'reconnect' ? 'warn' : 'off'} />
                 <span className="cn-main">
                   <b>{row.name}</b>
                   <small>
                     {waiting ? (flow?.code ? t('cnGithubCode') : t('cnWaiting'))
                       : s.kind === 'connected' ? t('cnConnectedAs', { account: s.account })
                       : s.kind === 'reconnect' ? t('cnNeedsReconnect')
-                      : ok ? t(row.desc) : t('cnNotAvailable')}
+                      : ok ? t(row.desc) : `${t(row.desc)} · ${t('cnNotAvailable')}`}
                   </small>
                   {waiting && flow?.code && (
                     <span className="cn-code" data-testid="cn-device-code">

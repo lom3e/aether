@@ -10,9 +10,9 @@ export function VoiceSetting() {
     <div className="card" style={{ padding: '24px' }} data-testid="voice-setting">
       <h3 style={{ fontSize: '16px', fontWeight: 600, marginBottom: '6px' }}>{t('voiceTitle')}</h3>
       <p className="text-muted" style={{ fontSize: '13px', marginBottom: '14px' }}>{t('voiceDesc')}</p>
-      <label style={{ display: 'flex', alignItems: 'center', gap: '10px', fontSize: '14px', cursor: 'pointer' }}>
-        <input type="checkbox" checked={on} onChange={e => { setOn(e.target.checked); setSpeakVoiceAnswers(e.target.checked); }} data-testid="voice-toggle" disabled={!canSpeak()} />
+      <label style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '16px', fontSize: '14px', cursor: 'pointer' }}>
         {t('voiceToggle')}
+        <input type="checkbox" role="switch" className="ui-switch" checked={on} onChange={e => { setOn(e.target.checked); setSpeakVoiceAnswers(e.target.checked); }} data-testid="voice-toggle" disabled={!canSpeak()} />
       </label>
       {canSpeak() && (
         <button className="btn btn-ghost" style={{ marginTop: '12px', fontSize: '13px' }} onClick={() => speak(t('voiceSample'), language)} data-testid="voice-try">{t('voiceTry')}</button>

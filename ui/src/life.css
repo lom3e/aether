@@ -27,7 +27,7 @@
 
 /* People & jobs */
 .people-page { flex: 1; display: flex; flex-direction: column; min-width: 0; overflow: hidden; }
-.people-body { flex: 1; overflow-y: auto; padding: 8px 32px 48px; width: 100%; max-width: 860px; margin: 0 auto; display: grid; grid-template-columns: minmax(200px, 280px) 1fr; gap: 28px; align-items: start; }
+.people-body { flex: 1; overflow-y: auto; padding: 20px 32px 48px; width: 100%; max-width: 1040px; margin: 0 auto; display: grid; grid-template-columns: minmax(200px, 280px) 1fr; gap: 28px; align-items: start; }
 .people-side { display: flex; flex-direction: column; gap: 6px; }
 .people-side button.row { display: flex; flex-direction: column; align-items: flex-start; gap: 1px; text-align: left; background: none; border: 0; font: inherit; font-size: 14px; color: hsl(var(--fg)); padding: 8px 12px; border-radius: 12px; cursor: pointer; }
 .people-side button.row small { color: hsl(var(--muted-fg)); font-size: 12px; }
@@ -36,7 +36,16 @@
 .people-detail input, .people-detail textarea, .people-new input, .people-new select { font: inherit; font-size: 14px; padding: 9px 12px; border: 0; border-radius: 10px; background: hsl(var(--muted) / .6); color: hsl(var(--fg)); outline: none; width: 100%; }
 .people-detail input:focus, .people-detail textarea:focus, .people-new input:focus { box-shadow: 0 0 0 2px hsl(var(--ring) / .5); }
 .people-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
-.people-new { display: flex; gap: 6px; margin-top: 6px; }
+.people-new { display: flex; gap: 6px; margin-top: 10px; flex-wrap: wrap; }
+.people-new input { flex: 1 1 140px; }
+.people-new select { flex: 0 0 auto; width: auto; }
+.people-new .btn { flex: 0 0 auto; }
+.people-scroll { flex: 1; overflow-y: auto; padding: 20px 32px 48px; }
+.people-blank { max-width: 656px; margin: 24px auto 0; padding: 36px 32px; border-radius: 20px; background: hsl(var(--muted) / .35); display: flex; flex-direction: column; align-items: center; text-align: center; gap: 6px; }
+.people-blank .people-empty { max-width: 440px; margin: 6px 0 4px; }
+.people-blank .people-new { width: 100%; max-width: 460px; }
+.people-blank-icon { width: 44px; height: 44px; border-radius: 999px; display: inline-flex; align-items: center; justify-content: center; background: hsl(var(--primary) / .1); color: hsl(var(--primary)); }
 .people-empty { color: hsl(var(--muted-fg)); font-size: 13.5px; line-height: 1.6; }
-@media (max-width: 760px) { .people-body { grid-template-columns: 1fr; padding: 8px 16px 40px; } }
+@media (max-width: 760px) { .people-body { grid-template-columns: 1fr; padding: 16px 16px 40px; } .people-scroll { padding: 16px; } .people-blank { padding: 28px 18px; } }
 @media (prefers-reduced-motion: reduce) { .life-check { transition: none; } }
+.people-blank .people-new input, .people-blank .people-new select { background: hsl(var(--card)); box-shadow: inset 0 0 0 1px hsl(var(--border)); }

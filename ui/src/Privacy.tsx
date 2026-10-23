@@ -1,5 +1,4 @@
 import { useCallback, useContext, useEffect, useState } from 'react';
-import { ShieldCheck } from 'lucide-react';
 import { apiUrl } from './api';
 import { ToastContext } from './toast';
 import { useTranslation } from './i18n';
@@ -63,7 +62,7 @@ export function Privacy() {
 
   return (
     <div className="pv-page" data-testid="privacy-view">
-      <TopHeader title={t('pvTitle')} subtitle={t('pvSub')} icon={ShieldCheck} />
+      <TopHeader variant="page" title={t('pvTitle')} subtitle={t('pvSub')} />
       <div className="pv-body">
         <div className="pv-tabs" role="tablist">
           {(['out', 'knows', 'undo'] as Tab[]).map(k => (
@@ -81,8 +80,8 @@ export function Privacy() {
                 : t('pvLeadNone')}
             </p>
             <label className="pv-switch">
-              <input type="checkbox" checked={redact} onChange={toggleRedact} data-testid="privacy-redact-toggle" />
               <span><strong>{t('pvRedactLabel')}</strong><small>{t('pvRedactHint')}</small></span>
+              <input type="checkbox" role="switch" className="ui-switch" checked={redact} onChange={toggleRedact} data-testid="privacy-redact-toggle" />
             </label>
             {entries.length === 0 ? <p className="pv-empty">{t('pvLedgerEmpty')}</p> : (
               <ul className="pv-list">

@@ -3,6 +3,8 @@ import { apiUrl } from './api';
 import { openExternalUrl } from './desktop';
 import { ToastContext } from './toast';
 import { useTranslation } from './i18n';
+import { Send } from 'lucide-react';
+import { ServiceTile } from './ServiceTile';
 
 interface MobileStatus { configured: boolean; bot_username?: string; paired?: { chat_id: string; name: string }[]; running?: boolean; last_error?: string }
 
@@ -56,7 +58,7 @@ export function TelegramRow() {
 
   return (
     <li data-testid="conn-row-telegram" data-state={state} className="cn-tg">
-      <span className={`cn-dot ${paired.length ? 'on' : ''}`} aria-hidden />
+      <ServiceTile icon={Send} hue={200} state={paired.length ? 'on' : 'off'} />
       <span className="cn-main">
         <b>Telegram</b>
         <small>

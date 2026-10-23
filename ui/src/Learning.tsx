@@ -461,7 +461,7 @@ export function Learning() {
                       backgroundColor: 'hsl(var(--muted))', color: 'hsl(var(--muted-fg))',
                       padding: '2px 8px', borderRadius: '4px', fontSize: '11px', fontWeight: 500,
                     }}>
-                      Scope: {lesson.scope} {lesson.target_identifier ? `(${lesson.target_identifier})` : ''}
+                      {t('lrnScope')}: {lesson.scope} {lesson.target_identifier ? `(${lesson.target_identifier})` : ''}
                     </div>
 
                     {lesson.quality_gate_rule && (
@@ -491,10 +491,10 @@ export function Learning() {
                 </div>
 
                 <div>
-                  <h4 style={{ fontSize: '15px', fontWeight: 600, color: 'hsl(var(--fg))', marginBottom: '6px' }}>
+                  <h4 data-user-content style={{ fontSize: '15px', fontWeight: 600, color: 'hsl(var(--fg))', marginBottom: '6px' }}>
                     {lesson.title}
                   </h4>
-                  <p style={{ fontSize: '13px', color: 'hsl(var(--fg))', lineHeight: '1.5', whiteSpace: 'pre-wrap' }}>
+                  <p data-user-content style={{ fontSize: '13px', color: 'hsl(var(--fg))', lineHeight: '1.5', whiteSpace: 'pre-wrap' }}>
                     {lesson.lesson_text}
                   </p>
                 </div>
@@ -513,7 +513,7 @@ export function Learning() {
                 }}>
                   <div style={{ display: 'flex', gap: '16px', alignItems: 'center', flexWrap: 'wrap' }}>
                     {lesson.source_mission_id && (
-                      <span>Mission: <strong style={{ color: 'hsl(var(--fg))' }}>{lesson.source_mission_id}</strong></span>
+                      <span>{t('lrnMission')}: <strong style={{ color: 'hsl(var(--fg))' }}>{lesson.source_mission_id}</strong></span>
                     )}
                     {lesson.memory_id && (
                       <span style={{ display: 'flex', alignItems: 'center', gap: '4px', color: '#10b981' }}>
@@ -571,14 +571,14 @@ export function Learning() {
                         padding: '2px 8px', borderRadius: '4px', fontSize: '11px', fontWeight: 600,
                         textTransform: 'capitalize'
                       }}>
-                        Correction: {corr.verification_status}
+                        {t('lrnCorrection')}: {corr.verification_status}
                       </div>
 
                       <div style={{
                         backgroundColor: 'hsl(var(--muted))', color: 'hsl(var(--muted-fg))',
                         padding: '2px 8px', borderRadius: '4px', fontSize: '11px', fontWeight: 500,
                       }}>
-                        Scope: {targetScope} ({targetId})
+                        {t('lrnScope')}: {targetScope} ({targetId})
                       </div>
                     </div>
 
@@ -593,7 +593,7 @@ export function Learning() {
                       <div style={{ fontSize: '11px', fontWeight: 600, color: '#f43f5e', marginBottom: '4px' }}>
                         {t('sdObservedProblem')}
                       </div>
-                      <div style={{ fontSize: '12px', color: 'hsl(var(--fg))' }}>
+                      <div data-user-content style={{ fontSize: '12px', color: 'hsl(var(--fg))' }}>
                         {problemText}
                       </div>
                     </div>
@@ -602,7 +602,7 @@ export function Learning() {
                       <div style={{ fontSize: '11px', fontWeight: 600, color: '#10b981', marginBottom: '4px' }}>
                         {t('sdProposedCorrection')}
                       </div>
-                      <div style={{ fontSize: '12px', color: 'hsl(var(--fg))' }}>
+                      <div data-user-content style={{ fontSize: '12px', color: 'hsl(var(--fg))' }}>
                         {fixText}
                       </div>
                     </div>
@@ -622,7 +622,7 @@ export function Learning() {
                   }}>
                     <div>
                       {missionId && (
-                        <span>Mission: <strong style={{ color: 'hsl(var(--fg))' }}>{missionId}</strong></span>
+                        <span>{t('lrnMission')}: <strong style={{ color: 'hsl(var(--fg))' }}>{missionId}</strong></span>
                       )}
                     </div>
 
@@ -630,7 +630,7 @@ export function Learning() {
                       <button
                         className="btn btn-ghost"
                         style={{ padding: '4px 10px', fontSize: '12px' }}
-                        onClick={() => setSelectedEvidence({ title: `Correction ${corr.id}`, type: 'correction', item: corr })}
+                        onClick={() => setSelectedEvidence({ title: `${t('lrnCorrection')} ${corr.id}`, type: 'correction', item: corr })}
                         data-testid={`view-evidence-correction-${corr.id}`}
                       >
                         {t('sdViewEvidence')}
@@ -699,13 +699,13 @@ export function Learning() {
                   </span>
                 </div>
 
-                <div style={{ fontSize: '13px', color: 'hsl(var(--fg))' }}>
+                <div data-user-content style={{ fontSize: '13px', color: 'hsl(var(--fg))' }}>
                   {evt.observed_behavior}
                 </div>
 
                 {evt.correction && (
                   <div style={{ fontSize: '12px', color: 'hsl(var(--muted-fg))' }}>
-                    Correction: {evt.correction}
+                    {t('lrnCorrection')}: <span data-user-content>{evt.correction}</span>
                   </div>
                 )}
               </div>
@@ -779,7 +779,7 @@ export function Learning() {
                   <div>ID: {selectedEvidence.item.id}</div>
                   <div>Workspace: {selectedEvidence.item.workspace_id}</div>
                   {(selectedEvidence.item.source_mission_id || selectedEvidence.item.mission_id) && (
-                    <div>Mission: {selectedEvidence.item.source_mission_id || selectedEvidence.item.mission_id}</div>
+                    <div>{t('lrnMission')}: {selectedEvidence.item.source_mission_id || selectedEvidence.item.mission_id}</div>
                   )}
                   {selectedEvidence.item.quality_gate_rule && <div>Rule: {selectedEvidence.item.quality_gate_rule}</div>}
                   {selectedEvidence.item.memory_id && <div>Memory ID: {selectedEvidence.item.memory_id}</div>}

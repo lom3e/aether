@@ -73,7 +73,7 @@ def test_morning_brief_setting_is_off_by_default_and_saved_by_the_real_server(br
     page = browser_context.new_page()
     _ensure_workspace(page)
     page.locator("[data-testid='nav-settings']").click()
-    page.get_by_role("button", name="General").click()
+    page.get_by_role("tab", name="General").click()
     toggle = page.get_by_test_id("brief-toggle")
     expect(toggle).not_to_be_checked(timeout=10000)
     toggle.check()

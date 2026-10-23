@@ -19,9 +19,9 @@ export function MorningBriefSetting() {
     <div className="card" style={{ padding: '24px' }} data-testid="morning-brief-setting">
       <h3 style={{ fontSize: '16px', fontWeight: 600, marginBottom: '6px' }}>{t('briefTitle')}</h3>
       <p className="text-muted" style={{ fontSize: '13px', marginBottom: '14px' }}>{t('briefDesc')}</p>
-      <label style={{ display: 'flex', alignItems: 'center', gap: '10px', fontSize: '14px', cursor: 'pointer' }}>
-        <input type="checkbox" checked={enabled} onChange={e => { setEnabled(e.target.checked); void save({ brief_enabled: e.target.checked }); }} data-testid="brief-toggle" />
+      <label style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '16px', fontSize: '14px', cursor: 'pointer' }}>
         {t('briefToggle')}
+        <input type="checkbox" role="switch" className="ui-switch" checked={enabled} onChange={e => { setEnabled(e.target.checked); void save({ brief_enabled: e.target.checked }); }} data-testid="brief-toggle" />
       </label>
       {enabled && (
         <label style={{ display: 'flex', alignItems: 'center', gap: '10px', fontSize: '14px', marginTop: '12px' }}>

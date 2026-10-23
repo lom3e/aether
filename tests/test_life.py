@@ -74,7 +74,10 @@ def test_contacts_and_jobs_are_mirrored_into_memory_and_forgotten_with_them(ws):
     assert jm.category.value == "project" and "Preventivo sito" in jm.summary and "Mario Rossi" in jm.summary
     s.update_job(j["id"], status="done")
     life.sync_job(ws, s, s.get_job(j["id"]))
-    assert "done" in ws.memory.get_memory(s.get_job(j["id"])["memory_id"], workspace_id=ws.id).content
+    content = ws.memory.get_memory(s.get_job(j["id"])["memory_id"], workspace_id=ws.id).content
+    assert "fatto" in content and "Lavoro per Mario Rossi" in content, "Italian interface, Italian memory"
+    life.sync_job(ws, s, s.get_job(j["id"]), "en")
+    assert "Job for Mario Rossi" in ws.memory.get_memory(s.get_job(j["id"])["memory_id"], workspace_id=ws.id).content
     assert life.forget_job(ws, s, j["id"]) and ws.memory.get_memory(jm.id, workspace_id=ws.id) is None or ws.memory.get_memory(jm.id, workspace_id=ws.id).is_deleted
     assert life.forget_contact(ws, s, c["id"])
 

@@ -18,8 +18,17 @@ export type Proposal =
   | { status: 'ok'; kind: 'job' | 'reminder' | 'contact'; title: string; notes: string; due_at: number | null; contact: { id: string | null; name: string; new: boolean } | null; email: string; phone: string }
   | { status: 'empty' | 'nothing' | 'unavailable' | 'failed'; reason?: string };
 
+// The interface language, so what Aether writes into Memory about a person or a job reads in that language
+function uiLanguage(): string {
+  try {
+    const saved = localStorage.getItem('aether_language');
+    if (saved === 'en' || saved === 'it') return saved;
+  } catch { /* storage unavailable */ }
+  return navigator.language.startsWith('it') ? 'it' : 'en';
+}
+
 async function call<T>(path: string, init?: RequestInit): Promise<T> {
-  const res = await fetch(apiUrl(path), init && { ...init, headers: { 'Content-Type': 'application/json', ...(init.headers || {}) } });
+  const res = await fetch(apiUrl(path), init && { ...init, headers: { 'Content-Type': 'application/json', 'X-Aether-Language': uiLanguage(), ...(init.headers || {}) } });
   if (!res.ok) throw new Error(String(res.status));
   return res.json() as Promise<T>;
 }

@@ -742,14 +742,13 @@ export function Sidebar({
           {/* Projects Section */}
           <div ref={projectSectionRef}>
             {!collapsed && (
-              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '2px 8px', marginBottom: '4px' }}>
-                <span style={{ fontSize: '10px', color: 'hsl(var(--muted-fg))', fontWeight: 500 }}>
-                  {t('uiProjects')}
-                </span>
+              <div className="sb-subhead">
+                <span>{t('uiProjects')}</span>
                 <Tooltip content={t('sidebarNewProject')} position="top">
                   <button
-                    className="btn btn-ghost"
-                    style={{ padding: '2px 4px', fontSize: '11px', color: 'hsl(var(--muted-fg))' }}
+                    type="button"
+                    className="sb-mini"
+                    aria-label={t('sidebarNewProject')}
                     onClick={() => setIsCreatingProject(!isCreatingProject)}
                   >
                     <Plus size={13} />
@@ -918,13 +917,11 @@ export function Sidebar({
           {/* Conversations Section */}
           <div ref={convMenuRef}>
             {!collapsed && (
-              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '2px 8px', marginBottom: '4px' }}>
-                <span style={{ fontSize: '10px', color: 'hsl(var(--muted-fg))', fontWeight: 500 }}>
-                  {showArchived ? t('archived') : t('navConversations')}
-                </span>
+              <div className="sb-subhead">
+                <span>{showArchived ? t('archived') : t('navConversations')}</span>
                 <button
-                  className="btn btn-ghost"
-                  style={{ padding: '2px 4px', fontSize: '10px', color: 'hsl(var(--muted-fg))' }}
+                  type="button"
+                  className="sb-mini"
                   onClick={() => setShowArchived(!showArchived)}
                   title={showArchived ? t('showActive') : t('showArchived')}
                 >

@@ -182,7 +182,7 @@ export function Memory() {
   };
 
   const handleDeleteMemory = async (mem: WorkforceMemory) => {
-    if (!confirm(`Are you sure you want to delete memory: "${mem.summary}"?`)) return;
+    if (!confirm(t('memDeleteConfirm', { summary: mem.summary }))) return;
     try {
       const res = await fetch(apiUrl(`/api/memories/${mem.id}`), {
         method: 'DELETE',
@@ -603,6 +603,7 @@ export function Memory() {
                           lineHeight: 1.4,
                           color: 'hsl(var(--fg))',
                         }}
+                        data-user-content
                       >
                         {mem.summary}
                       </h4>
@@ -619,6 +620,7 @@ export function Memory() {
                           WebkitBoxOrient: 'vertical',
                           overflow: 'hidden',
                         }}
+                        data-user-content
                       >
                         {mem.content}
                       </p>
@@ -693,9 +695,10 @@ export function Memory() {
                         </div>
 
                         <div style={{ display: 'flex', alignItems: 'center', gap: '4px' }} onClick={e => e.stopPropagation()}>
-                          <Tooltip content={mem.is_archived ? 'Restore' : 'Archive'}>
+                          <Tooltip content={mem.is_archived ? t('unarchive') : t('archive')}>
                             <button
                               data-testid="btn-archive-memory"
+                              aria-label={mem.is_archived ? t('unarchive') : t('archive')}
                               className="btn btn-ghost"
                               onClick={() => handleToggleArchive(mem)}
                               style={{ padding: '4px', color: 'hsl(var(--muted-fg))' }}
@@ -703,9 +706,10 @@ export function Memory() {
                               {mem.is_archived ? <ArchiveRestore size={13} /> : <Archive size={13} />}
                             </button>
                           </Tooltip>
-                          <Tooltip content="Delete">
+                          <Tooltip content={t('delete')}>
                             <button
                               data-testid="btn-delete-memory"
+                              aria-label={t('delete')}
                               className="btn btn-ghost"
                               onClick={() => handleDeleteMemory(mem)}
                               style={{ padding: '4px', color: '#f43f5e' }}

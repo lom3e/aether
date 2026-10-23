@@ -256,7 +256,7 @@ export const WorkforceHealthView: React.FC<WorkforceHealthViewProps> = ({
             {health.execution_success_rate}%
           </div>
           <div style={{ fontSize: '11px', color: 'hsl(var(--muted-fg))', marginTop: '4px' }}>
-            {health.completed_executions} of {health.total_executions} runs passed
+            {t('whRunsPassed', { done: health.completed_executions, total: health.total_executions })}
           </div>
         </div>
 
@@ -276,7 +276,7 @@ export const WorkforceHealthView: React.FC<WorkforceHealthViewProps> = ({
             {health.milestone_success_rate}%
           </div>
           <div style={{ fontSize: '11px', color: 'hsl(var(--muted-fg))', marginTop: '4px' }}>
-            {health.completed_milestones} of {health.total_milestones} stages
+            {t('whStagesDone', { done: health.completed_milestones, total: health.total_milestones })}
           </div>
         </div>
 
