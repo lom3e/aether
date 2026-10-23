@@ -145,12 +145,16 @@ pub fn apply_chrome(win: &WebviewWindow, mode: Mode) {
     #[cfg(target_os = "macos")]
     {
         let _ = win.set_shadow(false);
-        let effects = if mode == Mode::Panel {
-            Some(WindowEffectsConfig { effects: vec![Effect::Popover], state: Some(EffectState::Active), radius: Some(22.0), color: None })
+        if mode == Mode::Panel {
+            let _ = win.set_effects(WindowEffectsConfig { effects: vec![Effect::Popover], state: Some(EffectState::Active), radius: Some(22.0), color: None });
         } else {
-            None
-        };
-        let _ = win.set_effects(effects);
+            // Only the sphere: Tauri cannot clear effects on macOS (set_effects(None) does nothing there), so the Bar's
+            // light frosted glass stayed behind the orb as a pale rounded square. Remove that view ourselves.
+            let w = win.clone();
+            let _ = win.run_on_main_thread(move || {
+                let _ = window_vibrancy::clear_vibrancy(&w);
+            });
+        }
     }
     #[cfg(not(target_os = "macos"))]
     {

@@ -18,6 +18,10 @@ rand = "0.8"
 ureq = { version = "2.10", features = ["json"] }
 tauri-plugin-updater = "2"
 
+[target.'cfg(target_os = "macos")'.dependencies]
+# the same version Tauri already uses; needed to REMOVE the Bar's frosted glass (Tauri's set_effects(None) is a no-op on macOS)
+window-vibrancy = "0.6"
+
 [features]
 # Test-only hook: on start, check/install an update automatically (AETHER_E2E_UPDATE=1). Never enabled in release builds.
 updater-e2e = []

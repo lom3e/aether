@@ -22,6 +22,7 @@ dependencies = [
  "tauri-plugin-updater",
  "tokio",
  "ureq",
+ "window-vibrancy",
 ]
 
 [[package]]
