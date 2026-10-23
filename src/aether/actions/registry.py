@@ -102,6 +102,7 @@ class ActionRegistry:
             )
         for gid, gname, gdesc in (
             ("gmail.create_draft", "Save a Gmail draft", "Saves a reply or a new email as a draft in Gmail. It is not sent."),
+            ("gmail.send", "Send an email", "Sends a reply or a new email from Gmail after a short undo window."),
             ("gmail.trash", "Move mail to the Trash", "Moves the listed Gmail messages to the Trash (recoverable for 30 days)."),
             ("gmail.modify_labels", "Archive or mark mail read", "Archives the listed Gmail messages or marks them as read."),
         ):
@@ -366,6 +367,18 @@ class ActionRegistry:
                     },
                     "required": ["branch_name"],
                 },
+            )
+        )
+        self.register(
+            ActionDefinition(
+                id="github.list_repos",
+                name="List GitHub repositories",
+                description="Lists the repositories of the connected GitHub account, most recently updated first.",
+                tier=ActionTier.ANSWER,
+                permission_level=ActionPermissionLevel.READ_ONLY,
+                requires_confirmation=False,
+                provider="github",
+                input_schema={"type": "object", "properties": {"limit": {"type": "integer"}}},
             )
         )
         self.register(

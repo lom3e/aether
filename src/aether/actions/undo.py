@@ -19,8 +19,9 @@ from typing import Any
 
 CALENDAR_ACTIONS = {"google_calendar.create_event", "google_calendar.update_event", "google_calendar.delete_event"}
 LIFE_ACTIONS = {"life.save"}
-GMAIL_ACTIONS = {"gmail.create_draft", "gmail.trash", "gmail.modify_labels"}
-REVERSIBLE_ACTIONS = {"files.create_document"} | CALENDAR_ACTIONS | LIFE_ACTIONS | GMAIL_ACTIONS
+GMAIL_ACTIONS = {"gmail.create_draft", "gmail.send", "gmail.trash", "gmail.modify_labels"}
+GITHUB_ACTIONS = {"github.create_issue"}
+REVERSIBLE_ACTIONS = {"files.create_document"} | CALENDAR_ACTIONS | LIFE_ACTIONS | GMAIL_ACTIONS | GITHUB_ACTIONS
 
 
 class UndoError(Exception):
@@ -72,10 +73,26 @@ def describe(ws: Any, execution: Any) -> dict[str, Any]:
         out_, inp_ = execution.output_data or {}, execution.input_data or {}
         msgs = inp_.get("messages") or []
         item["title"] = inp_.get("subject") or ", ".join(m.get("subject", "") for m in msgs[:3] if m.get("subject")) or item["title"]
+        if execution.action_id == "gmail.send":
+            from aether.actions import mail_send
+
+            if out_.get("draft_id") and mail_send.is_pending(out_["draft_id"]):
+                item["reversible"], item["kind"] = True, "unsend"
+            else:
+                item["reason"] = "already_sent"
+            return item
         kind = {"gmail.create_draft": "remove_draft", "gmail.trash": "untrash", "gmail.modify_labels": "relabel"}[execution.action_id]
         ok = bool(out_.get("draft_id")) if kind == "remove_draft" else bool(out_.get("trashed") or out_.get("ids"))
         if ok:
             item["reversible"], item["kind"] = True, kind
+        else:
+            item["reason"] = "missing_backup"
+        return item
+    if execution.action_id in GITHUB_ACTIONS:
+        out_ = execution.output_data or {}
+        item["title"] = out_.get("title") or (execution.input_data or {}).get("title") or item["title"]
+        if out_.get("number"):
+            item["reversible"], item["kind"] = True, "close_issue"
         else:
             item["reason"] = "missing_backup"
         return item
@@ -157,6 +174,12 @@ def _undo_gmail(ws: Any, execution: Any, kind: str) -> dict[str, Any]:
     from aether.connections.gmail import LABEL_OPS
 
     out = execution.output_data or {}
+    if kind == "unsend":
+        from aether.actions import mail_send
+
+        if not mail_send.cancel(out.get("draft_id", "")):
+            raise UndoError("already_sent", "the email already left")
+        return {"result": "unsent", "draft_kept": True}
     connector = ws.connections.get_gmail_connector(execution.workspace_id)
     try:
         if kind == "remove_draft":
@@ -173,6 +196,16 @@ def _undo_gmail(ws: Any, execution: Any, kind: str) -> dict[str, Any]:
         raise
     except Exception as exc:  # noqa: BLE001 - a Gmail error must surface as a refusal, not a 500
         raise UndoError("failed", str(exc)) from exc
+
+
+def _undo_github(ws: Any, execution: Any) -> dict[str, Any]:
+    out, inp = execution.output_data or {}, execution.input_data or {}
+    connector = ws.connections.get_github_connector(execution.workspace_id)
+    res = connector.execute("github.update_issue", {"full_name": inp.get("full_name"), "owner": inp.get("owner"), "repository": inp.get("repository"),
+                                                    "issue_number": out["number"], "state": "closed"})
+    if hasattr(res, "success") and not res.success:
+        raise UndoError("failed", getattr(res, "error", "") or "could not close the issue")
+    return {"result": "closed", "number": out["number"]}
 
 
 def _undo_life(ws: Any, execution: Any) -> dict[str, Any]:
@@ -225,11 +258,13 @@ def undo(ws: Any, execution_id: str) -> dict[str, Any]:
     info = describe(ws, execution)
     if not info["reversible"]:
         raise UndoError(info["reason"] or "not_reversible")
-    if execution.action_id in CALENDAR_ACTIONS | LIFE_ACTIONS | GMAIL_ACTIONS:
+    if execution.action_id in CALENDAR_ACTIONS | LIFE_ACTIONS | GMAIL_ACTIONS | GITHUB_ACTIONS:
         if execution.action_id in CALENDAR_ACTIONS:
             done = _undo_calendar(ws, execution, info["kind"])
         elif execution.action_id in GMAIL_ACTIONS:
             done = _undo_gmail(ws, execution, info["kind"])
+        elif execution.action_id in GITHUB_ACTIONS:
+            done = _undo_github(ws, execution)
         else:
             done = _undo_life(ws, execution)
         execution.metadata = {**(execution.metadata or {}), "undo": {"at": _dt.datetime.now(_dt.timezone.utc).isoformat(), **done}}

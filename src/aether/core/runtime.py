@@ -7,7 +7,7 @@ import re
 from typing import Any, Callable
 from uuid import uuid4
 
-from aether.core.language import no_provider_message
+from aether.core.language import looks_english, no_provider_message
 from aether.actions.models import ActionExecutionStatus
 from aether.agents.agent import Agent
 from aether.agents.lifecycle import AgentLifecycleState
@@ -232,6 +232,9 @@ class Runtime:
 
         try:
             res = provider.generate(prep_ctx.messages)
+            if not (res and getattr(res, "content", None) and res.content.strip()):
+                # some models occasionally return nothing (e.g. all tokens spent on reasoning): one quiet retry
+                res = provider.generate(prep_ctx.messages)
             if res and getattr(res, "content", None) and res.content.strip():
                 return ExecutionResult(
                     success=True,
@@ -250,7 +253,8 @@ class Runtime:
             return ExecutionResult(
                 success=False,
                 status=ExecutionStatus.FAILED,
-                error="AI provider returned an empty response.",
+                error=("The model returned an empty answer twice. Please try again or rephrase." if looks_english(request.instruction or "")
+                       else "Il modello ha risposto a vuoto due volte. Riprova o riformula la richiesta."),
                 execution_id=request.id,
                 metadata={"code": "EMPTY_PROVIDER_RESPONSE"},
             )

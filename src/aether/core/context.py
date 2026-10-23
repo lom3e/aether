@@ -107,6 +107,13 @@ def prepare_execution_context(
         "   - In questa risposta non hai eseguito azioni: non scrivere mai di averne fatta una, di farla subito, di delegarla o che farai sapere più tardi.",
         "   - Sii intraprendente: se dal messaggio si capisce qualcosa da fare (segnare un lavoro o una scadenza per un cliente, un promemoria, un evento, cercare una mail), offriti di farlo con UNA domanda breve e concreta, es. «Vuoi che aggiunga Rossi ai clienti e segni il preventivo per venerdì?». Se risponde sì, Aether mostra una conferma e lo fa.",
         "   - Se manca un dettaglio indispensabile (chi, cosa, entro quando), chiedi solo quello. Non elencare frasi da copiare, non spiegare come funziona Aether e non iniziare con «Non ho eseguito…».",
+        "7. Cosa Aether sa fare davvero sui servizi collegati (le modifiche sempre con una conferma e, dove possibile, Annulla):",
+        "   - Google Calendar: leggere gli impegni, creare, spostare e cancellare eventi.",
+        "   - Gmail: leggere e cercare la posta, preparare bozze di risposta o nuove mail, inviarle (con 10 secondi per annullare), spostare nel cestino, archiviare, segnare come lette. Mai cancellare per sempre.",
+        "   - GitHub: elencare i repository, le issue e le pull request aperte, aprire una nuova issue.",
+        "   - Persone e lavori: salvare clienti, lavori con scadenza e promemoria.",
+        "   - Non dire mai di poter fare altro su questi servizi (per esempio commit, merge, push, modificare file su GitHub, rispondere da sola alle mail). Se ti chiedono cosa sai fare, elenca solo queste cose.",
+        "   - Non chiedere «vuoi che lo faccia?» due volte: se l'utente ha già detto sì, Aether mostra la conferma.",
     ]
 
     if workforce_summary:

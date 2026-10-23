@@ -993,7 +993,7 @@ class ActionExecutor:
             return {"messages": messages, "query": inp.get("query") or "in:inbox"}
 
         # 5a. Gmail changes the user confirmed: a draft (never sent), Trash, archive / mark read. Each has an exact inverse.
-        elif action_id in ("gmail.create_draft", "gmail.trash", "gmail.modify_labels"):
+        elif action_id in ("gmail.create_draft", "gmail.send", "gmail.trash", "gmail.modify_labels"):
             if not self.connection_service:
                 raise RuntimeError("Connection service not available.")
             from aether.connections.gmail import LABEL_OPS
@@ -1005,6 +1005,27 @@ class ActionExecutor:
                 made = connector.create_draft(to=str(inp.get("to") or ""), subject=str(inp.get("subject") or ""), body=str(inp.get("body") or ""),
                                               thread_id=inp.get("thread_id"), in_reply_to=str(inp.get("in_reply_to") or ""), references=str(inp.get("references") or ""))
                 return {**made, "to": inp.get("to"), "subject": inp.get("subject")}
+            if action_id == "gmail.send":
+                from aether.actions import mail_send
+
+                draft_id = str(inp.get("draft_id") or "")
+                if not draft_id:
+                    made = connector.create_draft(to=str(inp.get("to") or ""), subject=str(inp.get("subject") or ""), body=str(inp.get("body") or ""),
+                                                  thread_id=inp.get("thread_id"), in_reply_to=str(inp.get("in_reply_to") or ""), references=str(inp.get("references") or ""))
+                    draft_id = str(made["draft_id"])
+                exec_id = execution.id
+
+                def _record(result: Any) -> None:
+                    try:
+                        ex = self.store.get_execution(exec_id)
+                        if ex is not None:
+                            ex.output_data = {**(ex.output_data or {}), "sent": not (isinstance(result, dict) and result.get("error")), "send_result": result}
+                            self.store.save_execution(ex)
+                    except Exception:  # noqa: BLE001
+                        pass
+
+                mail_send.schedule(draft_id, lambda: connector.send_draft(draft_id), _record)
+                return {"draft_id": draft_id, "to": inp.get("to"), "subject": inp.get("subject"), "delay_seconds": mail_send.SEND_DELAY_SECONDS, "sent": False}
             ids = [str(m.get("id")) for m in (inp.get("messages") or []) if m.get("id")]
             if not ids:
                 raise ValueError("No messages to change.")

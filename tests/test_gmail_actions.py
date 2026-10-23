@@ -74,10 +74,10 @@ class FakeGmail:
 
 def test_only_safe_mail_actions_exist_and_all_need_confirmation():
     reg = ActionRegistry()
-    for aid in ("gmail.create_draft", "gmail.trash", "gmail.modify_labels"):
+    for aid in ("gmail.create_draft", "gmail.send", "gmail.trash", "gmail.modify_labels"):
         d = reg.get(aid)
         assert d is not None and d.requires_confirmation and d.tier.value == "act"
-    assert reg.get("gmail.send") is None and reg.get("gmail.delete") is None, "no sending, no permanent deletion"
+    assert reg.get("gmail.delete") is None, "no permanent deletion"
 
 
 def test_router_refuses_a_change_on_the_whole_inbox():
@@ -204,3 +204,138 @@ def test_a_new_email_uses_the_address_saved_for_the_person(tmp_path, monkeypatch
         assert "Non ho l'indirizzo email di **Verdi**" in missing.content
     finally:
         ws.close()
+
+
+class SendingGmail(FakeGmail):
+    def __init__(self):
+        super().__init__()
+        self.sent: list[str] = []
+
+    def send_draft(self, draft_id):
+        self.sent.append(draft_id)
+        return {"message_id": "s1"}
+
+
+def test_sending_waits_the_undo_window_and_undo_keeps_it_as_a_draft(tmp_path, monkeypatch):
+    import time
+
+    from aether.actions import mail_send
+
+    ws = Workspace.init(tmp_path, name="gmail-send")
+    try:
+        fake = SendingGmail()
+        svc = _wire(ws, monkeypatch, fake)
+        monkeypatch.setattr(mail_send, "SEND_DELAY_SECONDS", 5.0)
+        svc._router_provider_override = Model({"action": "mail_reply", "mail_query": "from:rossi", "instructions": "arriva lunedì", "send": "true"},
+                                              {"subject": "x", "body": "Ciao Mario,\n\narriva lunedì.\n\nA presto"})
+        prompt = "invia a Rossi una risposta: arriva lunedì"
+        msg = svc.process_prompt(workspace_id=ws.name, prompt=prompt)
+        assert msg.content.startswith("Invio questa mail a **Mario Rossi**") and "10 secondi" in msg.content and "non si può ritirare" in msg.content
+        msg.metadata["_prompt"] = prompt
+        done = _accept(svc, ws, msg)
+        assert "parte tra 10 secondi" in done.content and fake.sent == [] and len(fake.drafts) == 1
+        undo_mod.undo(ws, done.metadata["undo_execution_id"])
+        time.sleep(0.1)
+        assert fake.sent == [] and len(fake.drafts) == 1, "cancelled in time: never sent, kept as a draft"
+
+        # without Undo it leaves after the window
+        monkeypatch.setattr(mail_send, "SEND_DELAY_SECONDS", 0.05)
+        svc._router_provider_override = Model({"action": "mail_reply", "mail_query": "from:rossi", "instructions": "arriva lunedì", "send": "true"},
+                                              {"subject": "x", "body": "Ciao Mario,\n\narriva lunedì."})
+        msg2 = svc.process_prompt(workspace_id=ws.name, prompt=prompt, session_id=msg.session_id)
+        msg2.metadata["_prompt"] = prompt
+        done2 = _accept(svc, ws, msg2)
+        for _ in range(40):
+            if fake.sent:
+                break
+            time.sleep(0.05)
+        assert len(fake.sent) == 1
+        assert undo_mod.describe(ws, ws.action_store.get_execution(done2.metadata["undo_execution_id"]))["reason"] == "already_sent"
+    finally:
+        ws.close()
+
+
+def test_send_needs_the_word_send_and_inviala_sends_the_draft_just_made(tmp_path, monkeypatch):
+    from aether.actions import mail_send
+
+    ws = Workspace.init(tmp_path, name="gmail-send-draft")
+    try:
+        fake = SendingGmail()
+        svc = _wire(ws, monkeypatch, fake)
+        monkeypatch.setattr(mail_send, "SEND_DELAY_SECONDS", 5.0)
+        # the model says send, but the user never said "invia": only a draft
+        svc._router_provider_override = Model({"action": "mail_reply", "mail_query": "from:rossi", "instructions": "ok", "send": "true"},
+                                              {"subject": "x", "body": "Va bene."})
+        prompt = "rispondi a Rossi che va bene"
+        msg = svc.process_prompt(workspace_id=ws.name, prompt=prompt)
+        assert msg.metadata["resolved_action"]["action_id"] == "gmail.create_draft"
+        msg.metadata["_prompt"] = prompt
+        _accept(svc, ws, msg)
+        (draft_id,) = fake.drafts
+        svc._router_provider_override = Model({"action": "mail_send_draft"})
+        send = svc.process_prompt(workspace_id=ws.name, prompt="ok inviala", session_id=msg.session_id)
+        assert send.metadata["resolved_action"]["action_id"] == "gmail.send" and send.metadata["resolved_action"]["args"]["draft_id"] == draft_id
+        assert "Invio questa mail a **Mario Rossi**" in send.content
+        mail_send.cancel(draft_id)
+    finally:
+        ws.close()
+
+
+class FakeGitHub:
+    def __init__(self):
+        self.created, self.updated = [], []
+
+    def execute(self, op, params):
+        if op == "github.list_repos":
+            data = {"repositories": [{"full_name": "lom3e/aether", "name": "aether", "private": True, "description": "Assistente", "updated_at": "2026-10-22T10:00:00Z"},
+                                     {"full_name": "lom3e/sito", "name": "sito", "private": False, "description": "", "updated_at": "2026-10-01T10:00:00Z"}]}
+        elif op == "github.list_issues":
+            data = {"issues": [{"number": 3, "title": "Bug orb", "html_url": "https://github.com/lom3e/aether/issues/3", "user": {"login": "lom3e"}},
+                               {"number": 4, "title": "una PR", "pull_request": {}, "user": {"login": "x"}}]}
+        elif op == "github.create_issue":
+            self.created.append(params)
+            data = {"number": 7, "title": params["title"], "html_url": "https://github.com/lom3e/aether/issues/7"}
+        elif op == "github.update_issue":
+            self.updated.append(params)
+            data = {"number": params["issue_number"], "state": params["state"]}
+        else:
+            data = {}
+        return SimpleNamespace(success=True, data=data, error="")
+
+
+def test_github_from_chat_lists_for_real_and_opens_an_issue_only_after_confirmation(tmp_path, monkeypatch):
+    from aether.connections.models import ConnectionStatus
+
+    ws = Workspace.init(tmp_path, name="github-chat")
+    try:
+        gh = FakeGitHub()
+        svc = ws.personal
+        monkeypatch.setattr(ws.connections, "get_connection", lambda ws_id, prov: SimpleNamespace(status=ConnectionStatus.VERIFIED, auth_metadata={"token": "t"}, last_verification_error=""))
+        monkeypatch.setattr(ws.connections, "get_github_connector", lambda ws_id: gh)
+        svc._router_provider_override = Model({"action": "github_repos"})
+        repos = svc.process_prompt(workspace_id=ws.name, prompt="elencami i repository")
+        assert "**lom3e/aether** 🔒 — Assistente" in repos.content and "**lom3e/sito**" in repos.content and "Vuoi che" not in repos.content
+        svc._router_provider_override = Model({"action": "github_issues", "repo": "aether"})
+        issues = svc.process_prompt(workspace_id=ws.name, prompt="che issue ci sono su aether?", session_id=repos.session_id)
+        assert "#3" in issues.content and "Bug orb" in issues.content and "una PR" not in issues.content
+        svc._router_provider_override = Model({"action": "github_create_issue", "repo": "aether", "issue_title": "Orb con riquadro", "issue_body": "Dietro la sfera resta un riquadro chiaro."})
+        prompt = "apri una issue su aether: orb con riquadro"
+        card = svc.process_prompt(workspace_id=ws.name, prompt=prompt)
+        assert "Apro questa issue in **lom3e/aether**" in card.content and gh.created == []
+        card.metadata["_prompt"] = prompt
+        done = _accept(svc, ws, card)
+        assert gh.created and done.content.startswith("Fatto: ho aperto la issue #7 **Orb con riquadro** in lom3e/aether")
+        undo_mod.undo(ws, done.metadata["undo_execution_id"])
+        assert gh.updated == [{"full_name": "lom3e/aether", "owner": None, "repository": None, "issue_number": 7, "state": "closed"}]
+        svc._router_provider_override = Model({"action": "github_issues", "repo": "inesistente"})
+        assert "Non trovo il repository" in svc.process_prompt(workspace_id=ws.name, prompt="issue di inesistente").content
+    finally:
+        ws.close()
+
+
+def test_the_model_is_told_exactly_what_aether_can_do():
+    import aether.core.context as ctx
+
+    text = open(ctx.__file__, encoding="utf-8").read()
+    assert "GitHub: elencare i repository, le issue e le pull request aperte, aprire una nuova issue." in text
+    assert "Non dire mai di poter fare altro" in text

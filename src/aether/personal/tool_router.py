@@ -14,12 +14,16 @@ from typing import Any
 from aether.core.execution import Message
 
 MAIL_CHANGES = ("mail_trash", "mail_archive", "mail_mark_read")
-ACTIONS = ("none", "calendar_list", "calendar_create", "calendar_move", "calendar_delete", "mail_search", "mail_reply", "mail_compose", *MAIL_CHANGES, "life_note")
+GITHUB_ACTIONS = ("github_repos", "github_issues", "github_pulls", "github_create_issue")
+ACTIONS = ("none", "calendar_list", "calendar_create", "calendar_move", "calendar_delete", "mail_search", "mail_reply", "mail_compose", "mail_send_draft",
+           *MAIL_CHANGES, "life_note", *GITHUB_ACTIONS)
 NOTE_KINDS = ("job", "reminder", "contact")
 
 _SYSTEM = (
     "You map ONE user message to the single calendar, mail or note action it asks for. Reply with one JSON object and nothing else:\n"
-    '{"action":"none|calendar_list|calendar_create|calendar_move|calendar_delete|mail_search|mail_reply|mail_compose|mail_trash|mail_archive|mail_mark_read|life_note",'
+    '{"action":"none|calendar_list|calendar_create|calendar_move|calendar_delete|mail_search|mail_reply|mail_compose|mail_send_draft|mail_trash|mail_archive|mail_mark_read|life_note|github_repos|github_issues|github_pulls|github_create_issue",'
+    '"send":"true only if the user explicitly asks to SEND (invia/manda/send) the email now, false to prepare a draft",'
+    '"repo":"GitHub repository for github_* (name or owner/name)","issue_title":"title for github_create_issue","issue_body":"details for github_create_issue",'
     '"mail_query":"Gmail search selecting exactly the mail meant, e.g. is:unread newer_than:1d, from:rossi, subject:fattura",'
     '"instructions":"for mail_reply/mail_compose: what the email must say, in the user\'s words","to":"email address for mail_compose, only if the user wrote it",'
     '"note_kind":"job|reminder|contact for life_note","contact_name":"client or person for life_note, empty if none","due":"YYYY-MM-DD or YYYY-MM-DDTHH:MM for life_note, empty if none","email":"only if the user wrote it","phone":"only if the user wrote it",'
@@ -31,6 +35,11 @@ _SYSTEM = (
     "mail_reply: write a reply to an email they received (mail_query finds it, instructions = what to answer). mail_compose: write a NEW email "
     "to someone (contact_name and/or to, instructions). mail_trash: delete / move to the Trash the mail selected by mail_query. "
     "mail_archive: archive it. mail_mark_read: mark it as read. Never use a mail_query that selects the whole inbox for these. "
+    "mail_send_draft: the user asks to send the email draft Aether just prepared in the RECENT CONVERSATION ('inviala', 'mandala', 'ok invia'). "
+    "github_repos: list their GitHub repositories. github_issues / github_pulls: list open issues / pull requests of a repository. "
+    "github_create_issue: open a new issue in a repository (repo, issue_title, issue_body), e.g. 'apri una issue su aether: l'orb ha un "
+    "riquadro dietro' -> {\"action\":\"github_create_issue\",\"repo\":\"aether\",\"issue_title\":\"L'orb ha un riquadro dietro\",\"issue_body\":\"\"}; "
+    "write a short clear issue_title from the user's words when they do not give one explicitly. "
     "In mail_query use from: for a sender and do not turn generic words (newsletter, mail, messaggi) into subject: filters: "
     "'elimina le newsletter di Zalando' -> mail_trash, mail_query 'from:zalando'. "
     "'scrivi a Bianchi per chiedergli la fattura di ottobre' -> {\"action\":\"mail_compose\",\"contact_name\":\"Bianchi\",\"instructions\":\"chiedere la fattura di ottobre\"}. "
@@ -53,7 +62,8 @@ _SIGNAL_RE = re.compile(
     r"schedule|reschedule|move|book|add|delete|remove|mail|email|e-mail|posta|messaggi|inbox|gmail|scritt\w*|rispost\w*|wrote|replied|"
     r"vuole|vogliono|entro|scadenz\w*|consegn\w*|preventiv\w*|fattur\w*|client\w*|ricordami|promemoria|segna\w*|annota\w*|devo|dobbiamo|"
     r"wants|due|deadline|remind\w*|owe|quote|invoice|deliver\w*|"
-    r"rispond\w*|bozz\w*|cestin\w*|archivi\w*|lett[ae]|newsletter|spam|scrivi\w*|reply|draft|trash|archive|unread)\b",
+    r"rispond\w*|bozz\w*|cestin\w*|archivi\w*|lett[ae]|newsletter|spam|scrivi\w*|reply|draft|trash|archive|unread|"
+    r"invia\w*|mand[ae]\w*|send|github|repo\w*|issue|pull\s*request|pr)\b",
     re.IGNORECASE,
 )
 
@@ -145,6 +155,18 @@ def route(prompt: str, *, provider: Any, history: list[Any] | None = None, now: 
         return {"action": action, "kind": kind, "title": title, "contact_name": name,
                 "email": email if email and email in (prompt or "") else "", "phone": phone if phone and phone in (prompt or "") else "",
                 "due_at": due.timestamp() if due else None, "due_has_time": "T" in str(data.get("due") or "")}
+    if action == "mail_send_draft":
+        return {"action": action}
+    if action in GITHUB_ACTIONS:
+        repo = re.sub(r"[^\w./-]", "", str(data.get("repo") or ""))[:140]
+        if action == "github_repos":
+            return {"action": action}
+        if not repo:
+            return {"action": "none", "reason": "incomplete"}
+        if action == "github_create_issue":
+            t = str(data.get("issue_title") or title or "").strip()[:200]
+            return {"action": action, "repo": repo, "title": t, "body": str(data.get("issue_body") or "").strip()[:4000]} if t else {"action": "none", "reason": "incomplete"}
+        return {"action": action, "repo": repo}
     if action in ("mail_reply", "mail_compose") or action in MAIL_CHANGES:
         q = re.sub(r"[\r\n]+", " ", str(data.get("mail_query") or "")).strip()[:200]
         instructions = str(data.get("instructions") or "").strip()[:2000]
@@ -156,13 +178,14 @@ def route(prompt: str, *, provider: Any, history: list[Any] | None = None, now: 
             return {"action": action, "query": q}
         if not instructions:
             return {"action": "none", "reason": "incomplete"}
+        send = str(data.get("send")).lower() == "true" and re.search(r"\b(invia\w*|mand[ae]\w*|spedisc\w*|send)\b", prompt or "", re.I) is not None
         if action == "mail_reply":
-            return {"action": action, "query": q or "in:inbox", "instructions": instructions} if q else {"action": "none", "reason": "incomplete"}
+            return {"action": action, "query": q or "in:inbox", "instructions": instructions, "send": send} if q else {"action": "none", "reason": "incomplete"}
         to = str(data.get("to") or "").strip()[:200]
         name = str(data.get("contact_name") or "").strip()[:200]
         if not to and not name:
             return {"action": "none", "reason": "incomplete"}
-        return {"action": action, "to": to if to and to in (prompt or "") else "", "contact_name": name, "instructions": instructions}
+        return {"action": action, "to": to if to and to in (prompt or "") else "", "contact_name": name, "instructions": instructions, "send": send}
     if action == "mail_search":
         q = re.sub(r"[\r\n]+", " ", str(data.get("mail_query") or "in:inbox")).strip()[:200] or "in:inbox"
         return {"action": action, "query": q}

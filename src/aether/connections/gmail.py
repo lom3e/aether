@@ -1,6 +1,7 @@
 """Gmail: read your mail, and, only after you confirm each change, save reply drafts, move mail to the Trash, archive it
 or mark it read. Every change has an exact inverse (delete the draft, take out of the Trash, back to the inbox, unread),
-so it can be undone. Mail is never deleted for good and never sent by these methods.
+so it can be undone. Mail is never deleted for good. Sending happens only through a confirmed send, which waits a few
+seconds (the undo window) before the draft actually leaves.
 
 Built on the Google connector (same token refresh, same revocation handling). Scope: gmail.modify (read, drafts, labels,
 Trash; no permanent deletion). Connections made before carried gmail.readonly only: they keep reading, and a change asks
@@ -62,6 +63,9 @@ class GmailConnector(GoogleCalendarConnector):
     def capabilities(self) -> list[str]:
         return ["gmail.search", "gmail.read", "gmail.create_draft", "gmail.trash", "gmail.modify_labels"]
 
+    def can_send(self) -> bool:
+        return self.can_change_mail()
+
     def can_change_mail(self) -> bool:
         """True when this connection was granted gmail.modify (older ones were read-only and must reconnect)."""
         return GMAIL_MODIFY_SCOPE in str(self.auth_metadata.get("scope") or "")
@@ -122,6 +126,11 @@ class GmailConnector(GoogleCalendarConnector):
             payload["message"]["threadId"] = thread_id
         d = self._api_request("users/me/drafts", method="POST", data=payload)
         return {"draft_id": d.get("id"), "message_id": (d.get("message") or {}).get("id"), "thread_id": (d.get("message") or {}).get("threadId")}
+
+    def send_draft(self, draft_id: str) -> dict[str, Any]:
+        """Sends a saved draft. Only called after the user confirmed sending and the short undo window passed."""
+        sent = self._api_request("users/me/drafts/send", method="POST", data={"id": draft_id})
+        return {"message_id": sent.get("id"), "thread_id": sent.get("threadId")}
 
     def delete_draft(self, draft_id: str) -> None:
         self._api_request(f"users/me/drafts/{draft_id}", method="DELETE")

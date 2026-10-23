@@ -239,6 +239,11 @@ class GitHubRepositoryClient:
         """Fetch the authenticated GitHub user profile (GET /user)."""
         return self._http_request("GET", "/user", token=token)
 
+    def list_user_repositories(self, limit: int = 30, token: str | None = None) -> list[dict[str, Any]]:
+        """Repositories the signed-in user owns or works on, most recently updated first (GET /user/repos)."""
+        res = self._http_request("GET", f"/user/repos?sort=updated&per_page={max(1, min(int(limit), 100))}&affiliation=owner,collaborator,organization_member", token=token)
+        return res if isinstance(res, list) else []
+
     def list_branches(
         self,
         owner: str,

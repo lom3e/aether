@@ -422,6 +422,13 @@ def _note_sentence(a: dict[str, Any], done: bool) -> str:
 def calendar_confirmation_text(intent: Any) -> str:
     """The plain confirmation shown before Aether changes the calendar or your notes: what, when, and that nothing happened yet."""
     aid, a = getattr(intent, "action_id", ""), (getattr(intent, "action_args", None) or {})
+    if aid == "gmail.send" and (a.get("body") or a.get("draft_id")):
+        quoted = "\n".join(f"> {line}" if line.strip() else ">" for line in str(a.get("body") or "").splitlines())
+        return (f"Invio questa mail a **{a.get('to_name') or a.get('to')}** — oggetto «{a.get('subject', '')}»:\n\n{quoted}\n\n"
+                "Una volta partita non si può ritirare: dopo la conferma hai **10 secondi** per annullare l'invio. Non invio niente finché non confermi.")
+    if aid == "github.create_issue" and a.get("title"):
+        body = f"\n\n{a['body']}" if a.get("body") else ""
+        return f"Apro questa issue in **{a.get('full_name')}**:\n\n**{a['title']}**{body}\n\nPuoi annullare (la richiudo). Non apro niente finché non confermi."
     if aid == "gmail.create_draft" and a.get("body"):
         quoted = "\n".join(f"> {line}" if line.strip() else ">" for line in str(a["body"]).splitlines())
         head = (f"Ecco la risposta per **{a.get('to_name') or a.get('to')}**" if a.get("reply") else f"Ecco la mail per **{a.get('to_name') or a.get('to')}**")
@@ -460,7 +467,14 @@ def calendar_confirmation_text(intent: Any) -> str:
 def calendar_done_text(intent: Any, result: dict[str, Any]) -> str:
     """What happened, in plain words, after a confirmed calendar change, and how to take it back."""
     aid, a = getattr(intent, "action_id", ""), (getattr(intent, "action_args", None) or {})
-    if aid == "gmail.create_draft":
+    if aid == "gmail.send":
+        return (f"La mail a **{a.get('to_name') or a.get('to')}** parte tra 10 secondi. "
+                "Se hai cambiato idea premi Annulla adesso: resterà tra le bozze.")
+    if aid == "github.create_issue":
+        num = f" #{result.get('number')}" if result.get("number") else ""
+        link = f" ({result['html_url']})" if result.get("html_url") else ""
+        head = f"Fatto: ho aperto la issue{num} **{a.get('title', '')}** in {a.get('full_name', '')}{link}."
+    elif aid == "gmail.create_draft":
         head = f"Fatto: la bozza per **{a.get('to_name') or a.get('to')}** è tra le bozze di Gmail. Non è stata inviata."
     elif aid in ("gmail.trash", "gmail.modify_labels"):
         n = len(a.get("messages") or [])
@@ -1332,6 +1346,10 @@ class PersonalAgentService:
                               action_id="life.save", action_args=args)
         if action in ("mail_reply", "mail_compose", "mail_trash", "mail_archive", "mail_mark_read"):
             return self._mail_change_intent(prompt, workspace_id, routed)
+        if action == "mail_send_draft":
+            return self._send_last_draft_intent(prompt, workspace_id, history)
+        if action in ("github_repos", "github_issues", "github_pulls", "github_create_issue"):
+            return self._github_intent(prompt, workspace_id, routed)
         if action == "mail_search":
             if not self._provider_ready(workspace_id, "gmail"):
                 return UserIntent(raw_prompt=prompt, tier=IntentTier.ANSWER, summary="Gmail not connected", action_id="calendar.explain",
@@ -1399,7 +1417,7 @@ class PersonalAgentService:
                 return self._explain(prompt, "Non sono riuscito a scrivere la risposta adesso: riprova tra poco. Non ho salvato nulla.", "Draft writing failed")
             subject = ctx.get("subject") or ""
             subject = subject if re.match(r"(?i)\s*(re|r)\s*:", subject) else f"Re: {subject}".strip()
-            return UserIntent(raw_prompt=prompt, tier=IntentTier.ACT, summary=f"Save a reply draft to {ctx.get('from')}", action_id="gmail.create_draft",
+            return UserIntent(raw_prompt=prompt, tier=IntentTier.ACT, summary=f"Reply to {ctx.get('from')}", action_id="gmail.send" if routed.get("send") else "gmail.create_draft",
                               action_args={"to": ctx.get("from_raw", ""), "to_name": ctx.get("from") or ctx.get("from_raw", ""), "subject": subject,
                                            "body": written["body"], "thread_id": ctx.get("thread_id"), "in_reply_to": ctx.get("message_id_header", ""),
                                            "references": ctx.get("references", ""), "reply": True})
@@ -1415,8 +1433,86 @@ class PersonalAgentService:
         written = self._write_mail(routed["instructions"], prompt, original=None)
         if not written:
             return self._explain(prompt, "Non sono riuscito a scrivere la mail adesso: riprova tra poco. Non ho salvato nulla.", "Draft writing failed")
-        return UserIntent(raw_prompt=prompt, tier=IntentTier.ACT, summary=f"Save a draft to {to}", action_id="gmail.create_draft",
+        return UserIntent(raw_prompt=prompt, tier=IntentTier.ACT, summary=f"Email to {to}", action_id="gmail.send" if routed.get("send") else "gmail.create_draft",
                           action_args={"to": to, "to_name": name or to, "subject": written.get("subject") or "", "body": written["body"], "reply": False})
+
+    def _send_last_draft_intent(self, prompt: str, workspace_id: str, history: list[Any] | None) -> "UserIntent":
+        """'Inviala': the draft Aether saved in this conversation is sent (after confirmation and the undo window)."""
+        store = getattr(self.action_executor, "store", None)
+        for m in reversed(history or []):
+            eid = (getattr(m, "metadata", None) or {}).get("undo_execution_id")
+            ex = store.get_execution(eid) if (store and eid) else None
+            if ex is not None and ex.action_id == "gmail.create_draft" and (ex.output_data or {}).get("draft_id"):
+                inp = ex.input_data or {}
+                try:
+                    if not self.connection_service.get_gmail_connector(workspace_id).draft_exists(ex.output_data["draft_id"]):
+                        return self._explain(prompt, "Quella bozza non c'è più in Gmail (inviata o eliminata da lì). Non ho inviato nulla.", "Draft gone")
+                except Exception:  # noqa: BLE001
+                    return self._explain(prompt, "Non riesco a usare Gmail adesso. Non ho inviato nulla.", "Gmail unavailable")
+                return UserIntent(raw_prompt=prompt, tier=IntentTier.ACT, summary=f"Send the draft to {inp.get('to')}", action_id="gmail.send",
+                                  action_args={"draft_id": ex.output_data["draft_id"], "to": inp.get("to", ""), "to_name": inp.get("to_name") or inp.get("to", ""),
+                                               "subject": inp.get("subject", ""), "body": inp.get("body", ""), "reply": bool(inp.get("reply"))})
+        return self._explain(prompt, "Non trovo una bozza preparata qui da inviare. Dimmi a chi scrivere e cosa, e te la preparo.", "No draft to send")
+
+    def _github_ready(self, workspace_id: str) -> bool:
+        cs = self.connection_service
+        try:
+            conn = cs.get_connection(workspace_id, "github") if cs else None
+        except Exception:  # noqa: BLE001
+            return False
+        meta = getattr(conn, "auth_metadata", None) or {}
+        return bool(conn) and str(getattr(conn, "status", "")) not in ("disconnected", "not_configured") and bool(meta.get("token") or meta.get("access_token"))
+
+    def _github_read(self, workspace_id: str, action_id: str, args: dict[str, Any]) -> tuple[dict[str, Any] | None, str]:
+        from aether.actions.models import ActionExecutionStatus
+
+        ex = self.action_executor.execute(action_id=action_id, workspace_id=workspace_id, input_data=args, auto_approve=True) if self.action_executor else None
+        if ex is not None and ex.status == ActionExecutionStatus.SUCCEEDED:
+            return ex.output_data or {}, ""
+        return None, (ex.error_message if ex else "") or "errore"
+
+    def _github_intent(self, prompt: str, workspace_id: str, routed: dict[str, Any]) -> "UserIntent":
+        """GitHub from chat: list repositories, issues and pull requests (reads run now), open an issue (after confirmation)."""
+        if not self._github_ready(workspace_id):
+            return self._explain(prompt, "Per farlo collega GitHub da **Collegamenti → GitHub**: ti mostro un codice da confermare su github.com.", "GitHub not connected")
+        data, err = self._github_read(workspace_id, "github.list_repos", {"limit": 50})
+        if data is None:
+            return self._explain(prompt, f"Non riesco a leggere GitHub adesso ({err[:120]}). Controlla il collegamento in Collegamenti.", "GitHub read failed")
+        repos = data.get("repositories") or []
+        action = routed["action"]
+        if action == "github_repos":
+            if not repos:
+                return self._explain(prompt, "Sul tuo account GitHub non vedo repository.", "No repos")
+            lines = [f"- **{r['full_name']}**{' 🔒' if r.get('private') else ''}" + (f" — {r['description']}" if r.get("description") else "")
+                     + (f" · aggiornato {_day_label(datetime.fromisoformat(str(r['updated_at']).replace('Z', '+00:00')).astimezone())}" if r.get("updated_at") else "")
+                     for r in repos[:20]]
+            more = f"\n\n…e altri {len(repos) - 20}." if len(repos) > 20 else ""
+            return self._explain(prompt, f"I tuoi repository GitHub ({len(repos)}), dal più recente:\n\n" + "\n".join(lines) + more
+                                 + "\n\nPosso mostrarti le issue o le pull request aperte di uno di questi, o aprire una nuova issue.", "GitHub repositories")
+        wanted = routed["repo"].lower().strip("/")
+        match = next((r for r in repos if str(r.get("full_name", "")).lower() == wanted), None) or \
+            next((r for r in repos if str(r.get("name", "")).lower() == wanted.split("/")[-1]), None)
+        if not match:
+            names = ", ".join(r["name"] for r in repos[:8])
+            return self._explain(prompt, f"Non trovo il repository «{routed['repo']}» sul tuo account. Alcuni dei tuoi: {names}.", "Repo not found")
+        full = match["full_name"]
+        if action == "github_create_issue":
+            return UserIntent(raw_prompt=prompt, tier=IntentTier.ACT, summary=f"Open an issue in {full}", action_id="github.create_issue",
+                              action_args={"full_name": full, "title": routed["title"], "body": routed.get("body") or ""})
+        if action == "github_issues":
+            d, err = self._github_read(workspace_id, "github.list_issues", {"full_name": full, "state": "open", "limit": 30})
+            items = [i for i in ((d or {}).get("issues") or []) if "pull_request" not in i]  # GitHub lists pull requests among issues
+            label, empty = "issue aperte", "Nessuna issue aperta"
+        else:
+            d, err = self._github_read(workspace_id, "github.list_pull_requests", {"full_name": full, "state": "open", "limit": 30})
+            items = (d or {}).get("pull_requests") or []
+            label, empty = "pull request aperte", "Nessuna pull request aperta"
+        if d is None:
+            return self._explain(prompt, f"Non riesco a leggere {full} adesso ({err[:120]}).", "GitHub read failed")
+        if not items:
+            return self._explain(prompt, f"{empty} in **{full}**.", "GitHub list empty")
+        lines = [f"- [#{i.get('number')}]({i.get('html_url')}) **{i.get('title', '')}** — {((i.get('user') or {}).get('login') or '')}" for i in items[:20]]
+        return self._explain(prompt, f"In **{full}** ci sono {len(items)} {label}:\n\n" + "\n".join(lines), "GitHub list")
 
     def _write_mail(self, instructions: str, prompt: str, *, original: dict[str, Any] | None) -> dict[str, str] | None:
         """The model writes the text of a draft (only the one message being answered goes with it). Nothing is saved here."""
@@ -2980,6 +3076,8 @@ class PersonalAgentService:
         _rules_unsure = (
             (intent.tier == IntentTier.ANSWER and not intent.action_id and getattr(intent, "intent_type", "") != "conversation")
             or (intent.action_id == "calendar.create_event" and self._google_calendar_ready(workspace_id))
+            # the old GitHub keyword rules guess titles ("New Issue") and repositories: the model reads them for real
+            or ((intent.action_id or "").startswith("github.") and self._github_ready(workspace_id))
             or (intent.action_id == "calendar.list_events" and _change_verb is not None)
             # a calendar change phrased freely can look like a big task to the rules; the model decides
             or (intent.tier in (IntentTier.DELEGATE, IntentTier.DO) and _change_verb is not None

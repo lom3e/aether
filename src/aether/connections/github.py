@@ -56,6 +56,7 @@ class GitHubConnector(BaseConnector):
     @property
     def capabilities(self) -> list[str]:
         return [
+            "github.list_repos",
             "github.inspect_repo",
             "github.list_branches",
             "github.get_branch",
@@ -171,7 +172,18 @@ class GitHubConnector(BaseConnector):
         clean_op = operation.lower().strip()
 
         try:
-            if clean_op in ("github.inspect_repo", "inspect_repo", "get_repository"):
+            if clean_op in ("github.list_repos", "list_repos"):
+                repos = self.client.list_user_repositories(limit=int(params.get("limit") or 30), token=token)
+                return ConnectorResult(
+                    success=True,
+                    operation=operation,
+                    provider=self.provider,
+                    data={"repositories": [{"full_name": r.get("full_name"), "name": r.get("name"), "private": bool(r.get("private")),
+                                            "description": r.get("description") or "", "updated_at": r.get("pushed_at") or r.get("updated_at"),
+                                            "open_issues": r.get("open_issues_count", 0), "url": r.get("html_url")} for r in repos]},
+                )
+
+            elif clean_op in ("github.inspect_repo", "inspect_repo", "get_repository"):
                 owner, repo = self._resolve_target(params)
                 repo_obj = self.client.get_repository(owner, repo, token=token)
                 return ConnectorResult(
