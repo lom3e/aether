@@ -5,6 +5,7 @@ import { ToastContext } from './toast';
 import { useTranslation } from './i18n';
 import { Send } from 'lucide-react';
 import { ServiceTile } from './ServiceTile';
+import QRCode from 'qrcode';
 
 interface MobileStatus { configured: boolean; bot_username?: string; paired?: { chat_id: string; name: string }[]; running?: boolean; last_error?: string }
 
@@ -18,6 +19,12 @@ export function TelegramRow() {
   const [busy, setBusy] = useState(false);
   const [link, setLink] = useState('');
   const [error, setError] = useState('');
+  const [qr, setQr] = useState('');
+  // the pairing link as a QR code: point the phone camera at it and Telegram opens on the bot, ready
+  useEffect(() => {
+    if (!link) { setQr(''); return; }
+    QRCode.toDataURL(link, { margin: 1, width: 360, color: { dark: '#111111', light: '#ffffff' } }).then(setQr).catch(() => setQr(''));
+  }, [link]);
 
   const load = useCallback(async () => {
     try {
@@ -81,7 +88,8 @@ export function TelegramRow() {
               </>
             ) : link ? (
               <>
-                <span>{t('tgOpenOnPhone')}</span>
+                <span>{t('tgScanOrOpen')}</span>
+                {qr && <img className="cn-qr" src={qr} width={180} height={180} alt={t('tgQrAlt')} data-testid="tg-qr" />}
                 <span className="cn-code"><code data-testid="tg-link">{link}</code>
                   <button className="cn-link" onClick={() => navigator.clipboard?.writeText(link)}>{t('cnCopy')}</button>
                   <button className="cn-link" onClick={() => openExternalUrl(link)}>{t('tgOpen')}</button></span>

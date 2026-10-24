@@ -154,6 +154,7 @@ def test_telegram_is_set_up_with_a_token_and_paired_with_a_one_time_link(browser
     row.get_by_test_id("tg-token-input").fill("123456789:" + "A" * 35)
     row.get_by_test_id("tg-setup-btn").click()
     expect(row.get_by_test_id("tg-link")).to_have_text("https://t.me/aether_test_bot?start=abc")
+    expect(row.get_by_test_id("tg-qr")).to_be_visible()  # the same link as a QR code for the phone camera
     status["paired"] = [{"chat_id": "42", "name": "Matteo"}]
     expect(row).to_contain_text("Paired with Matteo", timeout=8000)
     assert row.get_attribute("data-state") == "connected"

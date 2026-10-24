@@ -28,3 +28,4 @@
 .cn-tg-form { display: flex; gap: 8px; }
 .cn-tg-form input { flex: 1; min-width: 0; padding: 8px 10px; border-radius: 8px; border: 1px solid hsl(var(--border)); background: hsl(var(--card)); color: hsl(var(--fg)); font-family: var(--font-mono, ui-monospace, monospace); font-size: 12px; }
 .cn-tg-steps code { word-break: break-all; }
+.cn-qr { display: block; margin: 10px 0 6px; border-radius: 12px; background: #fff; padding: 6px; box-shadow: 0 0 0 1px hsl(var(--border)); }
