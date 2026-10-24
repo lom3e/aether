@@ -11,10 +11,11 @@ settings route; it is never printed, logged or passed on a command line. Real-pr
 from __future__ import annotations
 
 import argparse
+import ctypes
 import json
 import os
 import re
-import subprocess
+import signal
 import sys
 import time
 import urllib.request
@@ -47,6 +48,38 @@ def ensure_provider(base: str, token: str) -> str:
     return f"groq / {MODEL} configured in the dev profile"
 
 
+def _spawn_disclaimed(cmd: list[str], env: dict[str, str]) -> tuple[int, "object"]:
+    """Start the app as its OWN responsible process. A plain child of a terminal (or of Claude Code) inherits that parent as
+    "responsible" for privacy checks, so macOS looks up the parent's Info.plist, finds no NSSpeechRecognitionUsageDescription
+    and kills Aether the first time the microphone button asks for speech recognition. Disclaiming responsibility (what
+    Terminal and Xcode do) makes macOS use Aether's own Info.plist and its own permission prompts, as for a user launch."""
+    libc = ctypes.CDLL(None, use_errno=True)
+    attr, fa = ctypes.c_void_p(), ctypes.c_void_p()
+    libc.posix_spawnattr_init(ctypes.byref(attr))
+    libc.responsibility_spawnattrs_setdisclaim(ctypes.byref(attr), 1)
+    libc.posix_spawn_file_actions_init(ctypes.byref(fa))
+    r, w = os.pipe()
+    for fd in (1, 2):
+        libc.posix_spawn_file_actions_adddup2(ctypes.byref(fa), w, fd)
+    libc.posix_spawn_file_actions_addclose(ctypes.byref(fa), r)
+    argv = (ctypes.c_char_p * (len(cmd) + 1))(*[c.encode() for c in cmd], None)
+    envl = [f"{k}={v}".encode() for k, v in env.items()]
+    envp = (ctypes.c_char_p * (len(envl) + 1))(*envl, None)
+    pid = ctypes.c_int()
+    rc = libc.posix_spawn(ctypes.byref(pid), cmd[0].encode(), ctypes.byref(fa), ctypes.byref(attr), argv, envp)
+    libc.posix_spawn_file_actions_destroy(ctypes.byref(fa))
+    libc.posix_spawnattr_destroy(ctypes.byref(attr))
+    os.close(w)
+    if rc != 0:
+        os.close(r)
+        raise OSError(rc, os.strerror(rc))
+    return pid.value, os.fdopen(r, "r", buffering=1, errors="replace")
+
+
+def _wait(pid: int) -> int:
+    return os.waitstatus_to_exitcode(os.waitpid(pid, 0)[1])
+
+
 def main() -> int:
     ap = argparse.ArgumentParser()
     ap.add_argument("--headless", action="store_true")
@@ -67,11 +100,11 @@ def main() -> int:
     if not Path(cmd[0]).exists():
         print(f"{cmd[0]} not found: run scripts/build_distribution.py first")
         return 2
-    proc = subprocess.Popen(cmd, env=env, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, bufsize=1)
+    pid, out = _spawn_disclaimed(cmd, env)
     base = token = None
     configured = False
     try:
-        for line in proc.stdout:  # type: ignore[union-attr]
+        for line in out:  # type: ignore[attr-defined]
             if "Session token" in line:
                 token = line.split(":", 1)[1].strip()
                 line = "  ► Session token: (hidden)\n"
@@ -81,6 +114,7 @@ def main() -> int:
             if "token=" in line:
                 line = re.sub(r"token=[^ &\"]+", "token=(hidden)", line)
             sys.stdout.write(line)
+            sys.stdout.flush()
             if a.headless and "--token" in cmd:
                 token = "dev-headless-token"
             if base and token and not configured:
@@ -92,10 +126,10 @@ def main() -> int:
                     print(f"[dev] could not configure the provider: {type(exc).__name__}")
                 if a.headless:
                     print(f"[dev] headless runtime at {base}")
-        return proc.wait()
+        return _wait(pid)
     except KeyboardInterrupt:
-        proc.terminate()
-        return proc.wait()
+        os.kill(pid, signal.SIGTERM)
+        return _wait(pid)
 
 
 if __name__ == "__main__":
