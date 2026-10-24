@@ -19,7 +19,7 @@ def browser_context(aether_server):
     with sync_playwright() as p:
         browser = p.chromium.launch(headless=True)
         context = browser.new_context(viewport={"width": 1280, "height": 800}, locale="en-US")
-        context.add_init_script("localStorage.setItem('aether_experience_mode', 'v1');")
+        context.add_init_script("localStorage.setItem('aether_home_view', 'transcript');")
         if _state["token"]:
             context.add_init_script(f"window.__AETHER_SESSION_TOKEN__ = '{_state['token']}';")
         yield context
@@ -41,7 +41,7 @@ def test_privacy_screen_tabs_forget_undo_and_the_real_toggle(browser_context):
     page.route("**/api/memories?*", lambda r: r.fulfill(status=200, content_type="application/json", body=json.dumps(
         [{"id": "mem-1", "category": "preference", "summary": "Prefers short answers", "content": "Prefers short answers"}])))
     page.route("**/api/memories/mem-1*", lambda r: (calls.append((r.request.method, r.request.url)), r.fulfill(status=200, content_type="application/json", body='{"deleted":true}'))[1])
-    page.route("**/api/undo", lambda r: r.fulfill(status=200, content_type="application/json", body=json.dumps({"items": [
+    page.route("**/api/undo/timeline*", lambda r: r.fulfill(status=200, content_type="application/json", body=json.dumps({"items": [
         {"execution_id": "ex-1", "title": "report.md", "created_at": 1760000000, "reversible": True, "reason": "", "undone": False, "kind": "restore"},
         {"execution_id": "ex-2", "title": "old.md", "created_at": 1760000100, "reversible": False, "reason": "changed_since", "undone": False}]})))
     undone: list = []

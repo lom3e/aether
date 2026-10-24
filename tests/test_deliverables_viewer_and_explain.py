@@ -614,7 +614,7 @@ def test_playwright_deliverables_viewer_and_explain(tmp_path, monkeypatch):
         with sync_playwright() as p:
             browser = p.chromium.launch(headless=True)
             context = browser.new_context(viewport={"width": 1440, "height": 900}, locale="en-US")
-            context.add_init_script("localStorage.setItem('aether_experience_mode', 'v1');")  # tests target the classic UI
+            context.add_init_script("localStorage.setItem('aether_home_view', 'transcript');")  # tests target the classic UI
             page = context.new_page()
             page.add_init_script("localStorage.setItem('aether_language', 'en');")
 

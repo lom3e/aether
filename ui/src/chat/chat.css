@@ -129,3 +129,4 @@
 .ch-empty .life-today { width: 100%; max-width: none; margin: 4px 0 0; padding: 16px 20px 18px; border-radius: 18px; background: hsl(var(--card)); box-shadow: 0 0 0 1px hsl(var(--border)); }
 .ch-empty .life-today h2 { font-size: 15px; }
 .ch-empty .life-capture input { background: hsl(var(--muted)); }
+.ch-confirm-note { font-size: 13px; color: hsl(var(--muted-fg)); margin: 4px 0 2px; }

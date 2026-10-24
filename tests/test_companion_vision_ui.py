@@ -41,7 +41,7 @@ def browser_context(aether_server):
     with sync_playwright() as p:
         browser = p.chromium.launch(headless=True)
         context = browser.new_context(viewport={"width": 1440, "height": 900}, locale="en-US")
-        context.add_init_script("localStorage.setItem('aether_experience_mode', 'v1');")
+        context.add_init_script("localStorage.setItem('aether_home_view', 'transcript');")
         if _state["token"]:
             context.add_init_script(f"window.__AETHER_SESSION_TOKEN__ = '{_state['token']}';")
         yield context

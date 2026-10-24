@@ -50,7 +50,8 @@
   --text-muted: hsl(var(--muted-fg));
 }
 
-.dark {
+.dark,
+html[data-stage='presence'] .sidebar {
   color-scheme: dark;
   /* Dark — soft graphite (not pure black), readable grey text, the same violet */
   --bg: 0 0% 12.9%;

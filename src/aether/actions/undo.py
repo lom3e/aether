@@ -243,6 +243,56 @@ def list_items(ws: Any, workspace_id: str, limit: int = 50) -> list[dict[str, An
     return [describe(ws, e) for e in rows if e.action_id in REVERSIBLE_ACTIONS or (e.metadata or {}).get("undo")]
 
 
+def _changes_something(ws: Any, action_id: str) -> bool:
+    if action_id in REVERSIBLE_ACTIONS:
+        return True
+    try:
+        d = ws.action_registry.get(action_id)
+    except Exception:  # noqa: BLE001
+        d = None
+    return bool(d) and str(getattr(d.permission_level, "value", d.permission_level)) != "read_only"
+
+
+def timeline(ws: Any, workspace_id: str, limit: int = 100) -> list[dict[str, Any]]:
+    """Rewind: everything Aether changed for you (files, calendar, mail, GitHub, people & jobs), newest first, each with
+    whether and how it can be taken back. Reads are left out: they changed nothing."""
+    rows = ws.action_store.list_executions(workspace_id=workspace_id, status="succeeded", limit=max(1, min(limit * 3, 600)))
+    out = []
+    for e in rows:
+        if not _changes_something(ws, e.action_id):
+            continue
+        item = describe(ws, e) if e.action_id in REVERSIBLE_ACTIONS else {
+            "execution_id": e.id, "action_id": e.action_id, "title": (e.input_data or {}).get("title") or e.action_id, "created_at": e.created_at,
+            "reversible": False, "reason": "no_undo", "undone": bool((e.metadata or {}).get("undo")), "effect": ""}
+        item["service"] = e.action_id.split(".", 1)[0]
+        out.append(item)
+        if len(out) >= limit:
+            break
+    return out
+
+
+def rewind(ws: Any, workspace_id: str, execution_id: str) -> dict[str, Any]:
+    """Takes back, newest first, every reversible change from the chosen one onwards: "put everything back as it was
+    just before this". Changes that cannot be undone are listed, never silently skipped."""
+    target = ws.action_store.get_execution(execution_id)
+    if target is None:
+        raise UndoError("not_found")
+    items = [i for i in timeline(ws, workspace_id, limit=200) if str(i["created_at"]) >= str(target.created_at)]
+    undone, kept = [], []
+    for item in items:  # already newest first
+        if item.get("undone"):
+            continue
+        if not item.get("reversible"):
+            kept.append({"execution_id": item["execution_id"], "title": item["title"], "reason": item.get("reason") or "no_undo"})
+            continue
+        try:
+            undo(ws, item["execution_id"])
+            undone.append({"execution_id": item["execution_id"], "title": item["title"]})
+        except UndoError as exc:
+            kept.append({"execution_id": item["execution_id"], "title": item["title"], "reason": exc.code})
+    return {"undone": undone, "kept": kept}
+
+
 def _keep(current: Path, history: Path, suffix: str) -> Path:
     history.mkdir(parents=True, exist_ok=True)
     stamp = _dt.datetime.now(_dt.timezone.utc).strftime("%Y%m%dT%H%M%S%fZ")
@@ -258,6 +308,12 @@ def undo(ws: Any, execution_id: str) -> dict[str, Any]:
     info = describe(ws, execution)
     if not info["reversible"]:
         raise UndoError(info["reason"] or "not_reversible")
+    try:  # an Undo means the user did not want it: earning autonomy for that kind starts over
+        from aether.personal.autonomy import autonomy_store_for, key_for
+
+        autonomy_store_for(ws).reset(key_for(execution.action_id, execution.input_data))
+    except Exception:  # noqa: BLE001
+        pass
     if execution.action_id in CALENDAR_ACTIONS | LIFE_ACTIONS | GMAIL_ACTIONS | GITHUB_ACTIONS:
         if execution.action_id in CALENDAR_ACTIONS:
             done = _undo_calendar(ws, execution, info["kind"])

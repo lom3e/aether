@@ -1,7 +1,7 @@
 import { useCallback, useContext, useEffect, useState } from 'react';
 import { apiUrl } from './api';
 import { ToastContext } from './toast';
-import { useTranslation } from './i18n';
+import { useTranslation, type TranslationKey } from './i18n';
 import { TopHeader } from './TopHeader';
 import { KnowsList } from './KnowsList';
 import './privacy.css';
@@ -31,13 +31,16 @@ export function Privacy() {
   const [redact, setRedact] = useState(true);
   const [entries, setEntries] = useState<LedgerEntry[]>([]);
   const [undo, setUndo] = useState<UndoItem[]>([]);
+  const [alone, setAlone] = useState<{ key: string; label: string; runs: number; granted_at: string }[]>([]);
 
   const load = useCallback(async () => {
-    const [s, l, u] = await Promise.all([
+    const [s, l, u, a] = await Promise.all([
       getJson<{ summary: Summary; settings: { redact: boolean } } | null>('/api/privacy/summary?days=7', null),
       getJson<{ entries: LedgerEntry[] }>('/api/privacy/ledger?limit=50', { entries: [] }),
-      getJson<{ items: UndoItem[] }>('/api/undo', { items: [] }),
+      getJson<{ items: UndoItem[] }>('/api/undo/timeline', { items: [] }),
+      getJson<{ items: { key: string; label: string; runs: number; granted_at: string }[] }>('/api/autonomy', { items: [] }),
     ]);
+    setAlone(a.items || []);
     if (s) { setSummary(s.summary); setRedact(!!s.settings?.redact); }
     setEntries(l.entries); setUndo(u.items);
   }, []);
@@ -54,11 +57,18 @@ export function Privacy() {
     void load();
   };
 
-  const undoLabel = (u: UndoItem) => {
-    const k = u.action_id === 'google_calendar.create_event' ? 'pvUndoCalCreated' : u.action_id === 'google_calendar.update_event' ? 'pvUndoCalMoved' : u.action_id === 'google_calendar.delete_event' ? 'pvUndoCalDeleted' : 'pvUndoDoc';
-    return `${t(k)}: `;
+  const LABEL: Record<string, TranslationKey> = {
+    'google_calendar.create_event': 'pvUndoCalCreated', 'google_calendar.update_event': 'pvUndoCalMoved', 'google_calendar.delete_event': 'pvUndoCalDeleted',
+    'gmail.create_draft': 'rwMailDraft', 'gmail.send': 'rwMailSend', 'gmail.trash': 'rwMailTrash', 'gmail.modify_labels': 'rwMailLabels',
+    'github.create_issue': 'rwGhIssue', 'life.save': 'rwLife', 'files.create_document': 'pvUndoDoc',
   };
-  const reasonText = (r: string) => (r === 'changed_since' ? t('pvReasonChanged') : r === 'already_undone' ? t('pvReasonDone') : t('pvReasonNoUndo'));
+  const undoLabel = (u: UndoItem) => `${t(LABEL[u.action_id || ''] || 'pvUndoDoc')}: `;
+  const revoke = async (key: string) => {
+    const res = await fetch(apiUrl(`/api/autonomy?key=${encodeURIComponent(key)}`), { method: 'DELETE' });
+    toast(res.ok ? t('auRevoked') : t('pvUndoFailed'), res.ok ? 'success' : 'error');
+    void load();
+  };
+  const reasonText = (r: string) => (r === 'changed_since' ? t('pvReasonChanged') : r === 'already_undone' ? t('pvReasonDone') : r === 'already_sent' ? t('rwWhySent') : t('pvReasonNoUndo'));
 
   return (
     <div className="pv-page" data-testid="privacy-view">
@@ -102,6 +112,20 @@ export function Privacy() {
 
         {tab === 'undo' && (
           <section data-testid="privacy-undo">
+            <div className="pv-group" data-testid="privacy-autonomy">
+              <h3>{t('auTitle')}</h3>
+              {alone.length === 0 ? <p className="pv-empty">{t('auEmpty')}</p> : (
+                <ul className="pv-list">
+                  {alone.map(a => (
+                    <li key={a.key}>
+                      <span className="pv-main">{a.label}<small>{t('auRuns', { count: a.runs })}</small></span>
+                      <button className="pv-link" onClick={() => revoke(a.key)} data-testid={`autonomy-revoke-${a.key}`}>{t('auRevoke')}</button>
+                    </li>
+                  ))}
+                </ul>
+              )}
+            </div>
+            <h3 className="pv-subhead">{t('rwTitle')}</h3>
             {undo.length === 0 ? <p className="pv-empty">{t('pvUndoEmpty')}</p> : (
               <ul className="pv-list">
                 {undo.map(u => (

@@ -217,7 +217,7 @@ class ActionExecutor:
                 canonicalize=getattr(self.workspace, "canonical_id", None),
             )
             authorised_paths = self._allowed_paths_from(proposal_obj)
-            user_confirmed_exact = self._user_confirmed_exact_args(authority, proposal_obj, input_data, p_store)
+            user_confirmed_exact = self._user_confirmed_exact_args(authority, proposal_obj, input_data, p_store, action_id=action_id, workspace=self.workspace)
 
         # Persist authority context into execution metadata for later revalidation (approve path)
         exec_meta = dict(metadata or {})
@@ -296,8 +296,10 @@ class ActionExecutor:
         return self._dispatch_and_run(definition, execution)
 
     @staticmethod
-    def _user_confirmed_exact_args(authority: Any, proposal: Any, input_data: dict[str, Any], store: Any) -> bool:
-        """True only when a HUMAN accepted a proposal that is bound to exactly these arguments and asked for it."""
+    def _user_confirmed_exact_args(authority: Any, proposal: Any, input_data: dict[str, Any], store: Any,
+                                   action_id: str = "", workspace: Any = None) -> bool:
+        """True only when a HUMAN accepted a proposal that is bound to exactly these arguments and asked for it, or when
+        the human earlier allowed exactly this kind of change to run alone (earned autonomy, checked in its own store)."""
         from aether.core.execution import compute_args_digest
 
         constraints = [str(c).strip() for c in (getattr(proposal, "constraints", None) or [])]
@@ -309,7 +311,17 @@ class ActionExecutor:
             consent = store.get_consent(authority.proposal_id, authority.proposal_version) if store else None
         except Exception:  # noqa: BLE001
             consent = None
-        return bool(consent and getattr(consent, "actor_kind", "") == "human" and not getattr(consent, "revoked_at", None))
+        if not consent or getattr(consent, "revoked_at", None):
+            return False
+        if getattr(consent, "actor_kind", "") == "human":
+            return True
+        code = str(getattr(consent, "policy_code", "") or "")
+        if getattr(consent, "actor_kind", "") == "policy_autonomous" and code.startswith("autonomy:") and workspace is not None and action_id:
+            from aether.personal.autonomy import autonomy_store_for, key_for
+
+            key = code[len("autonomy:"):]
+            return key == key_for(action_id, input_data) and autonomy_store_for(workspace).granted(key)
+        return False
 
     _CODING_INTERACTION_ACTIONS = ("coding.interact", "coding.send_message", "coding.run_tests", "coding.release_project")
 

@@ -31,7 +31,7 @@ def browser_context(aether_server):
     with sync_playwright() as p:
         browser = p.chromium.launch(headless=True)
         context = browser.new_context(viewport={"width": 1440, "height": 900}, locale="en-US")
-        context.add_init_script("localStorage.setItem('aether_experience_mode', 'v1');")
+        context.add_init_script("localStorage.setItem('aether_home_view', 'transcript');")
         if _state["token"]:
             context.add_init_script(f"window.__AETHER_SESSION_TOKEN__ = '{_state['token']}';")
         yield context
@@ -286,7 +286,7 @@ def test_listening_status_only_when_the_speech_engine_really_started(browser_con
 def test_orb_gallery_of_real_statuses_at_retina_scale(browser_context, workspace_ready):
     """Screenshots of the orb in every status (for visual review); asserts each status is distinguishable by attribute."""
     ctx = browser_context.browser.new_context(viewport={"width": 88, "height": 88}, device_scale_factor=2, locale="en-US")
-    ctx.add_init_script("localStorage.setItem('aether_experience_mode', 'v1');")
+    ctx.add_init_script("localStorage.setItem('aether_home_view', 'transcript');")
     if _state["token"]:
         ctx.add_init_script(f"window.__AETHER_SESSION_TOKEN__ = '{_state['token']}';")
     scenarios = {

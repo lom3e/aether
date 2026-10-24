@@ -1,10 +1,13 @@
 import { useState, useEffect, useContext, useRef } from 'react';
-import { CalendarDays, FileText, Loader2, Mail, Sparkles } from 'lucide-react';
+import { CalendarDays, CircleDot, FileText, Loader2, Mail, Sparkles } from 'lucide-react';
 import { AssistantMessage, Composer, ConfirmCard, Thinking, UserMessage } from './chat/ChatParts';
 import './home.css';
 import './chat/chat.css';
 import { apiUrl } from './api';
-import { speak } from './voiceOut';
+import { speak, speakVoiceAnswersEnabled } from './voiceOut';
+import { Presence } from './presence/Presence';
+import { Rewind } from './presence/Rewind';
+import { Promises } from './presence/Promises';
 import { useTranslation } from './i18n';
 import { ToastContext } from './toast';
 import { AutoArchitectModal } from './AutoArchitectModal';
@@ -61,6 +64,17 @@ export function Home({
   const [sessionTitle, setSessionTitle] = useState('');
   const [undoStates, setUndoStates] = useState<Record<string, 'busy' | 'done'>>({});
   const scrollRef = useRef<HTMLDivElement>(null);
+  // Presence (the orb, the default) or the transcript of the same conversation (the classic chat)
+  const [view, setViewState] = useState<'presence' | 'transcript'>(() => {
+    try { return localStorage.getItem('aether_home_view') === 'transcript' ? 'transcript' : 'presence'; } catch { return 'presence'; }
+  });
+  const setView = (v: 'presence' | 'transcript') => { setViewState(v); try { localStorage.setItem('aether_home_view', v); } catch { /* storage unavailable */ } };
+  const [rewindOpen, setRewindOpen] = useState(false);
+  const [promisesOpen, setPromisesOpen] = useState(false);
+  const [autonomyAnswers, setAutonomyAnswers] = useState<Record<string, 'yes' | 'no'>>({});
+  const voiceTurnRef = useRef(false);   // the current question was spoken: the answer is spoken back
+  const holdRef = useRef(false);        // Space is held down to talk
+  const sendAfterVoiceRef = useRef(false);
   const [overview, setOverview] = useState<any>({
     pending_approvals: [],
     recent_activities: [],
@@ -114,6 +128,7 @@ export function Home({
       .then(data => {
         if (cancelled || !data) return;
         setCurrentSessionId(sessionId);
+        setViewState('transcript');  // an older chat opened from the sidebar reads best as a transcript
         setSessionTitle(data.title || '');
         setMessages(Array.isArray(data.messages) ? data.messages.map((m: any) => ({ ...m, steps: m.steps || [] })) : []);
         setUndoStates({});
@@ -330,6 +345,11 @@ export function Home({
         setCurrentSessionId(data.session_id);
         setMessages(prev => [...prev, { ...data, steps: data.steps || [] }]);
         fetchOverview();
+        if (voiceTurnRef.current && speakVoiceAnswersEnabled() && data.content) {
+          setIsSpeaking(true);
+          setSpeakingMessageId(data.id);
+          speak(data.content, language, () => { setIsSpeaking(false); setSpeakingMessageId(null); });
+        }
       } else {
         const errData = await res.json().catch(() => ({}));
         const errMsg = errData.detail || t('homeUiErrorProcessingRequest');
@@ -369,8 +389,47 @@ export function Home({
       }]);
     } finally {
       setIsSubmitting(false);
+      voiceTurnRef.current = false;
     }
   };
+
+  // Hold Space (outside a text field) to talk to the orb; release to send what was heard.
+  useEffect(() => {
+    if (view !== 'presence') return;
+    const typing = (el: EventTarget | null) => {
+      const n = el as HTMLElement | null;
+      return !!n && (n.tagName === 'INPUT' || n.tagName === 'TEXTAREA' || n.tagName === 'SELECT' || n.isContentEditable);
+    };
+    const down = (e: KeyboardEvent) => {
+      if (e.code !== 'Space' || e.repeat || typing(e.target) || holdRef.current || isSubmitting) return;
+      e.preventDefault();
+      if (!recognitionRef.current) { showToast(t('homeUiSpeechRecognitionNotSupportedInThis'), 'warning'); return; }
+      holdRef.current = true;
+      setPromptInput('');
+      try { recognitionRef.current.start(); setIsListening(true); } catch { holdRef.current = false; }
+    };
+    const up = (e: KeyboardEvent) => {
+      if (e.code !== 'Space' || !holdRef.current) return;
+      e.preventDefault();
+      holdRef.current = false;
+      sendAfterVoiceRef.current = true;
+      try { recognitionRef.current?.stop(); } catch { /* already stopped */ }
+    };
+    window.addEventListener('keydown', down);
+    window.addEventListener('keyup', up);
+    return () => { window.removeEventListener('keydown', down); window.removeEventListener('keyup', up); };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [view, isSubmitting]);
+
+  useEffect(() => {
+    if (isListening || !sendAfterVoiceRef.current) return;
+    sendAfterVoiceRef.current = false;
+    if (promptInput.trim()) {
+      voiceTurnRef.current = true;
+      void handleSendPrompt(promptInput);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isListening]);
 
   useEffect(() => {
     if (initialApprovalId && overview.pending_approvals?.length > 0) {
@@ -626,6 +685,47 @@ export function Home({
 
   const hasChat = messages.length > 0;
   const needsAnswer = (msg: PersonalMsg) => msg.steps.some(s => s.status === 'pending_approval' || s.status === 'waiting_approval');
+  const answerAutonomy = async (msg: PersonalMsg, allow: boolean) => {
+    const offer = msg.metadata?.autonomy_offer;
+    if (!offer) return;
+    setAutonomyAnswers(prev => ({ ...prev, [msg.id]: allow ? 'yes' : 'no' }));
+    const res = await fetch(apiUrl('/api/autonomy'), { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ key: offer.key, allow }) }).catch(() => null);
+    if (res?.ok) showToast(allow ? t('auGrantedToast', { label: offer.label }) : t('auDeclinedToast'), 'success');
+    else { setAutonomyAnswers(prev => { const n = { ...prev }; delete n[msg.id]; return n; }); showToast(t('chUndoFailed'), 'error'); }
+  };
+  const renderCards = (msg: PersonalMsg) => (
+    <>
+      {msg.metadata?.autonomy_offer && !autonomyAnswers[msg.id] && (
+        <ConfirmCard testId="autonomy-offer" title={t('auOfferTitle', { count: msg.metadata.autonomy_offer.count, label: msg.metadata.autonomy_offer.label })} busy={false}
+          onConfirm={() => answerAutonomy(msg, true)} onDecline={() => answerAutonomy(msg, false)}
+          confirmLabel={t('auOfferYes')} declineLabel={t('auOfferNo')}>
+          <p className="ch-confirm-note">{t('auOfferNote')}</p>
+        </ConfirmCard>
+      )}
+      {msg.action_execution_id && needsAnswer(msg) && (
+        <ConfirmCard title={t('homeUiConfirmationRequired')} busy={actionLoading === msg.action_execution_id}
+          onConfirm={() => handleApproveAction(msg.action_execution_id!)} onDecline={() => handleRejectAction(msg.action_execution_id!)}
+          confirmLabel={actionLoading === msg.action_execution_id ? t('homeUiApproving') : t('approve')} declineLabel={t('reject')} />
+      )}
+      {msg.metadata?.proposal_id && msg.metadata?.status === 'proposal_pending' && msg.metadata?.proposal?.status === 'needs_clarification' && (
+        <ConfirmCard testId="proposal-clarification" title={t('homeUiClarificationNeeded')} busy={actionLoading === msg.metadata.proposal_id}
+          onConfirm={() => handleClarifyProposal(msg.metadata!.proposal_id, msg.session_id)} onDecline={() => handleRejectProposal(msg.metadata!.proposal_id)}
+          confirmLabel={t('homeUiClarificationSend')} declineLabel={t('reject')}>
+          <ul>{(msg.metadata.proposal.clarification_requirements || []).map((c: any, i: number) => <li key={i}>{c.question || c.context_key}</li>)}</ul>
+          <input placeholder={t('homeUiClarificationPlaceholder')} aria-label={t('homeUiClarificationPlaceholder')} value={clarifyDrafts[msg.metadata.proposal_id] || ''}
+            onChange={e => setClarifyDrafts(prev => ({ ...prev, [msg.metadata!.proposal_id]: e.target.value }))}
+            onKeyDown={e => { if (e.key === 'Enter') handleClarifyProposal(msg.metadata!.proposal_id, msg.session_id); }} />
+        </ConfirmCard>
+      )}
+      {msg.metadata?.proposal_id && msg.metadata?.proposal?.status !== 'needs_clarification' && (msg.metadata?.status === 'proposal_pending' || msg.steps.some(s => s.status === 'waiting_acceptance')) && (
+        <ConfirmCard title={t('homeUiConfirmationRequired')} busy={actionLoading === msg.metadata.proposal_id}
+          onConfirm={() => handleApproveProposal(msg.metadata!.proposal_id)} onDecline={() => handleRejectProposal(msg.metadata!.proposal_id)}
+          confirmLabel={actionLoading === msg.metadata.proposal_id ? t('homeUiApproving') : t('approve')} declineLabel={t('reject')} />
+      )}
+    </>
+  );
+  const lastAi = [...messages].reverse().find(m => m.role === 'assistant');
+  const needsYou = !!lastAi && (needsAnswer(lastAi) || (lastAi.metadata?.status === 'proposal_pending'));
   const composer = (
     <Composer
       value={promptInput}
@@ -640,10 +740,45 @@ export function Home({
     />
   );
 
+  if (view === 'presence') {
+    return (
+      <div className="ch-shell" data-view="presence">
+        <Presence
+          t={t}
+          language={language}
+          messages={messages}
+          busy={isSubmitting}
+          listening={isListening}
+          speaking={isSpeaking}
+          input={promptInput}
+          composer={composer}
+          actions={lastAi ? renderCards(lastAi) : null}
+          needsYou={needsYou}
+          undoState={lastAi ? (undoStates[lastAi.id] || 'idle') : 'idle'}
+          onUndo={lastAi ? () => handleUndo(lastAi) : undefined}
+          onSpeak={() => lastAi && handleSpeakText(lastAi.id, lastAi.content)}
+          onOpenTranscript={() => setView('transcript')}
+          onOpenRewind={() => setRewindOpen(true)}
+          onOpenPromises={() => setPromisesOpen(true)}
+          onAsk={p => handleSendPrompt(p)}
+          notifications={<NotificationCenter workspaceName={workspaceName} onNavigate={navigate} />}
+        />
+        {rewindOpen && <Rewind t={t} language={language} onClose={() => setRewindOpen(false)} />}
+        {promisesOpen && <Promises t={t} language={language} onClose={() => setPromisesOpen(false)} />}
+        {isAutoArchitectOpen && (
+          <AutoArchitectModal isOpen={isAutoArchitectOpen} onClose={() => setIsAutoArchitectOpen(false)} onSuccess={() => fetchOverview()} />
+        )}
+      </div>
+    );
+  }
+
   return (
     <div className="ch-shell">
       <header className="ch-top" data-testid="top-header">
-        {hasChat ? <h2 className="ch-top-title">{sessionTitle || t('chUntitled')}</h2> : <span />}
+        <span className="ch-top-left">
+          <button type="button" className="ch-presence-btn" onClick={() => setView('presence')} data-testid="open-presence"><CircleDot size={15} />{t('prPresence')}</button>
+          {hasChat && <h2 className="ch-top-title">{sessionTitle || t('chUntitled')}</h2>}
+        </span>
         <NotificationCenter workspaceName={workspaceName} onNavigate={navigate} />
       </header>
 
@@ -748,26 +883,7 @@ export function Home({
                 onUndo={() => handleUndo(msg)}
                 undoState={undoStates[msg.id] || 'idle'}
               >
-                {msg.action_execution_id && needsAnswer(msg) && (
-                  <ConfirmCard title={t('homeUiConfirmationRequired')} busy={actionLoading === msg.action_execution_id}
-                    onConfirm={() => handleApproveAction(msg.action_execution_id!)} onDecline={() => handleRejectAction(msg.action_execution_id!)}
-                    confirmLabel={actionLoading === msg.action_execution_id ? t('homeUiApproving') : t('approve')} declineLabel={t('reject')} />
-                )}
-                {msg.metadata?.proposal_id && msg.metadata?.status === 'proposal_pending' && msg.metadata?.proposal?.status === 'needs_clarification' && (
-                  <ConfirmCard testId="proposal-clarification" title={t('homeUiClarificationNeeded')} busy={actionLoading === msg.metadata.proposal_id}
-                    onConfirm={() => handleClarifyProposal(msg.metadata!.proposal_id, msg.session_id)} onDecline={() => handleRejectProposal(msg.metadata!.proposal_id)}
-                    confirmLabel={t('homeUiClarificationSend')} declineLabel={t('reject')}>
-                    <ul>{(msg.metadata.proposal.clarification_requirements || []).map((c: any, i: number) => <li key={i}>{c.question || c.context_key}</li>)}</ul>
-                    <input placeholder={t('homeUiClarificationPlaceholder')} aria-label={t('homeUiClarificationPlaceholder')} value={clarifyDrafts[msg.metadata.proposal_id] || ''}
-                      onChange={e => setClarifyDrafts(prev => ({ ...prev, [msg.metadata!.proposal_id]: e.target.value }))}
-                      onKeyDown={e => { if (e.key === 'Enter') handleClarifyProposal(msg.metadata!.proposal_id, msg.session_id); }} />
-                  </ConfirmCard>
-                )}
-                {msg.metadata?.proposal_id && msg.metadata?.proposal?.status !== 'needs_clarification' && (msg.metadata?.status === 'proposal_pending' || msg.steps.some(s => s.status === 'waiting_acceptance')) && (
-                  <ConfirmCard title={t('homeUiConfirmationRequired')} busy={actionLoading === msg.metadata.proposal_id}
-                    onConfirm={() => handleApproveProposal(msg.metadata!.proposal_id)} onDecline={() => handleRejectProposal(msg.metadata!.proposal_id)}
-                    confirmLabel={actionLoading === msg.metadata.proposal_id ? t('homeUiApproving') : t('approve')} declineLabel={t('reject')} />
-                )}
+                {renderCards(msg)}
               </AssistantMessage>
             ))}
             {isSubmitting && <Thinking t={t} />}

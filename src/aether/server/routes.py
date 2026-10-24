@@ -7405,6 +7405,25 @@ async def life_capture(request: Request, payload: LifeCapturePayload):
     return await asyncio.to_thread(capture.propose, ws, store, payload.text, language=payload.language or "it")
 
 
+class PromiseScanPayload(BaseModel):
+    language: str | None = None
+
+
+@router.post("/life/promises/scan")
+async def life_promises_scan(request: Request, payload: PromiseScanPayload):
+    """Promise keeper, on request: open commitments found in recent mail, as proposals (nothing is saved here)."""
+    ws, store = _life(request)
+    from aether.life import promises
+
+    try:
+        gmail = ws.connections.get_gmail_connector(ws.id)
+    except Exception:  # noqa: BLE001
+        return {"status": "no_gmail", "items": []}
+    from aether.providers.resolution import resolve_provider
+
+    return await asyncio.to_thread(promises.scan, ws, store, gmail=gmail, provider=resolve_provider(workspace=ws), language=payload.language or "it")
+
+
 @router.get("/screen-memory")
 async def screen_memory_list_route(request: Request):
     ws = getattr(request.app.state, "workspace", None)
@@ -7437,6 +7456,72 @@ async def undo_list_route(request: Request, limit: int = 50):
     from aether.actions import undo as undo_mod
 
     return {"items": await asyncio.to_thread(undo_mod.list_items, ws, ws.id, limit)}
+
+
+class AutonomyDecision(BaseModel):
+    key: str
+    allow: bool
+
+
+@router.get("/autonomy")
+async def autonomy_list_route(request: Request):
+    """The kinds of change the user allowed Aether to do alone (each can be revoked)."""
+    ws = getattr(request.app.state, "workspace", None)
+    if not ws:
+        return {"items": []}
+    from aether.personal.autonomy import autonomy_store_for
+
+    return {"items": await asyncio.to_thread(autonomy_store_for(ws).list_granted)}
+
+
+@router.post("/autonomy")
+async def autonomy_decide_route(request: Request, payload: AutonomyDecision):
+    """The user's answer to "shall I do this alone from now on?". Only kinds Aether offered can be granted."""
+    ws = getattr(request.app.state, "workspace", None)
+    if not ws:
+        raise HTTPException(status_code=503, detail="Workspace not initialized.")
+    from aether.personal.autonomy import autonomy_store_for
+
+    store = autonomy_store_for(ws)
+    row = await asyncio.to_thread(store.get, payload.key)
+    if payload.allow and not (row and row.get("offered_at")):
+        raise HTTPException(status_code=409, detail={"code": "not_offered", "message": "Autonomy is granted only for a kind Aether offered after your approvals."})
+    return await asyncio.to_thread(store.decide, payload.key, payload.allow)
+
+
+@router.delete("/autonomy")
+async def autonomy_revoke_route(request: Request, key: str):
+    ws = getattr(request.app.state, "workspace", None)
+    if not ws:
+        raise HTTPException(status_code=503, detail="Workspace not initialized.")
+    from aether.personal.autonomy import autonomy_store_for
+
+    return {"revoked": await asyncio.to_thread(autonomy_store_for(ws).revoke, key)}
+
+
+@router.get("/undo/timeline")
+async def undo_timeline_route(request: Request, limit: int = 100):
+    """Rewind: every change Aether made for you, across services, newest first, with how to take each back."""
+    ws = getattr(request.app.state, "workspace", None)
+    if not ws:
+        return {"items": []}
+    from aether.actions import undo as undo_mod
+
+    return {"items": await asyncio.to_thread(undo_mod.timeline, ws, ws.id, limit)}
+
+
+@router.post("/undo/rewind/{execution_id}")
+async def undo_rewind_route(request: Request, execution_id: str):
+    """Puts back, newest first, every reversible change from this one onwards."""
+    ws = getattr(request.app.state, "workspace", None)
+    if not ws:
+        raise HTTPException(status_code=503, detail="Workspace not initialized.")
+    from aether.actions import undo as undo_mod
+
+    try:
+        return await asyncio.to_thread(undo_mod.rewind, ws, ws.id, execution_id)
+    except undo_mod.UndoError as exc:
+        raise HTTPException(status_code=404 if exc.code == "not_found" else 409, detail={"code": exc.code, "message": str(exc)}) from exc
 
 
 @router.post("/undo/{execution_id}")

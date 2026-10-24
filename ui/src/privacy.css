@@ -38,3 +38,4 @@
 .settings-tabs button svg { opacity: .75; }
 .settings-body { max-width: 720px; margin: 0 auto; padding: 20px 32px 48px; }
 @media (max-width: 640px) { .settings-body { padding: 16px 16px 40px; } .settings-body .card { padding: 18px !important; } }
+.pv-subhead { font-size: 13px; font-weight: 500; color: hsl(var(--muted-fg)); margin: 4px 0 4px; }

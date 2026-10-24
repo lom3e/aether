@@ -3067,6 +3067,7 @@ class PersonalAgentService:
         # 4. Intent classification (with multi-turn context)
         intent = self.classify_intent(prompt, recent_history=recent_history)
         _approved = self._approved_action(session_id, authority)
+        _ran_alone_key = ""  # set when this change runs alone by earned autonomy
         if _approved is not None:
             intent = _approved
         # The keyword rules cover common phrasings only. When they are unsure (plain answer, the old "create at now" calendar
@@ -3235,6 +3236,12 @@ class PersonalAgentService:
                     constraints=proposal_constraints,
                 )
 
+                # Earned autonomy: the user allowed this exact kind of change to run without asking (still undoable).
+                if not auto_execute_allowed and authority is None and calendar_confirmation_text(intent) and self.workspace is not None:
+                    from aether.personal.autonomy import autonomy_store_for, key_for
+                    _akey = key_for(intent.action_id, intent.action_args)
+                    if _akey and autonomy_store_for(self.workspace).granted(_akey):
+                        auto_execute_allowed, auto_policy_code, _ran_alone_key = True, f"autonomy:{_akey}", _akey
                 if auto_execute_allowed:
                     # Autonomous operational mode (Principle 3.1):
                     # Internal planning completed; accept internally and issue authority
@@ -3528,6 +3535,19 @@ class PersonalAgentService:
                 if calendar_confirmation_text(intent):
                     response_text = calendar_done_text(intent, runtime_res.metadata.get("action_result") or {})
                     msg_metadata["undo_execution_id"] = action_execution_id
+                    if self.workspace is not None:
+                        from aether.personal.autonomy import autonomy_store_for, key_for, label_for
+                        _akey = key_for(intent.action_id, intent.action_args)
+                        if _akey:
+                            _astore = autonomy_store_for(self.workspace)
+                            if _ran_alone_key == _akey:
+                                _astore.note_ran_alone(_akey)
+                                msg_metadata["done_alone"] = True
+                                response_text = "Fatto da solo, come mi avevi permesso. " + response_text[len("Fatto: "):] if response_text.startswith("Fatto: ") else response_text
+                            else:
+                                _offer = _astore.note_approved(_akey, label_for(intent.action_id, intent.action_args))
+                                if _offer:
+                                    msg_metadata["autonomy_offer"] = _offer
                 elif intent.action_id == "agents.delegate_external":
                     res_data = runtime_res.metadata.get("action_result") or {}
                     out = res_data.get("output") or runtime_res.output or "Task executed successfully."
