@@ -5,6 +5,8 @@ trade-off. Nobody can talk to the bot until a chat is paired: the app shows a on
 the user taps it, Telegram sends "/start <code>" and only that chat is added to the allow-list. Every message goes through
 the same Personal Agent as the desktop (same memory, same confirmations); one conversation per chat so follow-ups
 ("cancellali") keep their context. Changes are confirmed with buttons, exactly like the confirmation cards in the app.
+Voice messages are transcribed with Whisper through the user's own provider key (the same as in the app); /oggi sends
+the day's brief with its one question as buttons; "may I do this by myself from now on?" is answered with buttons too.
 """
 from __future__ import annotations
 
@@ -22,6 +24,7 @@ logger = logging.getLogger(__name__)
 PAIRING_TTL = 600  # seconds a pairing link stays valid
 _SESSION_KEY = "telegram_session:{chat}"
 _PENDING_KEY = "telegram_pending:{proposal}"
+_AUTONOMY_KEY = "telegram_autonomy:{ref}"  # callback data is limited to 64 bytes: the autonomy key is kept here
 
 
 def plain(text: str) -> str:
@@ -169,6 +172,9 @@ class TelegramMobile:
         msg = update.get("message") or {}
         chat_id = (msg.get("chat") or {}).get("id")
         text = str(msg.get("text") or "").strip()
+        voice = msg.get("voice") or msg.get("audio")
+        if chat_id is not None and not text and voice and str(chat_id) in self._allowed():
+            return self._voice(tg, chat_id, voice)
         if chat_id is None or not text:
             return {"status": "ignored"}
         if text.startswith("/start "):
@@ -183,9 +189,57 @@ class TelegramMobile:
             tg.send_message(chat_id=chat_id, parse_mode="", text="Questo Aether è privato. Per collegare questa chat apri Aether sul tuo computer → Collegamenti → Telegram.")
             return {"status": "unauthorized"}
         if text in ("/start", "/help"):
-            tg.send_message(chat_id=chat_id, parse_mode="", text="Scrivimi cosa ti serve. Le modifiche (calendario, documenti) ti chiedono sempre conferma qui.")
+            tg.send_message(chat_id=chat_id, parse_mode="", text=(
+                "Scrivimi o mandami un vocale con quello che ti serve. Le modifiche (calendario, mail, documenti) ti chiedono sempre "
+                "conferma qui.\n/oggi: il riepilogo della giornata."))
             return {"status": "help"}
+        if text.split("@")[0] in ("/oggi", "/today"):
+            return self._brief(tg, chat_id, "en" if text.startswith("/today") else "it")
         return self._ask(tg, chat_id, text)
+
+    def _voice(self, tg: Any, chat_id: Any, voice: dict[str, Any]) -> dict[str, Any]:
+        """A voice message: Whisper with the user's key turns it into text, which is shown back and then handled as usual."""
+        from aether.personal import voice_engine
+
+        if int(voice.get("duration") or 0) > 180:
+            tg.send_message(chat_id=chat_id, parse_mode="", text="Il vocale è troppo lungo: tienilo sotto i tre minuti.")
+            return {"status": "voice_too_long"}
+        try:
+            audio = tg.get_file_bytes(voice.get("file_id"))
+            heard = voice_engine.transcribe(self.ws, audio, voice.get("mime_type") or "audio/ogg", "it")
+        except voice_engine.VoiceError as exc:
+            if exc.code == "use_device":
+                tg.send_message(chat_id=chat_id, parse_mode="", text=(
+                    "Per capire i vocali mi serve una chiave Groq o OpenAI in Aether (Impostazioni → Modello). Intanto scrivimi pure."))
+                return {"status": "voice_needs_key"}
+            tg.send_message(chat_id=chat_id, parse_mode="", text="Non sono riuscito a capire il vocale. Riprova o scrivimi.")
+            return {"status": "voice_failed", "code": exc.code}
+        except Exception as exc:  # noqa: BLE001
+            tg.send_message(chat_id=chat_id, parse_mode="", text="Non sono riuscito a scaricare il vocale. Riprova.")
+            return {"status": "voice_failed", "code": type(exc).__name__}
+        text = (heard.get("text") or "").strip()
+        if not text:
+            tg.send_message(chat_id=chat_id, parse_mode="", text="Non ho sentito niente nel vocale.")
+            return {"status": "voice_empty"}
+        tg.send_message(chat_id=chat_id, parse_mode="", text=f"🎙 «{text}»")
+        out = self._ask(tg, chat_id, text)
+        out["heard"] = text
+        return out
+
+    def _brief(self, tg: Any, chat_id: Any, language: str = "it") -> dict[str, Any]:
+        from aether.life import presence_brief
+        from aether.life.store import life_store_for
+
+        b = presence_brief.build(self.ws, life_store_for(self.ws), language=language)
+        offer = b.get("offer")
+        if not offer:
+            tg.send_message(chat_id=chat_id, parse_mode="", text=b["text"])
+            return {"status": "brief"}
+        ref = f"{offer['type']}:{offer.get('promise_id') or '-'}"
+        yes, no = ("Yes", "Not now") if language == "en" else ("Sì", "Non ora")
+        tg.send_message(chat_id=chat_id, parse_mode="", text=b["text"], reply_markup={"inline_keyboard": [[
+            {"text": yes, "callback_data": f"by:{ref}"}, {"text": no, "callback_data": f"bn:{ref}"}]]})
+        return {"status": "brief_with_offer", "offer": offer}
 
     def _session(self, chat_id: Any) -> str | None:
         try:
@@ -211,12 +265,27 @@ class TelegramMobile:
             tg.send_message(chat_id=chat_id, parse_mode="", text=plain(reply.content), reply_markup={"inline_keyboard": [[
                 {"text": "Approva", "callback_data": f"approve:{reply.action_execution_id}"}, {"text": "Rifiuta", "callback_data": f"reject:{reply.action_execution_id}"}]]})
             return {"status": "approval_sent", "execution_id": reply.action_execution_id}
+        offer = meta.get("autonomy_offer") or {}
         if meta.get("undo_execution_id"):
             tg.send_message(chat_id=chat_id, parse_mode="", text=plain(reply.content), reply_markup={"inline_keyboard": [[
                 {"text": "Annulla", "callback_data": f"undo:{meta['undo_execution_id']}"}]]})
+            if offer.get("key"):
+                self._offer_autonomy(tg, chat_id, offer)
             return {"status": "done_with_undo"}
         tg.send_message(chat_id=chat_id, parse_mode="", text=plain(reply.content))
+        if offer.get("key"):
+            self._offer_autonomy(tg, chat_id, offer)
         return {"status": "answered"}
+
+    def _offer_autonomy(self, tg: Any, chat_id: Any, offer: dict[str, Any]) -> None:
+        """Earned autonomy, on the phone: after the same approval three times in a row, ask once with two buttons."""
+        ref = uuid.uuid4().hex[:10]
+        self.ws.personal_store.set_setting(_AUTONOMY_KEY.format(ref=ref), offer["key"])
+        label = offer.get("label") or "questa azione"
+        tg.send_message(chat_id=chat_id, parse_mode="", text=(
+            f"Me l'hai approvato più volte di fila: d'ora in poi posso farlo da solo? ({label}). Resterà sempre annullabile, "
+            "e puoi togliermi il permesso in Aether → Privacy."), reply_markup={"inline_keyboard": [[
+                {"text": "Sì, fallo da solo", "callback_data": f"auto:y:{ref}"}, {"text": "No, chiedimelo", "callback_data": f"auto:n:{ref}"}]]})
 
     def _callback(self, tg: Any, cb: dict[str, Any]) -> dict[str, Any]:
         data = str(cb.get("data") or "")
@@ -250,6 +319,41 @@ class TelegramMobile:
                 why = {"changed_since": "l'evento è stato cambiato di nuovo nel frattempo", "already_undone": "era già stato annullato"}.get(exc.code, "non è stato possibile")
                 tg.send_message(chat_id=chat_id, parse_mode="", text=f"Non ho annullato: {why}.")
                 return {"status": "undo_refused", "code": exc.code}
+        if data.startswith("auto:"):
+            _, ans, ref = (data.split(":") + ["", ""])[:3]
+            key = self.ws.personal_store.get_setting(_AUTONOMY_KEY.format(ref=ref)) or ""
+            from aether.personal.autonomy import autonomy_store_for
+
+            st = autonomy_store_for(self.ws)
+            row = st.get(key) if key else None
+            if not row or not row.get("offered_at"):
+                tg.send_message(chat_id=chat_id, parse_mode="", text="Questa proposta non è più valida.")
+                return {"status": "autonomy_stale"}
+            st.decide(key, ans == "y")
+            self.ws.personal_store.set_setting(_AUTONOMY_KEY.format(ref=ref), "")
+            tg.send_message(chat_id=chat_id, parse_mode="", text=(
+                "Va bene: d'ora in poi lo faccio da solo, e ti dico sempre cosa ho fatto." if ans == "y" else "Va bene, continuerò a chiedertelo."))
+            return {"status": "autonomy_granted" if ans == "y" else "autonomy_declined", "key": key}
+        if data.startswith(("by:", "bn:")):
+            from aether.life import presence_brief
+            from aether.life.store import life_store_for
+
+            kind, _, pid = data[3:].partition(":")
+            offer = {"type": kind, "promise_id": None if pid == "-" else pid}
+            store = life_store_for(self.ws)
+            try:
+                if data.startswith("bn:"):
+                    presence_brief.decline(store, offer)
+                    tg.send_message(chat_id=chat_id, parse_mode="", text="Va bene, non te lo richiedo.")
+                    return {"status": "brief_declined"}
+                out = presence_brief.accept(self.ws, store, offer)
+            except ValueError:
+                tg.send_message(chat_id=chat_id, parse_mode="", text="Questa proposta non è più valida.")
+                return {"status": "brief_stale"}
+            if out.get("prompt"):
+                return self._ask(tg, chat_id, out["prompt"])
+            tg.send_message(chat_id=chat_id, parse_mode="", text=out.get("text") or "Fatto.")
+            return {"status": "brief_accepted"}
         if data.startswith("reject:"):
             self.ws.action_executor.reject_execution(data.split(":", 1)[1])
             tg.send_message(chat_id=chat_id, parse_mode="", text="Va bene, non faccio niente.")

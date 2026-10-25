@@ -336,6 +336,24 @@ class TelegramConnector(BaseConnector):
             logger.warning(f"Could not edit Telegram message {message_id}: {e}")
             return {}
 
+    def get_file_bytes(self, file_id: str, max_bytes: int = 12 * 1024 * 1024) -> bytes:
+        """Downloads a file the user sent (e.g. a voice message). Raises on failure; never logs the token."""
+        token = self._get_token()
+        if not token:
+            raise RuntimeError("no bot token")
+        req = urllib.request.Request(f"{self.API_BASE}/bot{token}/getFile?file_id={urllib.parse.quote(str(file_id))}", headers={"User-Agent": "Aether/1.0"})
+        with urllib.request.urlopen(req, timeout=15) as resp:  # noqa: S310 - fixed Telegram API host
+            info = json.loads(resp.read().decode("utf-8"))
+        path = ((info or {}).get("result") or {}).get("file_path")
+        if not info.get("ok") or not path:
+            raise RuntimeError("file not available")
+        req = urllib.request.Request(f"{self.API_BASE}/file/bot{token}/{path}", headers={"User-Agent": "Aether/1.0"})
+        with urllib.request.urlopen(req, timeout=30) as resp:  # noqa: S310
+            data = resp.read(max_bytes + 1)
+        if len(data) > max_bytes:
+            raise RuntimeError("file too large")
+        return data
+
     def get_updates(self, offset: int | None = None, timeout: int = 10) -> list[dict[str, Any]]:
         """Retrieves incoming updates via long polling."""
         token = self._get_token()

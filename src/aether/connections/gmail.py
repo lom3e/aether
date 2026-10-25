@@ -87,10 +87,11 @@ class GmailConnector(GoogleCalendarConnector):
         listing = self._api_request("users/me/messages", params={"q": query or "in:inbox", "maxResults": max(1, min(int(limit), 25))})
         out = []
         for ref in listing.get("messages") or []:
-            m = self._api_request(f"users/me/messages/{ref['id']}", params={"format": "metadata", "metadataHeaders": ["From", "Subject", "Date"]})
+            m = self._api_request(f"users/me/messages/{ref['id']}", params={"format": "metadata", "metadataHeaders": ["From", "To", "Subject", "Date"]})
             hs = (m.get("payload") or {}).get("headers") or []
             out.append({
                 "id": m.get("id"), "thread_id": m.get("threadId"), "from": _sender_name(_header(hs, "From")), "from_raw": _header(hs, "From"),
+                "to": _header(hs, "To"),
                 "subject": _header(hs, "Subject") or "(senza oggetto)", "date": _header(hs, "Date"),
                 "internal_ts": int(m.get("internalDate") or 0) // 1000, "snippet": html.unescape(m.get("snippet") or ""),
                 "unread": "UNREAD" in (m.get("labelIds") or []),

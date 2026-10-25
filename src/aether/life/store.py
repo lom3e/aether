@@ -31,6 +31,11 @@ CREATE TABLE IF NOT EXISTS reminders (
     source TEXT NOT NULL DEFAULT 'manual', created_at REAL NOT NULL, done_at REAL
 );
 CREATE TABLE IF NOT EXISTS life_settings (key TEXT PRIMARY KEY, value TEXT NOT NULL);
+CREATE TABLE IF NOT EXISTS promises (
+    id TEXT PRIMARY KEY, kind TEXT NOT NULL, title TEXT NOT NULL, who TEXT NOT NULL DEFAULT '', due_at REAL,
+    message_id TEXT NOT NULL DEFAULT '', subject TEXT NOT NULL DEFAULT '', status TEXT NOT NULL DEFAULT 'new',
+    job_id TEXT, found_at REAL NOT NULL, updated_at REAL NOT NULL
+);
 CREATE INDEX IF NOT EXISTS jobs_due ON jobs(status, due_at);
 CREATE INDEX IF NOT EXISTS reminders_due ON reminders(done, due_at);
 """
@@ -53,7 +58,8 @@ class LifeStore:
         return _Conn(conn)
 
     # -- settings (all opt-in, off by default) ---------------------------------------------------------------
-    DEFAULT_SETTINGS = {"brief_enabled": False, "brief_time": "08:30", "last_brief_date": ""}
+    DEFAULT_SETTINGS = {"brief_enabled": False, "brief_time": "08:30", "last_brief_date": "",
+                        "promise_watch": False, "last_promise_scan": 0.0, "promise_watch_offered": False}
 
     def settings(self) -> dict[str, Any]:
         import json
@@ -142,6 +148,48 @@ class LifeStore:
             c.execute("UPDATE jobs SET contact_id=NULL WHERE contact_id=?", (contact_id,))
             c.execute("UPDATE reminders SET contact_id=NULL WHERE contact_id=?", (contact_id,))
         return n > 0
+
+    # -- promises found in mail (promise keeper) ----------------------------------------------------------------
+    # kinds: i_promised (you owe someone), they_asked (someone asked you), they_promised (someone owes you),
+    # fulfilled (a sent mail seems to close an open job: job_id). status: new | tracked | ignored | done
+    PROMISE_KINDS = ("i_promised", "they_asked", "they_promised", "fulfilled")
+    PROMISE_STATUSES = ("new", "tracked", "ignored", "done")
+
+    def add_promise(self, kind: str, title: str, *, who: str = "", due_at: float | None = None, message_id: str = "",
+                    subject: str = "", job_id: str | None = None) -> dict[str, Any]:
+        if kind not in self.PROMISE_KINDS:
+            raise ValueError(f"kind must be one of {self.PROMISE_KINDS}")
+        if not (title or "").strip():
+            raise ValueError("a promise needs a title")
+        now = time.time()
+        pid = f"pm-{uuid.uuid4().hex[:10]}"
+        with self._lock, self._conn() as c:
+            c.execute("INSERT INTO promises(id,kind,title,who,due_at,message_id,subject,status,job_id,found_at,updated_at) VALUES(?,?,?,?,?,?,?,?,?,?,?)",
+                      (pid, kind, title.strip()[:300], (who or "").strip()[:120], due_at, message_id[:200], (subject or "")[:300], "new", job_id, now, now))
+        return self.get_promise(pid) or {}
+
+    def get_promise(self, promise_id: str) -> dict[str, Any] | None:
+        with self._lock, self._conn() as c:
+            r = c.execute("SELECT * FROM promises WHERE id=?", (promise_id,)).fetchone()
+        return dict(r) if r else None
+
+    def list_promises(self, *, status: str | None = None) -> list[dict[str, Any]]:
+        q, args = "SELECT * FROM promises", []
+        if status:
+            q += " WHERE status=?"
+            args.append(status)
+        with self._lock, self._conn() as c:
+            return [dict(r) for r in c.execute(q + " ORDER BY (due_at IS NULL), due_at, found_at DESC", args)]
+
+    def set_promise_status(self, promise_id: str, status: str, *, job_id: str | None = None) -> dict[str, Any] | None:
+        if status not in self.PROMISE_STATUSES:
+            raise ValueError(f"status must be one of {self.PROMISE_STATUSES}")
+        with self._lock, self._conn() as c:
+            if job_id:
+                c.execute("UPDATE promises SET status=?, job_id=?, updated_at=? WHERE id=?", (status, job_id, time.time(), promise_id))
+            else:
+                c.execute("UPDATE promises SET status=?, updated_at=? WHERE id=?", (status, time.time(), promise_id))
+        return self.get_promise(promise_id)
 
     # -- jobs -------------------------------------------------------------------------------------------------
     def add_job(self, title: str, *, contact_id: str | None = None, due_at: float | None = None, notes: str = "", source: str = "manual") -> dict[str, Any]:

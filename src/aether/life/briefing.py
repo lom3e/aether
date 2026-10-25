@@ -47,6 +47,9 @@ async def brief_loop(app_state: Any, interval: float = 60.0) -> None:
             ws = getattr(app_state, "workspace", None)
             if ws is not None:
                 await asyncio.to_thread(maybe_send_brief, ws, life_store_for(ws))
+                from aether.life.promises import watch_tick
+
+                await asyncio.to_thread(watch_tick, ws, life_store_for(ws))  # the daily promise check, only if turned on
         except asyncio.CancelledError:
             raise
         except Exception as exc:  # noqa: BLE001 - a failing brief must never take the server down

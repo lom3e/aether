@@ -106,3 +106,83 @@ def test_a_done_change_offers_undo_and_undo_runs_the_inverse(mobile, monkeypatch
     monkeypatch.setattr("aether.actions.undo.undo", lambda ws, ex_id: undone.append(ex_id) or {"result": "moved_back"})
     assert mobile.handle({"callback_query": {"id": "c", "data": "undo:ax-1", "message": {"chat": {"id": 42}}}})["status"] == "undone"
     assert undone == ["ax-1"] and "come prima" in mobile.fake.sent[-1]["text"]
+
+
+def _paired(mobile):
+    code = mobile.setup("123456789:" + "A" * 35)["code"]
+    mobile.handle(_msg(42, "/start " + code))
+
+
+def _cb(chat, data):
+    return {"update_id": 9, "callback_query": {"id": "cb", "data": data, "message": {"chat": {"id": chat}}}}
+
+
+def test_a_voice_message_is_transcribed_shown_back_and_handled(mobile, monkeypatch):
+    _paired(mobile)
+    from aether.personal import voice_engine
+
+    mobile.fake.get_file_bytes = lambda file_id: b"OGG" if file_id == "f1" else b""
+    heard = []
+    monkeypatch.setattr(voice_engine, "transcribe", lambda ws, audio, mime, lang: heard.append((audio, mime)) or {"text": "che impegni ho domani?"})
+    prompts = []
+    monkeypatch.setattr(mobile.ws.personal, "process_prompt", lambda **k: prompts.append(k["prompt"]) or SimpleNamespace(
+        session_id="s", content="Domani hai Analisi alle 10.", metadata={}, steps=[], action_execution_id=None))
+    out = mobile.handle({"update_id": 3, "message": {"chat": {"id": 42}, "voice": {"file_id": "f1", "duration": 4, "mime_type": "audio/ogg"}}})
+    assert out["status"] == "answered" and out["heard"] == "che impegni ho domani?"
+    assert heard == [(b"OGG", "audio/ogg")] and prompts == ["che impegni ho domani?"]
+    assert [m["text"] for m in mobile.fake.sent[-2:]] == ["🎙 «che impegni ho domani?»", "Domani hai Analisi alle 10."]
+    # a stranger's voice message is never downloaded
+    assert mobile.handle({"update_id": 4, "message": {"chat": {"id": 77}, "voice": {"file_id": "f1", "duration": 4}}})["status"] == "ignored"
+    assert len(heard) == 1
+
+
+def test_a_voice_message_without_a_key_says_what_is_missing(mobile, monkeypatch):
+    _paired(mobile)
+    from aether.personal import voice_engine
+
+    mobile.fake.get_file_bytes = lambda file_id: b"OGG"
+
+    def no_key(*a, **k):
+        raise voice_engine.VoiceError("use_device")
+
+    monkeypatch.setattr(voice_engine, "transcribe", no_key)
+    assert mobile.handle({"update_id": 3, "message": {"chat": {"id": 42}, "voice": {"file_id": "f1", "duration": 4}}})["status"] == "voice_needs_key"
+    assert "chiave Groq o OpenAI" in mobile.fake.sent[-1]["text"]
+
+
+def test_oggi_sends_the_brief_and_its_question_as_buttons(mobile, monkeypatch):
+    _paired(mobile)
+    from aether.life.store import life_store_for
+
+    store = life_store_for(mobile.ws)
+    store.update_settings(promise_watch_offered=True)
+    job = store.add_job("Preventivo Rossi")
+    store.add_promise("fulfilled", job["title"], job_id=job["id"], message_id="s1")
+    out = mobile.handle(_msg(42, "/oggi"))
+    assert out["status"] == "brief_with_offer" and out["offer"]["type"] == "job_done"
+    buttons = mobile.fake.sent[-1]["markup"]["inline_keyboard"][0]
+    assert [b["text"] for b in buttons] == ["Sì", "Non ora"] and "Lo segno come fatto?" in mobile.fake.sent[-1]["text"]
+    assert all(len(b["callback_data"].encode()) <= 64 for b in buttons)
+    assert mobile.handle(_cb(42, buttons[0]["callback_data"]))["status"] == "brief_accepted"
+    assert store.get_job(job["id"])["status"] == "done"
+    assert mobile.handle(_cb(77, buttons[0]["callback_data"]))["status"] == "unauthorized"
+
+
+def test_earned_autonomy_is_offered_with_buttons_on_the_phone(mobile, monkeypatch):
+    _paired(mobile)
+    from aether.personal.autonomy import autonomy_store_for
+
+    st = autonomy_store_for(mobile.ws)
+    for _ in range(3):
+        offer = st.note_approved("gmail.trash:from:zalando", "Spostare nel cestino le mail di Zalando")
+    assert offer and offer.get("key")
+    monkeypatch.setattr(mobile.ws.personal, "process_prompt", lambda **k: SimpleNamespace(
+        session_id="s", content="Fatto: 4 mail nel cestino.", metadata={"undo_execution_id": "ex-1", "autonomy_offer": offer}, steps=[], action_execution_id=None))
+    mobile.handle(_msg(42, "cestina le mail di zalando"))
+    ask = mobile.fake.sent[-1]
+    assert "posso farlo da solo" in ask["text"]
+    yes = ask["markup"]["inline_keyboard"][0][0]["callback_data"]
+    assert len(yes.encode()) <= 64
+    assert mobile.handle(_cb(42, yes)) == {"status": "autonomy_granted", "key": "gmail.trash:from:zalando"}
+    assert st.get("gmail.trash:from:zalando")["granted_at"]
+    assert mobile.handle(_cb(42, yes))["status"] == "autonomy_stale", "a button works once"

@@ -4,7 +4,13 @@ import { AssistantMessage, Composer, ConfirmCard, Thinking, UserMessage } from '
 import './home.css';
 import './chat/chat.css';
 import { apiUrl } from './api';
-import { speak, speakVoiceAnswersEnabled } from './voiceOut';
+import { speak, speakVoiceAnswersEnabled, stopSpeaking } from './voiceOut';
+import { canListen, createListener, type Listener } from './voice/voiceIO';
+import { greetAloudEnabled } from './voice/greet';
+
+type BriefOffer = { type: string; promise_id?: string; prompt?: string; view?: string };
+const BRIEF_YES = /^(s[iì]+|ok(ay)?|va bene|certo|fallo|fai pure|vai|procedi|perfetto|d'accordo|yes|yeah|yep|sure|do it|go ahead|please)\b/i;
+const BRIEF_NO = /^(no|non ora|non adesso|lascia( stare| perdere)?|not now|nope|skip|later|dopo)\b/i;
 import { Presence } from './presence/Presence';
 import { Rewind } from './presence/Rewind';
 import { Promises } from './presence/Promises';
@@ -90,7 +96,8 @@ export function Home({
   const [isListening, setIsListening] = useState(false);
   const [isSpeaking, setIsSpeaking] = useState(false);
   const [speakingMessageId, setSpeakingMessageId] = useState<string | null>(null);
-  const recognitionRef = useRef<any>(null);
+  const [isTranscribing, setIsTranscribing] = useState(false);
+  const recognitionRef = useRef<Listener | null>(null);
 
   const showToast = useContext(ToastContext);
   const { t, language } = useTranslation();
@@ -233,63 +240,41 @@ export function Home({
     };
   }, [workspaceName]);
 
-  // Voice Web Speech Recognition initialization
+  // Hearing: Whisper with your provider key (more accurate), or the Mac's dictation without one (see voice/voiceIO)
   useEffect(() => {
-    const SpeechRecognition = (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition;
-    if (SpeechRecognition) {
-      const rec = new SpeechRecognition();
-      rec.continuous = false;
-      rec.interimResults = true;
-      rec.lang = language === 'it' ? 'it-IT' : 'en-US'; // dictation in the interface language
-
-      rec.onresult = (event: any) => {
-        let transcript = '';
-        for (let i = event.resultIndex; i < event.results.length; ++i) {
-          transcript += event.results[i][0].transcript;
-        }
-        if (transcript) {
-          setPromptInput(transcript);
-        }
-      };
-
-      rec.onerror = () => {
-        setIsListening(false);
-      };
-
-      rec.onend = () => {
-        setIsListening(false);
-      };
-
-      recognitionRef.current = rec;
-    }
+    const rec = createListener(language, {
+      onText: text => setPromptInput(text),
+      onListening: on => setIsListening(on),
+      onTranscribing: on => setIsTranscribing(on),
+      onError: code => {
+        if (code === 'mic_denied') showToast(t('voMicDenied'), 'warning');
+        else if (code === 'unsupported') showToast(t('homeUiSpeechRecognitionNotSupportedInThis'), 'warning');
+        else if (code !== 'no-speech' && code !== 'aborted') showToast(t('voHearFailed'), 'warning');
+      },
+    });
+    recognitionRef.current = rec;
+    return () => rec.abort();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [language]);
 
   const toggleListening = () => {
-    if (!recognitionRef.current) {
+    if (!recognitionRef.current || !canListen()) {
       showToast(t('homeUiSpeechRecognitionNotSupportedInThis'), 'warning');
       return;
     }
     if (isListening) {
       recognitionRef.current.stop();
-      setIsListening(false);
     } else {
-      try {
-        recognitionRef.current.start();
-        setIsListening(true);
-        showToast(t('homeUiListeningSpeakYourRequest'), 'info');
-      } catch (e) {
-        console.error(e);
-      }
+      stopSpeaking();
+      setPromptInput('');
+      sendAfterVoiceRef.current = view === 'presence'; // in the orb a spoken turn is sent when you stop talking
+      void recognitionRef.current.start({ autoStop: true });
     }
   };
 
   const handleSpeakText = (msgId: string, text: string) => {
-    if (!('speechSynthesis' in window)) {
-      showToast(t('homeUiAudioSynthesisNotSupportedInThis'), 'warning');
-      return;
-    }
     if (isSpeaking && speakingMessageId === msgId) {
-      window.speechSynthesis.cancel();
+      stopSpeaking();
       setIsSpeaking(false);
       setSpeakingMessageId(null);
       return;
@@ -302,13 +287,76 @@ export function Home({
     });
   };
 
-  const handleSendPrompt = async (promptText: string) => {
+  // The orb speaks first: once a day, when Aether opens on the orb, a short brief of today with at most one question.
+  const [brief, setBrief] = useState<{ body: string; offer: BriefOffer | null } | null>(null);
+  const [briefBusy, setBriefBusy] = useState(false);
+  const briefRef = useRef(brief);
+  briefRef.current = brief;
+  const speakAloud = (text: string, id = 'brief') => {
+    if (!text || !speakVoiceAnswersEnabled()) return;
+    setIsSpeaking(true);
+    setSpeakingMessageId(id);
+    speak(text, language, () => { setIsSpeaking(false); setSpeakingMessageId(null); });
+  };
+  useEffect(() => {
+    if (view !== 'presence') return;
+    const day = new Date().toISOString().slice(0, 10);
+    let seen = '';
+    let met = true;
+    try { seen = localStorage.getItem('aether_brief_day') || ''; met = !!localStorage.getItem('aether_met'); } catch { /* storage unavailable */ }
+    if (seen === day && met) return;
+    let alive = true;
+    // the very first time, the orb introduces itself and shows how to talk to it
+    fetch(apiUrl(`/api/presence/brief?language=${encodeURIComponent(language)}${met ? '' : '&first=1'}`))
+      .then(r => (r.ok ? r.json() : null))
+      .then(d => {
+        if (!alive || !d?.text) return;
+        try { localStorage.setItem('aether_brief_day', day); localStorage.setItem('aether_met', '1'); } catch { /* storage unavailable */ }
+        setBrief({ body: d.body || d.text, offer: d.offer || null });
+        if (greetAloudEnabled()) speakAloud(d.text);
+      })
+      .catch(() => undefined);
+    return () => { alive = false; };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [view, language]);
+
+  const answerBrief = async (answer: 'yes' | 'no', spoken = false) => {
+    const offer = briefRef.current?.offer;
+    if (!offer || briefBusy) return;
+    if (offer.type === 'open') { // a place in the app (e.g. Connections): nothing to run on the server
+      setBrief(null);
+      if (answer === 'yes' && offer.view) navigate(offer.view);
+      return;
+    }
+    setBriefBusy(true);
+    try {
+      const res = await fetch(apiUrl('/api/presence/offer'), { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ offer, answer, language }) });
+      const d = res.ok ? await res.json() : null;
+      if (!res.ok) { setBrief(null); showToast(t('lifeSaveFailed'), 'error'); return; }
+      if (answer === 'yes' && d?.prompt) {
+        setBrief(null);
+        voiceTurnRef.current = spoken;
+        await handleSendPrompt(d.prompt, true);
+        return;
+      }
+      const text = answer === 'no' ? t('brOkNoProblem') : (d?.text || t('brDone'));
+      setBrief({ body: text, offer: null });
+      if (spoken) speakAloud(text);
+    } finally { setBriefBusy(false); }
+  };
+
+  const handleSendPrompt = async (promptText: string, fromBrief = false) => {
     const text = promptText.trim();
     if (!text || isSubmitting) return;
+    if (!fromBrief && briefRef.current?.offer && text.length < 40) {
+      // a short yes / no right after the orb asked something answers that question
+      if (BRIEF_YES.test(text)) { setPromptInput(''); void answerBrief('yes', voiceTurnRef.current); voiceTurnRef.current = false; return; }
+      if (BRIEF_NO.test(text)) { setPromptInput(''); void answerBrief('no', voiceTurnRef.current); voiceTurnRef.current = false; return; }
+    }
+    setBrief(null);
 
     if (isListening && recognitionRef.current) {
-      recognitionRef.current.stop();
-      setIsListening(false);
+      recognitionRef.current.abort();
     }
 
     setIsSubmitting(true);
@@ -403,17 +451,18 @@ export function Home({
     const down = (e: KeyboardEvent) => {
       if (e.code !== 'Space' || e.repeat || typing(e.target) || holdRef.current || isSubmitting) return;
       e.preventDefault();
-      if (!recognitionRef.current) { showToast(t('homeUiSpeechRecognitionNotSupportedInThis'), 'warning'); return; }
+      if (!recognitionRef.current || !canListen()) { showToast(t('homeUiSpeechRecognitionNotSupportedInThis'), 'warning'); return; }
       holdRef.current = true;
+      stopSpeaking();
       setPromptInput('');
-      try { recognitionRef.current.start(); setIsListening(true); } catch { holdRef.current = false; }
+      void recognitionRef.current.start();
     };
     const up = (e: KeyboardEvent) => {
       if (e.code !== 'Space' || !holdRef.current) return;
       e.preventDefault();
       holdRef.current = false;
       sendAfterVoiceRef.current = true;
-      try { recognitionRef.current?.stop(); } catch { /* already stopped */ }
+      recognitionRef.current?.stop();
     };
     window.addEventListener('keydown', down);
     window.addEventListener('keyup', up);
@@ -749,6 +798,7 @@ export function Home({
           messages={messages}
           busy={isSubmitting}
           listening={isListening}
+          transcribing={isTranscribing}
           speaking={isSpeaking}
           input={promptInput}
           composer={composer}
@@ -761,6 +811,9 @@ export function Home({
           onOpenRewind={() => setRewindOpen(true)}
           onOpenPromises={() => setPromisesOpen(true)}
           onAsk={p => handleSendPrompt(p)}
+          brief={brief}
+          briefBusy={briefBusy}
+          onBriefAnswer={a => void answerBrief(a)}
           notifications={<NotificationCenter workspaceName={workspaceName} onNavigate={navigate} />}
         />
         {rewindOpen && <Rewind t={t} language={language} onClose={() => setRewindOpen(false)} />}

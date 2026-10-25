@@ -1,5 +1,6 @@
-// Spoken answers with the voices already on this computer (Web Speech API): offline, free, nothing to download.
-// Reads the answer as written, without Markdown symbols, in the language of the interface.
+// Spoken answers: Aether's voice from the sidecar (the best voice on this Mac, or OpenAI's if chosen, see voice/voiceIO),
+// with the Web Speech voices as the fallback. Reads the answer as written, without Markdown symbols, in the interface language.
+import { speakText, stopSpeech } from './voice/voiceIO';
 
 const STORE_KEY = 'aether_speak_voice_answers';
 
@@ -43,15 +44,28 @@ export function canSpeak(): boolean {
 }
 
 export function stopSpeaking(): void {
+  stopSpeech();
   try {
     if (canSpeak()) window.speechSynthesis.cancel();
   } catch { /* nothing to stop */ }
 }
 
+let turn = 0;
+
 export function speak(text: string, lang: string, onEnd?: () => void): boolean {
-  if (!canSpeak()) return false;
   const clean = speakable(text);
   if (!clean) return false;
+  const mine = ++turn;
+  try { window.speechSynthesis?.cancel(); } catch { /* no engine */ }
+  void speakText(clean, lang).then(ok => {
+    if (mine !== turn) return;            // a newer answer took over
+    if (ok || !speakWithBrowser(clean, lang, onEnd)) onEnd?.();
+  });
+  return true;
+}
+
+function speakWithBrowser(clean: string, lang: string, onEnd?: () => void): boolean {
+  if (!canSpeak()) return false;
   try { // a voice engine error must never take the interface down with it
     window.speechSynthesis.cancel();
     const u = new SpeechSynthesisUtterance(clean);

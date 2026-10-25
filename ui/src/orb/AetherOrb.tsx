@@ -1,5 +1,6 @@
 import { useEffect, useRef, useCallback } from 'react';
 import { OrbEngine, type OrbState, type QualityProfileKey } from './OrbEngine';
+import { onVoiceLevel } from '../voice/voiceIO';
 import './orb.css';
 
 export interface AetherOrbProps {
@@ -14,6 +15,8 @@ export interface AetherOrbProps {
   interactive?: boolean;
   /** Use the engine's small-canvas layout (see OrbEngineOptions.compact). */
   compact?: boolean;
+  /** Move with the live voice level (your microphone while you talk, Aether's voice while it answers). */
+  followVoice?: boolean;
 }
 
 export function AetherOrb({
@@ -27,6 +30,7 @@ export function AetherOrb({
   className = '',
   interactive = true,
   compact = false,
+  followVoice = false,
 }: AetherOrbProps) {
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
   const engineRef = useRef<OrbEngine | null>(null);
@@ -102,6 +106,12 @@ export function AetherOrb({
       engineRef.current.setState(state);
     }
   }, [state]);
+
+  // Live voice level, straight to the engine (no React render per frame)
+  useEffect(() => {
+    if (!followVoice) return;
+    return onVoiceLevel(level => engineRef.current?.setAudioLevel(level));
+  }, [followVoice]);
 
   // Sync audio level
   useEffect(() => {

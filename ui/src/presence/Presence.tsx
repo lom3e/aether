@@ -18,13 +18,14 @@ export interface PresenceMsg { id: string; role: string; content: string; metada
  * it (next appointment, what is overdue, what waits for you). The whole conversation is one click away (transcript).
  */
 export function Presence({
-  t, language, messages, busy, listening, speaking, input, composer, actions, undoState, needsYou,
-  onUndo, onSpeak, onOpenTranscript, onOpenRewind, onOpenPromises, onAsk, notifications,
+  t, language, messages, busy, listening, transcribing, speaking, input, composer, actions, undoState, needsYou,
+  onUndo, onSpeak, onOpenTranscript, onOpenRewind, onOpenPromises, onAsk, notifications, brief, briefBusy, onBriefAnswer,
 }: {
-  t: T; language: string; messages: PresenceMsg[]; busy: boolean; listening: boolean; speaking: boolean; input: string;
+  t: T; language: string; messages: PresenceMsg[]; busy: boolean; listening: boolean; transcribing?: boolean; speaking: boolean; input: string;
   composer: ReactNode; actions?: ReactNode; undoState?: 'idle' | 'busy' | 'done'; needsYou: boolean;
   onUndo?: () => void; onSpeak: () => void; onOpenTranscript: () => void; onOpenRewind: () => void; onOpenPromises: () => void; onAsk: (prompt: string) => void;
   notifications: ReactNode;
+  brief?: { body: string; offer: { type: string } | null } | null; briefBusy?: boolean; onBriefAnswer?: (answer: 'yes' | 'no') => void;
 }) {
   const [today, setToday] = useState<TodayData | null>(null);
   const [copied, setCopied] = useState(false);
@@ -77,8 +78,23 @@ export function Presence({
   };
 
   let caption: ReactNode;
-  if (listening) caption = <p className="pr-live" aria-live="polite">{input || t('prListening')}</p>;
+  if (listening) caption = <p className="pr-live" aria-live="polite">{input || (transcribing ? t('voTranscribing') : t('prListening'))}</p>;
   else if (busy) caption = <><p className="pr-said">«{lastUser?.content}»</p><p className="pr-thinking" aria-live="polite">{t('prThinking')}</p></>;
+  else if (brief) caption = (
+    <div className="pr-brief" data-testid="presence-brief">
+      <h1 className="pr-greeting">{greeting}</h1>
+      <p className="pr-brief-text" aria-live="polite">{brief.body}</p>
+      {brief.offer && onBriefAnswer && (
+        <div className="pr-brief-actions">
+          <button type="button" className="pr-undo" disabled={briefBusy} onClick={() => onBriefAnswer('yes')} data-testid="brief-yes">
+            {briefBusy ? <Loader2 size={14} className="pr-spin" /> : <Check size={14} />}{t('brYes')}
+          </button>
+          <button type="button" className="pr-undo ghost" disabled={briefBusy} onClick={() => onBriefAnswer('no')} data-testid="brief-no">{t('brNo')}</button>
+          <small>{t('brSayIt')}</small>
+        </div>
+      )}
+    </div>
+  );
   else if (answerIsCurrent && lastAi) caption = (
     <div className="pr-answer" data-testid="presence-answer">
       {lastUser && <p className="pr-said">«{lastUser.content}»</p>}
@@ -142,7 +158,7 @@ export function Presence({
             </aside>
           )}
           <div className="pr-orb" style={{ width: orbSize, height: orbSize }}>
-            <AetherOrb state={orbState} size={orbSize} quality="auto" interactive={false} compact={orbSize < 300} />
+            <AetherOrb state={orbState} size={orbSize} quality="auto" interactive={false} compact={orbSize < 300} followVoice />
           </div>
         </div>
         <div className="pr-caption">{caption}</div>

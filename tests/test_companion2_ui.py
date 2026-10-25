@@ -579,6 +579,10 @@ def test_a_spoken_question_gets_a_spoken_answer_and_a_typed_one_does_not(browser
     """)
     page.route("**/api/personal/chat", lambda r: r.fulfill(status=200, content_type="application/json", body=json.dumps(
         {"id": "a1", "role": "assistant", "content": "**Domani** hai `due` impegni.", "session_id": "s1", "metadata": {}, "steps": []})))
+    # Aether's own voice comes first; here it is unavailable, so the browser voices take over
+    voiced: list = []
+    page.route("**/api/voice/speak", lambda r: (voiced.append(r.request.post_data_json), r.fulfill(
+        status=409, content_type="application/json", body=json.dumps({"detail": {"code": "use_device", "message": ""}})))[1])
     page.goto(f"{_state['base_url']}/?surface=companion")
     expect(page.get_by_test_id("companion-input")).to_be_visible(timeout=15000)
     page.evaluate("window.dispatchEvent(new CustomEvent('aether-companion-summon', {detail: {phase: 'press'}}))")
@@ -590,8 +594,9 @@ def test_a_spoken_question_gets_a_spoken_answer_and_a_typed_one_does_not(browser
     page.wait_for_function("window.__said.length > 0", timeout=8000)
     said = page.evaluate("window.__said")
     assert said == [{"text": "Domani hai due impegni.", "lang": "it-IT"}]
+    assert [v["text"] for v in voiced] == ["Domani hai due impegni."] and voiced[0]["language"] == "it"
     page.get_by_test_id("companion-input").fill("e dopodomani?")
     page.get_by_test_id("companion-input").press("Enter")
     page.wait_for_timeout(1500)
-    assert len(page.evaluate("window.__said")) == 1, "a typed question is answered in writing only"
+    assert len(page.evaluate("window.__said")) == 1 and len(voiced) == 1, "a typed question is answered in writing only"
     page.close()

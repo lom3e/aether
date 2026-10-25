@@ -7421,7 +7421,135 @@ async def life_promises_scan(request: Request, payload: PromiseScanPayload):
         return {"status": "no_gmail", "items": []}
     from aether.providers.resolution import resolve_provider
 
-    return await asyncio.to_thread(promises.scan, ws, store, gmail=gmail, provider=resolve_provider(workspace=ws), language=payload.language or "it")
+    def run():
+        out = promises.scan(ws, store, gmail=gmail, provider=resolve_provider(workspace=ws), language=payload.language or "it")
+        promises.remember(store, out)  # each item gets its id (new or already known) so it can be tracked from the panel
+        return out
+
+    return await asyncio.to_thread(run)
+
+
+@router.get("/life/promises")
+async def life_promises_list(request: Request, status: str | None = None):
+    _, store = _life(request)
+    return {"items": await asyncio.to_thread(store.list_promises, status=status), "watch": store.settings().get("promise_watch", False)}
+
+
+class PresenceOfferPayload(BaseModel):
+    offer: dict[str, Any]
+    answer: str = "yes"         # yes | no
+    language: str | None = None
+
+
+@router.get("/presence/brief")
+async def presence_brief_route(request: Request, language: str = "it", first: bool = False):
+    """What the orb says when you open Aether: today's facts and at most one question (built locally, no model call).
+    `first`: the very first opening, where it introduces itself instead."""
+    ws, store = _life(request)
+    from aether.life import presence_brief
+
+    return await asyncio.to_thread(presence_brief.build, ws, store, language=language, first=first)
+
+
+@router.post("/presence/offer")
+async def presence_offer_route(request: Request, payload: PresenceOfferPayload):
+    """Your yes or no to the orb's question. Yes runs it (an `ask` offer comes back as a prompt the app sends normally)."""
+    ws, store = _life(request)
+    from aether.life import presence_brief
+
+    try:
+        if payload.answer == "no":
+            await asyncio.to_thread(presence_brief.decline, store, payload.offer)
+            return {"text": ""}
+        return await asyncio.to_thread(presence_brief.accept, ws, store, payload.offer, language=payload.language or "it")
+    except ValueError as exc:
+        raise _life_value_error(exc) from None
+
+
+class VoiceSettingsPayload(BaseModel):
+    stt: str | None = None
+    tts: str | None = None
+    system_voice: str | None = None
+    openai_voice: str | None = None
+
+
+class VoiceSpeakPayload(BaseModel):
+    text: str
+    language: str | None = None
+    voice: str | None = None    # Settings preview: try a voice before choosing it
+    engine: str | None = None
+
+
+def _voice_ws(request: Request):
+    ws = getattr(request.app.state, "workspace", None)
+    if not ws:
+        raise HTTPException(status_code=503, detail="Workspace not initialized.")
+    return ws
+
+
+def _voice_error(exc: Exception) -> HTTPException:
+    from aether.personal.voice_engine import VoiceError
+
+    if isinstance(exc, VoiceError):
+        code = {"use_device": 409, "empty": 422, "too_long": 413, "no_key": 409}.get(exc.code, 502)
+        return HTTPException(status_code=code, detail={"code": exc.code, "message": exc.detail[:300]})
+    return HTTPException(status_code=422, detail={"code": "invalid", "message": str(exc)})
+
+
+@router.get("/voice/status")
+async def voice_engine_status(request: Request, language: str = "it"):
+    """How Aether hears (Whisper with your key, or the Mac's dictation) and speaks (which voice, how good)."""
+    from aether.personal import voice_engine
+
+    return await asyncio.to_thread(voice_engine.status, _voice_ws(request), language)
+
+
+@router.post("/voice/settings")
+async def voice_engine_settings(request: Request, payload: VoiceSettingsPayload):
+    from aether.personal import voice_engine
+
+    try:
+        voice_engine.update_settings(_voice_ws(request), **payload.model_dump())
+    except ValueError as exc:
+        raise _voice_error(exc) from None
+    return await asyncio.to_thread(voice_engine.status, _voice_ws(request))
+
+
+@router.post("/voice/transcribe")
+async def voice_engine_transcribe(request: Request, language: str = "it"):
+    """The raw recording in the body (audio/mp4 from the app). 409 use_device = no key: the app uses the Mac's dictation."""
+    from aether.personal import voice_engine
+
+    audio = await request.body()
+    try:
+        return await asyncio.to_thread(voice_engine.transcribe, _voice_ws(request), audio, request.headers.get("content-type", "audio/mp4"), language)
+    except Exception as exc:  # noqa: BLE001
+        raise _voice_error(exc) from None
+
+
+@router.post("/voice/speak")
+async def voice_engine_speak(request: Request, payload: VoiceSpeakPayload):
+    from fastapi.responses import Response
+    from aether.personal import voice_engine
+
+    try:
+        audio, mime = await asyncio.to_thread(voice_engine.synthesize, _voice_ws(request), payload.text, payload.language or "it", payload.voice, payload.engine)
+    except Exception as exc:  # noqa: BLE001
+        raise _voice_error(exc) from None
+    return Response(content=audio, media_type=mime, headers={"Cache-Control": "no-store"})
+
+
+@router.post("/voice/open-system-voices")
+async def voice_open_system_voices():
+    """Opens System Settings where the free Premium / Enhanced voices are downloaded (a fixed system URL, nothing else)."""
+    import shutil
+    import subprocess
+
+    opener = shutil.which("open")
+    if not opener:
+        raise HTTPException(status_code=409, detail={"code": "not_macos", "message": "Only on macOS."})
+    await asyncio.to_thread(subprocess.run, [opener, "x-apple.systempreferences:com.apple.preference.universalaccess?SpeakableItems"], capture_output=True, timeout=10)
+    return {"opened": True}
 
 
 @router.get("/screen-memory")

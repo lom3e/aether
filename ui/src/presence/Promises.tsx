@@ -2,17 +2,26 @@ import { useContext, useEffect, useState } from 'react';
 import { HandHeart, Loader2, X } from 'lucide-react';
 import { apiUrl } from '../api';
 import { ToastContext } from '../toast';
-import { fmtDue, lifeApi } from '../lifeApi';
+import { fmtDue } from '../lifeApi';
 import type { TranslationKey } from '../i18n';
 
 type T = (key: TranslationKey, params?: Record<string, string | number>) => string;
-interface Promise_ { kind: 'i_promised' | 'they_asked'; title: string; who: string; due_at: number | null; message_id: string; subject: string; contact: string | null }
+interface Promise_ { id?: string; status?: string; kind: 'i_promised' | 'they_asked' | 'they_promised' | 'fulfilled'; title: string; who: string; due_at: number | null; message_id: string; subject: string; contact?: string | null; job_id?: string }
 
-/** Promise keeper: what you promised and what was asked of you in recent mail. Nothing is saved until you pick it. */
+/** Promise keeper: what you promised, what was asked of you, what others promised you, and what a mail you sent already
+ * closed. Nothing is saved or marked done until you pick it. The daily check can be turned on from here. */
 export function Promises({ t, language, onClose }: { t: T; language: string; onClose: () => void }) {
   const toast = useContext(ToastContext);
-  const [state, setState] = useState<{ status: string; items: Promise_[]; scanned?: number } | null>(null);
-  const [done, setDone] = useState<Record<string, 'saved' | 'skipped'>>({});
+  const [state, setState] = useState<{ status: string; items: Promise_[]; fulfilled?: Promise_[]; scanned?: number } | null>(null);
+  const [done, setDone] = useState<Record<string, 'saved' | 'skipped' | 'closed'>>({});
+  const [watch, setWatch] = useState<boolean | null>(null);
+
+  useEffect(() => {
+    fetch(apiUrl('/api/life/promises?status=new')).then(r => (r.ok ? r.json() : null)).then(d => { if (d) setWatch(!!d.watch); }).catch(() => undefined);
+  }, []);
+
+  const offer = (body: Record<string, unknown>) =>
+    fetch(apiUrl('/api/presence/offer'), { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ ...body, language }) });
 
   useEffect(() => {
     let alive = true;
@@ -26,18 +35,28 @@ export function Promises({ t, language, onClose }: { t: T; language: string; onC
   }, [language, onClose]);
 
   const save = async (p: Promise_) => {
-    try {
-      let contactId: string | null = null;
-      if (p.who) {
-        const all = await lifeApi.contacts();
-        contactId = all.find(c => c.name.toLowerCase() === (p.contact || p.who).toLowerCase())?.id
-          || (await lifeApi.addContact({ name: p.contact || p.who, kind: 'client' })).id;
-      }
-      await lifeApi.addJob({ title: p.title, contact_id: contactId, due_at: p.due_at, source: 'promise_keeper' });
-      setDone(prev => ({ ...prev, [p.message_id + p.title]: 'saved' }));
-      toast(t('pkSaved'), 'success');
-    } catch { toast(t('lifeSaveFailed'), 'error'); }
+    const k = p.message_id + p.title;
+    const res = p.id ? await offer({ offer: { type: p.kind === 'fulfilled' ? 'job_done' : 'track', promise_id: p.id }, answer: 'yes' }).catch(() => null) : null;
+    if (!res?.ok) { toast(t('lifeSaveFailed'), 'error'); return; }
+    setDone(prev => ({ ...prev, [k]: p.kind === 'fulfilled' ? 'closed' : 'saved' }));
+    toast(p.kind === 'fulfilled' ? t('pkClosed') : t('pkSaved'), 'success');
   };
+  const skip = (p: Promise_) => {
+    setDone(prev => ({ ...prev, [p.message_id + p.title]: 'skipped' }));
+    if (p.id) void offer({ offer: { type: p.kind === 'fulfilled' ? 'job_done' : 'track', promise_id: p.id }, answer: 'no' }).catch(() => undefined);
+  };
+  const toggleWatch = async () => {
+    const res = await offer({ offer: { type: 'watch_on' }, answer: 'yes' }).catch(() => null);
+    if (res?.ok) setWatch(true);
+  };
+  const label = (p: Promise_) => {
+    const who = p.who || '—';
+    if (p.kind === 'i_promised') return t('pkYouPromised', { who });
+    if (p.kind === 'they_promised') return t('pkTheyPromised', { who });
+    if (p.kind === 'fulfilled') return t('pkLooksDone');
+    return t('pkTheyAsked', { who });
+  };
+  const all = [...(state?.fulfilled || []), ...(state?.items || [])];
 
   return (
     <div className="rw-backdrop" onMouseDown={e => { if (e.target === e.currentTarget) onClose(); }}>
@@ -54,23 +73,25 @@ export function Promises({ t, language, onClose }: { t: T; language: string; onC
           {state?.status === 'no_gmail' && <p className="rw-empty">{t('pkNoGmail')}</p>}
           {state?.status === 'unavailable' && <p className="rw-empty">{t('pkNoModel')}</p>}
           {state?.status === 'failed' && <p className="rw-empty">{t('pkFailed')}</p>}
-          {state?.status === 'ok' && state.items.length === 0 && <p className="rw-empty">{t('pkNone', { count: state.scanned || 0 })}</p>}
-          {state?.status === 'ok' && state.items.length > 0 && (
+          {state?.status === 'ok' && all.length === 0 && <p className="rw-empty">{t('pkNone', { count: state.scanned || 0 })}</p>}
+          {state?.status === 'ok' && all.length > 0 && (
             <ol className="pk-list">
-              {state.items.map(p => {
+              {all.map(p => {
                 const k = p.message_id + p.title;
                 return (
                   <li key={k} className={done[k] ? 'handled' : ''} data-testid="promise-item">
                     <span className="rw-main">
-                      <small>{p.kind === 'i_promised' ? t('pkYouPromised', { who: p.who || '—' }) : t('pkTheyAsked', { who: p.who || '—' })}{p.due_at ? ` · ${fmtDue(p.due_at, language)}` : ''}</small>
+                      <small>{label(p)}{p.due_at ? ` · ${fmtDue(p.due_at, language)}` : ''}</small>
                       <b>{p.title}</b>
                       <em className="pk-src">{p.subject}</em>
                     </span>
                     <span className="rw-actions">
-                      {done[k] === 'saved' ? <em className="pk-ok">{t('pkSavedShort')}</em> : done[k] === 'skipped' ? null : (
+                      {done[k] === 'saved' || p.status === 'tracked' ? <em className="pk-ok">{t('pkSavedShort')}</em>
+                        : done[k] === 'closed' || p.status === 'done' ? <em className="pk-ok">{t('pkClosedShort')}</em>
+                        : done[k] === 'skipped' || p.status === 'ignored' ? null : (
                         <>
-                          <button type="button" className="rw-btn" onClick={() => save(p)} data-testid="promise-save">{t('pkSave')}</button>
-                          <button type="button" className="rw-btn ghost" onClick={() => setDone(prev => ({ ...prev, [k]: 'skipped' }))}>{t('pkSkip')}</button>
+                          <button type="button" className="rw-btn" onClick={() => save(p)} data-testid="promise-save">{p.kind === 'fulfilled' ? t('pkMarkDone') : t('pkSave')}</button>
+                          <button type="button" className="rw-btn ghost" onClick={() => skip(p)}>{t('pkSkip')}</button>
                         </>
                       )}
                     </span>
@@ -79,6 +100,12 @@ export function Promises({ t, language, onClose }: { t: T; language: string; onC
               })}
             </ol>
           )}
+          {watch === false && (
+            <p className="pk-watch" data-testid="promise-watch">
+              {t('pkWatchOffer')} <button type="button" className="rw-btn" onClick={() => void toggleWatch()} data-testid="promise-watch-on">{t('pkWatchOn')}</button>
+            </p>
+          )}
+          {watch === true && <p className="pk-watch muted">{t('pkWatchActive')}</p>}
         </div>
       </section>
     </div>
