@@ -155,3 +155,54 @@ def test_the_sidebar_shows_few_things_and_advanced_tools_only_on_request(browser
     page.get_by_test_id("advanced-tools-toggle").uncheck()
     expect(page.get_by_test_id("nav-advanced")).to_have_count(0)
     page.close()
+
+
+def _voice_status(natural_state: str, done: int = 0, engine: str = "system") -> dict:
+    return {"settings": {"stt": "auto", "tts": "auto", "system_voice": "", "openai_voice": "coral", "neural_voice": ""},
+            "stt": {"engine": "device", "available": ["device"], "model": ""},
+            "tts": {"engine": engine, "available": ["system"] + (["neural"] if natural_state == "ready" else []),
+                    "voice": "af_heart" if engine == "neural" else "Alice", "quality": "natural" if engine == "neural" else "basic",
+                    "voices": [{"name": "Alice", "quality": "basic"}], "openai_voices": [], "needs_better_voice": engine == "system",
+                    "neural": {"state": natural_state, "voices": [{"id": "af_heart", "name": "Heart"}, {"id": "am_michael", "name": "Michael"}],
+                               "download": {"state": natural_state, "done": done, "total": 1000, "error": ""}, "size_mb": 121}}}
+
+
+def test_the_natural_voice_is_downloaded_once_with_progress_then_offered_as_the_voice(browser_context):
+    """Voice status and download routes mocked: they exercise the Settings flow, the model itself is tested in test_neural_voice."""
+    page = browser_context.new_page()
+    phase = {"state": "missing", "polls": 0}
+    calls: list[str] = []
+
+    def status(route):
+        if phase["state"] == "downloading":
+            phase["polls"] += 1
+            if phase["polls"] > 2:
+                phase["state"] = "ready"
+        st = phase["state"]
+        route.fulfill(status=200, content_type="application/json",
+                      body=json.dumps(_voice_status(st, done=400 if st == "downloading" else 0, engine="neural" if st == "ready" else "system")))
+
+    def download(route):
+        calls.append("download")
+        phase["state"] = "downloading"
+        route.fulfill(status=200, content_type="application/json", body=json.dumps({"state": "downloading", "done": 0, "total": 1000, "error": ""}))
+
+    page.route("**/api/voice/status*", status)
+    page.route("**/api/voice/natural/download", download)
+    page.goto(_state["base_url"])
+    page.get_by_test_id("nav-settings").first.click()
+    page.get_by_role("tab", name="General").click()
+    card = page.get_by_test_id("voice-natural")
+    expect(card).to_be_visible(timeout=15000)
+    expect(card).to_contain_text("121 MB")
+    expect(page.get_by_test_id("voice-better")).to_have_count(0)  # one suggestion at a time: the natural voice
+    page.get_by_test_id("voice-natural-download").click()
+    expect(page.get_by_test_id("voice-natural-progress")).to_be_visible()
+    expect(card).to_contain_text("40%")
+    expect(card).to_have_count(0, timeout=10000)  # done: the card goes away
+    assert calls == ["download"]
+    options = page.get_by_test_id("voice-tts").locator("option").all_inner_texts()
+    assert options[:2] == ["Heart · natural", "Michael · natural"]
+    expect(page.get_by_test_id("voice-tts")).to_have_value("neural:af_heart")
+    expect(page.get_by_test_id("voice-natural-remove")).to_be_visible()
+    page.close()

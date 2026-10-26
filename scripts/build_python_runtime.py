@@ -192,6 +192,20 @@ def build_runtime() -> Path:
     if ui_dist.exists():
         cmd.extend(["--add-data", f"{ui_dist}{data_sep}ui/dist"])
 
+    # Aether's natural voice: the espeak-ng program (built by scripts/build_espeak.py, a separate GPL program run as a
+    # subprocess) and onnxruntime for the model. Without them the app still works and uses the Mac's voices.
+    espeak_dir = REPO_ROOT / "build" / "espeak-ng"
+    if (espeak_dir / "bin" / "espeak-ng").exists():
+        cmd.extend(["--add-data", f"{espeak_dir}{data_sep}espeak-ng"])
+    else:
+        print("NOTE: build/espeak-ng missing (run scripts/build_espeak.py): the natural voice will be unavailable in this build.")
+    try:
+        import onnxruntime  # noqa: F401
+        import numpy  # noqa: F401
+        cmd.extend(["--collect-binaries", "onnxruntime", "--hidden-import", "onnxruntime", "--hidden-import", "numpy"])
+    except ImportError:
+        print("NOTE: onnxruntime/numpy not installed (pip install -e '.[voice]'): the natural voice will be unavailable in this build.")
+
     # Add hidden imports
     for imp in HIDDEN_IMPORTS:
         cmd.extend(["--hidden-import", imp])

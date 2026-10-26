@@ -1,7 +1,8 @@
 // Aether's ears and voice in the app.
 // Hearing: the microphone is recorded while you talk and transcribed by Whisper with your provider key (much more accurate
 // than the Mac's dictation, above all in Italian); without a key it falls back to the Mac's dictation. Speaking: audio made by
-// the sidecar (the best voice on this Mac, or OpenAI's if chosen), with the Web Speech voices as the last fallback.
+// the sidecar (Aether's natural voice once downloaded, else the best voice on this Mac, or OpenAI's if chosen), with the Web
+// Speech voices as the last fallback.
 // Both feed a level bus the orb listens to, so it moves with your voice and with its own.
 import { apiUrl } from '../api';
 
@@ -48,10 +49,16 @@ function meter(source: AudioNode, ac: AudioContext, onFrame?: (level: number) =>
 }
 
 // -- status ---------------------------------------------------------------------------------------------------------------
+export interface NaturalVoice {
+  state: 'ready' | 'missing' | 'downloading' | 'unavailable';
+  voices: { id: string; name: string }[];
+  download: { state: string; done: number; total: number; error: string };
+  size_mb: number;
+}
 export interface VoiceStatus {
-  settings: { stt: string; tts: string; system_voice: string; openai_voice: string };
+  settings: { stt: string; tts: string; system_voice: string; openai_voice: string; neural_voice: string };
   stt: { engine: 'device' | 'groq' | 'openai'; available: string[]; model: string };
-  tts: { engine: 'system' | 'openai' | 'device'; available: string[]; voice: string; quality: string; voices: { name: string; quality: string }[]; openai_voices: string[]; needs_better_voice: boolean };
+  tts: { engine: 'neural' | 'system' | 'openai' | 'device'; available: string[]; voice: string; quality: string; voices: { name: string; quality: string }[]; openai_voices: string[]; needs_better_voice: boolean; neural?: NaturalVoice };
 }
 let statusCache: { lang: string; p: Promise<VoiceStatus | null> } | null = null;
 export function voiceStatus(lang: string, refresh = false): Promise<VoiceStatus | null> {

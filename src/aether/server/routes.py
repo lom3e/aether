@@ -7471,6 +7471,7 @@ class VoiceSettingsPayload(BaseModel):
     tts: str | None = None
     system_voice: str | None = None
     openai_voice: str | None = None
+    neural_voice: str | None = None
 
 
 class VoiceSpeakPayload(BaseModel):
@@ -7537,6 +7538,33 @@ async def voice_engine_speak(request: Request, payload: VoiceSpeakPayload):
     except Exception as exc:  # noqa: BLE001
         raise _voice_error(exc) from None
     return Response(content=audio, media_type=mime, headers={"Cache-Control": "no-store"})
+
+
+@router.post("/voice/natural/download")
+async def voice_natural_download():
+    """Downloads Aether's natural voice (Kokoro, ~120 MB, once). Progress comes back in /voice/status (tts.neural.download)."""
+    from aether.personal import neural_voice
+
+    if neural_voice.state() == "unavailable":
+        raise HTTPException(status_code=409, detail={"code": "unavailable", "message": "The natural voice cannot run on this build."})
+    return neural_voice.start_download()
+
+
+@router.post("/voice/natural/cancel")
+async def voice_natural_cancel():
+    from aether.personal import neural_voice
+
+    neural_voice.cancel_download()
+    return neural_voice.download_status()
+
+
+@router.delete("/voice/natural")
+async def voice_natural_remove():
+    """Frees the disk space; Aether goes back to the Mac's voice."""
+    from aether.personal import neural_voice
+
+    await asyncio.to_thread(neural_voice.remove)
+    return neural_voice.download_status()
 
 
 @router.post("/voice/open-system-voices")

@@ -2,8 +2,9 @@
 
 Hearing: Whisper through the provider key the user already stored (Groq ``whisper-large-v3-turbo``, or OpenAI), which is far
 more accurate than the browser dictation, especially in Italian; without a key the app falls back to the dictation of the
-Mac ("device"). Speaking: the best voice installed on this Mac (Premium / Enhanced voices are neural and local, nothing leaves
-the computer), or OpenAI's natural voice when the user has an OpenAI key and picks it. Every cloud call is written to the
+Mac ("device"). Speaking: Aether's natural voice (Kokoro, local, downloaded once: see `neural_voice`), else the best voice
+installed on this Mac (Premium / Enhanced voices are neural and local too), or OpenAI's voice when the user has an OpenAI key and
+picks it. Every cloud call is written to the
 privacy ledger like any other request that leaves the computer (kind and size, never the audio or the text).
 """
 from __future__ import annotations
@@ -22,15 +23,17 @@ import uuid
 from pathlib import Path
 from typing import Any
 
+from aether.personal import neural_voice
+
 logger = logging.getLogger(__name__)
 
 STT_ENGINES = ("auto", "device", "groq", "openai")
-TTS_ENGINES = ("auto", "system", "openai")
+TTS_ENGINES = ("auto", "neural", "system", "openai")
 STT_MODELS = {"groq": "whisper-large-v3-turbo", "openai": "gpt-4o-mini-transcribe"}
 STT_URLS = {"groq": "https://api.groq.com/openai/v1/audio/transcriptions", "openai": "https://api.openai.com/v1/audio/transcriptions"}
 OPENAI_TTS_MODEL = "gpt-4o-mini-tts"
 OPENAI_VOICES = ("coral", "nova", "sage", "alloy", "ash", "ballad", "echo", "shimmer", "verse")
-DEFAULTS = {"stt": "auto", "tts": "auto", "system_voice": "", "openai_voice": "coral"}
+DEFAULTS = {"stt": "auto", "tts": "auto", "system_voice": "", "openai_voice": "coral", "neural_voice": ""}
 MAX_AUDIO_BYTES = 12 * 1024 * 1024
 MAX_SPEAK_CHARS = 1500
 
@@ -69,6 +72,8 @@ def update_settings(ws: Any, **values: Any) -> dict[str, Any]:
         raise ValueError(f"tts must be one of {TTS_ENGINES}")
     if values.get("openai_voice") is not None and values["openai_voice"] not in OPENAI_VOICES:
         raise ValueError("unknown OpenAI voice")
+    if values.get("neural_voice") is not None and values["neural_voice"] not in neural_voice.ALL_VOICE_IDS:
+        raise ValueError("unknown voice")
     cur.update({k: v for k, v in values.items() if k in DEFAULTS and v is not None})
     p = _settings_path(ws)
     p.parent.mkdir(parents=True, exist_ok=True)
@@ -163,12 +168,17 @@ def _system_voice(ws: Any, language: str) -> dict[str, Any] | None:
 
 def tts_engine(ws: Any, language: str = "it") -> str:
     pick = settings(ws)["tts"]
+    neural_ready = neural_voice.state() == "ready"
     if pick == "openai" and _key(ws, "openai"):
         return "openai"
+    if pick == "neural" and neural_ready:
+        return "neural"
     if pick == "system":
         return "system" if shutil.which("say") else "device"
-    # auto: the Mac's own neural voice when one is installed (local, free); a natural cloud voice only when the user has an
-    # OpenAI key AND no good local voice; otherwise the best local voice there is
+    # auto: Aether's own voice once downloaded; else the Mac's neural voice when one is installed (local, free); a cloud voice
+    # only when the user has an OpenAI key AND no good local voice; otherwise the best local voice there is
+    if neural_ready:
+        return "neural"
     say = shutil.which("say")
     if say and ((_system_voice(ws, language) or {}).get("quality") in ("premium", "enhanced")):
         return "system"
@@ -182,13 +192,17 @@ def status(ws: Any, language: str = "it") -> dict[str, Any]:
     cfg = settings(ws)
     best = _system_voice(ws, language)
     tts = tts_engine(ws, language)
+    neural = neural_voice.status(language)
+    voice = {"neural": neural_voice.voice_for(language, cfg["neural_voice"]), "openai": cfg["openai_voice"]}.get(tts, (best or {}).get("name", ""))
     return {
         "settings": cfg,
         "stt": {"engine": stt_engine(ws), "available": ["device"] + [p for p in ("groq", "openai") if _key(ws, p)],
                 "model": STT_MODELS.get(stt_engine(ws), "")},
-        "tts": {"engine": tts, "available": (["system"] if voices else []) + (["openai"] if _key(ws, "openai") else []),
-                "voice": (best or {}).get("name", "") if tts == "system" else cfg["openai_voice"],
-                "quality": "cloud" if tts == "openai" else (best or {}).get("quality", "none"),
+        "tts": {"engine": tts, "available": (["neural"] if neural["state"] == "ready" else []) + (["system"] if voices else [])
+                + (["openai"] if _key(ws, "openai") else []),
+                "voice": voice,
+                "quality": {"openai": "cloud", "neural": "natural"}.get(tts, (best or {}).get("quality", "none")),
+                "neural": neural,
                 "voices": [{"name": v["name"], "quality": v["quality"]} for v in voices[:12]],
                 "openai_voices": list(OPENAI_VOICES),
                 "needs_better_voice": tts == "system" and (best or {}).get("quality", "basic") == "basic"},
@@ -271,6 +285,11 @@ def synthesize(ws: Any, text: str, language: str = "it", voice: str | None = Non
     if not clean:
         raise VoiceError("empty")
     engine = engine or tts_engine(ws, language)
+    if engine == "neural":
+        try:
+            return neural_voice.synthesize(clean, language, voice or settings(ws)["neural_voice"]), "audio/wav"
+        except neural_voice.NeuralVoiceError as e:
+            raise VoiceError("neural_failed" if e.code not in ("not_installed", "unavailable") else "use_device", e.code) from None
     if engine == "openai":
         if not _key(ws, "openai"):
             raise VoiceError("no_key")

@@ -43,6 +43,7 @@ def ws(tmp_path, monkeypatch):
         monkeypatch.delenv(k, raising=False)
     ledger = Ledger()
     monkeypatch.setattr("aether.privacy.audit.ledger_for", lambda w: ledger)
+    monkeypatch.setattr(ve.neural_voice, "state", lambda: "missing")  # the natural voice is covered in test_neural_voice
     w = SimpleNamespace(id="w", conversations_db_path=str(tmp_path / "c.db"), secret_store=Secrets({}), ledger=ledger)
     return w
 
