@@ -59,6 +59,10 @@ _SECRET_RE = re.compile(r"(gsk_[A-Za-z0-9_\-]{8,}|Bearer\s+[A-Za-z0-9_\-\.]{8,})
 _THINK_RE = re.compile(r"<think>.*?</think>\s*", re.DOTALL)
 
 
+# same family, separate rate-limit buckets: used for one immediate retry when a model hits its per-minute limit
+RATE_LIMIT_SIBLINGS = {"openai/gpt-oss-120b": "openai/gpt-oss-20b", "openai/gpt-oss-20b": "openai/gpt-oss-120b"}
+
+
 @dataclass(frozen=True)
 class ModelListing:
     models: list[str]
@@ -173,12 +177,21 @@ class GroqProvider(AIProvider):
     MAX_CONNECTION_RETRIES = 2
     DEFAULT_BACKOFF = 2.0
 
-    def _open(self, req: urllib.request.Request, timeout: float):
+    def _open(self, req: urllib.request.Request, timeout: float, sibling: Any = None):
         attempt = 0
         while True:
             try:
                 return self._open_once(req, timeout)
             except RateLimitError as exc:
+                if sibling is not None and attempt == 0:
+                    # Groq's per-minute token limits are per model: the sibling model usually still has room, which beats
+                    # waiting 10-20 seconds in silence (the user is often talking to Aether)
+                    try:
+                        resp = sibling()
+                        logger.info("Groq rate limit: answered with the sibling model.")
+                        return resp
+                    except RateLimitError:
+                        pass
                 wait = exc.retry_after if exc.retry_after is not None else self.DEFAULT_BACKOFF * (2 ** attempt)
                 if attempt >= self.MAX_RATE_LIMIT_RETRIES or wait > self.MAX_RETRY_WAIT:
                     raise
@@ -234,11 +247,14 @@ class GroqProvider(AIProvider):
         return ProviderError(f"Groq API error (HTTP {code}): {detail}", provider="groq")
 
     def _post_json(self, path: str, body: dict[str, Any]) -> dict[str, Any]:
-        req = urllib.request.Request(
-            f"{self.config.base_url.rstrip('/')}{path}",
-            data=json.dumps(body).encode("utf-8"), headers=self._headers(), method="POST",
-        )
-        with self._open(req, float(self.config.timeout or self.DEFAULT_TIMEOUT)) as resp:
+        def request(b: dict[str, Any]) -> urllib.request.Request:
+            return urllib.request.Request(f"{self.config.base_url.rstrip('/')}{path}", data=json.dumps(b).encode("utf-8"),
+                                          headers=self._headers(), method="POST")
+
+        timeout = float(self.config.timeout or self.DEFAULT_TIMEOUT)
+        alt = RATE_LIMIT_SIBLINGS.get(str(body.get("model") or ""))
+        sibling = (lambda: self._open_once(request({**body, "model": alt}), timeout)) if alt else None
+        with self._open(request(body), timeout, sibling=sibling) as resp:
             return json.loads(resp.read().decode("utf-8"))
 
     # -- request building -----------------------------------------------------------------------------------
@@ -298,6 +314,10 @@ class GroqProvider(AIProvider):
             body["temperature"] = self.config.temperature
         if self.config.max_tokens is not None:
             body["max_tokens"] = self.config.max_tokens
+        if model.startswith("openai/gpt-oss"):
+            # an assistant's turns need little reasoning: "low" answers in about half the time and spends far fewer of the
+            # per-minute tokens (the free tier allows 8000 per model per minute)
+            body["reasoning_effort"] = "low"
         return body
 
     # -- generation -------------------------------------------------------------------------------------------

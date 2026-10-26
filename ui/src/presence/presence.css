@@ -84,9 +84,12 @@
 .pr-hint kbd { font: inherit; padding: 1px 6px; border-radius: 5px; box-shadow: inset 0 0 0 1px hsl(var(--pr-line)); }
 
 @media (max-width: 1180px) {
-  .pr-day { position: static; transform: none; width: 100%; max-width: 680px; flex-direction: row; flex-wrap: wrap; justify-content: center; order: 2; margin-top: 8px; }
+  /* narrow: orb, then what it says, then the day (what it says must never slide under the composer) */
+  .pr-orbit { display: contents; }
+  .pr-orb { order: 1; margin-top: 2vh; }
+  .pr-caption { order: 2; }
+  .pr-day { order: 3; position: static; transform: none; width: 100%; max-width: 680px; flex-direction: row; flex-wrap: wrap; justify-content: center; margin-top: 14px; }
   .pr-card { flex: 1 1 200px; animation: none; }
-  .pr-orbit { flex-direction: column; }
 }
 @media (max-width: 640px) {
   .pr-greeting { font-size: 22px; }

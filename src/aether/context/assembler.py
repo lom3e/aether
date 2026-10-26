@@ -24,6 +24,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 import hashlib
 import logging
+from pathlib import Path
 import re
 from typing import Any
 
@@ -43,6 +44,10 @@ PURPOSES: dict[str, tuple[str, ...]] = {
 }
 KIND_TAG = {"memory": "M", "graph": "M", "knowledge": "K", "lesson": "L", "mission": "S", "deliverable": "D", "history": "H"}
 KIND_SHARE = {"memory": 0.35, "knowledge": 0.35, "lesson": 0.15, "mission": 0.2, "deliverable": 0.1, "history": 0.2}
+
+
+_BUILTIN_DOCS = {p.name for p in (Path(__file__).resolve().parent.parent / "presets" / "builtin" / "knowledge" / "aether-core-knowledge").glob("*.md")}
+_ABOUT_AETHER = re.compile(r"\b(aether|agent\w*|workforce|team|skill\w*|runtime|preset\w*|knowledge|architettur\w*|architecture)\b", re.IGNORECASE)
 
 
 @dataclass
@@ -235,6 +240,9 @@ class ContextAssembler:
         if store is None:
             return []
         chunks = store.search(query, limit=6, project_id=self.project_id)
+        if not _ABOUT_AETHER.search(query or ""):
+            # the built-in architecture notes match almost any query; they only help when the user asks about Aether itself
+            chunks = [ch for ch in chunks if str(getattr(ch, "source", "")) not in _BUILTIN_DOCS]
         items = []
         for i, ch in enumerate(chunks):
             scope = getattr(ch, "scope", "workspace")

@@ -59,7 +59,8 @@ class LifeStore:
 
     # -- settings (all opt-in, off by default) ---------------------------------------------------------------
     DEFAULT_SETTINGS = {"brief_enabled": False, "brief_time": "08:30", "last_brief_date": "",
-                        "promise_watch": False, "last_promise_scan": 0.0, "promise_watch_offered": False}
+                        "promise_watch": False, "last_promise_scan": 0.0, "promise_watch_offered": False,
+                        "home_city": ""}
 
     def settings(self) -> dict[str, Any]:
         import json

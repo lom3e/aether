@@ -4,7 +4,7 @@ import { AetherOrb } from '../orb/AetherOrb';
 import type { OrbState } from '../orb/OrbEngine';
 import { MarkdownRenderer } from '../MarkdownRenderer';
 import { FirstRunModel } from '../FirstRunModel';
-import { fmtTime, lifeApi, type TodayData } from '../lifeApi';
+import { fmtTime, fmtWhen, lifeApi, type TodayData } from '../lifeApi';
 import type { TranslationKey } from '../i18n';
 import './presence.css';
 
@@ -30,12 +30,14 @@ export function Presence({
   const [today, setToday] = useState<TodayData | null>(null);
   const [copied, setCopied] = useState(false);
   const [justDone, setJustDone] = useState(false);
-  const [orbSize, setOrbSize] = useState(() => (window.innerWidth < 640 ? 240 : 340));
+  // the orb leaves room for what it says: smaller on narrow or short windows
+  const sizeFor = () => Math.max(170, Math.min(window.innerWidth < 640 ? 240 : 340, Math.round(window.innerHeight * 0.36)));
+  const [orbSize, setOrbSize] = useState(sizeFor);
 
   // the stage is dark: the sidebar follows it while the presence is on screen
   useEffect(() => {
     document.documentElement.dataset.stage = 'presence';
-    const resize = () => setOrbSize(window.innerWidth < 640 ? 240 : 340);
+    const resize = () => setOrbSize(sizeFor());
     window.addEventListener('resize', resize);
     return () => { delete document.documentElement.dataset.stage; window.removeEventListener('resize', resize); };
   }, []);
@@ -71,6 +73,9 @@ export function Presence({
   const overdue = [...(today?.jobs?.overdue || []), ...(today?.reminders?.overdue || [])];
   const dueToday = [...(today?.jobs?.today || []), ...(today?.reminders?.today || [])];
   const waiting = today?.pending_approvals || 0;
+  // nothing for today: the next thing in the coming days, so the home always says what comes next
+  const next = overdue.length || dueToday.length ? null : [...(today?.jobs?.upcoming || []), ...(today?.reminders?.upcoming || [])]
+    .filter(x => x.due_at).sort((a, b) => (a.due_at || 0) - (b.due_at || 0))[0];
 
   const copy = async () => {
     if (!lastAi) return;
@@ -145,6 +150,11 @@ export function Presence({
               {overdue.length === 0 && dueToday.length > 0 && (
                 <button type="button" className="pr-card" onClick={() => onAsk(t('prAskOverdue'))}>
                   <AlarmClock size={15} /><span><small>{t('prDueToday', { count: dueToday.length })}</small>{'title' in dueToday[0] ? dueToday[0].title : dueToday[0].text}</span>
+                </button>
+              )}
+              {next && (
+                <button type="button" className="pr-card" onClick={() => onAsk(t('prAskWeek'))} data-testid="presence-next">
+                  <AlarmClock size={15} /><span><small>{t('prNext')} · {fmtWhen(next.due_at || 0, language)}</small>{'title' in next ? next.title : next.text}</span>
                 </button>
               )}
               <button type="button" className="pr-card ghost" onClick={onOpenPromises} data-testid="presence-open-promises">

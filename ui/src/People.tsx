@@ -102,7 +102,7 @@ export function People() {
           {contacts.map(c => (
             <button key={c.id} className="row" aria-current={selected === c.id} onClick={() => setSelected(c.id)} data-testid={`person-${c.id}`}>
               {c.name}
-              <small>{[c.kind === 'client' ? t('peopleClient') : c.kind === 'company' ? t('peopleCompany') : t('peoplePerson'), openCount(c.id) ? t('peopleOpenJobs', { count: openCount(c.id) }) : ''].filter(Boolean).join(' · ')}</small>
+              <small>{[c.kind === 'client' ? t('peopleClient') : c.kind === 'company' ? t('peopleCompany') : t('peoplePerson'), openCount(c.id) ? (openCount(c.id) === 1 ? t('peopleOpenJob') : t('peopleOpenJobs', { count: openCount(c.id) })) : ''].filter(Boolean).join(' · ')}</small>
             </button>
           ))}
           {addForm}

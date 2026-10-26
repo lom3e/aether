@@ -12,7 +12,7 @@ export interface TodayData {
   counts: { events: number; overdue: number; today: number; upcoming: number };
   events: { title: string; start: number; location: string; all_day: boolean }[];
   jobs: { overdue: Job[]; today: Job[]; upcoming: Job[]; undated: Job[] };
-  reminders: { overdue: Reminder[]; today: Reminder[]; undated: Reminder[] };
+  reminders: { overdue: Reminder[]; today: Reminder[]; upcoming?: Reminder[]; undated: Reminder[] };
 }
 export type Proposal =
   | { status: 'ok'; kind: 'job' | 'reminder' | 'contact'; title: string; notes: string; due_at: number | null; contact: { id: string | null; name: string; new: boolean } | null; email: string; phone: string }
@@ -51,4 +51,14 @@ export const lifeApi = {
 
 export const fmtDue = (ts: number | null | undefined, lang: string): string =>
   ts ? new Date(ts * 1000).toLocaleDateString(lang === 'it' ? 'it-IT' : 'en-US', { weekday: 'short', day: 'numeric', month: 'short' }) : '';
+/** "domani 10:00", "giovedì", "lun 9 nov": how a person says when something is due (09:00 means "that day"). */
+export const fmtWhen = (ts: number, lang: string): string => {
+  const d = new Date(ts * 1000);
+  const loc = lang === 'it' ? 'it-IT' : 'en-US';
+  const days = Math.round((new Date(d).setHours(0, 0, 0, 0) - new Date().setHours(0, 0, 0, 0)) / 86400000);
+  const day = days === 0 ? (lang === 'it' ? 'oggi' : 'today') : days === 1 ? (lang === 'it' ? 'domani' : 'tomorrow')
+    : days > 1 && days < 7 ? d.toLocaleDateString(loc, { weekday: 'long' }) : d.toLocaleDateString(loc, { weekday: 'short', day: 'numeric', month: 'short' });
+  const timed = !(d.getHours() === 9 && d.getMinutes() === 0);
+  return timed ? `${day} ${d.toLocaleTimeString(loc, { hour: '2-digit', minute: '2-digit' })}` : day;
+};
 export const fmtTime = (ts: number, lang: string): string => new Date(ts * 1000).toLocaleTimeString(lang === 'it' ? 'it-IT' : 'en-US', { hour: '2-digit', minute: '2-digit' });

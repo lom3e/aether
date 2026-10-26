@@ -11,6 +11,7 @@ import json
 import re
 from typing import Any
 
+from aether.core.dates import days_table, fix_weekday
 from aether.core.execution import Message
 
 MAIL_CHANGES = ("mail_trash", "mail_archive", "mail_mark_read")
@@ -110,7 +111,7 @@ def route(prompt: str, *, provider: Any, history: list[Any] | None = None, now: 
     try:
         with egress_scope(purpose="intent_routing"):
             resp = provider.generate([
-                Message(role="system", content=f"{_SYSTEM}\nNOW: {now.strftime('%A %Y-%m-%d %H:%M')} ({now.tzname()})\nRECENT CONVERSATION:\n{recent or '(none)'}"),
+                Message(role="system", content=f"{_SYSTEM}\nNOW: {now.strftime('%A %Y-%m-%d %H:%M')} ({now.tzname()})\nDAYS: {days_table(now)}\nRECENT CONVERSATION:\n{recent or '(none)'}"),
                 Message(role="user", content=(prompt or "")[:1500]),
             ])
     except Exception as exc:  # noqa: BLE001
@@ -124,13 +125,17 @@ def route(prompt: str, *, provider: Any, history: list[Any] | None = None, now: 
     target = str(data.get("target") or "").strip()[:200]
     start = _local(str(data.get("start") or ""), tz)
     end = _local(str(data.get("end") or ""), tz)
+    fixed = fix_weekday(prompt, start, now)  # "venerdì" must be a Friday even when the model counted wrong
+    if start and fixed != start:
+        end = end + (fixed - start) if end else end
+        start = fixed
     if action == "calendar_list":
-        rs = _local(str(data.get("range_start") or ""), tz)
+        rs = fix_weekday(prompt, _local(str(data.get("range_start") or ""), tz), now)
         re_ = _local(str(data.get("range_end") or ""), tz)
         if not rs:
             return {"action": "none"}
         rs = rs.replace(hour=0, minute=0)
-        re_ = (re_ or rs).replace(hour=0, minute=0) + dt.timedelta(days=1)
+        re_ = max(re_ or rs, rs).replace(hour=0, minute=0) + dt.timedelta(days=1)
         return {"action": action, "time_min": rs.isoformat(), "time_max": re_.isoformat()}
     if action == "calendar_create":
         if not title or not start:
@@ -149,7 +154,7 @@ def route(prompt: str, *, provider: Any, history: list[Any] | None = None, now: 
         name = str(data.get("contact_name") or "").strip()[:200]
         if kind not in NOTE_KINDS or (kind == "contact" and not name) or (kind != "contact" and not title):
             return {"action": "none", "reason": "incomplete"}
-        due = _local(str(data.get("due") or ""), tz)
+        due = fix_weekday(prompt, _local(str(data.get("due") or ""), tz), now)
         email = str(data.get("email") or "").strip()[:200]
         phone = str(data.get("phone") or "").strip()[:60]
         return {"action": action, "kind": kind, "title": title, "contact_name": name,

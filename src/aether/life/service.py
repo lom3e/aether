@@ -139,12 +139,13 @@ def build_today(store: LifeStore, *, now: dt.datetime | None = None, events: lis
     rems = store.list_reminders()
     rem_overdue = [r for r in rems if r["due_at"] and r["due_at"] < s]
     rem_today = [r for r in rems if r["due_at"] and s <= r["due_at"] < e]
+    rem_upcoming = [r for r in rems if r["due_at"] and e <= r["due_at"] < w]
     rem_undated = [r for r in rems if not r["due_at"]]
     evs = sorted((x for x in (_event_dict(ev) for ev in (events or [])) if x and s <= x["start"] < e), key=lambda x: x["start"])
     out = {
         "date": sod.strftime("%Y-%m-%d"), "events": evs, "calendar_error": calendar_error,
         "jobs": {"overdue": overdue, "today": today, "upcoming": upcoming, "undated": undated[:5]},
-        "reminders": {"overdue": rem_overdue, "today": rem_today, "undated": rem_undated[:5]},
+        "reminders": {"overdue": rem_overdue, "today": rem_today, "upcoming": rem_upcoming, "undated": rem_undated[:5]},
         "pending_approvals": pending_approvals,
     }
     out["counts"] = {"events": len(evs), "overdue": len(overdue) + len(rem_overdue), "today": len(today) + len(rem_today), "upcoming": len(upcoming)}

@@ -32,7 +32,8 @@ def test_router_reads_a_commitment_and_refuses_an_incomplete_one():
     r = tool_router.route("Rossi vuole il preventivo entro venerdì", now=NOW, provider=Model(
         {"action": "life_note", "note_kind": "job", "title": "Inviare il preventivo", "contact_name": "Rossi", "due": "2026-10-24"}))
     assert r["action"] == "life_note" and r["kind"] == "job" and r["contact_name"] == "Rossi" and not r["due_has_time"]
-    assert dt.datetime.fromtimestamp(r["due_at"]).astimezone().strftime("%Y-%m-%d %H:%M") == "2026-10-24 09:00"
+    # the model said Saturday 24; "venerdì" from Thursday 22 is Friday 23, whatever the model counted
+    assert dt.datetime.fromtimestamp(r["due_at"]).astimezone().strftime("%Y-%m-%d %H:%M") == "2026-10-23 09:00"
     rem = tool_router.route("ricordami alle 10", now=NOW, provider=Model({"action": "life_note", "note_kind": "reminder", "title": "Chiamare il commercialista", "due": "2026-10-23T10:00"}))
     assert rem["kind"] == "reminder" and rem["due_has_time"]
     assert tool_router.route("x", now=NOW, provider=Model({"action": "life_note", "note_kind": "job", "title": ""}))["action"] == "none"
@@ -52,8 +53,8 @@ def test_the_model_is_told_to_offer_not_to_lecture():
 
 
 def _friday_9() -> dt.datetime:
-    """09:00 wall-clock two days from now (right across a daylight-saving change)."""
-    day = dt.date.today() + dt.timedelta(days=2)
+    """09:00 wall-clock on the next Friday after today (the prompts say "venerdì"; right across a daylight-saving change)."""
+    day = dt.date.today() + dt.timedelta(days=(4 - dt.date.today().weekday()) % 7 or 7)
     return dt.datetime(day.year, day.month, day.day, 9, 0).astimezone()
 
 

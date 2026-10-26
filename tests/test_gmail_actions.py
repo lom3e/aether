@@ -337,5 +337,5 @@ def test_the_model_is_told_exactly_what_aether_can_do():
     import aether.core.context as ctx
 
     text = open(ctx.__file__, encoding="utf-8").read()
-    assert "GitHub: elencare i repository, le issue e le pull request aperte, aprire una nuova issue." in text
-    assert "Non dire mai di poter fare altro" in text
+    assert "GitHub (list repositories, open issues and pull requests, open an issue)" in text
+    assert "Never claim other abilities on these services." in text

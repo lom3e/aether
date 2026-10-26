@@ -1314,6 +1314,14 @@ class PersonalAgentService:
         meta = getattr(conn, "auth_metadata", None) or {}
         return bool(conn) and str(getattr(conn, "status", "")) not in ("disconnected", "not_configured") and bool(meta.get("access_token") or meta.get("refresh_token"))
 
+    def _smtp_ready(self, workspace_id: str) -> bool:
+        """A mail account configured by hand (SMTP, in Advanced): the old send-by-confirmation path still works with it."""
+        try:
+            conn = self.connection_service.get_connection(workspace_id, "email") if self.connection_service else None
+        except Exception:  # noqa: BLE001
+            return False
+        return bool(conn) and str(getattr(conn, "status", "")) not in ("disconnected", "not_configured")
+
     def _route_with_model(self, prompt: str, workspace_id: str, history: list[Any] | None) -> "UserIntent | None":
         """Asks the model what the request means among the actions Aether has. Returns None when it is none of them."""
         from aether.personal import tool_router
@@ -1381,6 +1389,9 @@ class PersonalAgentService:
     def _mail_change_intent(self, prompt: str, workspace_id: str, routed: dict[str, Any]) -> "UserIntent":
         """A reply, a new email, Trash, archive or mark-read: reads what is needed now, changes nothing until confirmed."""
         action = routed["action"]
+        if action == "mail_compose" and not self._provider_ready(workspace_id, "gmail"):
+            # without Gmail a new mail is still useful: the model writes it in full, ready to copy
+            return UserIntent(raw_prompt=prompt, tier=IntentTier.ANSWER, summary="Write a mail (Gmail not connected)", intent_type="informational")
         if not self._provider_ready(workspace_id, "gmail"):
             return self._explain(prompt, "Per farlo collega Gmail da Collegamenti. Non ho toccato la posta.", "Gmail not connected")
         try:
@@ -3006,6 +3017,52 @@ class PersonalAgentService:
             intent_type="informational",
         )
 
+    _YES_RE = re.compile(r"\s*(?:s[iì]+|ok(?:ay)?|va\s+bene|certo|conferm[ao]|fallo|procedi|vai|perfetto|d'accordo|esatto|yes|sure|confirm|do\s+it|go\s+ahead)"
+                         r"(?:[\s,!.]+(?:s[iì]|grazie|pure|fallo|procedi|conferma|thanks|please))*[\s!.]*", re.I)
+    _NO_RE = re.compile(r"\s*(?:no+|nope|annulla|lascia\s+(?:stare|perdere)|non\s+(?:farlo|ora|adesso|serve)|stop|cancel(?:la)?|no\s+grazie|"
+                        r"no,?\s+(?:lascia\s+stare|grazie)|never\s*mind)[\s!.]*", re.I)
+
+    def _answer_pending_proposal(self, workspace_id: str, session_id: str, prompt: str, history: list[Any], is_voice: bool,
+                                 provider_id: str | None) -> "PersonalMessage | None":
+        last = history[-1] if history else None
+        meta = (getattr(last, "metadata", None) or {}) if last is not None and getattr(last, "role", "") == "assistant" else {}
+        pid = meta.get("proposal_id")
+        yes, no = self._YES_RE.fullmatch(prompt or ""), self._NO_RE.fullmatch(prompt or "")
+        if not pid or meta.get("status") != "proposal_pending" or not (yes or no):
+            return None
+        try:
+            proposal = self.store.get_proposal(pid, workspace_id=workspace_id)
+        except Exception:  # noqa: BLE001
+            proposal = None
+        if proposal is None or str(getattr(proposal.status, "value", proposal.status))  not in ("draft", "ready_for_acceptance"):
+            return None
+        now_iso = datetime.now(timezone.utc).isoformat()
+        self.store.add_message(PersonalMessage(id=f"msg-{uuid.uuid4().hex[:12]}", session_id=session_id, workspace_id=workspace_id, role="user",
+                                               content=prompt, metadata={"is_voice": is_voice, "answers_proposal": pid}, created_at=now_iso))
+        if no:
+            self.revoke_proposal(pid, workspace_id, actor="user", reason="declined in chat")
+            from aether.core.language import looks_english
+
+            reply = PersonalMessage(id=f"msg-{uuid.uuid4().hex[:12]}", session_id=session_id, workspace_id=workspace_id, role="assistant",
+                                    content="Okay, I won't do it." if looks_english(str(getattr(proposal, "objective", "") or prompt)) else "Va bene, non faccio niente.",
+                                    tier=IntentTier.ANSWER, metadata={"status": "proposal_declined", "proposal_id": pid},
+                                    created_at=datetime.now(timezone.utc).isoformat())
+            self.store.add_message(reply)
+            self.event_hub.publish(workspace_id=workspace_id, event_type="assistant_message", data=reply.to_dict())
+            return reply
+        _, authority = self.accept_proposal(proposal_id=pid, workspace_id=workspace_id, actor="user", channel="chat")
+        # what was approved: the request that produced the card (a clarified card carries it in its objective)
+        original = ""
+        if meta.get("supersedes_proposal_id"):
+            original = str(getattr(proposal, "objective", "") or "")
+        if not original:
+            idx = len(history) - 1
+            original = next((str(m.content) for m in reversed(history[:idx]) if getattr(m, "role", "") == "user"), "")
+        if not original:
+            return None
+        return self.process_prompt(workspace_id=workspace_id, prompt=original, session_id=session_id, is_voice=is_voice,
+                                   authority=authority, provider_id=provider_id)
+
     def process_prompt(
         self,
         workspace_id: str,
@@ -3045,6 +3102,13 @@ class PersonalAgentService:
         # 2. Multi-turn context extraction
         recent_history = self.store.get_recent_messages(session_id, limit=6)
 
+        # "sì" / "no" right after a confirmation card: the same as pressing Conferma / Annulla (Aether is often spoken to).
+        # Without this the model answered "Fatto" while nothing had been saved.
+        if authority is None:
+            answered = self._answer_pending_proposal(workspace_id, session_id, prompt, recent_history, is_voice, provider_id)
+            if answered is not None:
+                return answered
+
         # 3. Record user message
         user_msg = PersonalMessage(
             id=f"msg-{uuid.uuid4().hex[:12]}",
@@ -3074,8 +3138,33 @@ class PersonalAgentService:
         # rule, or a calendar read that actually contains a change verb), the model maps the request to a real action.
         from aether.personal import tool_router as _tr
         _change_verb = re.search(r"\b(spost\w*|mett\w*l[ao]|anticip\w*|posticip\w*|rimand\w*|aggiung\w*|cre[ai]\w*|fiss\w*|prenot\w*|move|reschedule|book|add)\b", prompt, re.I)
+        if _approved is None:
+            from aether.personal import mac_open
+
+            if mac_open.parse(prompt):  # "apri Spotify": done at once, nothing to confirm (opening changes no data)
+                from aether.core.language import looks_english as _is_en
+
+                said = mac_open.handle(prompt, english=_is_en(prompt))
+                if said:
+                    intent = self._explain(prompt, said, "Open app or site")
+            from aether.life import weather
+
+            if intent.tier == IntentTier.ANSWER and not intent.action_id and weather.asks_weather(prompt) and len(prompt) < 120:
+                from aether.core.language import looks_english as _is_en
+                from aether.life.store import life_store_for
+
+                try:
+                    _life = life_store_for(self.workspace)
+                except Exception:  # noqa: BLE001
+                    _life = None
+                intent = self._explain(prompt, weather.answer(self.workspace, _life, prompt, language="en" if _is_en(prompt) else "it"), "Weather")
+        if intent.action_id == "email.send" and not self._provider_ready(workspace_id, "gmail") and not self._smtp_ready(workspace_id):
+            # the old keyword rule turned "scrivi una mail a Mario…" into a send plan; without Gmail the useful answer is the text
+            intent = UserIntent(raw_prompt=prompt, tier=IntentTier.ANSWER, summary="Write a mail (Gmail not connected)", intent_type="informational")
         _rules_unsure = (
             (intent.tier == IntentTier.ANSWER and not intent.action_id and getattr(intent, "intent_type", "") != "conversation")
+            # with Gmail the model maps it to a real draft the user confirms
+            or (intent.action_id == "email.send" and self._provider_ready(workspace_id, "gmail"))
             or (intent.action_id == "calendar.create_event" and self._google_calendar_ready(workspace_id))
             # the old GitHub keyword rules guess titles ("New Issue") and repositories: the model reads them for real
             or ((intent.action_id or "").startswith("github.") and self._github_ready(workspace_id))

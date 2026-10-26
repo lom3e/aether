@@ -219,3 +219,26 @@ def test_the_natural_voice_is_downloaded_once_with_progress_then_offered_as_the_
     page.get_by_test_id("voice-try").click()
     page.wait_for_function("window.__played > 0", timeout=5000)
     page.close()
+
+
+def test_with_nothing_due_today_the_home_says_what_comes_next_and_the_answer_stays_above_the_composer(browser_context):
+    import time as _time
+
+    tomorrow_10 = int(_time.mktime(_time.localtime(_time.time() + 86400)[:3] + (10, 0, 0, 0, 0, -1)))
+    data = {**TODAY, "pending_approvals": 0, "counts": {"events": 0, "overdue": 0, "today": 0, "upcoming": 1}, "events": [],
+            "jobs": {"overdue": [], "today": [], "upcoming": [], "undated": []},
+            "reminders": {"overdue": [], "today": [], "upcoming": [{"id": "r1", "text": "Chiamare Laura", "due_at": tomorrow_10, "done": False}], "undated": []}}
+    page = browser_context.new_page()
+    page.set_viewport_size({"width": 900, "height": 700})
+    page.route("**/api/life/today*", lambda r: r.fulfill(status=200, content_type="application/json", body=json.dumps(data)))
+    page.goto(_state["base_url"])
+    nxt = page.get_by_test_id("presence-next")
+    expect(nxt).to_be_visible(timeout=20000)
+    expect(nxt).to_contain_text("Next · tomorrow 10:00")
+    expect(nxt).to_contain_text("Chiamare Laura")
+    # on a small window the greeting comes right under the orb, before the day cards, and never under the composer
+    greet = page.get_by_role("heading", level=1).bounding_box()
+    composer = page.get_by_test_id("presence").locator(".pr-bottom").bounding_box()
+    assert greet and composer and greet["y"] + greet["height"] <= composer["y"]
+    assert greet["y"] < nxt.bounding_box()["y"]
+    page.close()

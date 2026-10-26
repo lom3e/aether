@@ -117,7 +117,7 @@ def first_meeting(ws: Any, *, language: str = "it", now: dt.datetime | None = No
 
 
 def build(ws: Any, store: LifeStore, *, language: str = "it", now: dt.datetime | None = None, events: list[dict[str, Any]] | None = None,
-          gmail_connected: bool | None = None, first: bool = False) -> dict[str, Any]:
+          gmail_connected: bool | None = None, first: bool = False, with_weather: bool = True) -> dict[str, Any]:
     en = str(language).lower().startswith("en")
     now = (now or dt.datetime.now().astimezone()).astimezone()
     if gmail_connected is None:
@@ -153,6 +153,12 @@ def build(ws: Any, store: LifeStore, *, language: str = "it", now: dt.datetime |
         parts.append(question)
     elif len(parts) == 1:
         parts.append("Nothing urgent today." if en else "Oggi niente di urgente.")
+    if with_weather:  # right after the greeting: "A Milano ci sono 10 gradi, sereno, massima 15."
+        from aether.life import weather
+
+        line = weather.brief_line(ws, store, language)
+        if line:
+            parts.insert(1, line)
     # text: what is said aloud; body: what is shown under the greeting the orb already displays
     return {"text": " ".join(parts), "body": " ".join(parts[1:]), "offer": offer, "date": now.strftime("%Y-%m-%d")}
 

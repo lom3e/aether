@@ -10,6 +10,7 @@ import json
 import re
 from typing import Any
 
+from aether.core.dates import days_table, fix_weekday
 from aether.core.execution import Message
 from aether.life.store import LifeStore
 
@@ -47,6 +48,12 @@ def _due_ts(raw: str) -> float | None:
     return (d.astimezone() if d.tzinfo is None else d).timestamp()
 
 
+def _fixed_due(text: str, ts: float | None, now: dt.datetime) -> float | None:
+    if ts is None:
+        return None
+    return fix_weekday(text, dt.datetime.fromtimestamp(ts).astimezone(), now).timestamp()
+
+
 def propose(ws: Any, store: LifeStore, text: str, *, language: str = "it", now: dt.datetime | None = None, provider: Any = None) -> dict[str, Any]:
     text = (text or "").strip()[:1500]
     if not text:
@@ -63,7 +70,7 @@ def propose(ws: Any, store: LifeStore, text: str, *, language: str = "it", now: 
     try:
         with egress_scope(purpose="life_capture"):
             resp = provider.generate([
-                Message(role="system", content=f"{_SYSTEM}\nTODAY: {now.strftime('%A %Y-%m-%d %H:%M')} ({now.tzname()}). Language of the user: {language}."),
+                Message(role="system", content=f"{_SYSTEM}\nTODAY: {now.strftime('%A %Y-%m-%d %H:%M')} ({now.tzname()}). DAYS: {days_table(now)}. Language of the user: {language}."),
                 Message(role="user", content=text),
             ])
     except Exception as exc:  # noqa: BLE001
@@ -79,7 +86,7 @@ def propose(ws: Any, store: LifeStore, text: str, *, language: str = "it", now: 
     existing = store.find_contact(name) if name else None
     return {
         "status": "ok", "kind": kind, "title": title, "notes": str(data.get("notes") or "").strip()[:1000],
-        "due_at": _due_ts(str(data.get("due") or "")),
+        "due_at": _fixed_due(text, _due_ts(str(data.get("due") or "")), now),
         "contact": {"id": existing["id"], "name": existing["name"], "new": False} if existing else ({"id": None, "name": name, "new": True} if name else None),
         "email": str(data.get("email") or "").strip()[:200], "phone": str(data.get("phone") or "").strip()[:60],
     }
