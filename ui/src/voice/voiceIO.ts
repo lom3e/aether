@@ -186,7 +186,8 @@ export function createListener(language: string, cb: ListenCallbacks): Listener 
 }
 
 // -- speaking -------------------------------------------------------------------------------------------------------------
-let playing: { audio: HTMLAudioElement | null; cancelled: boolean } | null = null;
+interface Session { stop: (() => void) | null; cancelled: boolean }
+let playing: Session | null = null;
 
 /** Sentences grouped into pieces of ~220 characters: the first one plays while the next is being made. */
 export function speechChunks(text: string): string[] {
@@ -207,34 +208,49 @@ async function fetchSpeech(text: string, language: string, voice?: string, engin
   } catch { return null; }
 }
 
-function playBlob(blob: Blob, session: { audio: HTMLAudioElement | null; cancelled: boolean }): Promise<boolean> {
+/** Plays through Web Audio (decoded buffer -> analyser -> speakers): WebKit can turn a media element routed into Web Audio
+ * into silence, a decoded buffer always plays and still feeds the orb. A plain <audio> element is the fallback. */
+async function playBlob(blob: Blob, session: Session): Promise<boolean> {
+  const ac = audioContext();
+  // without a click WebKit keeps resume() pending forever: wait a moment at most
+  if (ac && ac.state === 'suspended') await Promise.race([ac.resume().catch(() => undefined), new Promise(r => setTimeout(r, 300))]);
+  if (ac && ac.state === 'running') {  // a suspended context (no click yet) would stay silent: then the media element
+    try {
+      const buffer = await ac.decodeAudioData(await blob.arrayBuffer());
+      if (session.cancelled) return true;
+      return await new Promise<boolean>(resolve => {
+        const src = ac.createBufferSource();
+        src.buffer = buffer;
+        src.connect(ac.destination);
+        const stopMeter = meter(src, ac);
+        let done = false;
+        const finish = () => { if (done) return; done = true; stopMeter(); resolve(true); };
+        src.onended = finish;
+        session.stop = () => { try { src.stop(); } catch { /* ended */ } finish(); };
+        src.start();
+      });
+    } catch { /* not decodable here: the media element below */ }
+  }
   return new Promise(resolve => {
     const url = URL.createObjectURL(blob);
     const audio = new Audio(url);
-    session.audio = audio;
-    let stopMeter: (() => void) | null = null;
-    const done = (ok: boolean) => { stopMeter?.(); URL.revokeObjectURL(url); resolve(ok); };
+    const done = (ok: boolean) => { URL.revokeObjectURL(url); resolve(ok); };
+    session.stop = () => { try { audio.pause(); } catch { /* gone */ } done(true); };
     audio.onended = () => done(true);
     audio.onerror = () => done(false);
-    const ac = audioContext();
-    audio.play().then(() => {
-      // route through the analyser only when the audio context is running, otherwise the sound would be muted
-      if (ac && ac.state === 'running') {
-        try { const src = ac.createMediaElementSource(audio); src.connect(ac.destination); stopMeter = meter(src, ac); } catch { /* plays anyway */ }
-      }
-    }).catch(() => done(false));
+    audio.play().catch(() => done(false));
   });
 }
 
 export function stopSpeech() {
-  if (playing) { playing.cancelled = true; try { playing.audio?.pause(); } catch { /* gone */ } playing = null; }
+  if (playing) { playing.cancelled = true; playing.stop?.(); playing = null; }
   emitLevel(0);
 }
 
 /** Speaks through the sidecar voice. Resolves false when nothing could be played (caller falls back). */
 export async function speakText(text: string, language: string, opts?: { voice?: string; engine?: string }): Promise<boolean> {
   stopSpeech();
-  const session = { audio: null as HTMLAudioElement | null, cancelled: false };
+  const session: Session = { stop: null, cancelled: false };
   playing = session;
   const chunks = speechChunks(text);
   if (!chunks.length) return false;

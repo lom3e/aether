@@ -137,7 +137,7 @@ def _say_listing() -> str:
 
 
 def system_voices(language: str = "it", listing: str | None = None) -> list[dict[str, Any]]:
-    """Installed voices for the language, best first. `listing` is the output of `say -v ?` (injected in tests)."""
+    """Installed Premium / Enhanced voices for the language, best first. `listing` is the output of `say -v ?` (injected in tests)."""
     if listing is None:
         listing = _say_listing()
     prefix = "it" if str(language).lower().startswith("it") else "en"
@@ -153,6 +153,8 @@ def system_voices(language: str = "it", listing: str | None = None) -> list[dict
         if base in _NOVELTY:
             continue
         q = _quality(name)
+        if q == "basic":  # the compact voices (Alice, Luca…) sound robotic: never offered
+            continue
         rank = {"premium": 0, "enhanced": 1}.get(q, 2 if base in _GOOD_COMPACT[prefix] else 3)
         out.append({"name": name, "lang": m["lang"], "quality": q, "rank": rank})
     out.sort(key=lambda v: (v["rank"], _GOOD_COMPACT[prefix].index(re.sub(r"\s*\(.*$", "", v["name"]).lower())
@@ -174,7 +176,7 @@ def tts_engine(ws: Any, language: str = "it") -> str:
     if pick == "neural" and neural_ready:
         return "neural"
     if pick == "system":
-        return "system" if shutil.which("say") else "device"
+        return "system" if shutil.which("say") and system_voices(language) else "device"
     # auto: Aether's own voice once downloaded; else the Mac's neural voice when one is installed (local, free); a cloud voice
     # only when the user has an OpenAI key AND no good local voice; otherwise the best local voice there is
     if neural_ready:
@@ -205,7 +207,7 @@ def status(ws: Any, language: str = "it") -> dict[str, Any]:
                 "neural": neural,
                 "voices": [{"name": v["name"], "quality": v["quality"]} for v in voices[:12]],
                 "openai_voices": list(OPENAI_VOICES),
-                "needs_better_voice": tts == "system" and (best or {}).get("quality", "basic") == "basic"},
+                "needs_better_voice": tts == "device"},
     }
 
 

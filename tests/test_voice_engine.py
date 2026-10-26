@@ -48,12 +48,11 @@ def ws(tmp_path, monkeypatch):
     return w
 
 
-def test_voices_best_first_without_novelty_voices():
+def test_only_good_voices_are_offered_never_basic_or_novelty_ones():
     it = ve.system_voices("it", LISTING)
-    assert [v["name"] for v in it] == ["Federica (Premium)", "Alice (Italiano (Italia))", "Luca"]
-    assert it[0]["quality"] == "premium"
+    assert [v["name"] for v in it] == ["Federica (Premium)"]
     en = ve.system_voices("en", LISTING)
-    assert [v["name"] for v in en] == ["Zoe (Enhanced)", "Samantha"]
+    assert [v["name"] for v in en] == ["Zoe (Enhanced)"]
 
 
 def test_hearing_uses_whisper_with_a_key_and_the_mac_without(ws, monkeypatch):
@@ -106,7 +105,7 @@ def test_basic_voice_only_suggests_a_better_one_and_openai_needs_a_key(ws, monke
     monkeypatch.setattr(ve, "_say_listing", lambda: "Alice (Italiano (Italia)) it_IT    # Ciao!\n")
     monkeypatch.setattr(ve.shutil, "which", lambda name: f"/usr/bin/{name}")
     st = ve.status(ws, "it")
-    assert st["tts"]["engine"] == "system" and st["tts"]["needs_better_voice"] is True
+    assert st["tts"]["engine"] == "device" and st["tts"]["voices"] == [] and st["tts"]["needs_better_voice"] is True
     with pytest.raises(ve.VoiceError) as e:
         ve.synthesize(ws, "Ciao", "it", engine="openai")
     assert e.value.code == "no_key"

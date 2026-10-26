@@ -78,7 +78,7 @@ export function VoiceSetting() {
             </small>
           </label>
 
-          <label style={{ display: 'grid', gap: '6px', fontSize: '14px' }}>
+          {(natural?.state === 'ready' || st.tts.voices.length > 0 || st.tts.available.includes('openai')) && <label style={{ display: 'grid', gap: '6px', fontSize: '14px' }}>
             <span>{t('voSpeakLabel')}</span>
             <span style={{ display: 'flex', gap: '8px' }}>
               <select className="input" style={{ flex: 1 }} value={voiceValue} onChange={e => pickVoice(e.target.value)} data-testid="voice-tts">
@@ -89,7 +89,7 @@ export function VoiceSetting() {
               <button className="btn btn-ghost" type="button" onClick={() => void tryVoice()} disabled={trying} data-testid="voice-try">{t('voiceTry')}</button>
             </span>
             <small className="text-muted">{st.tts.engine === 'openai' ? t('voSpeakCloudNote') : st.tts.engine === 'neural' ? t('voSpeakNaturalNote') : t('voSpeakLocalNote')}</small>
-          </label>
+          </label>}
 
           {natural && (natural.state === 'missing' || natural.state === 'downloading') && (
             <div role="note" data-testid="voice-natural" style={{ fontSize: '13px', lineHeight: 1.5, padding: '12px 14px', borderRadius: '12px', background: 'var(--surface-2, rgba(127,127,127,.08))' }}>

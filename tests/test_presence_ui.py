@@ -160,9 +160,9 @@ def test_the_sidebar_shows_few_things_and_advanced_tools_only_on_request(browser
 def _voice_status(natural_state: str, done: int = 0, engine: str = "system") -> dict:
     return {"settings": {"stt": "auto", "tts": "auto", "system_voice": "", "openai_voice": "coral", "neural_voice": ""},
             "stt": {"engine": "device", "available": ["device"], "model": ""},
-            "tts": {"engine": engine, "available": ["system"] + (["neural"] if natural_state == "ready" else []),
-                    "voice": "af_heart" if engine == "neural" else "Alice", "quality": "natural" if engine == "neural" else "basic",
-                    "voices": [{"name": "Alice", "quality": "basic"}], "openai_voices": [], "needs_better_voice": engine == "system",
+            "tts": {"engine": engine, "available": ["neural"] if natural_state == "ready" else [],
+                    "voice": "af_heart" if engine == "neural" else "", "quality": "natural" if engine == "neural" else "none",
+                    "voices": [], "openai_voices": [], "needs_better_voice": engine == "device",
                     "neural": {"state": natural_state, "voices": [{"id": "af_heart", "name": "Heart"}, {"id": "am_michael", "name": "Michael"}],
                                "download": {"state": natural_state, "done": done, "total": 1000, "error": ""}, "size_mb": 121}}}
 
@@ -180,7 +180,7 @@ def test_the_natural_voice_is_downloaded_once_with_progress_then_offered_as_the_
                 phase["state"] = "ready"
         st = phase["state"]
         route.fulfill(status=200, content_type="application/json",
-                      body=json.dumps(_voice_status(st, done=400 if st == "downloading" else 0, engine="neural" if st == "ready" else "system")))
+                      body=json.dumps(_voice_status(st, done=400 if st == "downloading" else 0, engine="neural" if st == "ready" else "device")))
 
     def download(route):
         calls.append("download")
@@ -205,4 +205,17 @@ def test_the_natural_voice_is_downloaded_once_with_progress_then_offered_as_the_
     assert options[:2] == ["Heart · natural", "Michael · natural"]
     expect(page.get_by_test_id("voice-tts")).to_have_value("neural:af_heart")
     expect(page.get_by_test_id("voice-natural-remove")).to_be_visible()
+
+    # "Prova la voce" plays the audio as a decoded Web Audio buffer (WebKit can silence a media element routed into Web Audio)
+    import io
+    import wave
+
+    buf = io.BytesIO()
+    with wave.open(buf, "wb") as w:
+        w.setnchannels(1); w.setsampwidth(2); w.setframerate(24000); w.writeframes(b"\x00\x10" * 2400)
+    page.route("**/api/voice/speak", lambda route: route.fulfill(status=200, content_type="audio/wav", body=buf.getvalue()))
+    page.evaluate("""() => { window.__played = 0; const s = AudioBufferSourceNode.prototype.start;
+        AudioBufferSourceNode.prototype.start = function (...a) { window.__played++; return s.apply(this, a); }; }""")
+    page.get_by_test_id("voice-try").click()
+    page.wait_for_function("window.__played > 0", timeout=5000)
     page.close()
