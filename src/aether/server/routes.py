@@ -7357,6 +7357,56 @@ async def life_reminders_delete(request: Request, reminder_id: str):
     return {"deleted": True, "id": reminder_id}
 
 
+class MoneyPayload(BaseModel):
+    contact_id: str
+    direction: str
+    amount: float
+    currency: str | None = "EUR"
+    what: str | None = ""
+
+
+class MoneyStatusPayload(BaseModel):
+    status: str
+
+
+@router.get("/life/money")
+async def life_money_list(request: Request, contact_id: str | None = None, status_filter: str | None = "open"):
+    """Who owes you and whom you owe (open by default)."""
+    _, store = _life(request)
+    return {"items": await asyncio.to_thread(store.list_money, status=status_filter or None, contact_id=contact_id)}
+
+
+@router.post("/life/money", status_code=status.HTTP_201_CREATED)
+async def life_money_create(request: Request, payload: MoneyPayload):
+    _, store = _life(request)
+    try:
+        return await asyncio.to_thread(store.add_money, payload.contact_id, payload.direction, payload.amount,
+                                       currency=payload.currency or "EUR", what=payload.what or "")
+    except ValueError as exc:
+        raise _life_value_error(exc) from exc
+
+
+@router.post("/life/money/{money_id}")
+async def life_money_status(request: Request, money_id: str, payload: MoneyStatusPayload):
+    """Paid (or open again, to undo a "paid" by mistake)."""
+    _, store = _life(request)
+    try:
+        m = await asyncio.to_thread(store.set_money_status, money_id, payload.status)
+    except ValueError as exc:
+        raise _life_value_error(exc) from exc
+    if not m:
+        raise HTTPException(status_code=404, detail="Not found.")
+    return m
+
+
+@router.delete("/life/money/{money_id}")
+async def life_money_delete(request: Request, money_id: str):
+    _, store = _life(request)
+    if not await asyncio.to_thread(store.delete_money, money_id):
+        raise HTTPException(status_code=404, detail="Not found.")
+    return {"deleted": True, "id": money_id}
+
+
 class LifeSettingsPayload(BaseModel):
     brief_enabled: bool | None = None
     brief_time: str | None = None
@@ -7495,6 +7545,25 @@ async def profile_set(request: Request, payload: ProfilePayload):
             out["city"] = place["name"]
             out["weather"] = await asyncio.to_thread(weather.brief_line, ws, store, language)
     return out
+
+
+@router.get("/presence/catchup")
+async def presence_catchup_route(request: Request, language: str = "it"):
+    """"Cosa mi sono perso?": what changed during the last long absence (facts only, no model call)."""
+    ws, store = _life(request)
+    from aether.life import catchup
+
+    return await asyncio.to_thread(catchup.for_workspace, ws, store, language=language)
+
+
+@router.post("/presence/seen")
+async def presence_seen_route(request: Request):
+    """The app is in front of the user. Returns how many hours they were away (the app shows the catch-up after a long absence)."""
+    _ws, store = _life(request)
+    from aether.life import catchup
+
+    away = await asyncio.to_thread(catchup.mark_seen, store)
+    return {"away_hours": round(away, 2), "show_catchup": away >= catchup.AWAY_HOURS}
 
 
 @router.post("/presence/offer")

@@ -30,7 +30,7 @@ def test_a_reminder_tied_to_a_person_is_saved_without_a_date_and_comes_back_when
                                                "contact_name": "Mario Rossi", "trigger": "person", "due": "2026-10-30"})
         card = svc.process_prompt(workspace_id=ws.name, prompt="quando sento Mario Rossi ricordami di chiedergli la fattura")
         assert card.metadata["status"] == "proposal_pending"
-        assert "quando parlerai di **Mario Rossi**" in card.content and "**Chiedergli la fattura**" in card.content
+        assert "appena si parla di **Mario Rossi**" in card.content and "**Chiedergli la fattura**" in card.content
         svc.process_prompt(workspace_id=ws.name, prompt="sì", session_id=card.session_id)
         [rem] = store.list_reminders()
         assert rem["source"] == "person" and rem["due_at"] is None, "no date: it waits for the person"
@@ -129,3 +129,12 @@ def test_the_router_ties_a_reminder_to_the_person_even_when_the_model_forgets_an
     ask = tool_router.route("mi ricordi domani di chiamare Laura?", now=now,
                             provider=Model({"action": "life_note", "note_kind": "reminder", "title": "Chiamare Laura", "due": "2026-10-27T09:00"}))
     assert ask["action"] == "life_note", "a request phrased as a question is still a request"
+
+
+def test_a_person_reminder_is_understood_even_when_the_model_says_none():
+    from aether.personal import tool_router
+
+    r = tool_router.route("la prossima volta che vedo Giulia ricordami di chiederle del contratto", provider=Model({"action": "none"}))
+    assert (r["action"], r["kind"], r["contact_name"], r["title"], r["trigger"]) == ("life_note", "reminder", "Giulia", "Chiederle del contratto", "person")
+    r2 = tool_router.route("ricordami di chiedere la fattura quando sento Mario", provider=Model({"action": "none"}))
+    assert (r2["contact_name"], r2["title"]) == ("Mario", "Chiedere la fattura")

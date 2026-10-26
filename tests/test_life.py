@@ -153,12 +153,14 @@ def test_the_morning_brief_is_opt_in_once_a_day_and_silent_when_empty(ws, monkey
     morning = NOW.replace(hour=8, minute=0)
     assert s.settings() == {"brief_enabled": False, "brief_time": "08:30", "last_brief_date": "",
                             "promise_watch": False, "last_promise_scan": 0.0, "promise_watch_offered": False,
-                            "home_city": "", "user_name": ""}
+                            "home_city": "", "user_name": "", "reconnect_offered": {},
+                            "last_seen_at": 0.0, "back_from": 0.0, "prepped_events": {},
+                            "telegram_offer": {}}
     assert briefing.maybe_send_brief(ws, s, now=NOW) is False and sent == [], "off by default: nothing is ever sent"
     s.update_settings(brief_enabled=True)
     assert briefing.maybe_send_brief(ws, s, now=morning) is False, "not before the chosen time"
     assert briefing.maybe_send_brief(ws, s, now=NOW) is True and len(sent) == 1
-    assert "Preventivo" in sent[0][0][3] and sent[0][0][2] == "Oggi"
+    assert "Preventivo" in sent[0][0][3] and sent[0][0][2] in ("Buongiorno", "Buon pomeriggio", "Buonasera"), "the title greets"
     assert briefing.maybe_send_brief(ws, s, now=NOW + dt.timedelta(hours=2)) is False, "once a day"
     s2 = LifeStore(Path(ws.conversations_db_path).parent / "life2.db")
     s2.update_settings(brief_enabled=True)

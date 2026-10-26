@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from 'react';
 import { apiUrl } from './api';
 import { useTranslation } from './i18n';
 import { setSpeakVoiceAnswers, speakVoiceAnswersEnabled } from './voiceOut';
-import { forgetVoiceStatus, speakText, voiceStatus, type VoiceStatus } from './voice/voiceIO';
+import { bargeInEnabled, forgetVoiceStatus, setBargeIn, speakText, voiceStatus, type VoiceStatus } from './voice/voiceIO';
 import { greetAloudEnabled, setGreetAloud } from './voice/greet';
 
 /** Settings → General: how Aether hears you (Whisper or the Mac's dictation) and which voice answers you. */
@@ -10,6 +10,7 @@ export function VoiceSetting() {
   const { t, language } = useTranslation();
   const [on, setOn] = useState(speakVoiceAnswersEnabled());
   const [greet, setGreet] = useState(greetAloudEnabled());
+  const [barge, setBarge] = useState(bargeInEnabled());
   const [st, setSt] = useState<VoiceStatus | null>(null);
   const [trying, setTrying] = useState(false);
   const poll = useRef<number | null>(null);
@@ -57,6 +58,10 @@ export function VoiceSetting() {
       <label style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '16px', fontSize: '14px', cursor: 'pointer' }}>
         {t('voiceToggle')}
         <input type="checkbox" role="switch" className="ui-switch" checked={on} onChange={e => { setOn(e.target.checked); setSpeakVoiceAnswers(e.target.checked); }} data-testid="voice-toggle" />
+      </label>
+      <label style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '16px', fontSize: '14px', cursor: 'pointer', marginTop: '12px' }}>
+        {t('voBargeToggle')}
+        <input type="checkbox" role="switch" className="ui-switch" checked={barge} onChange={e => { setBarge(e.target.checked); setBargeIn(e.target.checked); }} data-testid="voice-barge" />
       </label>
       <label style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '16px', fontSize: '14px', cursor: 'pointer', marginTop: '12px' }}>
         {t('voGreetToggle')}

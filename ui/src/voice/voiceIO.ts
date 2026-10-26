@@ -247,6 +247,61 @@ export function stopSpeech() {
   emitLevel(0);
 }
 
+// -- barge-in: talk over Aether and it stops to listen ---------------------------------------------------------------------
+// While Aether speaks (and only then) the microphone level is watched, echo-cancelled so its own voice does not count; nothing is
+// recorded. A third of a second of the user's voice stops the speech and hands the turn to whoever registered with onBargeIn.
+const BARGE_KEY = 'aether_barge_in';
+export function bargeInEnabled(): boolean { try { return localStorage.getItem(BARGE_KEY) !== '0'; } catch { return true; } }
+export function setBargeIn(on: boolean) { try { localStorage.setItem(BARGE_KEY, on ? '1' : '0'); } catch { /* storage unavailable */ } }
+let bargeHandler: (() => void) | null = null;
+export function onBargeIn(fn: (() => void) | null) { bargeHandler = fn; }
+
+async function watchForBargeIn(session: Session): Promise<() => void> {
+  if (!bargeInEnabled() || !bargeHandler || !navigator.mediaDevices?.getUserMedia) return () => undefined;
+  const ac = audioContext();
+  if (!ac) return () => undefined;
+  let stream: MediaStream | null = null;
+  try {
+    stream = await navigator.mediaDevices.getUserMedia({ audio: { echoCancellation: true, noiseSuppression: true, autoGainControl: false } });
+  } catch { return () => undefined; }
+  if (session.cancelled) { stream.getTracks().forEach(t => t.stop()); return () => undefined; }
+  const src = ac.createMediaStreamSource(stream);
+  const an = ac.createAnalyser();
+  an.fftSize = 512;
+  src.connect(an);
+  const buf = new Uint8Array(an.fftSize);
+  const started = Date.now();
+  let loudSince = 0;
+  let raf = 0;
+  let stopped = false;
+  const stop = () => {
+    if (stopped) return;
+    stopped = true;
+    cancelAnimationFrame(raf);
+    try { src.disconnect(); } catch { /* gone */ }
+    stream?.getTracks().forEach(t => t.stop());
+  };
+  const tick = () => {
+    if (stopped || session.cancelled) { stop(); return; }
+    an.getByteTimeDomainData(buf);
+    let sum = 0;
+    for (let i = 0; i < buf.length; i++) { const v = (buf[i] - 128) / 128; sum += v * v; }
+    const level = Math.min(1, Math.sqrt(sum / buf.length) * 4.2);
+    if (Date.now() - started > 700 && level > 0.16) {
+      loudSince = loudSince || Date.now();
+      if (Date.now() - loudSince > 320) {
+        stop();
+        stopSpeech();
+        bargeHandler?.();
+        return;
+      }
+    } else loudSince = 0;
+    raf = requestAnimationFrame(tick);
+  };
+  raf = requestAnimationFrame(tick);
+  return stop;
+}
+
 /** Speaks through the sidecar voice. Resolves false when nothing could be played (caller falls back). */
 export async function speakText(text: string, language: string, opts?: { voice?: string; engine?: string }): Promise<boolean> {
   stopSpeech();
@@ -256,15 +311,21 @@ export async function speakText(text: string, language: string, opts?: { voice?:
   if (!chunks.length) return false;
   let next = fetchSpeech(chunks[0], language, opts?.voice, opts?.engine);
   let playedAny = false;
-  for (let i = 0; i < chunks.length; i++) {
-    const blob = await next;
-    if (session.cancelled) return true;
-    if (!blob) return playedAny;
-    if (i + 1 < chunks.length) next = fetchSpeech(chunks[i + 1], language, opts?.voice, opts?.engine);
-    const ok = await playBlob(blob, session);
-    if (session.cancelled) return true;
-    if (!ok) return playedAny;
-    playedAny = true;
+  let stopWatching: (() => void) | null = null;
+  try {
+    for (let i = 0; i < chunks.length; i++) {
+      const blob = await next;
+      if (session.cancelled) return true;
+      if (!blob) return playedAny;
+      if (i + 1 < chunks.length) next = fetchSpeech(chunks[i + 1], language, opts?.voice, opts?.engine);
+      if (!stopWatching && !opts?.voice) stopWatching = await watchForBargeIn(session);  // not for a voice preview in Settings
+      const ok = await playBlob(blob, session);
+      if (session.cancelled) return true;
+      if (!ok) return playedAny;
+      playedAny = true;
+    }
+  } finally {
+    stopWatching?.();
   }
   if (playing === session) playing = null;
   return true;

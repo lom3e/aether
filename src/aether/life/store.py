@@ -14,6 +14,7 @@ from typing import Any
 
 CONTACT_KINDS = ("client", "person", "company")
 JOB_STATUSES = ("open", "done")
+MONEY_DIRECTIONS = ("owed_to_me", "i_owe")
 
 _SCHEMA = """
 CREATE TABLE IF NOT EXISTS contacts (
@@ -36,6 +37,10 @@ CREATE TABLE IF NOT EXISTS promises (
     message_id TEXT NOT NULL DEFAULT '', subject TEXT NOT NULL DEFAULT '', status TEXT NOT NULL DEFAULT 'new',
     job_id TEXT, found_at REAL NOT NULL, updated_at REAL NOT NULL
 );
+CREATE TABLE IF NOT EXISTS money (
+    id TEXT PRIMARY KEY, contact_id TEXT NOT NULL, direction TEXT NOT NULL, amount REAL NOT NULL, currency TEXT NOT NULL DEFAULT 'EUR',
+    what TEXT NOT NULL DEFAULT '', status TEXT NOT NULL DEFAULT 'open', created_at REAL NOT NULL, paid_at REAL, nudged_at REAL
+);
 CREATE INDEX IF NOT EXISTS jobs_due ON jobs(status, due_at);
 CREATE INDEX IF NOT EXISTS reminders_due ON reminders(done, due_at);
 """
@@ -51,6 +56,9 @@ class LifeStore:
         self._lock = threading.Lock()
         with self._conn() as c:
             c.executescript(_SCHEMA)
+            cols = {r[1] for r in c.execute("PRAGMA table_info(contacts)")}
+            if "last_seen_at" not in cols:  # when you last dealt with them (mentioned, a job, a mail): for the "you haven't heard from" nudge
+                c.execute("ALTER TABLE contacts ADD COLUMN last_seen_at REAL")
 
     def _conn(self) -> sqlite3.Connection:
         conn = sqlite3.connect(self.path, timeout=10)
@@ -60,7 +68,9 @@ class LifeStore:
     # -- settings (all opt-in, off by default) ---------------------------------------------------------------
     DEFAULT_SETTINGS = {"brief_enabled": False, "brief_time": "08:30", "last_brief_date": "",
                         "promise_watch": False, "last_promise_scan": 0.0, "promise_watch_offered": False,
-                        "home_city": "", "user_name": ""}
+                        "home_city": "", "user_name": "", "reconnect_offered": {},
+                        "last_seen_at": 0.0, "back_from": 0.0, "prepped_events": {},
+                        "telegram_offer": {}}
 
     def settings(self) -> dict[str, Any]:
         import json
@@ -96,8 +106,8 @@ class LifeStore:
         now = time.time()
         cid = f"ct-{uuid.uuid4().hex[:10]}"
         with self._lock, self._conn() as c:
-            c.execute("INSERT INTO contacts(id,name,kind,company,email,phone,notes,created_at,updated_at) VALUES(?,?,?,?,?,?,?,?,?)",
-                      (cid, name[:200], kind, company.strip()[:200], email.strip()[:200], phone.strip()[:60], notes.strip()[:4000], now, now))
+            c.execute("INSERT INTO contacts(id,name,kind,company,email,phone,notes,created_at,updated_at,last_seen_at) VALUES(?,?,?,?,?,?,?,?,?,?)",
+                      (cid, name[:200], kind, company.strip()[:200], email.strip()[:200], phone.strip()[:60], notes.strip()[:4000], now, now, now))
         return self.get_contact(cid) or {}
 
     def get_contact(self, contact_id: str) -> dict[str, Any] | None:
@@ -204,6 +214,8 @@ class LifeStore:
         with self._lock, self._conn() as c:
             c.execute("INSERT INTO jobs(id,contact_id,title,status,due_at,notes,source,created_at,updated_at) VALUES(?,?,?,?,?,?,?,?,?)",
                       (jid, contact_id, title[:300], "open", due_at, notes.strip()[:4000], source, now, now))
+        if contact_id:
+            self.touch_contact(contact_id, now)
         return self.get_job(jid) or {}
 
     def get_job(self, job_id: str) -> dict[str, Any] | None:
@@ -280,6 +292,55 @@ class LifeStore:
         with self._lock, self._conn() as c:
             c.execute("UPDATE reminders SET done=?, done_at=? WHERE id=?", (1 if done else 0, time.time() if done else None, reminder_id))
         return self.get_reminder(reminder_id)
+
+    def touch_contact(self, contact_id: str, at: float | None = None) -> None:
+        with self._lock, self._conn() as c:
+            c.execute("UPDATE contacts SET last_seen_at=MAX(COALESCE(last_seen_at, 0), ?) WHERE id=?", (at or time.time(), contact_id))
+
+    # -- money: who owes you, whom you owe --------------------------------------------------------------------
+    def add_money(self, contact_id: str, direction: str, amount: float, *, currency: str = "EUR", what: str = "") -> dict[str, Any]:
+        if direction not in MONEY_DIRECTIONS:
+            raise ValueError(f"direction must be one of {MONEY_DIRECTIONS}")
+        if not self.get_contact(contact_id):
+            raise ValueError("unknown contact")
+        if not amount or float(amount) <= 0:
+            raise ValueError("an amount above zero is needed")
+        mid = f"mn-{uuid.uuid4().hex[:10]}"
+        with self._lock, self._conn() as c:
+            c.execute("INSERT INTO money(id,contact_id,direction,amount,currency,what,created_at) VALUES(?,?,?,?,?,?,?)",
+                      (mid, contact_id, direction, round(float(amount), 2), (currency or "EUR").upper()[:3], (what or "")[:200], time.time()))
+        return self.get_money(mid) or {}
+
+    def get_money(self, money_id: str) -> dict[str, Any] | None:
+        with self._lock, self._conn() as c:
+            r = c.execute("SELECT * FROM money WHERE id=?", (money_id,)).fetchone()
+        return dict(r) if r else None
+
+    def list_money(self, *, status: str | None = "open", contact_id: str | None = None) -> list[dict[str, Any]]:
+        q, args = "SELECT * FROM money WHERE 1=1", []
+        if status:
+            q += " AND status=?"
+            args.append(status)
+        if contact_id:
+            q += " AND contact_id=?"
+            args.append(contact_id)
+        with self._lock, self._conn() as c:
+            return [dict(r) for r in c.execute(q + " ORDER BY created_at", args)]
+
+    def set_money_status(self, money_id: str, status: str) -> dict[str, Any] | None:
+        if status not in ("open", "paid"):
+            raise ValueError("status must be open or paid")
+        with self._lock, self._conn() as c:
+            c.execute("UPDATE money SET status=?, paid_at=? WHERE id=?", (status, time.time() if status == "paid" else None, money_id))
+        return self.get_money(money_id)
+
+    def mark_money_nudged(self, money_id: str) -> None:
+        with self._lock, self._conn() as c:
+            c.execute("UPDATE money SET nudged_at=? WHERE id=?", (time.time(), money_id))
+
+    def delete_money(self, money_id: str) -> bool:
+        with self._lock, self._conn() as c:
+            return c.execute("DELETE FROM money WHERE id=?", (money_id,)).rowcount > 0
 
     def set_reminder_due(self, reminder_id: str, due_at: float | None) -> dict[str, Any] | None:
         with self._lock, self._conn() as c:

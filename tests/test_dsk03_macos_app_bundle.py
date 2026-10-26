@@ -100,7 +100,7 @@ def test_dsk_03_bundled_sidecar_layout():
     assert sidecar_internal.exists(), f"Sidecar _internal directory missing at {sidecar_internal}"
 
 
-def test_dsk_03_out_of_repo_isolated_execution(tmp_path):
+def test_dsk_03_out_of_repo_isolated_execution(tmp_path, forget_app_copies):
     """
     Test copying Aether.app completely outside the repository (e.g. /tmp/Aether-Test/Aether.app)
     and running it with a sanitized environment.
@@ -111,6 +111,7 @@ def test_dsk_03_out_of_repo_isolated_execution(tmp_path):
     isolated_dir = tmp_path / "isolated_install"
     isolated_dir.mkdir(parents=True, exist_ok=True)
     isolated_app = isolated_dir / "Aether.app"
+    forget_app_copies.append(isolated_app)
 
     # Copy bundle to isolated location
     shutil.copytree(original_app, isolated_app, symlinks=True)

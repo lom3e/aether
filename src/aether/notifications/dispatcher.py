@@ -335,15 +335,16 @@ class NotificationDispatcher:
         if is_desktop_runtime:
             return DeliveryStatus.SKIPPED, "Desktop notifications managed directly by Tauri runtime; osascript disabled in packaged mode"
 
-        # 3. macOS development/headless fallback (when event_hub is None and not desktop runtime)
+        # 3. macOS development/headless fallback (when event_hub is None and not desktop runtime). Opt-in only: an AppleScript banner
+        # comes from Script Editor (its icon, not Aether's), and test runs and scripts must never put banners on the user's screen.
         if sys.platform == "darwin":
-            if os.getenv("AETHER_DISABLE_DEV_OSASCRIPT") == "1":
-                return DeliveryStatus.SKIPPED, "AppleScript fallback disabled via environment"
+            if os.getenv("AETHER_DEV_OSASCRIPT_NOTIFICATIONS") != "1" or os.getenv("AETHER_DISABLE_DEV_OSASCRIPT") == "1":
+                return DeliveryStatus.SKIPPED, "AppleScript fallback is off (set AETHER_DEV_OSASCRIPT_NOTIFICATIONS=1 to use it)"
 
             # Sanitize quotes for AppleScript
             clean_title = title.replace("\\", "\\\\").replace('"', '\\"').replace("'", "’")
             clean_msg = message.replace("\\", "\\\\").replace('"', '\\"').replace("'", "’")
-            script = f'tell application "System Events" to display notification "{clean_msg}" with title "{clean_title}" subtitle "Aether Notification Fabric"'
+            script = f'tell application "System Events" to display notification "{clean_msg}" with title "{clean_title}"'
             if sound_name:
                 script += f' sound name "{sound_name}"'
 

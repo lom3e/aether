@@ -148,7 +148,10 @@ export function CompanionPanel({ runtime, language, t, onHide, notify }: Props) 
     setSight(null); // one-shot: the next message does not carry the old screen
     void (async () => {
       const vs = await runtime.fetchVisionStatus();
-      if (vs?.supported) {
+      // "ricordami di rispondere a questa", "segna questo": something to keep, not a question about the picture. The text the
+      // local OCR read goes with the request, so Aether can name it ("Rispondere a Mario: preventivo") and ask to save it.
+      const keep = /\b(ricord\w*|segna\w*|annota\w*|aggiung\w*|salva\w*|promemoria|remind\w*|save|note|add)\b/i.test(v);
+      if (vs?.supported && !(keep && seen.text)) {
         await runtime.askAboutImage({ prompt: v, imageBase64: seen.base64, mediaType: seen.mediaType, displayUrl: seen.url, width: seen.width, height: seen.height, language, annotate: false });
       } else {
         // The model cannot see images: give it the text the local OCR read instead (it is masked like any outgoing text).

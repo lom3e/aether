@@ -285,3 +285,37 @@ def test_the_first_minute_is_a_guided_welcome_that_ends_in_a_real_reminder(brows
     expect(page.get_by_test_id("presence")).to_be_visible(timeout=15000)
     expect(page.get_by_test_id("welcome")).to_have_count(0)  # once is enough
     page.close()
+
+
+def test_people_show_money_with_a_paid_button_and_settings_offer_barge_in(browser_context):
+    """Contacts, jobs and money routes are mocked; the page is the real one."""
+    page = browser_context.new_page()
+    contact = {"id": "c1", "name": "Mario Rossi", "kind": "client", "company": "", "email": "", "phone": "", "notes": ""}
+    money = [{"id": "m1", "contact_id": "c1", "direction": "owed_to_me", "amount": 200, "currency": "EUR", "what": "il sito", "status": "open", "created_at": 1793000000}]
+    paid = []
+    page.route("**/api/life/contacts", lambda r: r.fulfill(status=200, content_type="application/json", body=json.dumps({"items": [contact]})))
+    page.route("**/api/life/jobs*", lambda r: r.fulfill(status=200, content_type="application/json", body=json.dumps({"items": []})))
+
+    def money_route(route):
+        if route.request.method == "POST":
+            paid.append(route.request.url)
+            money.clear()
+            return route.fulfill(status=200, content_type="application/json", body=json.dumps({"id": "m1", "status": "paid"}))
+        route.fulfill(status=200, content_type="application/json", body=json.dumps({"items": money}))
+
+    page.route("**/api/life/money**", money_route)
+    page.goto(_state["base_url"])
+    page.get_by_test_id("nav-people").first.click()
+    page.get_by_test_id("person-c1").click()
+    box = page.get_by_test_id("person-money")
+    expect(box).to_contain_text("Owes you €200.00 · il sito")
+    page.get_by_test_id("money-paid-m1").click()
+    expect(page.get_by_test_id("person-money")).to_have_count(0)
+    assert paid and paid[0].endswith("/api/life/money/m1")
+    page.get_by_test_id("nav-settings").first.click()
+    page.get_by_role("tab", name="General").click()
+    toggle = page.get_by_test_id("voice-barge")
+    expect(toggle).to_be_checked()
+    toggle.uncheck()
+    assert page.evaluate("localStorage.getItem('aether_barge_in')") == "0"
+    page.close()

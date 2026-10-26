@@ -36,7 +36,11 @@ def maybe_send_brief(ws: Any, store: LifeStore, *, now: dt.datetime | None = Non
     if today["empty"]:
         return False
     text = life.brief_text(today, language)
-    ws.notifications.notify(ws.id, "insight", "Oggi" if language.startswith("it") else "Today", text, link_view="home")
+    from aether.life.presence_brief import _greeting
+
+    name = str(cfg.get("user_name") or "").split(" ")[0]
+    title = _greeting(now, not language.startswith("it"), name).rstrip(".")  # "Buongiorno, Matteo"
+    ws.notifications.notify(ws.id, "insight", title, text, link_view="home")
     return True
 
 
@@ -50,6 +54,9 @@ async def brief_loop(app_state: Any, interval: float = 60.0) -> None:
                 from aether.life.promises import watch_tick
 
                 await asyncio.to_thread(watch_tick, ws, life_store_for(ws))  # the daily promise check, only if turned on
+                from aether.life.meeting_prep import tick as prep_tick
+
+                await asyncio.to_thread(prep_tick, ws, life_store_for(ws))  # ten minutes before a meeting with someone Aether knows
         except asyncio.CancelledError:
             raise
         except Exception as exc:  # noqa: BLE001 - a failing brief must never take the server down

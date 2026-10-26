@@ -405,8 +405,17 @@ def _note_sentence(a: dict[str, Any], done: bool) -> str:
     """'Aggiungo Rossi ai clienti e segno «Inviare il preventivo» entro venerdì 24 ottobre' (or the past tense once done)."""
     name, title, kind, due = a.get("contact_name") or "", a.get("title") or "", a.get("kind"), _note_due_label(a)
     parts = []
+    if kind == "money":
+        amount = f"{float(a.get('amount') or 0):,.2f}".replace(",", "X").replace(".", ",").replace("X", ".").removesuffix(",00")
+        money = f"{amount} {'€' if (a.get('currency') or 'EUR') == 'EUR' else a.get('currency')}"
+        what = f" per {title}" if title else ""
+        if a.get("direction") == "owed_to_me":
+            text = f"{'ho segnato' if done else 'segno'} che **{name}** ti deve **{money}**{what}"
+        else:
+            text = f"{'ho segnato' if done else 'segno'} che devi **{money}** a **{name}**{what}"
+        return text[:1].upper() + text[1:]
     if kind == "reminder" and a.get("trigger") == "person":
-        text = f"{'te lo ricorderò' if done else 'te lo ricordo'} quando parlerai di **{name}** o lo vedrai: **{title}**"
+        text = f"{'te lo ricorderò' if done else 'te lo ricordo'} appena si parla di **{name}**: **{title}**"
         return text[:1].upper() + text[1:]
     if name and a.get("contact_new"):
         details = ", ".join(x for x in (a.get("email"), a.get("phone")) if x)
@@ -1345,12 +1354,14 @@ class PersonalAgentService:
             name = routed.get("contact_name") or ""
             existing = life_store_for(self.workspace).find_contact(name) if name and self.workspace is not None else None
             person = routed.get("trigger") == "person"
-            if routed["kind"] == "reminder" and not existing and not person:
+            if routed["kind"] == "reminder" and not existing and not person and routed["kind"] != "money":
                 name = ""  # a reminder links to someone you already have; it never creates a client by itself
             args = {"kind": routed["kind"], "title": routed.get("title") or "", "contact_name": existing["name"] if existing else name,
                     "contact_new": bool(name) and not existing, "due_at": routed.get("due_at"), "due_has_time": bool(routed.get("due_has_time")),
                     "email": routed.get("email") or "", "phone": routed.get("phone") or "",
                     "language": "en" if looks_english(prompt) else "it", "trigger": "person" if person else ""}
+            if routed["kind"] == "money":
+                args.update(amount=routed["amount"], direction=routed["direction"], currency=routed["currency"])
             if args["kind"] == "contact" and existing:
                 return UserIntent(raw_prompt=prompt, tier=IntentTier.ANSWER, summary="Contact already saved", action_id="calendar.explain",
                                   intent_type="query", action_args={"message": f"**{existing['name']}** è già tra le tue persone: lo trovi in Persone e lavori."})
@@ -3184,6 +3195,16 @@ class PersonalAgentService:
                 said = mac_open.handle(prompt, english=_is_en(prompt))
                 if said:
                     intent = self._explain(prompt, said, "Open app or site")
+            if re.search(r"\b(cosa\s+mi\s+sono\s+pers[oa]|che\s+mi\s+sono\s+pers[oa]|novit[aà]\s+(?:da|mentre)|what\s+did\s+i\s+miss|catch\s+me\s+up)\b", prompt, re.I):
+                from aether.core.language import looks_english as _is_en
+                from aether.life import catchup
+                from aether.life.store import life_store_for
+
+                try:
+                    _cu = catchup.for_workspace(self.workspace, life_store_for(self.workspace), language="en" if _is_en(prompt) else "it")
+                    intent = self._explain(prompt, _cu["text"], "Catch-up")
+                except Exception:  # noqa: BLE001 - falls back to a normal answer
+                    logger.debug("catch-up failed", exc_info=True)
             from aether.life import weather
 
             if intent.tier == IntentTier.ANSWER and not intent.action_id and weather.asks_weather(prompt) and len(prompt) < 120:
@@ -4278,10 +4299,12 @@ class PersonalAgentService:
         if authority is None and msg_metadata.get("status") != "proposal_pending":
             try:
                 from aether.core.language import looks_english as _is_en
-                from aether.life.person_reminders import surface_in_chat
+                from aether.life.person_reminders import surface_in_chat, touch_mentioned
                 from aether.life.store import life_store_for
 
-                _note = surface_in_chat(life_store_for(self.workspace), prompt, english=_is_en(prompt))
+                _ls = life_store_for(self.workspace)
+                touch_mentioned(_ls, prompt)
+                _note = surface_in_chat(_ls, prompt, english=_is_en(prompt))
                 if _note:
                     response_text = f"{response_text}\n\n{_note}" if response_text else _note
                     msg_metadata["person_reminders"] = True

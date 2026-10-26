@@ -78,6 +78,7 @@ def test_deliver_desktop_with_event_hub_bypasses_osascript(temp_store):
     assert "Event Hub" in detail
 
 
+@patch.dict("os.environ", {"AETHER_DEV_OSASCRIPT_NOTIFICATIONS": "1"})  # the opt-in AppleScript fallback (subprocess is mocked)
 def test_deliver_desktop_headless_macos_uses_system_events(temp_store):
     """
     In headless macOS fallback (event_hub is None), AppleScript must explicitly target
@@ -173,6 +174,7 @@ def test_notification_service_emits_navigation_target_payload(temp_store):
     assert data["action_payload"]["action_id"] == "act-99"
 
 
+@patch.dict("os.environ", {"AETHER_DEV_OSASCRIPT_NOTIFICATIONS": "1"})  # the opt-in AppleScript fallback (subprocess is mocked)
 def test_desktop_notification_sound_disabled(temp_store):
     """
     When sound_enabled is False, no sound option should be included.

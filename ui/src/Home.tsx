@@ -5,7 +5,7 @@ import './home.css';
 import './chat/chat.css';
 import { apiUrl } from './api';
 import { speak, speakVoiceAnswersEnabled, stopSpeaking } from './voiceOut';
-import { canListen, createListener, type Listener } from './voice/voiceIO';
+import { canListen, createListener, type Listener, onBargeIn } from './voice/voiceIO';
 import { greetAloudEnabled } from './voice/greet';
 
 type BriefOffer = { type: string; promise_id?: string; prompt?: string; view?: string };
@@ -273,6 +273,18 @@ export function Home({
     }
   };
 
+  // talking over Aether stops it and starts listening (see voice/voiceIO barge-in)
+  const bargeRef = useRef<() => void>(() => undefined);
+  bargeRef.current = () => {
+    setIsSpeaking(false);
+    setSpeakingMessageId(null);
+    if (!isListening) toggleListening();
+  };
+  useEffect(() => {
+    onBargeIn(() => bargeRef.current());
+    return () => onBargeIn(null);
+  }, []);
+
   const handleSpeakText = (msgId: string, text: string) => {
     if (isSpeaking && speakingMessageId === msgId) {
       stopSpeaking();
@@ -326,6 +338,29 @@ export function Home({
       })
       .catch(() => undefined);
     return () => { alive = false; };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [view, language, welcomeOpen]);
+
+  // back after a few hours: "while you were away…" (unless the brief of the day is already speaking)
+  useEffect(() => {
+    if (view !== 'presence' || welcomeOpen) return;
+    let alive = true;
+    const seen = async (allowCatchup: boolean) => {
+      if (document.visibilityState !== 'visible') return;
+      const r = await fetch(apiUrl('/api/presence/seen'), { method: 'POST' }).then(x => (x.ok ? x.json() : null)).catch(() => null);
+      if (!alive || !allowCatchup || !r?.show_catchup) return;
+      await new Promise(res => setTimeout(res, 1500));  // let the daily brief win when both are due
+      if (!alive || briefRef.current) return;
+      const d = await fetch(apiUrl(`/api/presence/catchup?language=${encodeURIComponent(language)}`)).then(x => (x.ok ? x.json() : null)).catch(() => null);
+      if (!alive || !d?.changes || briefRef.current) return;
+      setBrief({ body: d.body, offer: null });
+      if (greetAloudEnabled()) speakAloud(d.text);
+    };
+    void seen(true);
+    const tick = window.setInterval(() => void seen(false), 2 * 60 * 1000);
+    const onVisible = () => void seen(true);
+    document.addEventListener('visibilitychange', onVisible);
+    return () => { alive = false; window.clearInterval(tick); document.removeEventListener('visibilitychange', onVisible); };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [view, language, welcomeOpen]);
 

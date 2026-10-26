@@ -331,6 +331,7 @@ def test_osascript_strictly_bypassed_in_app_bundle(temp_store):
 # 9. Headless / Dev Fallback Uses System Events (No Script Editor Trap)
 # ---------------------------------------------------------------------------
 
+@patch.dict("os.environ", {"AETHER_DEV_OSASCRIPT_NOTIFICATIONS": "1"})  # the opt-in AppleScript fallback (subprocess is mocked)
 def test_headless_fallback_explicitly_targets_system_events(temp_store):
     dispatcher = NotificationDispatcher(store=temp_store, event_hub=None)
     channel = NotificationChannel(
@@ -354,6 +355,12 @@ def test_headless_fallback_explicitly_targets_system_events(temp_store):
             mock_proc.returncode = 0
             mock_run.return_value = mock_proc
 
+            status, detail = dispatcher._deliver_desktop(channel, notif)
+            mock_run.assert_not_called()  # off unless asked for: no banner from a script or a test run
+            assert status == DeliveryStatus.SKIPPED
+
+        with patch.dict(os.environ, {"AETHER_DEV_OSASCRIPT_NOTIFICATIONS": "1"}), patch("sys.platform", "darwin"), patch("subprocess.run") as mock_run:
+            mock_run.return_value = MagicMock(returncode=0)
             status, detail = dispatcher._deliver_desktop(channel, notif)
             mock_run.assert_called_once()
             cmd = mock_run.call_args[0][0]

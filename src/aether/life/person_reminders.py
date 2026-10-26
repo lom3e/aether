@@ -34,6 +34,13 @@ def due_in_text(store: Any, text: str) -> list[tuple[dict[str, Any], dict[str, A
     return [(r, c) for r, c in pending(store) if _mentions(text, c)]
 
 
+def touch_mentioned(store: Any, text: str) -> None:
+    """Talking about someone counts as hearing from them (the "you haven't heard from X" nudge waits)."""
+    for c in store.list_contacts():
+        if _mentions(text, c):
+            store.touch_contact(c["id"])
+
+
 def surface_in_chat(store: Any, prompt: str, english: bool = False) -> str:
     """The line appended to Aether's answer when the user mentions someone with a pending reminder; marks them done."""
     hits = due_in_text(store, prompt)

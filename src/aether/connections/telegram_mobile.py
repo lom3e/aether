@@ -191,10 +191,12 @@ class TelegramMobile:
         if text in ("/start", "/help"):
             tg.send_message(chat_id=chat_id, parse_mode="", text=(
                 "Scrivimi o mandami un vocale con quello che ti serve. Le modifiche (calendario, mail, documenti) ti chiedono sempre "
-                "conferma qui.\n/oggi: il riepilogo della giornata."))
+                "conferma qui.\n/oggi: il riepilogo della giornata.\n/sera: chiudi la giornata (e sposta a domani quello che resta)."))
             return {"status": "help"}
         if text.split("@")[0] in ("/oggi", "/today"):
             return self._brief(tg, chat_id, "en" if text.startswith("/today") else "it")
+        if text.split("@")[0] in ("/sera", "/evening"):
+            return self._brief(tg, chat_id, "en" if text.startswith("/evening") else "it", evening=True)
         return self._ask(tg, chat_id, text)
 
     def _voice(self, tg: Any, chat_id: Any, voice: dict[str, Any]) -> dict[str, Any]:
@@ -226,16 +228,23 @@ class TelegramMobile:
         out["heard"] = text
         return out
 
-    def _brief(self, tg: Any, chat_id: Any, language: str = "it") -> dict[str, Any]:
+    def _brief(self, tg: Any, chat_id: Any, language: str = "it", evening: bool = False) -> dict[str, Any]:
         from aether.life import presence_brief
         from aether.life.store import life_store_for
 
-        b = presence_brief.build(self.ws, life_store_for(self.ws), language=language)
+        store = life_store_for(self.ws)
+        b = presence_brief.evening(self.ws, store, language=language) if evening else presence_brief.build(self.ws, store, language=language)
+        if evening and not b.get("text"):
+            b = {"text": "Today there is nothing to close." if language == "en" else "Oggi non c'è niente da chiudere.", "offer": None}
         offer = b.get("offer")
         if not offer:
             tg.send_message(chat_id=chat_id, parse_mode="", text=b["text"])
             return {"status": "brief"}
-        ref = f"{offer['type']}:{offer.get('promise_id') or '-'}"
+        if offer.get("promise_id"):
+            ref = f"{offer['type']}:{offer['promise_id']}"
+        else:  # a money, reconnect or roll-over offer does not fit in Telegram's 64-byte button data: kept here until answered
+            store.update_settings(telegram_offer=offer)
+            ref = f"{offer['type']}:@"
         yes, no = ("Yes", "Not now") if language == "en" else ("Sì", "Non ora")
         tg.send_message(chat_id=chat_id, parse_mode="", text=b["text"], reply_markup={"inline_keyboard": [[
             {"text": yes, "callback_data": f"by:{ref}"}, {"text": no, "callback_data": f"bn:{ref}"}]]})
@@ -341,6 +350,12 @@ class TelegramMobile:
             kind, _, pid = data[3:].partition(":")
             offer = {"type": kind, "promise_id": None if pid == "-" else pid}
             store = life_store_for(self.ws)
+            if pid == "@":
+                offer = dict(store.settings().get("telegram_offer") or {})
+                store.update_settings(telegram_offer={})
+                if offer.get("type") != kind:
+                    tg.send_message(chat_id=chat_id, parse_mode="", text="Questa proposta non è più valida.")
+                    return {"status": "brief_stale"}
             try:
                 if data.startswith("bn:"):
                     presence_brief.decline(store, offer)

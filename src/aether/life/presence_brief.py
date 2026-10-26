@@ -79,12 +79,65 @@ def _offer(store: LifeStore, now: dt.datetime, en: bool, gmail_connected: bool) 
             line = (f"{who} asked you: “{r['title']}”." if r["kind"] == "they_asked" else f"You promised {who}: “{r['title']}”.") if en else \
                    (f"{who} ti ha chiesto: «{r['title']}»." if r["kind"] == "they_asked" else f"Hai promesso a {who}: «{r['title']}».")
             return (line + (" Shall I add it to your jobs?" if en else " Lo segno tra i lavori?"), {"type": "track", "promise_id": r["id"]})
+    money = _money_offer(store, now, en)
+    if money:
+        return money
+    reconnect = _reconnect_offer(store, now, en)
+    if reconnect:
+        return reconnect
     cfg = store.settings()
     if gmail_connected and not cfg.get("promise_watch") and not cfg.get("promise_watch_offered"):
         return (("Want me to check your mail every day for promises, yours and other people's, so nothing slips?" if en else
                  "Vuoi che ogni giorno controlli da solo le promesse nelle mail, le tue e quelle degli altri, così non ne sfugge nessuna?"),
                 {"type": "watch_on"})
     return "", None
+
+
+MONEY_NUDGE_DAYS = 7
+RECONNECT_DAYS = 21
+
+
+def money_label(amount: float, currency: str = "EUR") -> str:
+    n = f"{float(amount):,.2f}".replace(",", "X").replace(".", ",").replace("X", ".").removesuffix(",00")
+    return f"{n} €" if (currency or "EUR") == "EUR" else f"{n} {currency}"
+
+
+def _money_offer(store: LifeStore, now: dt.datetime, en: bool) -> tuple[str, dict[str, Any] | None] | None:
+    """Someone has owed you money for a week (and Aether has not asked about it this week): a polite reminder, written for you."""
+    people = {c["id"]: c for c in store.list_contacts()}
+    week = MONEY_NUDGE_DAYS * 86400
+    for m in store.list_money(status="open"):
+        if m["direction"] != "owed_to_me" or now.timestamp() - m["created_at"] < week or (m.get("nudged_at") and now.timestamp() - m["nudged_at"] < week):
+            continue
+        who = people.get(m["contact_id"], {}).get("name") or ("someone" if en else "qualcuno")
+        days = int((now.timestamp() - m["created_at"]) // 86400)
+        amount, what = money_label(m["amount"], m["currency"]), m.get("what") or ""
+        prompt = (f"Write {who} a short, kind reminder about the {amount}" + (f" for {what}" if what else "") + " they owe me." if en else
+                  f"Scrivi a {who} un sollecito breve e gentile per i {amount}" + (f" di {what}" if what else "") + " che mi deve.")
+        return ((f"{who} has owed you {amount} for {days} days. Shall I write a kind reminder?" if en else
+                 f"{who} ti deve {amount} da {days} giorni. Vuoi che prepari un sollecito gentile?"),
+                {"type": "money_nudge", "money_id": m["id"], "prompt": prompt})
+    return None
+
+
+def _reconnect_offer(store: LifeStore, now: dt.datetime, en: bool) -> tuple[str, dict[str, Any] | None] | None:
+    """A client you worked with and have not heard of for three weeks: two lines to keep the relationship warm."""
+    asked = dict(store.settings().get("reconnect_offered") or {})
+    worked = {j["contact_id"] for j in store.list_jobs() if j.get("contact_id")}
+    for c in sorted(store.list_contacts(), key=lambda c: c.get("last_seen_at") or 0):
+        seen = c.get("last_seen_at") or c.get("created_at") or 0
+        if c.get("kind") != "client" or c["id"] not in worked or now.timestamp() - seen < RECONNECT_DAYS * 86400:
+            continue
+        if now.timestamp() - float(asked.get(c["id"], 0)) < 30 * 86400:
+            continue
+        weeks = int((now.timestamp() - seen) // (7 * 86400))
+        first = c["name"].split()[0]
+        prompt = (f"Write {c['name']} two warm, short lines to hear how things are going (no sales pitch)." if en else
+                  f"Scrivi a {c['name']} due righe calde e brevi per sentire come va (niente tono commerciale).")
+        return ((f"You haven't heard from {first} in {weeks} weeks. Shall I write two lines to see how it's going?" if en else
+                 f"Non senti {first} da {weeks} settimane. Le scrivo due righe per sentire come va?"),
+                {"type": "reconnect", "contact_id": c["id"], "prompt": prompt})
+    return None
 
 
 def _has_model(ws: Any) -> bool:
@@ -196,6 +249,8 @@ def evening(ws: Any, store: LifeStore, *, language: str = "it", now: dt.datetime
     if done:
         parts.append(f"Today you closed {done} thing{'s' if done > 1 else ''}." if en else
                      f"Oggi hai chiuso {done} {'cosa' if done == 1 else 'cose'}.")
+    if now.weekday() == 4:  # Friday evening: the week in two sentences before the usual close
+        parts.extend(_week_lines(store, now, en))
     left = _still_open_today(store, now)
     offer = None
     if left:
@@ -206,11 +261,31 @@ def evening(ws: Any, store: LifeStore, *, language: str = "it", now: dt.datetime
         else:
             parts.append(f"{'Resta aperta una cosa' if len(left) == 1 else f'Restano aperte {len(left)} cose'}: {quoted}. {'La sposto' if len(left) == 1 else 'Le sposto'} a domani?")
         offer = {"type": "roll_over", "items": [[k, x["id"]] for k, x in left[:20]]}
-    elif done:
+    elif done or len(parts) > 1:
         parts.append("Nothing left open: the day is closed." if en else "Non resta niente in sospeso: giornata chiusa.")
     else:  # nothing done and nothing open: no point in talking
         return {"text": "", "body": "", "offer": None, "date": now.strftime("%Y-%m-%d"), "moment": "evening"}
     return {"text": " ".join(parts), "body": " ".join(parts[1:]), "offer": offer, "date": now.strftime("%Y-%m-%d"), "moment": "evening"}
+
+
+def _week_lines(store: LifeStore, now: dt.datetime, en: bool) -> list[str]:
+    """What the week closed, and the first things of next week (by day)."""
+    monday = (now - dt.timedelta(days=now.weekday())).replace(hour=0, minute=0, second=0, microsecond=0).timestamp()
+    closed = sum(1 for j in store.list_jobs(status="done") if (j.get("done_at") or 0) >= monday)
+    closed += sum(1 for r in store.list_reminders(include_done=True) if r["done"] and (r.get("done_at") or 0) >= monday)
+    next_mon = monday + 7 * 86400
+    ahead = [(x["due_at"], str(x.get("title") or x.get("text"))) for x in store.list_jobs(status="open") + store.list_reminders()
+             if x.get("due_at") and next_mon <= x["due_at"] < next_mon + 7 * 86400]
+    ahead.sort()
+    out = []
+    if closed:
+        out.append(f"This week you closed {closed} thing{'s' if closed > 1 else ''}." if en else
+                   f"Questa settimana hai chiuso {closed} {'cosa' if closed == 1 else 'cose'}.")
+    if ahead:
+        days = [(_day(ts, now, en), t) for ts, t in ahead[:3]]
+        listed = "; ".join(f"{d} {t}" if en else f"{d} «{t}»" for d, t in days)
+        out.append(f"Next week: {listed}." if en else f"La settimana prossima: {listed}.")
+    return out
 
 
 def roll_over(store: LifeStore, items: list[Any], now: dt.datetime | None = None) -> int:
@@ -236,6 +311,12 @@ def accept(ws: Any, store: LifeStore, offer: dict[str, Any], *, language: str = 
     """Runs an offer the user said yes to. `ask` offers are run by the app as a normal request (with its own confirmation)."""
     en = str(language).lower().startswith("en")
     kind = offer.get("type")
+    if kind == "money_nudge":
+        store.mark_money_nudged(str(offer.get("money_id") or ""))
+        return {"text": "", "prompt": offer.get("prompt") or ""}
+    if kind == "reconnect":
+        _mark_reconnect(store, str(offer.get("contact_id") or ""))
+        return {"text": "", "prompt": offer.get("prompt") or ""}
     if kind == "roll_over":
         n = roll_over(store, list(offer.get("items") or []))
         return {"text": ("Done: moved to tomorrow. Have a good evening." if en else "Fatto: spostate a domani. Buona serata.") if n else
@@ -274,12 +355,24 @@ def accept(ws: Any, store: LifeStore, offer: dict[str, Any], *, language: str = 
     raise ValueError("unknown offer")
 
 
+def _mark_reconnect(store: LifeStore, contact_id: str) -> None:
+    asked = dict(store.settings().get("reconnect_offered") or {})
+    asked[contact_id] = dt.datetime.now().timestamp()
+    store.update_settings(reconnect_offered=asked)
+
+
 def decline(store: LifeStore, offer: dict[str, Any]) -> None:
     """'No' to an offer: it is not asked again (a promise you said no to stays visible in the panel)."""
     if offer.get("type") == "watch_on":
         store.update_settings(promise_watch_offered=True)
         return
     if offer.get("type") == "roll_over":  # nothing to remember: they stay where they are
+        return
+    if offer.get("type") == "money_nudge":
+        store.mark_money_nudged(str(offer.get("money_id") or ""))
+        return
+    if offer.get("type") == "reconnect":
+        _mark_reconnect(store, str(offer.get("contact_id") or ""))
         return
     p = store.get_promise(str(offer.get("promise_id") or ""))
     if p and p["status"] == "new":

@@ -66,6 +66,16 @@ def user_context(ws: Any, *, now: dt.datetime | None = None, language: str = "it
         extra = ", ".join(x for x in (c.get("company") or "", c.get("email") or "", c.get("phone") or "", (c.get("notes") or "")[:120]) if x)
         owed = [j["title"] for j in jobs if j.get("contact_id") == c["id"]][:3]
         rec.append(f"- {c['name']} ({c.get('kind') or 'person'})" + (f": {extra}" if extra else "") + (f"; open jobs: {', '.join(owed)}" if owed else ""))
+    money = store.list_money(status="open")
+    if money:
+        from aether.life.presence_brief import money_label
+
+        rec.append("Money (open):")
+        for m in money[:10]:
+            who = by_id.get(m["contact_id"], "?")
+            what = f" for {m['what']}" if m.get("what") else ""
+            rec.append(f"- {who} owes the user {money_label(m['amount'], m['currency'])}{what}" if m["direction"] == "owed_to_me" else
+                       f"- the user owes {who} {money_label(m['amount'], m['currency'])}{what}")
     linked = connected_services(ws)
     rec.append("Connected services: " + (", ".join(linked) if linked else "none (calendar and mail are not readable until the user connects them in Collegamenti)"))
     return "\n".join(lines + ["\n".join(rec)])

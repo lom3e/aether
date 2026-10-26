@@ -766,6 +766,9 @@ class GoogleCalendarConnector(BaseConnector):
                 "location": ev.get("location", ""),
                 "status": ev.get("status", "confirmed"),
                 "html_link": ev.get("htmlLink", ""),
+                # who else is invited (emails and names only): lets Aether prepare you for a meeting with someone it knows
+                "attendees": [{"email": a.get("email", ""), "name": a.get("displayName", "")}
+                              for a in (ev.get("attendees") or []) if not a.get("self") and not a.get("resource")][:20],
             }
             for ev in items
         ]

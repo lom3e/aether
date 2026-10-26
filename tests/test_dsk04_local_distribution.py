@@ -104,7 +104,7 @@ def test_dsk_04_dmg_mount_structure_and_app():
         subprocess.run(["hdiutil", "detach", str(mount_point)], check=True)
 
 
-def test_dsk_04_install_from_dmg_and_execute(tmp_path):
+def test_dsk_04_install_from_dmg_and_execute(tmp_path, forget_app_copies):
     """
     Simulates mounting the DMG, dragging Aether.app to a target directory,
     unmounting the DMG, and launching the installed app with full data isolation.
@@ -127,6 +127,7 @@ def test_dsk_04_install_from_dmg_and_execute(tmp_path):
     install_dest = tmp_path / "Applications_Test"
     install_dest.mkdir(parents=True, exist_ok=True)
     installed_app = install_dest / "Aether.app"
+    forget_app_copies.append(installed_app)
 
     try:
         # 2. Drag & drop simulation (copy Aether.app from mounted volume)

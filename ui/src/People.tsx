@@ -3,7 +3,7 @@ import { Users } from 'lucide-react';
 import { ToastContext } from './toast';
 import { useTranslation } from './i18n';
 import { TopHeader } from './TopHeader';
-import { fmtDue, lifeApi, type Contact, type Job } from './lifeApi';
+import { fmtDue, lifeApi, type Contact, type Job, type Money } from './lifeApi';
 import './life.css';
 
 /** People & clients with their jobs. Everything is stored locally and mirrored into what Aether remembers; deleting forgets both. */
@@ -12,6 +12,7 @@ export function People() {
   const toast = useContext(ToastContext);
   const [contacts, setContacts] = useState<Contact[]>([]);
   const [jobs, setJobs] = useState<Job[]>([]);
+  const [money, setMoney] = useState<Money[]>([]);
   const [selected, setSelected] = useState<string | null>(null);
   const [draft, setDraft] = useState<Contact | null>(null);
   const [newName, setNewName] = useState('');
@@ -21,15 +22,22 @@ export function People() {
 
   const load = useCallback(async () => {
     try {
-      const [c, j] = await Promise.all([lifeApi.contacts(), lifeApi.jobs()]);
+      const [c, j, m] = await Promise.all([lifeApi.contacts(), lifeApi.jobs(), lifeApi.money().catch(() => [] as Money[])]);
       setContacts(c);
       setJobs(j);
+      setMoney(m);
     } catch { /* the list stays as it was */ }
   }, []);
   useEffect(() => { void load(); }, [load]);
   useEffect(() => { setDraft(contacts.find(c => c.id === selected) ?? null); }, [selected, contacts]);
 
   const mine = jobs.filter(j => j.contact_id === selected);
+  const mineMoney = money.filter(m => m.contact_id === selected);
+  const amount = (m: Money) => new Intl.NumberFormat(language === 'it' ? 'it-IT' : 'en-US', { style: 'currency', currency: m.currency || 'EUR', maximumFractionDigits: 2 }).format(m.amount);
+  const paid = async (m: Money) => {
+    await lifeApi.setMoney(m.id, 'paid').catch(() => toast(t('lifeSaveFailed'), 'error'));
+    void load();
+  };
   const openCount = (id: string) => jobs.filter(j => j.contact_id === id && j.status === 'open').length;
 
   const addContact = async () => {
@@ -135,6 +143,20 @@ export function People() {
                   </li>
                 ))}
               </ul>
+              {mineMoney.length > 0 && (
+                <>
+                  <h3 style={{ fontSize: 13, fontWeight: 500, color: 'hsl(var(--muted-fg))' }}>{t('peopleMoney')}</h3>
+                  <ul className="life-list" data-testid="person-money">
+                    {mineMoney.map(m => (
+                      <li key={m.id}>
+                        <span className="life-main">{m.direction === 'owed_to_me' ? t('peopleOwesYou', { amount: amount(m) }) : t('peopleYouOwe', { amount: amount(m) })}{m.what ? ` · ${m.what}` : ''}</span>
+                        <time>{fmtDue(m.created_at, language)}</time>
+                        <button className="life-link" onClick={() => void paid(m)} data-testid={`money-paid-${m.id}`}>{t('peoplePaid')}</button>
+                      </li>
+                    ))}
+                  </ul>
+                </>
+              )}
               <div className="life-capture">
                 <input aria-label={t('peopleJobPlaceholder')} placeholder={t('peopleJobPlaceholder')} value={jobTitle} onChange={e => setJobTitle(e.target.value)} onKeyDown={e => { if (e.key === 'Enter') void addJob(); }} data-testid="person-job-title" />
                 <input type="date" aria-label={t('peopleDue')} value={jobDue} onChange={e => setJobDue(e.target.value)} style={{ flex: '0 0 150px' }} data-testid="person-job-due" />

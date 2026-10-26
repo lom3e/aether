@@ -85,6 +85,18 @@ os.environ.setdefault("AETHER_DISABLE_DEV_WINDOWS_TOAST", "1")
 os.environ.setdefault("AETHER_INSECURE_LOCAL_DEV", "1")
 
 
+@pytest.fixture
+def forget_app_copies():
+    """Copies of Aether.app a test makes register with macOS under Aether's bundle id. Left behind they confuse macOS about which
+    Aether is the real one (notifications came with a blank icon): every path appended here is unregistered at teardown."""
+    paths: list[Path] = []
+    yield paths
+    lsregister = "/System/Library/Frameworks/CoreServices.framework/Frameworks/LaunchServices.framework/Support/lsregister"
+    if sys.platform == "darwin" and os.path.exists(lsregister):
+        for p in paths:
+            subprocess.run([lsregister, "-u", str(p)], capture_output=True, timeout=30, check=False)
+
+
 @pytest.fixture(scope="session", autouse=True)
 def _protect_tracked_static_assets():
     """

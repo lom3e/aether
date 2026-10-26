@@ -18,7 +18,7 @@ MAIL_CHANGES = ("mail_trash", "mail_archive", "mail_mark_read")
 GITHUB_ACTIONS = ("github_repos", "github_issues", "github_pulls", "github_create_issue")
 ACTIONS = ("none", "calendar_list", "calendar_create", "calendar_move", "calendar_delete", "mail_search", "mail_reply", "mail_compose", "mail_send_draft",
            *MAIL_CHANGES, "life_note", *GITHUB_ACTIONS)
-NOTE_KINDS = ("job", "reminder", "contact")
+NOTE_KINDS = ("job", "reminder", "contact", "money")
 
 _SYSTEM = (
     "You map ONE user message to the single calendar, mail or note action it asks for. Reply with one JSON object and nothing else:\n"
@@ -53,6 +53,12 @@ _SYSTEM = (
     "A reminder tied to a PERSON instead of a time ('quando sento Mario ricordami di chiedergli la fattura', 'la prossima volta che "
     "vedo Laura dille del contratto', 'next time I talk to Ann…') -> note_kind=reminder, contact_name=<the person>, trigger=\"person\", "
     "title = what to remember (e.g. 'Chiedergli la fattura'), no due. "
+    "When the message is followed by '[Testo letto dallo schermo]' / '[Text read from the screen]', the user is pointing at what is on "
+    "screen ('ricordami di rispondere a questa', 'segna questo lavoro'): name the item from that text, e.g. 'Rispondere a Mario: "
+    "preventivo sito', and take the person from it; never copy long text into the title. "
+    "Money between the user and someone ('Mario mi deve 200 euro per il sito', 'devo 50 € a Laura', 'Ann owes me $80') -> "
+    "note_kind=money, contact_name, amount (a number), currency (EUR unless said), direction=owed_to_me|i_owe, title = what it is "
+    "for ('il sito') or empty. "
     "Something the user SENT or ASKED and is now waiting for ('ho mandato il preventivo a Mario', 'ho chiesto a Laura il contratto', "
     "'I sent Ann the invoice') -> a follow-up: note_kind=reminder, contact_name=<the person>, title='<person> ha risposto su: <what>?' "
     "(English: 'Did <person> reply about <what>?'), due = 3 working days after today at 09:00. "
@@ -81,9 +87,28 @@ _SIGNAL_RE = re.compile(
 )
 
 
+_MONEY_RE = re.compile(r"(?:\b(?:deve|devo|dobbiamo|debit\w*|credit\w*|soldi|euro|pagat\w*|rimbors\w*|prestat\w*|owes?|owed|paid|lent|dollars?)\b|[€$£]\s?\d|\d\s?[€$£])",
+                       re.IGNORECASE)
+
+
+_REMIND_WHAT_RE = re.compile(r"\b(?:ricordami|ricordamelo|remind\s+me)\s+(?:di\s+|to\s+|che\s+)?(?P<what>.+?)[\s.!]*$", re.IGNORECASE)
+
+
+def _person_reminder_from_text(prompt: str) -> dict[str, Any] | None:
+    pm, wm = _PERSON_TRIGGER_RE.search(prompt or ""), _REMIND_WHAT_RE.search(prompt or "")
+    if not pm or not wm:
+        return None
+    what = wm.group("what").strip()
+    what = re.split(r"\s+(?:quando|la\s+prossima\s+volta|next\s+time|when)\b", what, maxsplit=1, flags=re.IGNORECASE)[0].strip(" ,")
+    if not what:
+        return None
+    return {"action": "life_note", "note_kind": "reminder", "title": what[:1].upper() + what[1:], "contact_name": pm.group("name").strip(),
+            "trigger": "person"}
+
+
 def worth_routing(prompt: str) -> bool:
     """Cheap pre-check so ordinary chat never pays for an extra model call."""
-    return bool(_SIGNAL_RE.search(prompt or ""))
+    return bool(_SIGNAL_RE.search(prompt or "") or _MONEY_RE.search(prompt or ""))
 
 
 def _parse(text: str) -> dict[str, Any] | None:
@@ -129,6 +154,8 @@ def route(prompt: str, *, provider: Any, history: list[Any] | None = None, now: 
     except Exception as exc:  # noqa: BLE001
         return {"action": "none", "reason": type(exc).__name__}
     data = _parse(getattr(resp, "content", "") or "")
+    if (not data or data.get("action") in (None, "none")) and _person_reminder_from_text(prompt):
+        data = _person_reminder_from_text(prompt)  # "la prossima volta che vedo Giulia ricordami di…": clear enough without the model
     if not data or data.get("action") not in ACTIONS or data["action"] == "none":
         return {"action": "none"}
     tz = now.tzinfo
@@ -170,6 +197,17 @@ def route(prompt: str, *, provider: Any, history: list[Any] | None = None, now: 
         if pm and kind in ("reminder", "job"):  # "quando sento Mario…": tied to the person even when the model forgot to say so
             kind, name = "reminder", name or pm.group("name").strip()
             data["trigger"] = "person"
+        if kind == "money":
+            try:
+                amount = round(float(str(data.get("amount") or "0").replace(",", ".")), 2)
+            except ValueError:
+                amount = 0.0
+            direction = str(data.get("direction") or "")
+            if not name or amount <= 0 or direction not in ("owed_to_me", "i_owe"):
+                return {"action": "none", "reason": "incomplete"}
+            return {"action": action, "kind": "money", "title": title, "contact_name": name, "amount": amount, "direction": direction,
+                    "currency": re.sub(r"[^A-Z]", "", str(data.get("currency") or "EUR").upper())[:3] or "EUR",
+                    "due_at": None, "due_has_time": False, "email": "", "phone": "", "trigger": ""}
         if kind not in NOTE_KINDS or (kind == "contact" and not name) or (kind != "contact" and not title):
             return {"action": "none", "reason": "incomplete"}
         due = fix_weekday(prompt, _local(str(data.get("due") or ""), tz), now)

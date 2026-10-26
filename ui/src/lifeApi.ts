@@ -2,6 +2,7 @@ import { apiUrl } from './api';
 
 export interface Contact { id: string; name: string; kind: 'client' | 'person' | 'company'; company: string; email: string; phone: string; notes: string }
 export interface Job { id: string; contact_id: string | null; contact_name?: string | null; title: string; status: 'open' | 'done'; due_at: number | null; notes: string }
+export interface Money { id: string; contact_id: string; direction: 'owed_to_me' | 'i_owe'; amount: number; currency: string; what: string; status: 'open' | 'paid'; created_at: number }
 export interface Reminder { id: string; text: string; due_at: number | null; done: boolean }
 export interface TodayData {
   date: string;
@@ -46,6 +47,8 @@ export const lifeApi = {
   updateJob: (id: string, j: Partial<Job>) => call<Job>(`/api/life/jobs/${encodeURIComponent(id)}`, { method: 'PATCH', body: body(j) }),
   deleteJob: (id: string) => call<{ deleted: boolean }>(`/api/life/jobs/${encodeURIComponent(id)}`, { method: 'DELETE' }),
   addReminder: (r: { text: string; due_at?: number | null; source?: string }) => call<Reminder>('/api/life/reminders', { method: 'POST', body: body(r) }),
+  money: (contactId?: string) => call<{ items: Money[] }>(`/api/life/money${contactId ? `?contact_id=${encodeURIComponent(contactId)}` : ''}`).then(r => r.items),
+  setMoney: (id: string, status: 'open' | 'paid') => call<Money>(`/api/life/money/${encodeURIComponent(id)}`, { method: 'POST', body: body({ status }) }),
   doneReminder: (id: string, done = true) => call<Reminder>(`/api/life/reminders/${encodeURIComponent(id)}/done?done=${done}`, { method: 'POST' }),
 };
 

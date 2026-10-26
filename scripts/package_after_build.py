@@ -50,6 +50,18 @@ def sync_frontend_static_assets() -> int:
     return manifest["file_count"]
 
 
+def forget_intermediate_bundles() -> None:
+    """The build leaves copies of Aether.app (Tauri's own bundle, the DMG staging folder) that macOS registers under Aether's
+    bundle id; with several candidates macOS may show a blank icon on notifications. Only build/Aether.app stays registered."""
+    lsregister = Path("/System/Library/Frameworks/CoreServices.framework/Frameworks/LaunchServices.framework/Support/lsregister")
+    if sys.platform != "darwin" or not lsregister.exists():
+        return
+    for p in (REPO_ROOT / "src-tauri" / "target" / "release" / "bundle" / "macos" / "Aether.app", REPO_ROOT / "build" / "dmg_staging" / "Aether.app"):
+        subprocess.run([str(lsregister), "-u", str(p)], capture_output=True, timeout=30, check=False)
+    if APP_OUTPUT.exists():
+        subprocess.run([str(lsregister), "-f", str(APP_OUTPUT)], capture_output=True, timeout=30, check=False)
+
+
 def run_packaging_pipeline():
     """Executes the desktop app build and DMG distribution pipeline."""
     print("\n--- [PIPELINE] 2. Packaging Desktop Application & macOS DMG ---")
@@ -110,6 +122,8 @@ def run_packaging_pipeline():
             file=sys.stderr,
         )
         sys.exit(1)
+
+    forget_intermediate_bundles()
 
     app_size_mb = sum(
         os.path.getsize(os.path.join(dirpath, f))

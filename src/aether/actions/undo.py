@@ -99,7 +99,7 @@ def describe(ws: Any, execution: Any) -> dict[str, Any]:
     if execution.action_id in LIFE_ACTIONS:
         out_, inp_ = execution.output_data or {}, execution.input_data or {}
         item["title"] = inp_.get("title") or inp_.get("contact_name") or item["title"]
-        if out_.get("job_id") or out_.get("reminder_id") or out_.get("created_contact_id"):
+        if out_.get("job_id") or out_.get("reminder_id") or out_.get("money_id") or out_.get("created_contact_id"):
             item["reversible"], item["kind"] = True, "remove_note"
         else:
             item["reason"] = "missing_backup"
@@ -220,6 +220,8 @@ def _undo_life(ws: Any, execution: Any) -> dict[str, Any]:
     if out.get("job_id") and store.get_job(out["job_id"]):
         life.forget_job(ws, store, out["job_id"])
         removed.append("job")
+    if out.get("money_id") and store.get_money(out["money_id"]):
+        store.delete_money(out["money_id"])
     if out.get("reminder_id") and store.get_reminder(out["reminder_id"]):
         store.delete_reminder(out["reminder_id"])
         removed.append("reminder")

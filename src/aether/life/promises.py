@@ -150,8 +150,9 @@ def watch_tick(ws: Any, store: LifeStore, *, now: float | None = None, language:
     if added:
         en = str(language).startswith("en")
         title = "Promises in your mail" if en else "Promesse nelle mail"
-        body = (f"I found {len(added)} new thing(s) to keep track of." if en else
-                f"Ho trovato {len(added)} cos{'a' if len(added) == 1 else 'e'} da non dimenticare.")
+        first = added[0].get("title") or ""
+        body = ((f"“{first}”" + (f" and {len(added) - 1} more" if len(added) > 1 else "") + ". Open Aether to keep track of it.") if en else
+                (f"«{first}»" + (f" e altre {len(added) - 1}" if len(added) > 1 else "") + ". Apri Aether per tenerne traccia."))
         try:
             ws.notifications.notify(ws.id, "insight", title, body, link_view="home")
         except Exception:  # noqa: BLE001
