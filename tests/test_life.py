@@ -153,7 +153,7 @@ def test_the_morning_brief_is_opt_in_once_a_day_and_silent_when_empty(ws, monkey
     morning = NOW.replace(hour=8, minute=0)
     assert s.settings() == {"brief_enabled": False, "brief_time": "08:30", "last_brief_date": "",
                             "promise_watch": False, "last_promise_scan": 0.0, "promise_watch_offered": False,
-                            "home_city": ""}
+                            "home_city": "", "user_name": ""}
     assert briefing.maybe_send_brief(ws, s, now=NOW) is False and sent == [], "off by default: nothing is ever sent"
     s.update_settings(brief_enabled=True)
     assert briefing.maybe_send_brief(ws, s, now=morning) is False, "not before the chosen time"

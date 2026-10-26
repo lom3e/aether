@@ -19,13 +19,14 @@ export interface PresenceMsg { id: string; role: string; content: string; metada
  */
 export function Presence({
   t, language, messages, busy, listening, transcribing, speaking, input, composer, actions, undoState, needsYou,
-  onUndo, onSpeak, onOpenTranscript, onOpenRewind, onOpenPromises, onAsk, notifications, brief, briefBusy, onBriefAnswer,
+  onUndo, onSpeak, onOpenTranscript, onOpenRewind, onOpenPromises, onAsk, notifications, brief, briefBusy, onBriefAnswer, welcome,
 }: {
   t: T; language: string; messages: PresenceMsg[]; busy: boolean; listening: boolean; transcribing?: boolean; speaking: boolean; input: string;
   composer: ReactNode; actions?: ReactNode; undoState?: 'idle' | 'busy' | 'done'; needsYou: boolean;
   onUndo?: () => void; onSpeak: () => void; onOpenTranscript: () => void; onOpenRewind: () => void; onOpenPromises: () => void; onAsk: (prompt: string) => void;
   notifications: ReactNode;
   brief?: { body: string; offer: { type: string } | null } | null; briefBusy?: boolean; onBriefAnswer?: (answer: 'yes' | 'no') => void;
+  welcome?: ReactNode;
 }) {
   const [today, setToday] = useState<TodayData | null>(null);
   const [copied, setCopied] = useState(false);
@@ -83,7 +84,8 @@ export function Presence({
   };
 
   let caption: ReactNode;
-  if (listening) caption = <p className="pr-live" aria-live="polite">{input || (transcribing ? t('voTranscribing') : t('prListening'))}</p>;
+  if (welcome) caption = welcome;
+  else if (listening) caption = <p className="pr-live" aria-live="polite">{input || (transcribing ? t('voTranscribing') : t('prListening'))}</p>;
   else if (busy) caption = <><p className="pr-said">«{lastUser?.content}»</p><p className="pr-thinking" aria-live="polite">{t('prThinking')}</p></>;
   else if (brief) caption = (
     <div className="pr-brief" data-testid="presence-brief">
@@ -135,7 +137,7 @@ export function Presence({
 
       <div className="pr-center">
         <div className="pr-orbit">
-          {!busy && !listening && (
+          {!busy && !listening && !welcome && (
             <aside className="pr-day" aria-label={t('lifeToday')} data-testid="presence-day">
               {nextEvent && (
                 <button type="button" className="pr-card" onClick={() => onAsk(t('prAskAgenda'))}>
@@ -174,10 +176,12 @@ export function Presence({
         <div className="pr-caption">{caption}</div>
       </div>
 
-      <footer className="pr-bottom">
-        {composer}
-        <p className="pr-hint">{t('prHoldSpace')}</p>
-      </footer>
+      {!welcome && (
+        <footer className="pr-bottom">
+          {composer}
+          <p className="pr-hint">{t('prHoldSpace')}</p>
+        </footer>
+      )}
     </div>
   );
 }

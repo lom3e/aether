@@ -19,7 +19,7 @@ def browser_context(aether_server):
         context = browser.new_context(viewport={"width": 1440, "height": 900}, locale="en-US")
         context.add_init_script("localStorage.setItem('aether_language', 'en');")
         # the daily spoken brief is tested on its own; elsewhere it counts as already given today
-        context.add_init_script("localStorage.setItem('aether_brief_day', new Date().toISOString().slice(0, 10)); localStorage.setItem('aether_met', '1'); localStorage.setItem('aether_greet_aloud', '0');")
+        context.add_init_script("localStorage.setItem('aether_brief_day', new Date().toISOString().slice(0, 10)); localStorage.setItem('aether_evening_day', new Date().toISOString().slice(0, 10)); localStorage.setItem('aether_met', '1'); localStorage.setItem('aether_greet_aloud', '0');")
         if _state["token"]:
             context.add_init_script(f"window.__AETHER_SESSION_TOKEN__ = '{_state['token']}';")
         yield context
@@ -241,4 +241,47 @@ def test_with_nothing_due_today_the_home_says_what_comes_next_and_the_answer_sta
     composer = page.get_by_test_id("presence").locator(".pr-bottom").bounding_box()
     assert greet and composer and greet["y"] + greet["height"] <= composer["y"]
     assert greet["y"] < nxt.bounding_box()["y"]
+    page.close()
+
+
+def test_the_first_minute_is_a_guided_welcome_that_ends_in_a_real_reminder(browser_context):
+    """Voice status (natural voice unavailable here) and the city lookup are mocked; the rest is the real server."""
+    page = browser_context.new_page()
+    page.add_init_script("if (!sessionStorage.getItem('wl_once')) { sessionStorage.setItem('wl_once', '1'); localStorage.removeItem('aether_met'); "
+                         "localStorage.removeItem('aether_onboarded'); localStorage.setItem('aether_home_view', 'presence'); }")
+    page.route("**/api/voice/status*", lambda r: r.fulfill(status=200, content_type="application/json", body=json.dumps(
+        {**_voice_status("unavailable", engine="device")})))
+    sent = {}
+
+    def profile(route):
+        body = json.loads(route.request.post_data or "{}")
+        sent.update(body)
+        out = {"city": "Milano", "weather": "A Milano ci sono 10 gradi, sereno, massima 15."} if body.get("city") else {"name": body.get("name", "")}
+        route.fulfill(status=200, content_type="application/json", body=json.dumps(out))
+
+    page.route("**/api/profile", profile)
+    page.goto(_state["base_url"])
+    wl = page.get_by_test_id("welcome")
+    expect(wl).to_be_visible(timeout=20000)
+    expect(wl).to_have_attribute("data-step", "name")
+    expect(page.locator(".pr-bottom")).to_have_count(0)  # one question, one field: no second composer
+    page.get_by_test_id("welcome-name").fill("Matteo")
+    page.get_by_test_id("welcome-next").click()
+    expect(wl).to_have_attribute("data-step", "city")  # the voice step is skipped: the natural voice cannot run here
+    assert sent.get("name") == "Matteo"
+    page.get_by_test_id("welcome-city").fill("milano")
+    page.get_by_test_id("welcome-next").click()
+    expect(wl).to_have_attribute("data-step", "model")  # no model on the test server
+    page.get_by_test_id("welcome-skip").click()
+    expect(wl).to_have_attribute("data-step", "calendar")
+    page.get_by_test_id("welcome-later").click()
+    expect(wl).to_have_attribute("data-step", "first")
+    page.get_by_test_id("welcome-first").fill("chiamare Laura venerdì per il preventivo")
+    page.get_by_test_id("welcome-next").click()
+    expect(page.get_by_test_id("welcome")).to_have_count(0)
+    expect(page.get_by_test_id("presence")).to_contain_text("Remind me to chiamare Laura venerdì per il preventivo", timeout=15000)
+    assert page.evaluate("localStorage.getItem('aether_onboarded')") == "1"
+    page.reload()
+    expect(page.get_by_test_id("presence")).to_be_visible(timeout=15000)
+    expect(page.get_by_test_id("welcome")).to_have_count(0)  # once is enough
     page.close()

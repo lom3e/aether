@@ -1074,8 +1074,9 @@ class ActionExecutor:
                 existing = store.find_contact(name)
                 if existing:
                     contact_id = existing["id"]
-                elif kind != "reminder":
-                    c = store.add_contact(name, kind=str(inp.get("contact_kind") or "client"), email=str(inp.get("email") or ""), phone=str(inp.get("phone") or ""))
+                elif kind != "reminder" or inp.get("trigger") == "person":
+                    ck = "person" if kind == "reminder" else str(inp.get("contact_kind") or "client")
+                    c = store.add_contact(name, kind=ck, email=str(inp.get("email") or ""), phone=str(inp.get("phone") or ""))
                     life.sync_contact(ws, store, c, lang)
                     contact_id = out["created_contact_id"] = c["id"]
             out["contact_id"] = contact_id
@@ -1084,7 +1085,8 @@ class ActionExecutor:
                 life.sync_job(ws, store, store.get_job(j["id"]) or j, lang)
                 out["job_id"] = j["id"]
             elif kind == "reminder":
-                r = store.add_reminder(title, due_at=due_at, contact_id=contact_id, source="chat")
+                person = inp.get("trigger") == "person" and contact_id
+                r = store.add_reminder(title, due_at=None if person else due_at, contact_id=contact_id, source="person" if person else "chat")
                 out["reminder_id"] = r["id"]
             elif kind != "contact":
                 raise ValueError(f"Unknown note kind: {kind}")

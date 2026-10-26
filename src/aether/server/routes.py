@@ -7442,13 +7442,59 @@ class PresenceOfferPayload(BaseModel):
 
 
 @router.get("/presence/brief")
-async def presence_brief_route(request: Request, language: str = "it", first: bool = False):
+async def presence_brief_route(request: Request, language: str = "it", first: bool = False, moment: str = "morning"):
     """What the orb says when you open Aether: today's facts and at most one question (built locally, no model call).
-    `first`: the very first opening, where it introduces itself instead."""
+    `first`: the very first opening, where it introduces itself instead. `moment=evening`: the close of the day."""
     ws, store = _life(request)
     from aether.life import presence_brief
 
+    if moment == "evening" and not first:
+        return await asyncio.to_thread(presence_brief.evening, ws, store, language=language)
     return await asyncio.to_thread(presence_brief.build, ws, store, language=language, first=first)
+
+
+class ProfilePayload(BaseModel):
+    name: str | None = None
+    city: str | None = None
+    language: str | None = None
+
+
+@router.get("/profile")
+async def profile_get(request: Request):
+    """What Aether calls you and where you live (for the greeting, your mails' signature and the weather)."""
+    _ws, store = _life(request)
+    cfg = store.settings()
+    return {"name": cfg.get("user_name", ""), "city": cfg.get("home_city", "")}
+
+
+@router.post("/profile")
+async def profile_set(request: Request, payload: ProfilePayload):
+    """Name and city from the welcome or Settings. A city is checked on Open-Meteo first; the answer carries the weather there."""
+    ws, store = _life(request)
+    from aether.life import weather
+
+    language = payload.language or "it"
+    out: dict[str, Any] = {}
+    if payload.name is not None:
+        name = " ".join(str(payload.name).split())[:60]
+        store.update_settings(user_name=name)
+        out["name"] = name
+    if payload.city is not None:
+        city = " ".join(str(payload.city).split())[:80]
+        if not city:
+            store.update_settings(home_city="")
+            out["city"] = ""
+        else:
+            try:
+                place = await asyncio.to_thread(weather.locate, city, ws, language)
+            except weather.WeatherError:
+                raise HTTPException(status_code=503, detail={"code": "offline", "message": "The weather service is not reachable."}) from None
+            if not place:
+                raise HTTPException(status_code=422, detail={"code": "unknown_city", "message": f"Unknown city: {city}"})
+            store.update_settings(home_city=place["name"])
+            out["city"] = place["name"]
+            out["weather"] = await asyncio.to_thread(weather.brief_line, ws, store, language)
+    return out
 
 
 @router.post("/presence/offer")

@@ -60,7 +60,7 @@ class LifeStore:
     # -- settings (all opt-in, off by default) ---------------------------------------------------------------
     DEFAULT_SETTINGS = {"brief_enabled": False, "brief_time": "08:30", "last_brief_date": "",
                         "promise_watch": False, "last_promise_scan": 0.0, "promise_watch_offered": False,
-                        "home_city": ""}
+                        "home_city": "", "user_name": ""}
 
     def settings(self) -> dict[str, Any]:
         import json
@@ -279,6 +279,11 @@ class LifeStore:
     def complete_reminder(self, reminder_id: str, done: bool = True) -> dict[str, Any] | None:
         with self._lock, self._conn() as c:
             c.execute("UPDATE reminders SET done=?, done_at=? WHERE id=?", (1 if done else 0, time.time() if done else None, reminder_id))
+        return self.get_reminder(reminder_id)
+
+    def set_reminder_due(self, reminder_id: str, due_at: float | None) -> dict[str, Any] | None:
+        with self._lock, self._conn() as c:
+            c.execute("UPDATE reminders SET due_at=? WHERE id=?", (due_at, reminder_id))
         return self.get_reminder(reminder_id)
 
     def delete_reminder(self, reminder_id: str) -> bool:

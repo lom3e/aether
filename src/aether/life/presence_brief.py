@@ -28,11 +28,13 @@ def _day(ts: float, now: dt.datetime, en: bool) -> str:
     return d.strftime("%B %-d") if en else f"il {d.day} {_MONTHS_IT[d.month - 1]}"
 
 
-def _greeting(now: dt.datetime, en: bool) -> str:
+def _greeting(now: dt.datetime, en: bool, name: str = "") -> str:
     h = now.hour
     if en:
-        return "Good morning." if 5 <= h < 13 else "Good afternoon." if h < 18 else "Good evening."
-    return "Buongiorno." if 5 <= h < 13 else "Buon pomeriggio." if h < 18 else "Buonasera."
+        word = "Good morning" if 5 <= h < 13 else "Good afternoon" if h < 18 else "Good evening"
+    else:
+        word = "Buongiorno" if 5 <= h < 13 else "Buon pomeriggio" if h < 18 else "Buonasera"
+    return f"{word}, {name}." if name else f"{word}."
 
 
 def ask_prompt(p: dict[str, Any], en: bool) -> str:
@@ -131,7 +133,7 @@ def build(ws: Any, store: LifeStore, *, language: str = "it", now: dt.datetime |
     if events is None:
         events, _ = life.fetch_events(ws, now) if ws is not None else ([], "")
     today = life.build_today(store, now=now, events=events)
-    parts = [_greeting(now, en)]
+    parts = [_greeting(now, en, str((store.settings() or {}).get("user_name") or "").split(" ")[0])]
     upcoming = [e for e in today["events"] if e.get("all_day") or e["start"] >= now.timestamp() - 600]
     if upcoming:
         e = upcoming[0]
@@ -148,6 +150,12 @@ def build(ws: Any, store: LifeStore, *, language: str = "it", now: dt.datetime |
             parts.append(f"“{first}” is late." if len(overdue) == 1 else f"{len(overdue)} things are late, starting with “{first}”.")
         else:
             parts.append(f"«{first}» è in ritardo." if len(overdue) == 1 else f"Hai {len(overdue)} cose in ritardo, la prima è «{first}».")
+    from aether.life.person_reminders import for_events
+
+    for r, c, ev in for_events(store, upcoming)[:2]:  # "Alle 15:00 vedi Mario: chiedergli la fattura."
+        at = "" if ev.get("all_day") else dt.datetime.fromtimestamp(ev["start"]).strftime("%H:%M")
+        parts.append((f"At {at} you see {c['name']}: remember “{r['text']}”." if at else f"Today you see {c['name']}: remember “{r['text']}”.") if en else
+                     (f"Alle {at} vedi {c['name']}: ricordati «{r['text']}»." if at else f"Oggi vedi {c['name']}: ricordati «{r['text']}»."))
     question, offer = _offer(store, now, en, bool(gmail_connected))
     if question:
         parts.append(question)
@@ -163,10 +171,75 @@ def build(ws: Any, store: LifeStore, *, language: str = "it", now: dt.datetime |
     return {"text": " ".join(parts), "body": " ".join(parts[1:]), "offer": offer, "date": now.strftime("%Y-%m-%d")}
 
 
+def _still_open_today(store: LifeStore, now: dt.datetime) -> list[tuple[str, dict[str, Any]]]:
+    """("job"|"reminder", item) due today or earlier and not done (person reminders have no date and never count)."""
+    eod = (now.replace(hour=0, minute=0, second=0, microsecond=0) + dt.timedelta(days=1)).timestamp()
+    jobs = [("job", j) for j in store.list_jobs(status="open") if j["due_at"] and j["due_at"] < eod]
+    rems = [("reminder", r) for r in store.list_reminders() if r["due_at"] and r["due_at"] < eod]
+    return sorted(jobs + rems, key=lambda x: x[1]["due_at"])
+
+
+def _done_today(store: LifeStore, now: dt.datetime) -> int:
+    sod = now.replace(hour=0, minute=0, second=0, microsecond=0).timestamp()
+    jobs = sum(1 for j in store.list_jobs(status="done") if (j.get("done_at") or 0) >= sod)
+    rems = sum(1 for r in store.list_reminders(include_done=True) if r["done"] and (r.get("done_at") or 0) >= sod)
+    return jobs + rems
+
+
+def evening(ws: Any, store: LifeStore, *, language: str = "it", now: dt.datetime | None = None) -> dict[str, Any]:
+    """The close of the day: what got done, what is still open, and one question: move what is left to tomorrow?"""
+    en = str(language).lower().startswith("en")
+    now = (now or dt.datetime.now().astimezone()).astimezone()
+    name = str((store.settings() or {}).get("user_name") or "").split(" ")[0]
+    parts = [_greeting(now, en, name)]
+    done = _done_today(store, now)
+    if done:
+        parts.append(f"Today you closed {done} thing{'s' if done > 1 else ''}." if en else
+                     f"Oggi hai chiuso {done} {'cosa' if done == 1 else 'cose'}.")
+    left = _still_open_today(store, now)
+    offer = None
+    if left:
+        titles = [str(x.get("title") or x.get("text")) for _, x in left[:3]]
+        quoted = ", ".join(f"“{t}”" if en else f"«{t}»" for t in titles) + (" …" if len(left) > 3 else "")
+        if en:
+            parts.append(f"{'One thing is' if len(left) == 1 else f'{len(left)} things are'} still open: {quoted}. Shall I move {'it' if len(left) == 1 else 'them'} to tomorrow?")
+        else:
+            parts.append(f"{'Resta aperta una cosa' if len(left) == 1 else f'Restano aperte {len(left)} cose'}: {quoted}. {'La sposto' if len(left) == 1 else 'Le sposto'} a domani?")
+        offer = {"type": "roll_over", "items": [[k, x["id"]] for k, x in left[:20]]}
+    elif done:
+        parts.append("Nothing left open: the day is closed." if en else "Non resta niente in sospeso: giornata chiusa.")
+    else:  # nothing done and nothing open: no point in talking
+        return {"text": "", "body": "", "offer": None, "date": now.strftime("%Y-%m-%d"), "moment": "evening"}
+    return {"text": " ".join(parts), "body": " ".join(parts[1:]), "offer": offer, "date": now.strftime("%Y-%m-%d"), "moment": "evening"}
+
+
+def roll_over(store: LifeStore, items: list[Any], now: dt.datetime | None = None) -> int:
+    """Moves the given open items to tomorrow, keeping their time of day (a late item without a real time goes to 9:00)."""
+    now = (now or dt.datetime.now().astimezone()).astimezone()
+    tomorrow = (now + dt.timedelta(days=1)).date()
+    moved = 0
+    for kind, item_id in items:
+        item = store.get_job(item_id) if kind == "job" else store.get_reminder(item_id) if kind == "reminder" else None
+        if not item or not item.get("due_at") or (kind == "job" and item["status"] != "open") or (kind == "reminder" and item["done"]):
+            continue
+        old = dt.datetime.fromtimestamp(item["due_at"]).astimezone()
+        new = dt.datetime(tomorrow.year, tomorrow.month, tomorrow.day, old.hour, old.minute).astimezone().timestamp()
+        if kind == "job":
+            store.update_job(item_id, due_at=new)
+        else:
+            store.set_reminder_due(item_id, new)
+        moved += 1
+    return moved
+
+
 def accept(ws: Any, store: LifeStore, offer: dict[str, Any], *, language: str = "it") -> dict[str, Any]:
     """Runs an offer the user said yes to. `ask` offers are run by the app as a normal request (with its own confirmation)."""
     en = str(language).lower().startswith("en")
     kind = offer.get("type")
+    if kind == "roll_over":
+        n = roll_over(store, list(offer.get("items") or []))
+        return {"text": ("Done: moved to tomorrow. Have a good evening." if en else "Fatto: spostate a domani. Buona serata.") if n else
+                ("Nothing left to move." if en else "Non c'era più niente da spostare.")}
     if kind == "watch_on":
         store.update_settings(promise_watch=True, promise_watch_offered=True)
         return {"text": "Done: I'll check your mail for promises every day." if en else "Fatto: controllerò le promesse nelle mail ogni giorno."}
@@ -205,6 +278,8 @@ def decline(store: LifeStore, offer: dict[str, Any]) -> None:
     """'No' to an offer: it is not asked again (a promise you said no to stays visible in the panel)."""
     if offer.get("type") == "watch_on":
         store.update_settings(promise_watch_offered=True)
+        return
+    if offer.get("type") == "roll_over":  # nothing to remember: they stay where they are
         return
     p = store.get_promise(str(offer.get("promise_id") or ""))
     if p and p["status"] == "new":

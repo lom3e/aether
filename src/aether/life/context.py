@@ -48,11 +48,17 @@ def user_context(ws: Any, *, now: dt.datetime | None = None, language: str = "it
            "These are the ONLY saved jobs, reminders and people. Answer questions about the user's week, tasks or clients from "
            "them and the calendar; never present something as saved or scheduled if it is not listed here (offer to save it instead). "
            "When asked who someone is or what you know about the user, answer from these records and the memories above."]
+    name = str((store.settings() or {}).get("user_name") or "").strip()
+    if name:
+        rec.append(f"The user's name: {name} (sign the user's mails with it; never sign as Aether).")
     rec.append("Open jobs:" + ("" if jobs else " none"))
     for j in jobs[:_MAX_JOBS]:
         who = by_id.get(j.get("contact_id") or "", "")
         rec.append(f"- {j['title']}" + (f" — for {who}" if who else "") + (f" — due {_when(j['due_at'], now, False)}" if j["due_at"] else ""))
     rec.append("Reminders:" + ("" if rems else " none"))
+    for r in [x for x in rems if x.get("source") == "person"][:_MAX_REMINDERS]:
+        rec.append(f"- {r['text']} — when {by_id.get(r.get('contact_id') or '', 'that person')} comes up (no date)")
+    rems = [x for x in rems if x.get("source") != "person"]
     for r in rems[:_MAX_REMINDERS]:
         rec.append(f"- {r['text']}" + (f" — {_when(r['due_at'], now)}" if r["due_at"] else ""))
     rec.append("People:" + ("" if people else " none"))

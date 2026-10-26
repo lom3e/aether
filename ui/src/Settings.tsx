@@ -6,6 +6,7 @@ import {
 } from 'lucide-react';
 import { apiError, apiUrl } from './api';
 import { MorningBriefSetting } from './MorningBriefSetting';
+import { ProfileSetting } from './ProfileSetting';
 import { VoiceSetting } from './VoiceSetting';
 import { AdvancedToolsSetting } from './AdvancedToolsSetting';
 import { useTranslation } from './i18n';
@@ -634,6 +635,7 @@ export function Settings({ onWorkspaceSwitched }: SettingsProps) {
       {/* GENERAL TAB */}
       {activeTab === 'general' && (
         <div style={{ display: 'flex', flexDirection: 'column', gap: '20px' }}>
+          <ProfileSetting onReplay={() => window.location.reload()} />
           <VoiceSetting />
           <MorningBriefSetting />
           <AdvancedToolsSetting />

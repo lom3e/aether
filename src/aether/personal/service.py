@@ -405,6 +405,9 @@ def _note_sentence(a: dict[str, Any], done: bool) -> str:
     """'Aggiungo Rossi ai clienti e segno «Inviare il preventivo» entro venerdì 24 ottobre' (or the past tense once done)."""
     name, title, kind, due = a.get("contact_name") or "", a.get("title") or "", a.get("kind"), _note_due_label(a)
     parts = []
+    if kind == "reminder" and a.get("trigger") == "person":
+        text = f"{'te lo ricorderò' if done else 'te lo ricordo'} quando parlerai di **{name}** o lo vedrai: **{title}**"
+        return text[:1].upper() + text[1:]
     if name and a.get("contact_new"):
         details = ", ".join(x for x in (a.get("email"), a.get("phone")) if x)
         parts.append(f"{'ho aggiunto' if done else 'aggiungo'} **{name}** ai clienti" + (f" ({details})" if details else ""))
@@ -1341,12 +1344,13 @@ class PersonalAgentService:
 
             name = routed.get("contact_name") or ""
             existing = life_store_for(self.workspace).find_contact(name) if name and self.workspace is not None else None
-            if routed["kind"] == "reminder" and not existing:
+            person = routed.get("trigger") == "person"
+            if routed["kind"] == "reminder" and not existing and not person:
                 name = ""  # a reminder links to someone you already have; it never creates a client by itself
             args = {"kind": routed["kind"], "title": routed.get("title") or "", "contact_name": existing["name"] if existing else name,
                     "contact_new": bool(name) and not existing, "due_at": routed.get("due_at"), "due_has_time": bool(routed.get("due_has_time")),
                     "email": routed.get("email") or "", "phone": routed.get("phone") or "",
-                    "language": "en" if looks_english(prompt) else "it"}
+                    "language": "en" if looks_english(prompt) else "it", "trigger": "person" if person else ""}
             if args["kind"] == "contact" and existing:
                 return UserIntent(raw_prompt=prompt, tier=IntentTier.ANSWER, summary="Contact already saved", action_id="calendar.explain",
                                   intent_type="query", action_args={"message": f"**{existing['name']}** è già tra le tue persone: lo trovi in Persone e lavori."})
@@ -3022,6 +3026,36 @@ class PersonalAgentService:
     _NO_RE = re.compile(r"\s*(?:no+|nope|annulla|lascia\s+(?:stare|perdere)|non\s+(?:farlo|ora|adesso|serve)|stop|cancel(?:la)?|no\s+grazie|"
                         r"no,?\s+(?:lascia\s+stare|grazie)|never\s*mind)[\s!.]*", re.I)
 
+    _UNDO_RE = re.compile(r"\s*(?:annulla(?:lo|la|le|li)?|torna\s+indietro|disfa(?:lo)?|ripristina|rimetti\s+(?:com'era|come\s+prima)|"
+                          r"undo(?:\s+(?:it|that))?|take\s+it\s+back)(?:\s+(?:per\s+favore|please|l'ultima\s+cosa|quello))?[\s!.]*", re.I)
+
+    def _undo_by_voice(self, workspace_id: str, session_id: str, prompt: str, history: list[Any], is_voice: bool) -> "PersonalMessage | None":
+        """"Annulla" right after Aether changed something: the same as its Undo button."""
+        if not self._UNDO_RE.fullmatch(prompt or ""):
+            return None
+        last = next((m for m in reversed(history) if getattr(m, "role", "") == "assistant"), None)
+        eid = ((getattr(last, "metadata", None) or {}).get("undo_execution_id")) if last is not None else None
+        if not eid:
+            return None
+        from aether.actions import undo as undo_mod
+        from aether.core.language import looks_english as _is_en
+
+        en = _is_en(str(getattr(last, "content", "") or ""))
+        try:
+            undo_mod.undo(self.workspace, eid)
+            text, meta = ("Undone: it is back as it was." if en else "Annullato: è tutto come prima."), {"status": "undone", "undone_execution_id": eid}
+        except undo_mod.UndoError as exc:
+            text = ("That can't be undone anymore." if en else "Questo non si può più annullare.") + (f" ({exc})" if str(exc) else "")
+            meta = {"status": "undo_failed"}
+        now_iso = datetime.now(timezone.utc).isoformat()
+        self.store.add_message(PersonalMessage(id=f"msg-{uuid.uuid4().hex[:12]}", session_id=session_id, workspace_id=workspace_id, role="user",
+                                               content=prompt, metadata={"is_voice": is_voice}, created_at=now_iso))
+        reply = PersonalMessage(id=f"msg-{uuid.uuid4().hex[:12]}", session_id=session_id, workspace_id=workspace_id, role="assistant",
+                                content=text, tier=IntentTier.ANSWER, metadata=meta, created_at=datetime.now(timezone.utc).isoformat())
+        self.store.add_message(reply)
+        self.event_hub.publish(workspace_id=workspace_id, event_type="assistant_message", data=reply.to_dict())
+        return reply
+
     def _answer_pending_proposal(self, workspace_id: str, session_id: str, prompt: str, history: list[Any], is_voice: bool,
                                  provider_id: str | None) -> "PersonalMessage | None":
         last = history[-1] if history else None
@@ -3108,6 +3142,9 @@ class PersonalAgentService:
             answered = self._answer_pending_proposal(workspace_id, session_id, prompt, recent_history, is_voice, provider_id)
             if answered is not None:
                 return answered
+            undone = self._undo_by_voice(workspace_id, session_id, prompt, recent_history, is_voice)
+            if undone is not None:
+                return undone
 
         # 3. Record user message
         user_msg = PersonalMessage(
@@ -4236,6 +4273,20 @@ class PersonalAgentService:
                     "Per eseguire direttamente modifiche al codice o avviare una delega con un coding agent, "
                     "specifica l'azione richiesta o autorizza l'esecuzione sul progetto."
                 )
+
+        # "quando sento Mario, ricordami…": the person came up, so the reminder comes back with this answer
+        if authority is None and msg_metadata.get("status") != "proposal_pending":
+            try:
+                from aether.core.language import looks_english as _is_en
+                from aether.life.person_reminders import surface_in_chat
+                from aether.life.store import life_store_for
+
+                _note = surface_in_chat(life_store_for(self.workspace), prompt, english=_is_en(prompt))
+                if _note:
+                    response_text = f"{response_text}\n\n{_note}" if response_text else _note
+                    msg_metadata["person_reminders"] = True
+            except Exception:  # noqa: BLE001 - a reminder lookup never breaks the answer
+                logger.debug("person reminders lookup failed", exc_info=True)
 
         # 7. Record assistant message
         msg_metadata["intent_type"] = getattr(intent, "intent_type", "general")

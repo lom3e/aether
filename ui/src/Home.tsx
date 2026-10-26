@@ -18,6 +18,7 @@ import { useTranslation } from './i18n';
 import { ToastContext } from './toast';
 import { AutoArchitectModal } from './AutoArchitectModal';
 import { FirstRunModel } from './FirstRunModel';
+import { Welcome, onboarded } from './presence/Welcome';
 import { Today } from './Today';
 import { NotificationCenter } from './NotificationCenter';
 import { submitApprovalDecision, approvalToastKind, approvalIsFinished, approvalIsInProgress } from './canonicalNotification';
@@ -298,27 +299,35 @@ export function Home({
     setSpeakingMessageId(id);
     speak(text, language, () => { setIsSpeaking(false); setSpeakingMessageId(null); });
   };
+  // the very first time: the guided welcome under the orb instead of the brief
+  const [welcomeOpen, setWelcomeOpen] = useState(() => !onboarded());
   useEffect(() => {
-    if (view !== 'presence') return;
+    if (view !== 'presence' || welcomeOpen) return;
     const day = new Date().toISOString().slice(0, 10);
     let seen = '';
+    let seenEvening = '';
     let met = true;
-    try { seen = localStorage.getItem('aether_brief_day') || ''; met = !!localStorage.getItem('aether_met'); } catch { /* storage unavailable */ }
-    if (seen === day && met) return;
+    try { seen = localStorage.getItem('aether_brief_day') || ''; seenEvening = localStorage.getItem('aether_evening_day') || ''; met = !!localStorage.getItem('aether_met'); } catch { /* storage unavailable */ }
+    // after 18:00 the first opening closes the day (what got done, move what is left to tomorrow) instead of the morning brief
+    const evening = met && new Date().getHours() >= 18 && seenEvening !== day;
+    if (seen === day && met && !evening) return;
     let alive = true;
     // the very first time, the orb introduces itself and shows how to talk to it
-    fetch(apiUrl(`/api/presence/brief?language=${encodeURIComponent(language)}${met ? '' : '&first=1'}`))
+    fetch(apiUrl(`/api/presence/brief?language=${encodeURIComponent(language)}${met ? '' : '&first=1'}${evening ? '&moment=evening' : ''}`))
       .then(r => (r.ok ? r.json() : null))
       .then(d => {
         if (!alive || !d?.text) return;
-        try { localStorage.setItem('aether_brief_day', day); localStorage.setItem('aether_met', '1'); } catch { /* storage unavailable */ }
+        try {
+          localStorage.setItem('aether_brief_day', day); localStorage.setItem('aether_met', '1');
+          if (evening) localStorage.setItem('aether_evening_day', day);
+        } catch { /* storage unavailable */ }
         setBrief({ body: d.body || d.text, offer: d.offer || null });
         if (greetAloudEnabled()) speakAloud(d.text);
       })
       .catch(() => undefined);
     return () => { alive = false; };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [view, language]);
+  }, [view, language, welcomeOpen]);
 
   const answerBrief = async (answer: 'yes' | 'no', spoken = false) => {
     const offer = briefRef.current?.offer;
@@ -814,6 +823,11 @@ export function Home({
           brief={brief}
           briefBusy={briefBusy}
           onBriefAnswer={a => void answerBrief(a)}
+          welcome={welcomeOpen ? (
+            <Welcome t={t} language={language} onSpeaking={setIsSpeaking}
+              onOpenConnections={() => { setWelcomeOpen(false); navigate('connections'); }}
+              onFinish={thing => { setWelcomeOpen(false); if (thing) void handleSendPrompt(thing); }} />
+          ) : undefined}
           notifications={<NotificationCenter workspaceName={workspaceName} onNavigate={navigate} />}
         />
         {rewindOpen && <Rewind t={t} language={language} onClose={() => setRewindOpen(false)} />}
