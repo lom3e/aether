@@ -59,7 +59,7 @@ def test_playwright_missions_e2e_flow(tmp_path, monkeypatch):
         with sync_playwright() as p:
             browser = p.chromium.launch(headless=True)
             context = browser.new_context(locale="en-US")
-            context.add_init_script("localStorage.setItem('aether_home_view', 'transcript');")  # tests target the classic UI
+            context.add_init_script("localStorage.setItem('aether_home_view', 'transcript'); localStorage.setItem('aether_show_advanced', '1');")  # tests target the classic UI
             page = context.new_page()
             page.add_init_script("localStorage.setItem('aether_language', 'en');")
 

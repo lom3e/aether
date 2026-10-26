@@ -137,3 +137,21 @@ def test_the_orb_speaks_first_once_a_day_and_a_short_yes_answers_its_question(br
     page.reload()
     expect(page.get_by_test_id("presence-brief")).to_have_count(0)  # once a day
     page.close()
+
+
+def test_the_sidebar_shows_few_things_and_advanced_tools_only_on_request(browser_context):
+    page = browser_context.new_page()
+    page.goto(_state["base_url"])
+    expect(page.get_by_test_id("presence")).to_be_visible(timeout=20000)
+    for visible in ("nav-home", "nav-people", "nav-connections", "nav-privacy", "nav-settings"):
+        expect(page.get_by_test_id(visible).first).to_be_visible()
+    for hidden in ("nav-missions", "nav-memory", "nav-advanced"):
+        expect(page.get_by_test_id(hidden).first).to_be_hidden()
+    page.get_by_test_id("nav-settings").first.click()
+    page.get_by_role("tab", name="General").click()
+    page.get_by_test_id("advanced-tools-toggle").check()
+    expect(page.get_by_test_id("nav-missions").first).to_be_visible()
+    expect(page.get_by_test_id("nav-advanced")).to_be_visible()
+    page.get_by_test_id("advanced-tools-toggle").uncheck()
+    expect(page.get_by_test_id("nav-advanced")).to_have_count(0)
+    page.close()

@@ -90,6 +90,13 @@ export function Sidebar({
 
   // Projects State
   const [projects, setProjects] = useState<any[]>([]);
+  // Few things, done well: the advanced tools (work queue, memory, system, team projects) appear only when turned on in Settings
+  const [showAdvanced, setShowAdvanced] = useState(() => { try { return localStorage.getItem('aether_show_advanced') === '1'; } catch { return false; } });
+  useEffect(() => {
+    const sync = () => { try { setShowAdvanced(localStorage.getItem('aether_show_advanced') === '1'); } catch { /* storage unavailable */ } };
+    window.addEventListener('aether-advanced-changed', sync);
+    return () => window.removeEventListener('aether-advanced-changed', sync);
+  }, []);
   const [selectedProjectId, setSelectedProjectId] = useState<string | null>(null);
   const [isCreatingProject, setIsCreatingProject] = useState(false);
   const [newProjectName, setNewProjectName] = useState('');
@@ -561,6 +568,7 @@ export function Sidebar({
               </button>
             </Tooltip>
 
+            {showAdvanced && (
             <Tooltip content={t('navWork') || 'Lavori'} position={collapsed ? 'right' : 'top'} disabled={!collapsed}>
               <button
                 data-testid="nav-missions"
@@ -572,7 +580,9 @@ export function Sidebar({
                 {!collapsed && <span>{t('navWork') || 'Lavori'}</span>}
               </button>
             </Tooltip>
+            )}
 
+            {showAdvanced && (
             <Tooltip content={t('navMemoryContext')} position={collapsed ? 'right' : 'top'} disabled={!collapsed}>
               <button
                 data-testid="nav-memory"
@@ -584,6 +594,7 @@ export function Sidebar({
                 {!collapsed && <span>{t('navMemoryContext')}</span>}
               </button>
             </Tooltip>
+            )}
 
             <Tooltip content={t('navPeople')} position={collapsed ? 'right' : 'top'} disabled={!collapsed}>
               <button
@@ -622,8 +633,8 @@ export function Sidebar({
             </Tooltip>
           </div>
 
-          {/* Secondary / System Resources (Collapsible) */}
-          <div style={{ marginTop: '4px' }}>
+          {/* Secondary / System Resources (Collapsible): only when advanced tools are turned on in Settings */}
+          {showAdvanced && (<div style={{ marginTop: '4px' }}>
             {!collapsed ? (
               <button
                 type="button"
@@ -719,9 +730,12 @@ export function Sidebar({
 
               </div>
             )}
+          </div>)}
         {/* Compatibility alias elements for E2E tests */}
         <div style={{ display: 'none' }}>
           <button data-testid="nav-work" onClick={() => onNavigate('missions')}>Work</button>
+          {!showAdvanced && <button data-testid="nav-missions" onClick={() => onNavigate('missions')}>Work</button>}
+          {!showAdvanced && <button data-testid="nav-memory" onClick={() => onNavigate('memory')}>Memory</button>}
           <button data-testid="nav-new-team-chat" onClick={() => onNewConversation()}>Team chat</button>
           <button data-testid="nav-deliverables" onClick={() => onNavigate('results')}>Deliverables</button>
           <button data-testid="nav-agents" onClick={() => onNavigate('agents')}>Agents</button>
@@ -734,9 +748,8 @@ export function Sidebar({
           <button data-testid="nav-proactive" onClick={() => onNavigate('proactive')}>Proactive</button>
           <button data-testid="nav-marketplace" onClick={() => onNavigate('marketplace')}>Marketplace</button>
         </div>
-          </div>
 
-          {advancedOpen && !collapsed && (
+          {showAdvanced && advancedOpen && !collapsed && (
             <div className="sb-team" data-testid="sidebar-team-section">
               <div className="sb-label">{t('chTeamSection')}</div>
           {/* Projects Section */}

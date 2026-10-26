@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
-import { Bell, Camera, ChevronDown, ChevronRight, Copy, Crosshair, ExternalLink, Eye, MoreHorizontal, Mic, Minus, Paperclip, Plus, Send, Square, X } from 'lucide-react';
+import { Bell, Camera, ChevronDown, ChevronRight, Copy, ExternalLink, Eye, MoreHorizontal, Mic, Paperclip, Plus, Send, Square, X } from 'lucide-react';
 import { AetherOrb } from '../orb/AetherOrb';
 import { MarkdownRenderer } from '../MarkdownRenderer';
 import { contextIsEmpty, type AttachedFile, type CompanionRuntime, type DesktopContext, type NotificationsSummary } from './useCompanionRuntime';
@@ -20,14 +20,11 @@ interface Props {
   runtime: CompanionRuntime;
   language: string;
   t: (key: TranslationKey, params?: Record<string, string | number>) => string;
-  follow: boolean;
-  onToggleFollow: () => void;
-  onCollapse: () => void;
   onHide: () => void;
   notify: (message: string, kind: 'success' | 'error' | 'info' | 'warning') => void;
 }
 
-export function CompanionPanel({ runtime, language, t, follow, onToggleFollow, onCollapse, onHide, notify }: Props) {
+export function CompanionPanel({ runtime, language, t, onHide, notify }: Props) {
   const [text, setText] = useState('');
   const [attachments, setAttachments] = useState<AttachedFile[]>([]);
   const [context, setContext] = useState<DesktopContext | null>(null);
@@ -113,7 +110,7 @@ export function CompanionPanel({ runtime, language, t, follow, onToggleFollow, o
       if (e.key === 'Escape') {
         e.preventDefault();
         if (menuOpen) setMenuOpen(false);
-        else onCollapse();
+        else onHide();
       } else if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 'o') {
         e.preventDefault();
         showMainWindow();
@@ -127,7 +124,7 @@ export function CompanionPanel({ runtime, language, t, follow, onToggleFollow, o
     };
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
-  }, [onCollapse, runtime, menuOpen]);
+  }, [onHide, runtime, menuOpen]);
 
   useEffect(() => {
     if (!menuOpen) return;
@@ -286,7 +283,9 @@ export function CompanionPanel({ runtime, language, t, follow, onToggleFollow, o
       >
         {dragging && <div className="cmp-drop" data-testid="companion-drop-overlay">{t('cmpDropHere')}</div>}
         <header className="cmp-head" onMouseDown={dragFromHeader} title={t('cmpDragHint')}>
-          <span className="cmp-dot" data-testid="companion-status-dot" data-busy={status === 'processing' || status === 'listening'} />
+          <span className="cmp-head-orb" data-testid="companion-panel-orb" data-status={status} aria-hidden>
+            <AetherOrb state={orbStateFor(status)} size={30} quality="low" interactive={false} compact followVoice />
+          </span>
           <span className="cmp-title">Aether</span>
           <span className="cmp-status" data-testid="companion-status-label" role="status" aria-live="polite">{t(STATUS_LABEL_KEYS[status])}</span>
           <span className="cmp-spacer" />
@@ -294,11 +293,9 @@ export function CompanionPanel({ runtime, language, t, follow, onToggleFollow, o
           {menuOpen && (
             <div className="cmp-menu" role="menu" data-testid="companion-menu-list">
               <button role="menuitem" onClick={() => { setMenuOpen(false); doNotifications(); }} disabled={busyTool === 'notifications'} data-testid="companion-notifications"><Bell size={15} />{t('cmpNotifications')}</button>
-              <button role="menuitem" aria-pressed={follow} onClick={() => { onToggleFollow(); }} title={t('cmpFollowHint')} data-testid="companion-follow-toggle"><Crosshair size={15} />{follow ? t('cmpFollowOn') : t('cmpFollowOff')}</button>
               <button role="menuitem" onClick={() => { setMenuOpen(false); runtime.newConversation(); }} data-testid="companion-new"><Plus size={15} />{t('cmpNewConversation')}</button>
               <button role="menuitem" onClick={() => { setMenuOpen(false); showMainWindow(); }} data-testid="companion-open-main"><ExternalLink size={15} />{t('cmpOpenWorkspace')}</button>
               <hr />
-              <button role="menuitem" onClick={() => { setMenuOpen(false); onCollapse(); }} data-testid="companion-collapse"><Minus size={15} />{t('cmpCollapse')}</button>
               <button role="menuitem" onClick={() => { setMenuOpen(false); onHide(); }} data-testid="companion-hide"><X size={15} />{t('cmpHide')}</button>
             </div>
           )}

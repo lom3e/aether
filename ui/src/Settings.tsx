@@ -7,6 +7,7 @@ import {
 import { apiError, apiUrl } from './api';
 import { MorningBriefSetting } from './MorningBriefSetting';
 import { VoiceSetting } from './VoiceSetting';
+import { AdvancedToolsSetting } from './AdvancedToolsSetting';
 import { useTranslation } from './i18n';
 import type { TranslationKey } from './i18n';
 import { useTheme } from './theme';
@@ -633,8 +634,9 @@ export function Settings({ onWorkspaceSwitched }: SettingsProps) {
       {/* GENERAL TAB */}
       {activeTab === 'general' && (
         <div style={{ display: 'flex', flexDirection: 'column', gap: '20px' }}>
-          <MorningBriefSetting />
           <VoiceSetting />
+          <MorningBriefSetting />
+          <AdvancedToolsSetting />
           <div className="card" style={{ padding: '24px' }}>
             <h3 style={{ fontSize: '16px', fontWeight: 600, marginBottom: '16px' }}>{t('appearanceAndLanguage')}</h3>
             <div style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>

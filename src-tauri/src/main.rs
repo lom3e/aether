@@ -877,7 +877,7 @@ fn main() {
 
             // 3. System Tray & Menu Setup
             let tray_menu = MenuBuilder::new(app)
-                .item(&MenuItemBuilder::with_id("open_companion", "Open Companion").build(app)?)
+                .item(&MenuItemBuilder::with_id("open_companion", "Ask Aether").build(app)?)
                 .item(&MenuItemBuilder::with_id("open_workspace", "Open Full Workspace").build(app)?)
                 .separator()
                 .item(&MenuItemBuilder::with_id("status", "Status: Ready (idle)").enabled(false).build(app)?)

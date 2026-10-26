@@ -177,7 +177,7 @@ def test_c_close_interception_contract():
     assert "api.prevent_close()" in code
     assert "main_win_clone.hide()" in code
     assert "TrayIconBuilder::new()" in code
-    assert "Open Companion" in code
+    assert "Ask Aether" in code  # the tray opens the quick panel
     assert "Open Full Workspace" in code
 
 
@@ -375,12 +375,12 @@ def test_m_voice_truthfulness():
     repo_root = _get_repo_root()
     hook = (repo_root / "ui" / "src" / "companion" / "useDictation.ts").read_text(encoding="utf-8")
     panel = (repo_root / "ui" / "src" / "companion" / "CompanionPanel.tsx").read_text(encoding="utf-8")
-    assert "SpeechRecognition" in hook
-    assert "rec.onstart = () => cb.current.onListening(true)" in hook   # listening starts only when the engine says so
-    assert "rec.onend" in hook and "rec.onerror" in hook
+    ears = (repo_root / "ui" / "src" / "voice" / "voiceIO.ts").read_text(encoding="utf-8")
+    assert "createListener" in hook and "canListen()" in hook          # the same ears as the main window
+    assert "SpeechRecognition" in ears
+    assert "dict.onstart = () => { on = true; cb.onListening(true); }" in ears  # listening starts only when the engine says so
+    assert "dict.onend" in ears and "dict.onerror" in ears
     assert "dictation.supported &&" in panel                           # no microphone without an engine
-    # No text-to-speech is claimed in this slice
-    assert "speechSynthesis" not in hook and "speechSynthesis" not in panel
 
 
 # ---------------------------------------------------------------------------

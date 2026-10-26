@@ -184,8 +184,8 @@ pub fn set_mode(app: &AppHandle, mode: Mode) {
     notify_mode(&win, mode);
 }
 
-/// Shows the Companion as the expanded panel next to the pointer (quick-ask), or toggles it when already visible:
-/// panel -> orb, orb -> panel.
+/// Shows the quick-ask panel (the mini orb and the conversation), or hides it when it is already visible. There is no
+/// floating orb any more: Aether is the orb in its window, and this one panel when summoned from any app.
 pub fn toggle(app: &AppHandle) {
     let Some(win) = window(app) else { return };
     let visible = win.is_visible().unwrap_or(false);
@@ -204,11 +204,7 @@ pub fn toggle(app: &AppHandle) {
         notify_mode(&win, Mode::Panel);
         return;
     }
-    let current = app
-        .try_state::<CompanionState>()
-        .map(|s| *s.mode.lock().unwrap())
-        .unwrap_or(Mode::Panel);
-    set_mode(app, if current == Mode::Panel { Mode::Orb } else { Mode::Panel });
+    let _ = win.hide();
 }
 
 /// Brings the Companion up as the expanded panel without ever collapsing it (used by "minimize to Companion").
@@ -313,7 +309,7 @@ fn finish_summon(app: &AppHandle, win: &WebviewWindow) {
         notify_summon(win, "release");
     } else if state.was_open.load(Ordering::SeqCst) {
         notify_summon(win, "cancel");
-        set_mode(app, Mode::Orb);
+        let _ = win.hide(); // a tap on an open panel puts it away
     } else {
         notify_summon(win, "tap");
     }

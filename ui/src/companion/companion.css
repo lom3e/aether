@@ -194,3 +194,7 @@ html.cmp-vibrant .cmp-panel { background: hsl(var(--cmp-bg) / .55); box-shadow: 
 .cmp-sight[data-state='hidden'] { color: hsl(var(--cmp-fg)); }
 .cmp-sight[data-state='unchecked'] { color: hsl(var(--cmp-accent)); }
 .cmp-sight span { flex: 1; min-width: 0; }
+
+/* the mini orb at the top of the quick panel: the same Aether as the big one, moving with the voice */
+.cmp-head-orb { position: relative; width: 30px; height: 30px; flex: 0 0 30px; display: inline-grid; place-items: center; margin-right: 2px; overflow: hidden; pointer-events: none; border-radius: 50%; }
+.cmp-head-orb canvas { width: 30px !important; height: 30px !important; }

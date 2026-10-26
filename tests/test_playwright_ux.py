@@ -54,6 +54,7 @@ def test_playwright_workspace_and_conversation_flow(tmp_path, monkeypatch):
         with sync_playwright() as p:
             browser = p.chromium.launch(headless=True)
             page = browser.new_page(locale="en-US")
+            page.add_init_script("localStorage.setItem('aether_show_advanced', '1');")  # team chats live under the advanced tools
 
             # 1. Open UI
             page.goto("http://localhost:8992/?ui=v1")

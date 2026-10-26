@@ -1,7 +1,7 @@
 """
 Companion 2.0 in a real browser against a real Aether server (isolated data dir, no AI provider configured).
 
-The native window behaviour (compact orb, drag, follow) lives in src-tauri/src/companion.rs and is covered by its Rust
+The native window behaviour (the quick panel, drag) lives in src-tauri/src/companion.rs and is covered by its Rust
 unit tests and by the packaged-app smoke test. These tests cover what the webview shows and how it talks to the runtime:
 statuses that follow real runtime facts, the real "no provider" conversation, session continuity with the main Assistant,
 orb <-> panel transitions, approvals/tasks as reported by the overview endpoint, and layout at small sizes.
@@ -126,44 +126,21 @@ def test_conversation_is_shared_with_the_main_assistant_session(browser_context,
     second.close()
 
 
-def test_orb_panel_transitions_and_keyboard(browser_context, workspace_ready):
-    page = _open(browser_context, mode="orb", size=(88, 88))
-    orb = page.get_by_test_id("companion-orb")
-    expect(orb).to_be_visible(timeout=15000)
-    assert orb.get_attribute("data-status") == "available"
-    assert page.locator("canvas").count() == 1, "the orb is the real Aether orb engine"
-    box = orb.bounding_box()
-    assert box and box["width"] <= 88 and box["height"] <= 88
-    page.wait_for_timeout(1500)  # let the particle sphere draw
-    page.screenshot(path=str(SHOTS / "companion2_orb.png"))
-    orb.click()
-    expect(page.get_by_test_id("companion-panel")).to_be_visible()
-    page.set_viewport_size({"width": 408, "height": 604})
+def test_the_quick_panel_is_the_only_companion_with_a_mini_orb(browser_context, workspace_ready):
+    """No floating orb any more: summoned from any app, Aether is one glass panel with the mini orb on top."""
+    page = _open(browser_context, mode="orb")  # an old link asking for the orb still gets the panel
+    expect(page.get_by_test_id("companion-panel")).to_be_visible(timeout=15000)
+    assert page.get_by_test_id("companion-orb").count() == 0
+    mini = page.get_by_test_id("companion-panel-orb")
+    expect(mini).to_have_attribute("data-status", "available")
+    assert mini.locator("canvas").count() == 1, "the mini orb is the real Aether orb engine"
+    page.get_by_test_id("companion-menu").click()
+    items = page.get_by_test_id("companion-menu-list")
+    expect(items).to_be_visible()
+    assert page.get_by_test_id("companion-follow-toggle").count() == 0 and page.get_by_test_id("companion-collapse").count() == 0
+    expect(page.get_by_test_id("companion-hide")).to_be_visible()
     page.keyboard.press("Escape")
-    expect(page.get_by_test_id("companion-orb")).to_be_visible()
-    page.get_by_test_id("companion-orb").press("Enter")
-    expect(page.get_by_test_id("companion-panel")).to_be_visible()
-    _menu(page, "companion-collapse").click()
-    expect(page.get_by_test_id("companion-orb")).to_be_visible()
-    page.close()
-
-
-def test_orb_drag_does_not_open_the_panel(browser_context, workspace_ready):
-    """Regression: mouseup fires before click, so a press that turned into a drag must not be read as a click."""
-    page = _open(browser_context, mode="orb", size=(88, 88))
-    orb = page.get_by_test_id("companion-orb")
-    expect(orb).to_be_visible(timeout=15000)
-    box = orb.bounding_box()
-    x, y = box["x"] + box["width"] / 2, box["y"] + box["height"] / 2
-    page.mouse.move(x, y)
-    page.mouse.down()
-    page.mouse.move(x + 3, y + 1)
-    page.mouse.move(x + 12, y + 8)
-    page.mouse.up()
-    page.wait_for_timeout(400)
-    assert page.get_by_test_id("companion-panel").count() == 0, "a drag must not expand the Companion"
-    orb.click()  # a plain click still opens it
-    expect(page.get_by_test_id("companion-panel")).to_be_visible()
+    expect(items).to_have_count(0)
     page.close()
 
 
@@ -198,13 +175,11 @@ def test_pending_approval_drives_status_badge_and_decision(browser_context, work
     expect(page.get_by_test_id("companion-approvals")).to_have_count(0, timeout=10000)
     assert calls and calls[0].endswith("/api/approvals/exec-1/approve")
     page.close()
-    # the orb shows the same fact as a count badge
+    # the mini orb shows the same fact
     orb = browser_context.new_page()
-    orb.set_viewport_size({"width": 88, "height": 88})
     orb.route("**/api/personal/overview*", lambda r: r.fulfill(status=200, content_type="application/json", body=json.dumps({"pending_approvals": [{"execution_id": "e2", "title": "x"}], "background_tasks": []})))
-    orb.goto(f"{_state['base_url']}/?surface=companion&mode=orb")
-    expect(orb.get_by_test_id("companion-orb")).to_have_attribute("data-status", "awaiting_approval", timeout=15000)
-    expect(orb.get_by_test_id("companion-badge")).to_have_text("1")
+    orb.goto(f"{_state['base_url']}/?surface=companion")
+    expect(orb.get_by_test_id("companion-panel-orb")).to_have_attribute("data-status", "awaiting_approval", timeout=15000)
     orb.close()
 
 
@@ -272,6 +247,7 @@ def test_listening_status_only_when_the_speech_engine_really_started(browser_con
     mic = page.get_by_test_id("companion-mic")
     expect(mic).to_be_visible(timeout=15000)
     mic.click()  # asks the engine to start; it has not reported onstart yet
+    page.wait_for_function("!!window.__speech")  # the engine is picked first (Whisper with a key, else the Mac's dictation)
     expect(page.get_by_test_id("companion-status-label")).to_have_text("Ready")
     page.evaluate("window.__speech.onstart && window.__speech.onstart()")
     expect(page.get_by_test_id("companion-status-label")).to_have_text("Listening")
@@ -299,15 +275,15 @@ def test_orb_gallery_of_real_statuses_at_retina_scale(browser_context, workspace
         if overview is not None:
             body = json.dumps(overview)
             page.route("**/api/personal/overview*", lambda route, _request=None, _body=body: route.fulfill(status=200, content_type="application/json", body=_body))
-        page.goto(f"{_state['base_url']}/?surface=companion&mode=orb")
-        expect(page.get_by_test_id("companion-orb")).to_have_attribute("data-status", name, timeout=15000)
+        page.goto(f"{_state['base_url']}/?surface=companion")
+        expect(page.get_by_test_id("companion-panel-orb")).to_have_attribute("data-status", name, timeout=15000)
         page.wait_for_timeout(1600)
         page.screenshot(path=str(SHOTS / f"companion2_orb_{name}.png"))
         page.close()
     err = ctx.new_page()
     err.route("**/api/workspace", lambda r: r.abort())
-    err.goto(f"{_state['base_url']}/?surface=companion&mode=orb")
-    expect(err.get_by_test_id("companion-orb")).to_have_attribute("data-status", "error", timeout=15000)
+    err.goto(f"{_state['base_url']}/?surface=companion")
+    expect(err.get_by_test_id("companion-panel-orb")).to_have_attribute("data-status", "error", timeout=15000)
     err.wait_for_timeout(1200)
     err.screenshot(path=str(SHOTS / "companion2_orb_error.png"))
     ctx.close()
