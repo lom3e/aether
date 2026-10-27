@@ -136,5 +136,8 @@ def test_a_person_reminder_is_understood_even_when_the_model_says_none():
 
     r = tool_router.route("la prossima volta che vedo Giulia ricordami di chiederle del contratto", provider=Model({"action": "none"}))
     assert (r["action"], r["kind"], r["contact_name"], r["title"], r["trigger"]) == ("life_note", "reminder", "Giulia", "Chiederle del contratto", "person")
+    r3 = tool_router.route("Quando sento Giulia ricordami di chiederle del contratto", provider=Model(
+        {"action": "life_note", "note_kind": "reminder", "title": "Chiederle del contratto", "contact_name": "Giulia"}))
+    assert (r3["trigger"], r3["contact_name"]) == ("person", "Giulia"), "a capital Q is the same sentence"
     r2 = tool_router.route("ricordami di chiedere la fattura quando sento Mario", provider=Model({"action": "none"}))
     assert (r2["contact_name"], r2["title"]) == ("Mario", "Chiedere la fattura")

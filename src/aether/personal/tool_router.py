@@ -70,10 +70,10 @@ _SYSTEM = (
 )
 
 _NOTE_VERB_RE = re.compile(r"\b(ricord\w*|promemoria|segna\w*|annota\w*|aggiung\w*|salva\w*|remind\w*|note|save|add)\b", re.IGNORECASE)
-_PERSON_TRIGGER_RE = re.compile(
-    r"\b(?:quando|la\s+prossima\s+volta\s+che|appena|next\s+time|when(?:ever)?)\s+(?:io\s+|I\s+)?"
+_PERSON_TRIGGER_RE = re.compile(  # the words are case-insensitive ("Quando sento…"), the name must start with a capital
+    r"(?i:\b(?:quando|la\s+prossima\s+volta\s+che|appena|next\s+time|when(?:ever)?)\s+(?:io\s+|I\s+)?"
     r"(?:sento|vedo|incontro|parlo\s+con|chiamo|mi\s+(?:scrive|chiama|sente)|talk\s+to|see|meet|call|hear\s+from|speak\s+(?:to|with))\s+"
-    r"(?:a\s+|ad\s+|con\s+)?(?P<name>[A-ZÀ-Ý][\wÀ-ÿ'’-]+(?:\s+[A-ZÀ-Ý][\wÀ-ÿ'’-]+)?)")
+    r"(?:a\s+|ad\s+|con\s+)?)(?P<name>[A-ZÀ-Ý][\wÀ-ÿ'’-]+(?:\s+[A-ZÀ-Ý][\wÀ-ÿ'’-]+)?)")
 
 _SIGNAL_RE = re.compile(
     r"\b(spost\w*|sposta\w*|mett\w*|aggiung\w*|cre[ai]\w*|fiss\w*|prenot\w*|anticip\w*|posticip\w*|rimand\w*|port\w+l[ao]|"
