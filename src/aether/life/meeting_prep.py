@@ -93,7 +93,9 @@ def tick(ws: Any, store: LifeStore, *, now: dt.datetime | None = None, events: l
     done = dict(store.settings().get("prepped_events") or {})
     sent = []
     for ev in events:
-        st, eid = _start(ev), str(ev.get("id") or f"{ev.get('title')}@{ev.get('start_time')}")
+        st = _start(ev)
+        # the start time is part of the key: a meeting moved to another time is prepared again (Google keeps its id)
+        eid = f"{ev.get('id') or ev.get('title')}@{int(st or 0)}"
         if st is None or eid in done or not (LEAD_MIN <= st - now.timestamp() <= LEAD_MAX):
             continue
         text = brief_for(store, ev, gmail=gmail, language=language)

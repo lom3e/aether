@@ -137,7 +137,7 @@ def test_ten_minutes_before_a_meeting_with_someone_known(tmp_path):
                     "Volevi ricordarti: «Chiedergli la fattura». Ultima mail: «Re: preventivo».")
     sent = []
     ws = SimpleNamespace(id="w", notifications=SimpleNamespace(notify=lambda *a, **k: sent.append(a)))
-    assert meeting_prep.tick(ws, store, now=now, events=[ev], gmail=gmail) == ["ev1"]
+    assert meeting_prep.tick(ws, store, now=now, events=[ev], gmail=gmail) == [f"ev1@{int((now + dt.timedelta(minutes=10)).timestamp())}"]
     assert sent[0][2] == "Tra 10 minuti: Allineamento" and "Mandare il preventivo" in sent[0][3]
     assert meeting_prep.tick(ws, store, now=now + dt.timedelta(minutes=1), events=[ev], gmail=gmail) == [], "once per meeting"
     stranger = {"id": "ev2", "title": "Dentista", "start_time": (now + dt.timedelta(minutes=10)).isoformat()}
@@ -195,7 +195,9 @@ def test_a_meeting_is_prepared_once_the_person_is_saved_even_if_the_first_check_
     assert meeting_prep.tick(ws, store, now=now, events=[ev]) == []
     c = store.add_contact("Mario", kind="client")
     store.add_job("Mandare il preventivo", contact_id=c["id"])
-    assert meeting_prep.tick(ws, store, now=now + dt.timedelta(minutes=1), events=[ev]) == ["ev9"]
+    assert len(meeting_prep.tick(ws, store, now=now + dt.timedelta(minutes=1), events=[ev])) == 1
+    moved = {**ev, "start_time": (now + dt.timedelta(minutes=70)).isoformat()}
+    assert len(meeting_prep.tick(ws, store, now=now + dt.timedelta(minutes=61), events=[moved])) == 1, "moved: prepared again"
 
 
 def test_a_slow_network_is_explained_in_plain_words():
