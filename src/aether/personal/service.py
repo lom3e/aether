@@ -508,7 +508,9 @@ def calendar_done_text(intent: Any, result: dict[str, Any]) -> str:
 def format_mail_response(messages: list[dict[str, Any]] | None, query: str, error: str = "") -> str:
     """Mail listed on this computer: sender, subject, when. The content is not sent to any model to build this answer."""
     if messages is None:
-        return f"Non riesco a leggere la posta adesso ({error or 'errore di collegamento'}). Controlla Gmail in Collegamenti."
+        if re.search(r"timed out|timeout|unreachable|reach google|temporary failure|connection", error or "", re.I):
+            return "Google non risponde in questo momento (la connessione sembra lenta). Riprova tra poco: Gmail è collegato, non serve fare niente."
+        return "Non riesco a leggere la posta adesso. Se continua, ricollega Gmail in Collegamenti."
     if not messages:
         return "Nessuna mail trovata." + (f" (ricerca: `{query}`)" if query and query != "in:inbox" else "")
     lines = []

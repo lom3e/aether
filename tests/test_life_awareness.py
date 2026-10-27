@@ -167,3 +167,39 @@ def test_telegram_closes_the_day_and_the_yes_button_moves_what_is_left(tmp_path,
         assert sent[-1]["text"] == "Questa proposta non è più valida.", "a button works once"
     finally:
         ws.close()
+
+
+def test_money_sentences_are_understood_without_the_model_even_when_it_is_down():
+    from aether.personal import tool_router
+
+    class Down:
+        def generate(self, messages):
+            raise TimeoutError("read timed out")
+
+    r = tool_router.route("Mario mi deve 200 euro per il sito", provider=Down())
+    assert (r["kind"], r["contact_name"], r["amount"], r["direction"], r["title"]) == ("money", "Mario", 200.0, "owed_to_me", "il sito")
+    wrong = Model({"action": "life_note", "note_kind": "reminder", "title": "200 euro per il sito", "contact_name": "Mario"})
+    assert tool_router.route("Mario mi deve 200 euro per il sito", provider=wrong)["kind"] == "money", "the sentence wins over a wrong guess"
+    assert tool_router.route("Mario Rossi mi deve ancora 1.500,50 euro", provider=Down())["amount"] == 1500.5
+    assert tool_router.route("devo 35 € a Laura per la cena", provider=Down())["direction"] == "i_owe"
+    assert tool_router.route("Ann owes me $80", provider=Down())["currency"] == "USD"
+    assert tool_router.route("che tempo fa?", provider=Down())["action"] == "none"
+
+
+def test_a_meeting_is_prepared_once_the_person_is_saved_even_if_the_first_check_found_nobody(tmp_path):
+    store = LifeStore(tmp_path / "life.db")
+    now = dt.datetime(2026, 10, 27, 10, 0).astimezone()
+    ev = {"id": "ev9", "title": "Call con Mario", "start_time": (now + dt.timedelta(minutes=10)).isoformat()}
+    sent = []
+    ws = SimpleNamespace(id="w", notifications=SimpleNamespace(notify=lambda *a, **k: sent.append(a)))
+    assert meeting_prep.tick(ws, store, now=now, events=[ev]) == []
+    c = store.add_contact("Mario", kind="client")
+    store.add_job("Mandare il preventivo", contact_id=c["id"])
+    assert meeting_prep.tick(ws, store, now=now + dt.timedelta(minutes=1), events=[ev]) == ["ev9"]
+
+
+def test_a_slow_network_is_explained_in_plain_words():
+    from aether.personal.service import format_mail_response
+
+    text = format_mail_response(None, "in:inbox", "Failed to reach Google token endpoint during refresh: The read operation timed out")
+    assert text.startswith("Google non risponde in questo momento") and "token" not in text

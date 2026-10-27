@@ -451,8 +451,18 @@ class GoogleCalendarConnector(BaseConnector):
             )
 
         try:
-            with urllib.request.urlopen(req, timeout=10.0) as resp:
-                data = json.loads(resp.read().decode("utf-8"))
+            data = None
+            for attempt in range(3):  # a slow or flaky network (a university Wi-Fi) is retried before giving up
+                try:
+                    with urllib.request.urlopen(req, timeout=15.0) as resp:
+                        data = json.loads(resp.read().decode("utf-8"))
+                    break
+                except urllib.error.HTTPError:
+                    raise
+                except (TimeoutError, OSError, urllib.error.URLError):
+                    if attempt == 2:
+                        raise
+                    time.sleep(1.0 + attempt)
         except urllib.error.HTTPError as exc:
             err_body = exc.read().decode("utf-8", errors="replace")
             # If invalid_grant, token has been revoked by Google

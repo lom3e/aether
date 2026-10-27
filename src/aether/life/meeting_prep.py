@@ -96,9 +96,9 @@ def tick(ws: Any, store: LifeStore, *, now: dt.datetime | None = None, events: l
         if st is None or eid in done or not (LEAD_MIN <= st - now.timestamp() <= LEAD_MAX):
             continue
         text = brief_for(store, ev, gmail=gmail, language=language)
-        done[eid] = now.timestamp()
         if not text:
-            continue
+            continue  # nothing known yet: checked again next minute (you may save the person meanwhile)
+        done[eid] = now.timestamp()
         mins = int(round((st - now.timestamp()) / 60))
         title = f"Tra {mins} minuti: {ev.get('title') or ''}" if language.startswith("it") else f"In {mins} minutes: {ev.get('title') or ''}"
         try:

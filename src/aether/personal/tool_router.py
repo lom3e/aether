@@ -94,6 +94,31 @@ _MONEY_RE = re.compile(r"(?:\b(?:deve|devo|dobbiamo|debit\w*|credit\w*|soldi|eur
 _REMIND_WHAT_RE = re.compile(r"\b(?:ricordami|ricordamelo|remind\s+me)\s+(?:di\s+|to\s+|che\s+)?(?P<what>.+?)[\s.!]*$", re.IGNORECASE)
 
 
+_NAME = r"(?P<name>[A-ZÀ-Ý][\wÀ-ÿ'’-]+(?:\s+[A-ZÀ-Ý][\wÀ-ÿ'’-]+)?)"
+_AMOUNT = (r"(?P<pre>€|\$)?\s*(?P<amount>\d{1,3}(?:\.\d{3})+(?:,\d{1,2})?|\d+(?:[.,]\d{1,2})?)\s*"
+           r"(?P<cur>€|euro|eur|\$|dollari|dollars?|usd)?")
+_WHAT = r"(?:\s+(?:per|di|for)\s+(?P<what>.+?))?[\s.!]*$"
+_MONEY_PATTERNS = (
+    ("owed_to_me", re.compile(rf"^\s*{_NAME}\s+mi\s+deve(?:\s+ancora)?\s+{_AMOUNT}{_WHAT}", re.IGNORECASE)),
+    ("owed_to_me", re.compile(rf"^\s*{_NAME}\s+owes\s+me\s+{_AMOUNT}{_WHAT}", re.IGNORECASE)),
+    ("i_owe", re.compile(rf"^\s*(?:io\s+)?devo(?:\s+ancora)?\s+{_AMOUNT}\s+(?:a|ad)\s+{_NAME}{_WHAT}", re.IGNORECASE)),
+    ("i_owe", re.compile(rf"^\s*I\s+owe\s+{_NAME}\s+{_AMOUNT}{_WHAT}", re.IGNORECASE)),
+)
+
+
+def _money_from_text(prompt: str) -> dict[str, Any] | None:
+    for direction, pat in _MONEY_PATTERNS:
+        m = pat.match(prompt or "")
+        if m and m.group("name").split()[0].lower() not in ("mi", "ti", "gli", "le", "io", "tu", "lui", "lei", "i", "you", "he", "she"):
+            cur = (m.group("cur") or m.group("pre") or "").lower()
+            raw = m.group("amount")
+            amount = raw.replace(".", "").replace(",", ".") if re.search(r"\.\d{3}", raw) else raw.replace(",", ".")  # 1.500,50
+            return {"action": "life_note", "note_kind": "money", "contact_name": m.group("name").strip(), "amount": amount,
+                    "currency": "USD" if cur in ("$", "dollari", "dollar", "dollars", "usd") else "EUR", "direction": direction,
+                    "title": (m.group("what") or "").strip()}
+    return None
+
+
 def _person_reminder_from_text(prompt: str) -> dict[str, Any] | None:
     pm, wm = _PERSON_TRIGGER_RE.search(prompt or ""), _REMIND_WHAT_RE.search(prompt or "")
     if not pm or not wm:
@@ -151,10 +176,15 @@ def route(prompt: str, *, provider: Any, history: list[Any] | None = None, now: 
                 Message(role="system", content=f"{_SYSTEM}\nNOW: {now.strftime('%A %Y-%m-%d %H:%M')} ({now.tzname()})\nDAYS: {days_table(now)}\nRECENT CONVERSATION:\n{recent or '(none)'}"),
                 Message(role="user", content=(prompt or "")[:1500]),
             ])
-    except Exception as exc:  # noqa: BLE001
-        return {"action": "none", "reason": type(exc).__name__}
-    data = _parse(getattr(resp, "content", "") or "")
-    if (not data or data.get("action") in (None, "none")) and _person_reminder_from_text(prompt):
+    except Exception as exc:  # noqa: BLE001 - the model is unreachable: sentences clear enough on their own still work
+        resp = None
+        if not (_money_from_text(prompt) or _person_reminder_from_text(prompt)):
+            return {"action": "none", "reason": type(exc).__name__}
+    data = _parse(getattr(resp, "content", "") or "") if resp is not None else None
+    money = _money_from_text(prompt)
+    if money:  # "Mario mi deve 200 euro": the sentence says it all, whatever the model guessed (it took it for a reminder)
+        data = money
+    elif (not data or data.get("action") in (None, "none")) and _person_reminder_from_text(prompt):
         data = _person_reminder_from_text(prompt)  # "la prossima volta che vedo Giulia ricordami di…": clear enough without the model
     if not data or data.get("action") not in ACTIONS or data["action"] == "none":
         return {"action": "none"}
