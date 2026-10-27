@@ -1,6 +1,6 @@
 {
   "manifest_version": "1.0",
-  "generated_at": "2026-10-27T10:38:58.672313+00:00",
+  "generated_at": "2026-10-27T10:44:06.293993+00:00",
   "source": "ui/dist",
   "target": "src/aether/server/static",
   "file_count": 13,

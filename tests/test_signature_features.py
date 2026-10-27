@@ -153,3 +153,14 @@ def test_a_key_repeated_empty_by_the_model_does_not_erase_its_value():
 
     r = tool_router.route("appena vedo marco ricordami di ridargli il libro", provider=Raw())
     assert (r["title"], r["contact_name"], r["trigger"]) == ("Ridargli il libro", "Marco", "person")
+
+
+def test_a_person_reminder_title_makes_sense_on_its_own():
+    from aether.personal import tool_router
+
+    r = tool_router.route("quando sento giulia ricordami del contratto", provider=Model(
+        {"action": "life_note", "note_kind": "reminder", "title": "Del contratto", "contact_name": "Giulia", "trigger": "person"}))
+    assert r["title"] == "Parlare con Giulia del contratto"
+    ok = tool_router.route("quando sento Giulia ricordami di chiederle del contratto", provider=Model(
+        {"action": "life_note", "note_kind": "reminder", "title": "Chiederle del contratto", "contact_name": "Giulia", "trigger": "person"}))
+    assert ok["title"] == "Chiederle del contratto", "a full sentence is kept as it is"

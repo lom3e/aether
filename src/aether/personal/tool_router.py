@@ -55,7 +55,8 @@ _SYSTEM = (
     "A reminder tied to a PERSON instead of a time, however it is written ('quando sento Mario ricordami di chiedergli la fattura', "
     "'appena vedo giulia ricordami del contratto', 'ricordami di dire a Laura del preventivo la prossima volta che la sento', "
     "'next time I talk to Ann…') -> note_kind=reminder, contact_name=<the person, with a capital letter>, trigger=\"person\", "
-    "title = what to remember (e.g. 'Chiedergli la fattura'), due empty. Think about it: a reminder with no date that waits for a "
+    "title = what to remember as a complete sentence that makes sense alone, read weeks later (e.g. 'Chiedere a Giulia del "
+    "contratto', not 'Del contratto'), due empty. Think about it: a reminder with no date that waits for a "
     "person is a person reminder. "
     "When the message is followed by '[Testo letto dallo schermo]' / '[Text read from the screen]', the user is pointing at what is on "
     "screen ('ricordami di rispondere a questa', 'segna questo lavoro'): name the item from that text, e.g. 'Rispondere a Mario: "
@@ -128,6 +129,25 @@ def _money_from_text(prompt: str) -> dict[str, Any] | None:
                     "currency": "USD" if cur in ("$", "dollari", "dollar", "dollars", "usd") else "EUR", "direction": direction,
                     "title": (m.group("what") or "").strip()}
     return None
+
+
+_FRAGMENT_RE = re.compile(r"^(?:del|della|dello|dei|degli|delle|di|d'|al|alla|allo|ai|alle|sul|sulla|sui|per|il|lo|la|i|gli|le|un|una|"
+                          r"about|of|the|a|an|on|to)\b", re.IGNORECASE)
+
+
+def _complete_title(title: str, prompt: str, name: str) -> str:
+    """A person reminder read weeks later must make sense alone: "Del contratto" (what the model kept of "ricordami del
+    contratto") becomes "Parlare con Giulia del contratto"; a full sentence is left as it is."""
+    t = (title or "").strip().rstrip(".")
+    if not t:
+        wm = _REMIND_WHAT_RE.search(prompt or "")
+        t = (wm.group("what") if wm else "").strip()
+        t = re.split(r"\s+(?:quando|appena|la\s+prossima\s+volta|next\s+time|when)\b", t, maxsplit=1, flags=re.IGNORECASE)[0].strip(" ,")
+    if t and (_FRAGMENT_RE.match(t) or len(t.split()) < 2):
+        en = bool(re.search(r"\b(remind|next time|when|talk)\b", prompt or "", re.IGNORECASE)) and not re.search(r"\bricord", prompt or "", re.I)
+        who = f" {'with' if en else 'con'} {name}" if name else ""
+        t = f"{'Talk' if en else 'Parlare'}{who} {t[:1].lower() + t[1:]}" if not en else f"Talk{who} about {re.sub(r'^(?:about)\s+', '', t, flags=re.I)}"
+    return (t[:1].upper() + t[1:])[:200] if t else t
 
 
 def _person_reminder_from_text(prompt: str) -> dict[str, Any] | None:
@@ -252,6 +272,8 @@ def route(prompt: str, *, provider: Any, history: list[Any] | None = None, now: 
             # even if the model left the trigger out (it decides who; this only checks the sentence has no date)
             kind, name = "reminder", name or pm.group("name").strip().title()
             data["trigger"] = "person"
+        if kind == "reminder" and data.get("trigger") == "person":
+            title = _complete_title(title, prompt, name)
         if kind == "money":
             try:
                 amount = round(float(str(data.get("amount") or "0").replace(",", ".")), 2)
