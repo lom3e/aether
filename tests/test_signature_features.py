@@ -141,3 +141,15 @@ def test_a_person_reminder_is_understood_even_when_the_model_says_none():
     assert (r3["trigger"], r3["contact_name"]) == ("person", "Giulia"), "a capital Q is the same sentence"
     r2 = tool_router.route("ricordami di chiedere la fattura quando sento Mario", provider=Model({"action": "none"}))
     assert (r2["contact_name"], r2["title"]) == ("Mario", "Chiedere la fattura")
+
+
+def test_a_key_repeated_empty_by_the_model_does_not_erase_its_value():
+    from aether.personal import tool_router
+
+    class Raw:
+        def generate(self, messages):
+            return SimpleNamespace(content='{"action":"life_note","note_kind":"reminder","contact_name":"Marco","trigger":"person",'
+                                           '"title":"Ridargli il libro","due":"","title":"","due":""}')
+
+    r = tool_router.route("appena vedo marco ricordami di ridargli il libro", provider=Raw())
+    assert (r["title"], r["contact_name"], r["trigger"]) == ("Ridargli il libro", "Marco", "person")

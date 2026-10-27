@@ -11,7 +11,7 @@ import json
 import re
 from typing import Any
 
-from aether.core.dates import days_table, fix_weekday
+from aether.core.dates import days_table, fix_weekday, said_weekday
 from aether.core.execution import Message
 
 MAIL_CHANGES = ("mail_trash", "mail_archive", "mail_mark_read")
@@ -27,7 +27,9 @@ _SYSTEM = (
     '"repo":"GitHub repository for github_* (name or owner/name)","issue_title":"title for github_create_issue","issue_body":"details for github_create_issue",'
     '"mail_query":"Gmail search selecting exactly the mail meant, e.g. is:unread newer_than:1d, from:rossi, subject:fattura",'
     '"instructions":"for mail_reply/mail_compose: what the email must say, in the user\'s words","to":"email address for mail_compose, only if the user wrote it",'
-    '"note_kind":"job|reminder|contact for life_note","contact_name":"client or person for life_note, empty if none","due":"YYYY-MM-DD or YYYY-MM-DDTHH:MM for life_note, empty if none","email":"only if the user wrote it","phone":"only if the user wrote it",'
+    '"note_kind":"job|reminder|contact|money for life_note","contact_name":"client or person for life_note, empty if none",'
+    '"trigger":"for a reminder: person when it must come back the next time the user talks to / sees / hears from contact_name (no date), time when it has a date or time, empty otherwise",'
+    '"amount":"number for money","currency":"EUR unless said","direction":"owed_to_me or i_owe for money","due":"YYYY-MM-DD or YYYY-MM-DDTHH:MM for life_note, empty if none","email":"only if the user wrote it","phone":"only if the user wrote it",'
     '"title":"event title for create, or the job/reminder title for life_note, empty otherwise","target":"title of the EXISTING event for move/delete, empty otherwise",'
     '"start":"YYYY-MM-DDTHH:MM local time for create, or the new start for move","end":"YYYY-MM-DDTHH:MM or empty",'
     '"range_start":"YYYY-MM-DD for list","range_end":"YYYY-MM-DD for list (inclusive)"}\n'
@@ -50,9 +52,11 @@ _SYSTEM = (
     "For life_note ALWAYS put the client or person in contact_name when the message names one, e.g. 'Rossi vuole il preventivo "
     "entro venerdì' -> {\"action\":\"life_note\",\"note_kind\":\"job\",\"title\":\"Inviare il preventivo\",\"contact_name\":\"Rossi\",\"due\":\"<that Friday>\"}; "
     "'devo mandare la fattura a Verdi lunedì' -> contact_name Verdi, title 'Mandare la fattura'. "
-    "A reminder tied to a PERSON instead of a time ('quando sento Mario ricordami di chiedergli la fattura', 'la prossima volta che "
-    "vedo Laura dille del contratto', 'next time I talk to Ann…') -> note_kind=reminder, contact_name=<the person>, trigger=\"person\", "
-    "title = what to remember (e.g. 'Chiedergli la fattura'), no due. "
+    "A reminder tied to a PERSON instead of a time, however it is written ('quando sento Mario ricordami di chiedergli la fattura', "
+    "'appena vedo giulia ricordami del contratto', 'ricordami di dire a Laura del preventivo la prossima volta che la sento', "
+    "'next time I talk to Ann…') -> note_kind=reminder, contact_name=<the person, with a capital letter>, trigger=\"person\", "
+    "title = what to remember (e.g. 'Chiedergli la fattura'), due empty. Think about it: a reminder with no date that waits for a "
+    "person is a person reminder. "
     "When the message is followed by '[Testo letto dallo schermo]' / '[Text read from the screen]', the user is pointing at what is on "
     "screen ('ricordami di rispondere a questa', 'segna questo lavoro'): name the item from that text, e.g. 'Rispondere a Mario: "
     "preventivo sito', and take the person from it; never copy long text into the title. "
@@ -70,10 +74,17 @@ _SYSTEM = (
 )
 
 _NOTE_VERB_RE = re.compile(r"\b(ricord\w*|promemoria|segna\w*|annota\w*|aggiung\w*|salva\w*|remind\w*|note|save|add)\b", re.IGNORECASE)
-_PERSON_TRIGGER_RE = re.compile(  # the words are case-insensitive ("Quando sento…"), the name must start with a capital
-    r"(?i:\b(?:quando|la\s+prossima\s+volta\s+che|appena|next\s+time|when(?:ever)?)\s+(?:io\s+|I\s+)?"
+_WHEN_RE = re.compile(r"\b(?:oggi|domani|dopodomani|stasera|stanotte|alle\s+\d|entro|\d{1,2}[:.]\d{2}|today|tomorrow|tonight|at\s+\d|by\s+\w+day)\b",
+                      re.IGNORECASE)
+_PERSON_CUE_RE = re.compile(r"\b(?:quando|appena|la\s+prossima\s+volta|next\s+time|when(?:ever)?|as\s+soon\s+as)\b.{0,40}?\b"
+                            r"(?:sent\w*|ved\w*|incontr\w*|parl\w*|chiam\w*|scriv\w*|see|talk\w*|meet\w*|call\w*|hear\w*|speak\w*)",
+                            re.IGNORECASE)
+# only for when the model cannot be reached: "quando sento Mario…" read without it (any case, the name is capitalised after)
+_PERSON_TRIGGER_RE = re.compile(
+    r"\b(?:quando|la\s+prossima\s+volta\s+che|appena|next\s+time|when(?:ever)?)\s+(?:io\s+|I\s+)?"
     r"(?:sento|vedo|incontro|parlo\s+con|chiamo|mi\s+(?:scrive|chiama|sente)|talk\s+to|see|meet|call|hear\s+from|speak\s+(?:to|with))\s+"
-    r"(?:a\s+|ad\s+|con\s+)?)(?P<name>[A-ZÀ-Ý][\wÀ-ÿ'’-]+(?:\s+[A-ZÀ-Ý][\wÀ-ÿ'’-]+)?)")
+    r"(?:a\s+|ad\s+|con\s+)?(?P<name>(?!(?:lo|la|li|le|lui|lei|him|her|them)\b)[\wÀ-ÿ'’-]{2,}(?:\s+(?!(?:ricord|dimm|dill|digl|remind)\w*)[A-ZÀ-Ý][\wÀ-ÿ'’-]+)?)",
+    re.IGNORECASE)
 
 _SIGNAL_RE = re.compile(
     r"\b(spost\w*|sposta\w*|mett\w*|aggiung\w*|cre[ai]\w*|fiss\w*|prenot\w*|anticip\w*|posticip\w*|rimand\w*|port\w+l[ao]|"
@@ -127,7 +138,7 @@ def _person_reminder_from_text(prompt: str) -> dict[str, Any] | None:
     what = re.split(r"\s+(?:quando|la\s+prossima\s+volta|next\s+time|when)\b", what, maxsplit=1, flags=re.IGNORECASE)[0].strip(" ,")
     if not what:
         return None
-    return {"action": "life_note", "note_kind": "reminder", "title": what[:1].upper() + what[1:], "contact_name": pm.group("name").strip(),
+    return {"action": "life_note", "note_kind": "reminder", "title": what[:1].upper() + what[1:], "contact_name": pm.group("name").strip().title(),
             "trigger": "person"}
 
 
@@ -141,10 +152,20 @@ def _parse(text: str) -> dict[str, Any] | None:
     if not m:
         return None
     try:
-        d = json.loads(m.group(0))
+        d = json.loads(m.group(0), object_pairs_hook=_first_filled)
     except ValueError:
         return None
     return d if isinstance(d, dict) else None
+
+
+def _first_filled(pairs: list[tuple[str, Any]]) -> dict[str, Any]:
+    """Models sometimes repeat a key, the second time empty ({"title":"Ridargli il libro", …, "title":""}): the first value
+    that says something wins."""
+    out: dict[str, Any] = {}
+    for k, v in pairs:
+        if k not in out or (out[k] in ("", None) and v not in ("", None)):
+            out[k] = v
+    return out
 
 
 def _local(raw: str, tz: Any) -> dt.datetime | None:
@@ -224,8 +245,12 @@ def route(prompt: str, *, provider: Any, history: list[Any] | None = None, now: 
         if "?" in (prompt or "") and not _NOTE_VERB_RE.search(prompt or ""):
             return {"action": "none", "reason": "question"}  # "domani ho una call con Mario, cosa gli devo dire?" asks, it does not note
         pm = _PERSON_TRIGGER_RE.search(prompt or "")
-        if pm and kind in ("reminder", "job"):  # "quando sento Mario…": tied to the person even when the model forgot to say so
-            kind, name = "reminder", name or pm.group("name").strip()
+        said_when = bool(_WHEN_RE.search(prompt or "") or said_weekday(prompt or ""))
+        if kind in ("reminder", "job") and not said_when and (str(data.get("trigger") or "") == "person" or (
+                (name and _PERSON_CUE_RE.search(prompt or "")) or pm)):
+            # the model named a person and the sentence waits for them ("quando sento…", "appena vedo…"): a person reminder,
+            # even if the model left the trigger out (it decides who; this only checks the sentence has no date)
+            kind, name = "reminder", name or pm.group("name").strip().title()
             data["trigger"] = "person"
         if kind == "money":
             try:
