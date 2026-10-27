@@ -179,7 +179,25 @@ def brief_text(today: dict[str, Any], language: str = "it") -> str:
     return " · ".join(parts) or "Niente in programma per oggi."
 
 
+_events_cache: dict[str, tuple[float, list[dict[str, Any]], str]] = {}
+EVENTS_CACHE_SECONDS = 60
+
+
 def fetch_events(ws: Any, now: dt.datetime | None = None) -> tuple[list[dict[str, Any]], str]:
+    """Today's events, read from Google at most once a minute and shared by Today, the brief and the meeting prep (they used to
+    read every calendar on their own, several times a minute, and Google started closing the connections)."""
+    now = (now or dt.datetime.now().astimezone()).astimezone()
+    key = f"{getattr(ws, 'id', '')}:{now.strftime('%Y-%m-%d')}"
+    hit = _events_cache.get(key)
+    if hit and dt.datetime.now().timestamp() - hit[0] < EVENTS_CACHE_SECONDS:
+        return list(hit[1]), hit[2]
+    events, err = _fetch_events_now(ws, now)
+    _events_cache.clear() if len(_events_cache) > 8 else None
+    _events_cache[key] = (dt.datetime.now().timestamp(), events, err)
+    return list(events), err
+
+
+def _fetch_events_now(ws: Any, now: dt.datetime | None = None) -> tuple[list[dict[str, Any]], str]:
     """Today's calendar events through the existing `calendar.list_events` action (read-only). Returns (events, error)."""
     executor = getattr(ws, "action_executor", None)
     if executor is None:

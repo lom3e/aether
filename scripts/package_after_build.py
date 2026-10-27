@@ -142,7 +142,19 @@ def run_packaging_pipeline():
     print("=" * 74 + "\n")
 
 
+def refuse_if_running() -> None:
+    """Rebuilding build/Aether.app under a running Aether swaps the files it is reading: the next import fails with
+    "zlib.error: incorrect header check". Close it first (AETHER_BUILD_WHILE_RUNNING=1 overrides)."""
+    if os.environ.get("AETHER_BUILD_WHILE_RUNNING") == "1":
+        return
+    running = subprocess.run(["pgrep", "-f", str(APP_OUTPUT / "Contents" / "MacOS")], capture_output=True, text=True).stdout.split()
+    if running:
+        print(f"ERROR: Aether is running from {APP_OUTPUT} (pid {', '.join(running)}). Quit it, then build again.", file=sys.stderr)
+        sys.exit(1)
+
+
 def main():
+    refuse_if_running()
     sync_frontend_static_assets()
     run_packaging_pipeline()
 

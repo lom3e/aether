@@ -699,6 +699,9 @@ class GoogleCalendarConnector(BaseConnector):
             # Skip calendars where user only has free/busy access without event details
             if cal.get("accessRole") == "freeBusyReader":
                 continue
+            # Google's public holiday calendars: never an appointment of the user's, and one more request on every read
+            if str(cal_id).endswith("#holiday@group.v.calendar.google.com"):
+                continue
 
             cal_summary = cal.get("summary") or cal_id
             is_prim = bool(cal.get("primary", False))
@@ -722,7 +725,7 @@ class GoogleCalendarConnector(BaseConnector):
                         seen_keys.add(dedup_key)
                         all_events.append(ev)
             except Exception as cal_err:
-                logger.warning("Error fetching events from calendar '%s' (%s): %s", cal_summary, cal_id, cal_err)
+                logger.info("Calendar '%s' not read this time: %s", cal_summary, type(cal_err).__name__)
                 continue
 
         # Sort chronologically by start_time / start_date

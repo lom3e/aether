@@ -81,8 +81,9 @@ def tick(ws: Any, store: LifeStore, *, now: dt.datetime | None = None, events: l
     now = (now or dt.datetime.now().astimezone()).astimezone()
     if events is None:
         try:
-            ex = ws.action_executor.execute("calendar.list_events", ws.id, {"time_min": now.isoformat(), "time_max": (now + dt.timedelta(minutes=20)).isoformat(), "limit": 10})
-            events = list((getattr(ex, "output_data", None) or {}).get("events") or [])
+            from aether.life.service import fetch_events
+
+            events, _ = fetch_events(ws, now)  # today's events, shared with Today (read from Google at most once a minute)
         except Exception:  # noqa: BLE001 - no calendar: nothing to prepare
             return []
         try:
