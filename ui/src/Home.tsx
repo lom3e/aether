@@ -490,9 +490,11 @@ export function Home({
     if (view !== 'presence') return;
     const typing = (el: EventTarget | null) => {
       const n = el as HTMLElement | null;
+      if (n?.getAttribute?.('data-testid') === 'companion-input-field' && !(n as HTMLTextAreaElement).value.trim()) return false; // an empty message box does not need spaces: Space talks
       return !!n && (n.tagName === 'INPUT' || n.tagName === 'TEXTAREA' || n.tagName === 'SELECT' || n.isContentEditable);
     };
     const down = (e: KeyboardEvent) => {
+      if (e.code === 'Space' && holdRef.current) { e.preventDefault(); return; } // held down: no spaces typed while talking
       if (e.code !== 'Space' || e.repeat || typing(e.target) || holdRef.current || isSubmitting) return;
       e.preventDefault();
       if (!recognitionRef.current || !canListen()) { showToast(t('homeUiSpeechRecognitionNotSupportedInThis'), 'warning'); return; }

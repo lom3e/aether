@@ -139,6 +139,22 @@ def test_the_orb_speaks_first_once_a_day_and_a_short_yes_answers_its_question(br
     page.close()
 
 
+def test_holding_space_in_the_empty_message_box_talks_instead_of_typing_spaces(browser_context):
+    page = browser_context.new_page()
+    page.goto(_state["base_url"])
+    expect(page.get_by_test_id("presence")).to_be_visible(timeout=20000)
+    box = page.get_by_test_id("companion-input-field")
+    box.click()
+    page.keyboard.down("Space")
+    page.keyboard.down("Space")  # key repeat while held
+    page.keyboard.up("Space")
+    assert box.input_value() == ""
+    box.fill("ciao")
+    page.keyboard.press("Space")
+    assert box.input_value() == "ciao "  # once you are typing, Space is a space again
+    page.close()
+
+
 def test_the_sidebar_shows_few_things_and_advanced_tools_only_on_request(browser_context):
     page = browser_context.new_page()
     page.goto(_state["base_url"])
