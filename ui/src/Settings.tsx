@@ -24,7 +24,7 @@ interface SettingsProps {
 }
 
 export function Settings({ onWorkspaceSwitched }: SettingsProps) {
-  const [activeTab, setActiveTab] = useState<'workspace' | 'providers' | 'general' | 'storage' | 'shortcuts' | 'advanced'>('workspace');
+  const [activeTab, setActiveTab] = useState<'workspace' | 'providers' | 'general' | 'storage' | 'shortcuts' | 'advanced'>('general');
 
   // Provider Settings State
   const [provider, setProvider] = useState('');      // '' = nothing chosen yet (never an assumed provider)
@@ -302,11 +302,11 @@ export function Settings({ onWorkspaceSwitched }: SettingsProps) {
       <div className="pv-tabs settings-tabs" role="tablist">
         <button
           role="tab"
-          aria-selected={activeTab === 'workspace'}
-          className={activeTab === 'workspace' ? 'on' : ''}
-          onClick={() => setActiveTab('workspace')}
+          aria-selected={activeTab === 'general'}
+          className={activeTab === 'general' ? 'on' : ''}
+          onClick={() => setActiveTab('general')}
         >
-          <Layers size={16} /> {t('workspace')}
+          <Globe size={16} /> {t('generalTab')}
         </button>
         <button
           role="tab"
@@ -326,11 +326,11 @@ export function Settings({ onWorkspaceSwitched }: SettingsProps) {
         </button>
         <button
           role="tab"
-          aria-selected={activeTab === 'general'}
-          className={activeTab === 'general' ? 'on' : ''}
-          onClick={() => setActiveTab('general')}
+          aria-selected={activeTab === 'workspace'}
+          className={activeTab === 'workspace' ? 'on' : ''}
+          onClick={() => setActiveTab('workspace')}
         >
-          <Globe size={16} /> {t('generalTab')}
+          <Layers size={16} /> {t('workspace')}
         </button>
         <button
           role="tab"
@@ -505,7 +505,7 @@ export function Settings({ onWorkspaceSwitched }: SettingsProps) {
                     setModel('');
                   }}
                 >
-                  <option value="">— Choose a provider —</option>
+                  <option value="">{t('syChooseAProvider')}</option>
                   <option value="ollama">Ollama (Local)</option>
                   <option value="openai">OpenAI</option>
                   <option value="anthropic">Anthropic</option>
@@ -614,7 +614,7 @@ export function Settings({ onWorkspaceSwitched }: SettingsProps) {
                 <div style={{ fontSize: '12px', color: 'hsl(var(--muted-fg))', marginBottom: '4px' }}>{t('knowledgeStore')}</div>
                 <div style={{ fontSize: '20px', fontWeight: 700 }}>{workspaceStats?.knowledge_chunks_count || 0} {t('chunks').toLowerCase()}</div>
                 <div style={{ fontSize: '11px', color: 'hsl(var(--muted-fg))', marginTop: '4px' }}>
-                  {workspaceStats?.knowledge_documents_count || 0} docs ({formatBytes(workspaceStats?.knowledge_size_bytes)})
+                  {workspaceStats?.knowledge_documents_count || 0} {language === 'it' ? 'documenti' : 'docs'} ({formatBytes(workspaceStats?.knowledge_size_bytes)})
                 </div>
               </div>
 
@@ -624,7 +624,7 @@ export function Settings({ onWorkspaceSwitched }: SettingsProps) {
                   {formatBytes(workspaceStats?.total_size_bytes)}
                 </div>
                 <div style={{ fontSize: '11px', color: 'hsl(var(--muted-fg))', marginTop: '4px' }}>
-                  SQLite 100% Local-first
+                  {language === 'it' ? 'Tutto resta su questo computer' : '100% on this computer'}
                 </div>
               </div>
             </div>

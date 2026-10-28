@@ -326,7 +326,7 @@ p {
   color: hsl(var(--fg));
 }
 
-.form-input, .form-select, .form-textarea {
+.form-input, .form-select, .form-textarea, .input {
   width: 100%;
   padding: 8px 12px;
   font-size: 13.5px;
@@ -340,9 +340,15 @@ p {
   box-sizing: border-box;
 }
 
-.form-input {
+.form-input, .input {
   height: 38px;
   min-height: 38px;
+}
+
+textarea.input {
+  height: auto;
+  min-height: 72px;
+  line-height: 1.5;
 }
 
 .form-select {
@@ -359,7 +365,7 @@ p {
   cursor: pointer;
 }
 
-.form-input:focus, .form-select:focus, .form-textarea:focus {
+.form-input:focus, .form-select:focus, .form-textarea:focus, .input:focus {
   border-color: hsl(var(--primary));
   box-shadow: 0 0 0 2px hsl(var(--primary)/0.15);
 }
