@@ -220,6 +220,10 @@ def _undo_life(ws: Any, execution: Any) -> dict[str, Any]:
     if out.get("job_id") and store.get_job(out["job_id"]):
         life.forget_job(ws, store, out["job_id"])
         removed.append("job")
+    if out.get("completed_job_id") and (store.get_job(out["completed_job_id"]) or {}).get("status") == "done":
+        store.update_job(out["completed_job_id"], status="open")
+        life.sync_job(ws, store, store.get_job(out["completed_job_id"]), str((execution.input_data or {}).get("language") or "it"))
+        removed.append("done")
     if out.get("money_id") and store.get_money(out["money_id"]):
         store.delete_money(out["money_id"])
     if out.get("reminder_id") and store.get_reminder(out["reminder_id"]):

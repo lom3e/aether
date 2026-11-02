@@ -102,8 +102,8 @@ def _ts(v: Any) -> float:
         return 0.0
 
 
-def for_workspace(ws: Any, store: LifeStore, *, language: str = "it") -> dict[str, Any]:
-    """The catch-up with the user's real sources (Gmail when connected, today's calendar, Rewind)."""
+def for_workspace(ws: Any, store: LifeStore, *, language: str = "it", since: float | None = None) -> dict[str, Any]:
+    """The catch-up with the user's real sources (Gmail when connected, today's calendar, Rewind), since `since` when given."""
     from aether.life import service as life
 
     gmail = None
@@ -124,4 +124,4 @@ def for_workspace(ws: Any, store: LifeStore, *, language: str = "it") -> dict[st
         timeline = rewind(ws, ws.id, limit=30)
     except Exception:  # noqa: BLE001
         timeline = []
-    return build(ws, store, language=language, gmail=gmail, events=events, timeline=timeline)
+    return build(ws, store, language=language, since=since, gmail=gmail, events=events, timeline=timeline)

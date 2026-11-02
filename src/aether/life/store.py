@@ -70,7 +70,7 @@ class LifeStore:
                         "promise_watch": False, "last_promise_scan": 0.0, "promise_watch_offered": False,
                         "home_city": "", "user_name": "", "reconnect_offered": {},
                         "last_seen_at": 0.0, "back_from": 0.0, "prepped_events": {},
-                        "telegram_offer": {}}
+                        "telegram_offer": {}, "focus_started": 0.0, "focus_until": 0.0, "web_search_provider": ""}
 
     def settings(self) -> dict[str, Any]:
         import json

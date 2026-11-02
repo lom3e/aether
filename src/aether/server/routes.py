@@ -7566,6 +7566,98 @@ async def presence_seen_route(request: Request):
     return {"away_hours": round(away, 2), "show_catchup": away >= catchup.AWAY_HOURS}
 
 
+class FocusPayload(BaseModel):
+    minutes: int = 50
+
+
+@router.get("/focus")
+async def focus_status_route(request: Request):
+    """Concentrazione: whether it is on, until when, and how many notifications were kept quiet so far."""
+    ws, store = _life(request)
+    from aether.life import focus
+
+    return focus.status(store, ws.id)
+
+
+@router.post("/focus")
+async def focus_start_route(request: Request, payload: FocusPayload):
+    """Starts (or restarts) a focus window: non-urgent notifications stay in the bell, the orb asks nothing."""
+    ws, store = _life(request)
+    from aether.life import focus
+
+    return focus.start(store, ws.id, payload.minutes)
+
+
+@router.delete("/focus")
+async def focus_stop_route(request: Request, language: str = "it"):
+    """Ends the window (early or on time) and says what arrived meanwhile, from facts only."""
+    ws, store = _life(request)
+    from aether.life import focus
+
+    was = focus.status(store, ws.id)
+    if not was["active"] and not was.get("ended"):
+        return {"text": "", "active": False}
+    started, held = focus.stop(store, ws.id)
+    text = await asyncio.to_thread(focus.summary, ws, store, started, held, language=language, until=was.get("until"))
+    return {"text": text, "active": False, "held": len(held)}
+
+
+class WebSearchPayload(BaseModel):
+    provider: str
+    api_key: str = ""
+
+
+@router.get("/web-search")
+async def web_search_settings_route(request: Request):
+    """Which search service answers web questions: Groq's own search, or the user's Brave/Tavily key, else DuckDuckGo."""
+    ws, store = _life(request)
+    from aether.tools.web_search import KEYED_BACKENDS, SECRET_REF
+
+    provider = str(store.settings().get("web_search_provider") or "")
+    has_key = bool(provider in KEYED_BACKENDS and ws.secret_store.has_secret(SECRET_REF))
+    return {"provider": provider if has_key else "", "configured": has_key, "providers": sorted(KEYED_BACKENDS)}
+
+
+@router.put("/web-search")
+async def web_search_save_route(request: Request, payload: WebSearchPayload):
+    """Saves a Brave or Tavily key after one real test search (the key goes to the encrypted vault, never back to the app)."""
+    ws, store = _life(request)
+    from aether.tools.web_search import KEYED_BACKENDS, SECRET_REF
+
+    cls = KEYED_BACKENDS.get(payload.provider)
+    key = payload.api_key.strip()
+    if cls is None or not key:
+        raise HTTPException(status_code=422, detail={"code": "invalid", "message": "provider and key are required"})
+    try:
+        found = await asyncio.to_thread(cls(key).search, "Aether assistant", 2)
+    except Exception as exc:  # noqa: BLE001 - reported plainly, the key is not saved
+        status = getattr(exc, "code", None)
+        code = "invalid_key" if status in (401, 403) else "rate_limited" if status == 429 else "unreachable"
+        raise HTTPException(status_code=400, detail={"code": code, "message": type(exc).__name__}) from None
+    ws.secret_store.store_secret(SECRET_REF, key, entity_type="web_search", entity_id=payload.provider)
+    store.update_settings(web_search_provider=payload.provider)
+    return {"provider": payload.provider, "configured": True, "results": len(found)}
+
+
+@router.delete("/web-search")
+async def web_search_delete_route(request: Request):
+    ws, store = _life(request)
+    from aether.tools.web_search import SECRET_REF
+
+    ws.secret_store.delete_secret(SECRET_REF)
+    store.update_settings(web_search_provider="")
+    return {"provider": "", "configured": False}
+
+
+@router.get("/diary")
+async def diary_route(request: Request, q: str = "", language: str = "it"):
+    """Il diario: what you got done in a period ("oggi", "settimana scorsa", "ottobre"), optionally for one person."""
+    ws, store = _life(request)
+    from aether.life import diary
+
+    return await asyncio.to_thread(diary.for_workspace, ws, store, q or "questa settimana", language=language)
+
+
 @router.post("/presence/offer")
 async def presence_offer_route(request: Request, payload: PresenceOfferPayload):
     """Your yes or no to the orb's question. Yes runs it (an `ask` offer comes back as a prompt the app sends normally)."""

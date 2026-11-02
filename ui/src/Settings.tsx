@@ -8,6 +8,7 @@ import { apiError, apiUrl } from './api';
 import { MorningBriefSetting } from './MorningBriefSetting';
 import { ProfileSetting } from './ProfileSetting';
 import { VoiceSetting } from './VoiceSetting';
+import { WebSearchSetting } from './WebSearchSetting';
 import { AdvancedToolsSetting } from './AdvancedToolsSetting';
 import { useTranslation } from './i18n';
 import type { TranslationKey } from './i18n';
@@ -593,6 +594,7 @@ export function Settings({ onWorkspaceSwitched }: SettingsProps) {
               </div>
             </div>
           </div>
+          <WebSearchSetting />
         </div>
       )}
 

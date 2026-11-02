@@ -17,6 +17,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Web answers**: questions whose answer is on the internet (news, results, prices, opening hours) are searched and answered in a few sentences with the sources (Groq's own search with gpt-oss, DuckDuckGo otherwise).
 - **Connections in one click**: Google Calendar and Gmail (loopback OAuth with PKCE), GitHub (device code), Telegram on the phone (QR pairing); Gmail and GitHub from chat, always confirmed and undoable.
 - Weather (Open-Meteo), "apri Spotify", spoken "sì / no / annulla".
+- **Focus (Concentrazione)**: "voglio concentrarmi per un'ora", the Focus button on the orb or /concentrazione on Telegram. Non-urgent notifications stay in the bell (desktop and Telegram are quiet) and the orb asks nothing. A thin ring around the orb fills as the time passes. At the end Aether says what arrived meanwhile. Urgent notifications still get through, and the window survives a restart.
+- **Diary**: "cosa ho fatto questa settimana?", "…per Rossi?", "…a ottobre?", the Diary card on the orb or /diario on Telegram. It is built from facts only: what you ticked off, money paid, and mail sent or appointments set that were not undone. The answer is day by day, and a one-client version reads as a report to send.
+- **Done by voice**: "ho mandato il preventivo a Rossi" with that job open is offered as done (one confirmation, undoable). When it was something sent or asked, Aether asks you in three working days whether they answered.
+- **Monday morning**: the brief adds the week ahead in one sentence ("Questa settimana: mercoledì «Preventivo Rossi»; venerdì …").
+- **Web search with your own key**: Settings → Model → Web search takes a free Brave Search or Tavily key, tested before it is saved and kept in the encrypted vault. Web answers then work reliably with any model, and DuckDuckGo stays the fallback.
 
 ### Changed
 - One personal space, one interface (chat and Presence); advanced tools under a switch in Settings.
@@ -28,6 +33,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Remembered facts are said back to you ("il tuo colore preferito"), reminder confirmations read "ti ricordo di chiamare…".
 - Connections → Advanced → "Sync all" called a route that does not exist.
 - DuckDuckGo results lost their snippets (the parser stopped before them).
+- A follow-up reads as a question ("giovedì ti chiedo se **Laura** ha risposto su «contratto»"), not as a reminder titled "Laura ha risposto su: contratto?".
+- Dropdowns show the same chevron everywhere (the first-run model card and People used the system one). On a short window the orb steps back when the first-run model card is shown, and content that does not fit fades under the composer instead of being cut.
 
 ---
 

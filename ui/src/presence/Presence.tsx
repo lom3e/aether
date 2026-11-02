@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState, type ReactNode } from 'react';
-import { AlarmClock, CalendarDays, Check, Copy, HandHeart, History, Loader2, MessageSquareText, ShieldAlert, Undo2, Volume2, VolumeX } from 'lucide-react';
+import { AlarmClock, BookOpen, CalendarDays, Check, Copy, HandHeart, History, Loader2, MessageSquareText, ShieldAlert, Timer, Undo2, Volume2, VolumeX } from 'lucide-react';
 import { AetherOrb } from '../orb/AetherOrb';
 import type { OrbState } from '../orb/OrbEngine';
 import { MarkdownRenderer } from '../MarkdownRenderer';
@@ -20,6 +20,7 @@ export interface PresenceMsg { id: string; role: string; content: string; metada
 export function Presence({
   t, language, messages, busy, listening, transcribing, speaking, input, composer, actions, undoState, needsYou,
   onUndo, onSpeak, onOpenTranscript, onOpenRewind, onOpenPromises, onAsk, notifications, brief, briefBusy, onBriefAnswer, welcome,
+  focus, onFocusStart, onFocusStop,
 }: {
   t: T; language: string; messages: PresenceMsg[]; busy: boolean; listening: boolean; transcribing?: boolean; speaking: boolean; input: string;
   composer: ReactNode; actions?: ReactNode; undoState?: 'idle' | 'busy' | 'done'; needsYou: boolean;
@@ -27,7 +28,10 @@ export function Presence({
   notifications: ReactNode;
   brief?: { body: string; offer: { type: string } | null } | null; briefBusy?: boolean; onBriefAnswer?: (answer: 'yes' | 'no') => void;
   welcome?: ReactNode;
+  /** Concentrazione: on while `focus` is set (seconds left and how far along), started and ended from here or by voice */
+  focus?: { remaining: number; progress: number } | null; onFocusStart?: (minutes: number) => void; onFocusStop?: () => void;
 }) {
+  const [focusMenu, setFocusMenu] = useState(false);
   const [today, setToday] = useState<TodayData | null>(null);
   const [copied, setCopied] = useState(false);
   const [justDone, setJustDone] = useState(false);
@@ -62,6 +66,19 @@ export function Presence({
     const id = window.setTimeout(() => setJustDone(false), 1600);
     return () => window.clearTimeout(id);
   }, [busy, answerIsCurrent, lastAi?.id]);
+
+  // close the focus menu with Escape or a click elsewhere
+  useEffect(() => {
+    if (!focusMenu) return;
+    const close = (e: Event) => {
+      if (e instanceof KeyboardEvent && e.key !== 'Escape') return;
+      if (e instanceof MouseEvent && (e.target as HTMLElement)?.closest?.('.pr-focus-menu, [data-testid="presence-focus"]')) return;
+      setFocusMenu(false);
+    };
+    window.addEventListener('keydown', close);
+    window.addEventListener('mousedown', close);
+    return () => { window.removeEventListener('keydown', close); window.removeEventListener('mousedown', close); };
+  }, [focusMenu]);
 
   const orbState: OrbState = listening ? 'listening' : busy ? 'working' : speaking ? 'speaking' : needsYou ? 'needs-you' : justDone ? 'done' : 'idle';
 
@@ -125,19 +142,38 @@ export function Presence({
   else caption = <><h1 className="pr-greeting">{greeting}</h1><p className="pr-sub">{t('prHowCanIHelp')}</p><div className="pr-firstrun"><FirstRunModel /></div></>;
 
   return (
-    <div className="pr-stage" data-testid="presence" data-state={orbState}>
+    <div className="pr-stage" data-testid="presence" data-state={orbState} data-focus={focus ? 'on' : undefined}>
       <div className="pr-sky" aria-hidden />
       <header className="pr-top" data-testid="top-header">
         <div className="pr-top-left">
-          <button type="button" className="pr-chip" onClick={onOpenTranscript} data-testid="presence-open-transcript"><MessageSquareText size={15} />{t('prTranscript')}</button>
-          <button type="button" className="pr-chip" onClick={onOpenRewind} data-testid="presence-open-rewind"><History size={15} />{t('rwTitle')}</button>
+          <button type="button" className="pr-chip" onClick={onOpenTranscript} data-testid="presence-open-transcript"><MessageSquareText size={15} /><span className="pr-chip-label">{t('prTranscript')}</span></button>
+          <button type="button" className="pr-chip" onClick={onOpenRewind} data-testid="presence-open-rewind"><History size={15} /><span className="pr-chip-label">{t('rwTitle')}</span></button>
+          {onFocusStart && !focus && (
+            <div className="pr-focus-wrap">
+              <button type="button" className="pr-chip" onClick={() => setFocusMenu(v => !v)} aria-expanded={focusMenu} aria-controls="pr-focus-menu" data-testid="presence-focus">
+                <Timer size={15} /><span className="pr-chip-label">{t('fcTitle')}</span>
+              </button>
+              {focusMenu && (
+                <div className="pr-focus-menu" id="pr-focus-menu" role="group" aria-label={t('fcTitle')}>
+                  <p>{t('fcExplain')}</p>
+                  <div>
+                    {[25, 50, 90].map(m => (
+                      <button key={m} type="button" autoFocus={m === 50} onClick={() => { setFocusMenu(false); onFocusStart(m); }} data-testid={`focus-${m}`}>
+                        {t('fcMinutes', { count: m })}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              )}
+            </div>
+          )}
         </div>
         {notifications}
       </header>
 
       <div className="pr-center">
         <div className="pr-orbit">
-          {!busy && !listening && !welcome && (
+          {!busy && !listening && !welcome && !focus && (
             <aside className="pr-day" aria-label={t('lifeToday')} data-testid="presence-day">
               {nextEvent && (
                 <button type="button" className="pr-card" onClick={() => onAsk(t('prAskAgenda'))}>
@@ -159,6 +195,9 @@ export function Presence({
                   <AlarmClock size={15} /><span><small>{t('prNext')} · {fmtWhen(next.due_at || 0, language)}</small>{'title' in next ? next.title : next.text}</span>
                 </button>
               )}
+              <button type="button" className="pr-card ghost" onClick={() => onAsk(t('dyAsk'))} data-testid="presence-diary">
+                <BookOpen size={15} /><span><small>{t('dyTitle')}</small>{t('dyCta')}</span>
+              </button>
               <button type="button" className="pr-card ghost" onClick={onOpenPromises} data-testid="presence-open-promises">
                 <HandHeart size={15} /><span><small>{t('pkTitle')}</small>{t('pkCta')}</span>
               </button>
@@ -169,10 +208,22 @@ export function Presence({
               )}
             </aside>
           )}
-          <div className="pr-orb" style={{ width: orbSize, height: orbSize }}>
+          <div className="pr-orb" style={{ width: orbSize, height: orbSize, ['--orb' as string]: `${orbSize}px` }}>
             <AetherOrb state={orbState} size={orbSize} quality="auto" interactive={false} compact={orbSize < 300} followVoice />
+            {focus && (
+              <svg className="pr-focus-ring" viewBox="0 0 100 100" aria-hidden>
+                <circle cx="50" cy="50" r="48" pathLength={100} className="track" />
+                <circle cx="50" cy="50" r="48" pathLength={100} className="done" strokeDasharray={`${Math.max(0.5, focus.progress * 100)} 100`} />
+              </svg>
+            )}
           </div>
         </div>
+        {focus && !listening && !busy && (
+          <div className="pr-focus-status" data-testid="focus-status">
+            <span><Timer size={14} />{t('fcLeft', { time: fmtLeft(focus.remaining) })}</span>
+            {onFocusStop && <button type="button" className="pr-undo ghost" onClick={onFocusStop} data-testid="focus-stop">{t('fcStop')}</button>}
+          </div>
+        )}
         <div className="pr-caption">{caption}</div>
       </div>
 
@@ -184,4 +235,10 @@ export function Presence({
       )}
     </div>
   );
+}
+
+function fmtLeft(seconds: number): string {
+  const s = Math.max(0, Math.round(seconds));
+  const h = Math.floor(s / 3600), m = Math.floor((s % 3600) / 60), r = s % 60;
+  return h ? `${h}:${String(m).padStart(2, '0')}:${String(r).padStart(2, '0')}` : `${m}:${String(r).padStart(2, '0')}`;
 }

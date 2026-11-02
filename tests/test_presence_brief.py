@@ -83,3 +83,19 @@ def test_first_meeting_introduces_aether_and_points_at_the_next_useful_step(tmp_
     no_gmail = presence_brief.first_meeting(None, language="en", now=NOW, gmail_connected=False, has_model=True)
     assert no_gmail["offer"] == {"type": "open", "view": "connections"} and "Gmail" in no_gmail["body"]
     assert presence_brief.first_meeting(None, now=NOW, gmail_connected=True, has_model=True)["offer"] is None
+
+
+def test_monday_morning_says_the_week_ahead_and_other_days_do_not(tmp_path):
+    store = LifeStore(tmp_path / "life.db")
+    store.update_settings(promise_watch_offered=True)
+    monday = dt.datetime(2026, 11, 2, 8, 30).astimezone()
+    store.add_job("Preventivo Rossi", due_at=dt.datetime(2026, 11, 4, 9, 0).timestamp())
+    store.add_reminder("Chiamare il commercialista", due_at=dt.datetime(2026, 11, 6, 11, 0).timestamp())
+    store.add_job("Più avanti", due_at=dt.datetime(2026, 11, 12, 9, 0).timestamp())
+    def at(now, language="it"):
+        return presence_brief.build(None, store, language=language, now=now, events=[], gmail_connected=True, with_weather=False)["body"]
+
+    body = at(monday)
+    assert "Questa settimana: mercoledì «Preventivo Rossi»; venerdì «Chiamare il commercialista»." in body and "Più avanti" not in body
+    assert "This week: Wednesday Preventivo Rossi; Friday Chiamare il commercialista." in at(monday, "en")
+    assert "Questa settimana" not in at(monday + dt.timedelta(days=1))

@@ -209,6 +209,10 @@ def build(ws: Any, store: LifeStore, *, language: str = "it", now: dt.datetime |
         at = "" if ev.get("all_day") else dt.datetime.fromtimestamp(ev["start"]).strftime("%H:%M")
         parts.append((f"At {at} you see {c['name']}: remember “{r['text']}”." if at else f"Today you see {c['name']}: remember “{r['text']}”.") if en else
                      (f"Alle {at} vedi {c['name']}: ricordati «{r['text']}»." if at else f"Oggi vedi {c['name']}: ricordati «{r['text']}»."))
+    if now.weekday() == 0:  # Monday morning: the week ahead in one sentence ("Questa settimana: mercoledì «Preventivo Rossi»; …")
+        line = _week_ahead(store, now, en)
+        if line:
+            parts.append(line)
     question, offer = _offer(store, now, en, bool(gmail_connected))
     if question:
         parts.append(question)
@@ -286,6 +290,21 @@ def _week_lines(store: LifeStore, now: dt.datetime, en: bool) -> list[str]:
         listed = "; ".join(f"{d} {t}" if en else f"{d} «{t}»" for d, t in days)
         out.append(f"Next week: {listed}." if en else f"La settimana prossima: {listed}.")
     return out
+
+
+def _week_ahead(store: LifeStore, now: dt.datetime, en: bool) -> str:
+    """The open jobs and reminders due from tomorrow to Sunday, the first three by day (today's are said already)."""
+    tomorrow = (now + dt.timedelta(days=1)).replace(hour=0, minute=0, second=0, microsecond=0)
+    end = tomorrow + dt.timedelta(days=6 - now.weekday())
+    ahead = sorted((x["due_at"], str(x.get("title") or x.get("text"))) for x in store.list_jobs(status="open") + store.list_reminders()
+                   if x.get("due_at") and tomorrow.timestamp() <= x["due_at"] < end.timestamp())
+    if not ahead:
+        return ""
+    listed = "; ".join(f"{_day(ts, now, en)} {t}" if en else f"{_day(ts, now, en)} «{t}»" for ts, t in ahead[:3])
+    more = len(ahead) - 3
+    if en:
+        return f"This week: {listed}" + (f", and {more} more." if more > 0 else ".")
+    return f"Questa settimana: {listed}" + (f", e altre {more}." if more > 0 else ".")
 
 
 def roll_over(store: LifeStore, items: list[Any], now: dt.datetime | None = None) -> int:

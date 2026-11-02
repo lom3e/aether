@@ -155,7 +155,7 @@ def test_the_morning_brief_is_opt_in_once_a_day_and_silent_when_empty(ws, monkey
                             "promise_watch": False, "last_promise_scan": 0.0, "promise_watch_offered": False,
                             "home_city": "", "user_name": "", "reconnect_offered": {},
                             "last_seen_at": 0.0, "back_from": 0.0, "prepped_events": {},
-                            "telegram_offer": {}}
+                            "telegram_offer": {}, "focus_started": 0.0, "focus_until": 0.0, "web_search_provider": ""}
     assert briefing.maybe_send_brief(ws, s, now=NOW) is False and sent == [], "off by default: nothing is ever sent"
     s.update_settings(brief_enabled=True)
     assert briefing.maybe_send_brief(ws, s, now=morning) is False, "not before the chosen time"

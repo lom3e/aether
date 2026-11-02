@@ -335,3 +335,27 @@ def test_people_show_money_with_a_paid_button_and_settings_offer_barge_in(browse
     toggle.uncheck()
     assert page.evaluate("localStorage.getItem('aether_barge_in')") == "0"
     page.close()
+
+
+def test_focus_puts_a_ring_around_the_orb_hides_the_day_and_ends_with_a_summary(browser_context):
+    page = browser_context.new_page()
+    page.route("**/api/life/today*", lambda r: r.fulfill(status=200, content_type="application/json", body=json.dumps(TODAY)))
+    page.goto(_state["base_url"])
+    page.evaluate("localStorage.setItem('aether_home_view', 'presence')")
+    page.reload()
+    expect(page.get_by_test_id("presence-day")).to_be_visible(timeout=20000)
+    expect(page.get_by_test_id("presence-diary")).to_contain_text("What you got done this week")
+    page.get_by_test_id("presence-focus").click()
+    page.get_by_test_id("focus-25").click()
+    status = page.get_by_test_id("focus-status")
+    expect(status).to_contain_text("Focus · 2")  # 25:00 → 24:5x left
+    expect(page.locator(".pr-focus-ring")).to_have_count(1)
+    expect(page.get_by_test_id("presence-day")).to_have_count(0)
+    expect(page.get_by_test_id("presence-focus")).to_have_count(0)
+    page.reload()  # the window is kept by the server
+    expect(page.get_by_test_id("focus-status")).to_be_visible(timeout=15000)
+    page.get_by_test_id("focus-stop").click()
+    expect(page.get_by_test_id("presence-brief")).to_contain_text("Focus over", timeout=10000)
+    expect(page.get_by_test_id("focus-status")).to_have_count(0)
+    expect(page.get_by_test_id("presence-focus")).to_be_visible()
+    page.close()

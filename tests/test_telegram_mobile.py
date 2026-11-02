@@ -186,3 +186,15 @@ def test_earned_autonomy_is_offered_with_buttons_on_the_phone(mobile, monkeypatc
     assert mobile.handle(_cb(42, yes)) == {"status": "autonomy_granted", "key": "gmail.trash:from:zalando"}
     assert st.get("gmail.trash:from:zalando")["granted_at"]
     assert mobile.handle(_cb(42, yes))["status"] == "autonomy_stale", "a button works once"
+
+
+def test_diario_and_concentrazione_are_shortcuts_to_the_same_sentences(mobile, monkeypatch):
+    _paired(mobile)
+    asked = []
+    monkeypatch.setattr(mobile.ws.personal, "process_prompt",
+                        lambda **k: asked.append(k["prompt"]) or SimpleNamespace(session_id="s", content="ok", metadata={}, steps=[], action_execution_id=None))
+    for cmd in ("/diario", "/concentrazione", "/fine", "/focus@aether_test_bot"):
+        mobile.handle(_msg(42, cmd))
+    assert asked == ["cosa ho fatto questa settimana?", "voglio concentrarmi per un'ora", "fine concentrazione", "let me focus for an hour"]
+    mobile.handle(_msg(42, "/help"))
+    assert "/diario" in mobile.fake.sent[-1]["text"] and "/concentrazione" in mobile.fake.sent[-1]["text"]

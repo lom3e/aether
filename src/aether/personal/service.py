@@ -414,6 +414,16 @@ def _note_sentence(a: dict[str, Any], done: bool) -> str:
         else:
             text = f"{'ho segnato' if done else 'segno'} che devi **{money}** a **{name}**{what}"
         return text[:1].upper() + text[1:]
+    if kind == "done":  # "Segno come fatto «Inviare il preventivo» per Rossi e mercoledì ti chiedo se ha risposto"
+        who = f" per **{a['job_contact']}**" if a.get("job_contact") else ""
+        text = f"{'ho segnato' if done else 'segno'} come fatto **{title}**{who}"
+        if a.get("followup") and due:
+            text += f" e {due} {'ti chiederò' if done else 'ti chiedo'} se {'ha' if a.get('job_contact') else 'hanno'} risposto"
+        return text[:1].upper() + text[1:]
+    follow = re.fullmatch(r"(?P<who>.+?) ha risposto su: (?P<what>.+?)\??", title or "") if kind == "reminder" else None
+    if follow:  # a follow-up the router wrote: "ti chiedo mercoledì se Rossi ha risposto sul preventivo", not "ti ricordo «Rossi ha risposto su: …?»"
+        text = f"{(due + ' ') if due else ''}{'ti chiederò' if done else 'ti chiedo'} se **{follow['who']}** ha risposto su «{follow['what']}»"
+        return text[:1].upper() + text[1:]
     if kind == "reminder" and a.get("trigger") == "person":
         text = f"{'te lo ricorderò' if done else 'te lo ricordo'} appena si parla di **{name}**: **{title}**"
         return text[:1].upper() + text[1:]
@@ -1616,12 +1626,18 @@ class PersonalAgentService:
             except Exception as exc:  # noqa: BLE001 - falls back to DuckDuckGo below
                 logger.info("Groq web search failed: %s", type(exc).__name__)
 
-        from aether.tools.web_search import DuckDuckGoSearchBackend
+        from aether.tools.web_search import DuckDuckGoSearchBackend, keyed_backend
 
-        try:
-            results = DuckDuckGoSearchBackend().search(query, max_results=6)
-        except Exception:  # noqa: BLE001
-            results = []
+        results = []
+        keyed = keyed_backend(self.workspace) if self.workspace is not None else None
+        for backend in ([keyed] if keyed else []) + [DuckDuckGoSearchBackend()]:  # the user's Brave/Tavily key first
+            try:
+                results = backend.search(query, max_results=6)
+            except Exception as exc:  # noqa: BLE001
+                logger.info("web search via %s failed: %s", type(backend).__name__, type(exc).__name__)
+                results = []
+            if results:
+                break
         results = [r for r in results if "duckduckgo.com/y.js" not in r.url]  # sponsored links
         if not results:
             return ("I could not search the web right now: the search service did not answer. Try again in a moment."
@@ -3334,6 +3350,45 @@ class PersonalAgentService:
                     intent = self._explain(prompt, _cu["text"], "Catch-up")
                 except Exception:  # noqa: BLE001 - falls back to a normal answer
                     logger.debug("catch-up failed", exc_info=True)
+            from aether.life import completion, diary, focus
+            from aether.life.store import life_store_for as _lsf
+
+            # "ho mandato il preventivo a Rossi" with that job open: offered as done (and a follow-up when it was sent or asked)
+            _done = completion.match_open_job(_lsf(self.workspace), prompt) if intent.action_id is None and self.workspace is not None and len(prompt) < 200 else None
+            if _done:
+                _fu = completion.followup_due() if _done["asked"] else None
+                _who = _done["contact_name"]
+                intent = UserIntent(raw_prompt=prompt, tier=IntentTier.ACT, summary=f"Mark done: {_done['title']}", action_id="life.save",
+                                    action_args={"kind": "done", "title": _done["title"], "complete_job_id": _done["id"], "contact_name": "",
+                                                 "job_contact": _who, "due_at": _fu, "due_has_time": True,
+                                                 "followup": (f"{_who} ha risposto su: {_done['title'][:1].lower()}{_done['title'][1:]}?" if _who else
+                                                              f"Risposta su: {_done['title'][:1].lower()}{_done['title'][1:]}?") if _fu else "",
+                                                 "language": "en" if looks_english(prompt) else "it"})
+
+            _focus = focus.parse(prompt) if intent.action_id is None and self.workspace is not None else None
+            if _focus:  # "voglio concentrarmi per un'ora" / "fine concentrazione"
+                from aether.core.language import looks_english as _is_en
+                from aether.life.store import life_store_for
+
+                _en, _store = _is_en(prompt), life_store_for(self.workspace)
+                if _focus[0] == "start":
+                    _said = focus.started_text(focus.start(_store, workspace_id, _focus[1]), _en)
+                elif focus.status(_store, workspace_id)["active"]:
+                    _started, _held = focus.stop(_store, workspace_id)
+                    _said = focus.summary(self.workspace, _store, _started, _held, language="en" if _en else "it")
+                else:
+                    _said = "Focus is not on." if _en else "La concentrazione non è attiva."
+                intent = self._explain(prompt, _said, "Focus")
+                intent.action_args["focus"] = _focus[0]
+            elif intent.action_id is None and self.workspace is not None and diary.asks(prompt) and len(prompt) < 160:
+                from aether.core.language import looks_english as _is_en
+                from aether.life.store import life_store_for
+
+                try:
+                    _d = diary.for_workspace(self.workspace, life_store_for(self.workspace), prompt, language="en" if _is_en(prompt) else "it")
+                    intent = self._explain(prompt, _d["text"], "Diary")
+                except Exception:  # noqa: BLE001 - falls back to a normal answer
+                    logger.debug("diary failed", exc_info=True)
             from aether.life import weather
 
             if intent.tier == IntentTier.ANSWER and not intent.action_id and weather.asks_weather(prompt) and len(prompt) < 120:
@@ -4223,6 +4278,8 @@ class PersonalAgentService:
 
             elif intent.action_id == "calendar.explain":
                 response_text = str(intent.action_args.get("message") or "")
+                if intent.action_args.get("focus"):  # the app shows (or clears) the focus ring around the orb at once
+                    msg_metadata["focus"] = intent.action_args["focus"]
 
             elif intent.action_id == "gmail.search":
                 from aether.actions.models import ActionExecutionStatus

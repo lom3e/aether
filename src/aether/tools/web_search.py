@@ -140,6 +140,71 @@ class DuckDuckGoSearchBackend(BaseWebSearchBackend):
         return raw_url
 
 
+def _get_json(req: urllib.request.Request, timeout: float) -> Any:
+    import json
+
+    with urllib.request.urlopen(req, timeout=min(timeout, 10.0)) as resp:  # noqa: S310 - fixed https endpoints
+        return json.loads(resp.read().decode("utf-8", "replace"))
+
+
+def _plain(text: str) -> str:
+    return html.unescape(re.sub(r"<[^>]+>", "", text or "")).strip()
+
+
+class BraveSearchBackend(BaseWebSearchBackend):
+    """Brave Search API (the user's own key, free tier available): no CAPTCHA, works with any model."""
+
+    ENDPOINT = "https://api.search.brave.com/res/v1/web/search"
+
+    def __init__(self, api_key: str) -> None:
+        self.api_key = api_key
+
+    def search(self, query: str, max_results: int = 5, timeout: float = 10.0) -> list[WebSearchResult]:
+        url = f"{self.ENDPOINT}?{urllib.parse.urlencode({'q': query, 'count': max(1, min(max_results, 20))})}"
+        req = urllib.request.Request(url, headers={"Accept": "application/json", "X-Subscription-Token": self.api_key})
+        data = _get_json(req, timeout)
+        rows = ((data or {}).get("web") or {}).get("results") or []
+        return [WebSearchResult(title=_plain(r.get("title", "")), url=str(r.get("url", "")), snippet=_plain(r.get("description", "")))
+                for r in rows if r.get("url")][:max_results]
+
+
+class TavilySearchBackend(BaseWebSearchBackend):
+    """Tavily search API (the user's own key, free tier available): results made for models to read."""
+
+    ENDPOINT = "https://api.tavily.com/search"
+
+    def __init__(self, api_key: str) -> None:
+        self.api_key = api_key
+
+    def search(self, query: str, max_results: int = 5, timeout: float = 10.0) -> list[WebSearchResult]:
+        import json
+
+        body = json.dumps({"query": query, "max_results": max(1, min(max_results, 10)), "search_depth": "basic"}).encode()
+        req = urllib.request.Request(self.ENDPOINT, data=body, method="POST",
+                                     headers={"Content-Type": "application/json", "Authorization": f"Bearer {self.api_key}"})
+        data = _get_json(req, timeout)
+        rows = (data or {}).get("results") or []
+        return [WebSearchResult(title=_plain(r.get("title", "")), url=str(r.get("url", "")), snippet=_plain(r.get("content", ""))[:400])
+                for r in rows if r.get("url")][:max_results]
+
+
+KEYED_BACKENDS: dict[str, type[BaseWebSearchBackend]] = {"brave": BraveSearchBackend, "tavily": TavilySearchBackend}
+SECRET_REF = "web_search_api_key"
+
+
+def keyed_backend(ws: Any) -> BaseWebSearchBackend | None:
+    """The search service the user set up in Settings (Brave or Tavily with their own key), else None."""
+    try:
+        from aether.life.store import life_store_for
+
+        provider = str(life_store_for(ws).settings().get("web_search_provider") or "")
+        cls = KEYED_BACKENDS.get(provider)
+        key = ws.secret_store.get_secret(SECRET_REF) if cls else None
+    except Exception:  # noqa: BLE001 - no keyed search, the free fallback is used
+        return None
+    return cls(key) if cls and key else None
+
+
 class MockWebSearchBackend(BaseWebSearchBackend):
     """Deterministic mock backend for hermetic tests."""
 

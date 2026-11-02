@@ -23,6 +23,6 @@
 .frm h3 { font-size: 15px; font-weight: 600; }
 .frm p, .frm small { font-size: 13px; color: hsl(var(--muted-fg)); line-height: 1.5; }
 .frm-row { display: flex; gap: 8px; }
-.frm-row select, .frm-row input { flex: 1; min-width: 0; font: inherit; font-size: 14px; padding: 9px 12px; border: 0; border-radius: 10px; background: hsl(var(--card)); color: hsl(var(--fg)); box-shadow: inset 0 0 0 1px hsl(var(--border) / .6); outline: none; }
-.frm-row select { flex: 0 0 140px; }
+.frm-row select, .frm-row input { flex: 1; min-width: 0; font: inherit; font-size: 14px; padding: 9px 12px; border: 0; border-radius: 10px; background-color: hsl(var(--card)); color: hsl(var(--fg)); box-shadow: inset 0 0 0 1px hsl(var(--border) / .6); outline: none; }
+.frm-row select { flex: 0 0 140px; padding-right: 30px; }
 .frm-row input:focus, .frm-row select:focus { box-shadow: 0 0 0 2px hsl(var(--ring) / .5); }

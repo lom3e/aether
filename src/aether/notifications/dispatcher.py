@@ -245,6 +245,14 @@ class NotificationDispatcher:
             else str(notification.type)
         )
 
+        # Concentrazione: what is not urgent stays in the bell, the desktop and the phone are quiet
+        if notif_rank < 3:
+            from aether.life import focus
+
+            if focus.is_active(notification.workspace_id):
+                focus.hold(notification.workspace_id, notification.title)
+                return {ChannelType.IN_APP}
+
         active_rules = [r for r in rules if r.enabled]
         if not active_rules:
             return {ChannelType.IN_APP, ChannelType.DESKTOP}

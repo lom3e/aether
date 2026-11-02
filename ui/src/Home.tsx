@@ -14,6 +14,7 @@ const BRIEF_NO = /^(no|non ora|non adesso|lascia( stare| perdere)?|not now|nope|
 import { Presence } from './presence/Presence';
 import { Rewind } from './presence/Rewind';
 import { Promises } from './presence/Promises';
+import { useFocus } from './presence/focus';
 import { useTranslation } from './i18n';
 import { ToastContext } from './toast';
 import { AutoArchitectModal } from './AutoArchitectModal';
@@ -311,6 +312,15 @@ export function Home({
     setSpeakingMessageId(id);
     speak(text, language, () => { setIsSpeaking(false); setSpeakingMessageId(null); });
   };
+  // Concentrazione: while on, the orb neither briefs nor catches up; at the end it says what arrived meanwhile
+  const focusCtl = useFocus(language, text => { setBrief({ body: text, offer: null }); speakAloud(text, 'focus'); });
+  const focusOnRef = useRef(false);
+  focusOnRef.current = !!focusCtl.focus;
+  useEffect(() => {  // started or ended by voice or from Telegram: the ring follows at once
+    const last = messages[messages.length - 1];
+    if (last?.role === 'assistant' && last.metadata?.focus) void focusCtl.refresh();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [messages.length]);
   // the very first time: the guided welcome under the orb instead of the brief
   const [welcomeOpen, setWelcomeOpen] = useState(() => !onboarded());
   useEffect(() => {
@@ -328,7 +338,7 @@ export function Home({
     fetch(apiUrl(`/api/presence/brief?language=${encodeURIComponent(language)}${met ? '' : '&first=1'}${evening ? '&moment=evening' : ''}`))
       .then(r => (r.ok ? r.json() : null))
       .then(d => {
-        if (!alive || !d?.text) return;
+        if (!alive || !d?.text || focusOnRef.current) return;
         try {
           localStorage.setItem('aether_brief_day', day); localStorage.setItem('aether_met', '1');
           if (evening) localStorage.setItem('aether_evening_day', day);
@@ -348,7 +358,7 @@ export function Home({
     const seen = async (allowCatchup: boolean) => {
       if (document.visibilityState !== 'visible') return;
       const r = await fetch(apiUrl('/api/presence/seen'), { method: 'POST' }).then(x => (x.ok ? x.json() : null)).catch(() => null);
-      if (!alive || !allowCatchup || !r?.show_catchup) return;
+      if (!alive || !allowCatchup || !r?.show_catchup || focusOnRef.current) return;
       await new Promise(res => setTimeout(res, 1500));  // let the daily brief win when both are due
       if (!alive || briefRef.current) return;
       const d = await fetch(apiUrl(`/api/presence/catchup?language=${encodeURIComponent(language)}`)).then(x => (x.ok ? x.json() : null)).catch(() => null);
@@ -860,6 +870,9 @@ export function Home({
           brief={brief}
           briefBusy={briefBusy}
           onBriefAnswer={a => void answerBrief(a)}
+          focus={focusCtl.focus ? { remaining: focusCtl.remaining, progress: focusCtl.progress } : null}
+          onFocusStart={m => { setBrief(null); void focusCtl.start(m); }}
+          onFocusStop={() => void focusCtl.stop()}
           welcome={welcomeOpen ? (
             <Welcome t={t} language={language} onSpeaking={setIsSpeaking}
               onOpenConnections={() => { setWelcomeOpen(false); navigate('connections'); }}

@@ -191,12 +191,19 @@ class TelegramMobile:
         if text in ("/start", "/help"):
             tg.send_message(chat_id=chat_id, parse_mode="", text=(
                 "Scrivimi o mandami un vocale con quello che ti serve. Le modifiche (calendario, mail, documenti) ti chiedono sempre "
-                "conferma qui.\n/oggi: il riepilogo della giornata.\n/sera: chiudi la giornata (e sposta a domani quello che resta)."))
+                "conferma qui.\n/oggi: il riepilogo della giornata.\n/sera: chiudi la giornata (e sposta a domani quello che resta).\n"
+                "/diario: cosa hai fatto questa settimana.\n/concentrazione: un'ora senza avvisi (/fine per smettere prima)."))
             return {"status": "help"}
         if text.split("@")[0] in ("/oggi", "/today"):
             return self._brief(tg, chat_id, "en" if text.startswith("/today") else "it")
         if text.split("@")[0] in ("/sera", "/evening"):
             return self._brief(tg, chat_id, "en" if text.startswith("/evening") else "it", evening=True)
+        # the diary and focus are plain sentences for Aether: the commands are shortcuts to them
+        shortcut = {"/diario": "cosa ho fatto questa settimana?", "/diary": "what did I get done this week?",
+                    "/concentrazione": "voglio concentrarmi per un'ora", "/focus": "let me focus for an hour",
+                    "/fine": "fine concentrazione", "/endfocus": "end focus"}.get(text.split("@")[0].split()[0] if text.strip() else "")
+        if shortcut:
+            return self._ask(tg, chat_id, shortcut)
         return self._ask(tg, chat_id, text)
 
     def _voice(self, tg: Any, chat_id: Any, voice: dict[str, Any]) -> dict[str, Any]:

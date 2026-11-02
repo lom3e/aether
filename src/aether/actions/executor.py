@@ -1092,6 +1092,16 @@ class ActionExecutor:
                 m = store.add_money(contact_id, str(inp.get("direction") or ""), float(inp.get("amount") or 0),
                                     currency=str(inp.get("currency") or "EUR"), what=title)
                 out["money_id"] = m["id"]
+            elif kind == "done":  # "ho mandato il preventivo a Rossi": the open job is ticked, a follow-up asks later if they answered
+                job = store.get_job(str(inp.get("complete_job_id") or ""))
+                if not job or job["status"] != "open":
+                    raise ValueError("That job is no longer open.")
+                store.update_job(job["id"], status="done")
+                life.sync_job(ws, store, store.get_job(job["id"]) or job, lang)
+                out["completed_job_id"] = job["id"]
+                if inp.get("followup") and due_at:
+                    r = store.add_reminder(str(inp["followup"]), due_at=due_at, contact_id=job.get("contact_id"), job_id=job["id"], source="chat")
+                    out["reminder_id"] = r["id"]
             elif kind != "contact":
                 raise ValueError(f"Unknown note kind: {kind}")
             return out
