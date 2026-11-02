@@ -17,12 +17,13 @@ from aether.core.execution import Message
 MAIL_CHANGES = ("mail_trash", "mail_archive", "mail_mark_read")
 GITHUB_ACTIONS = ("github_repos", "github_issues", "github_pulls", "github_create_issue")
 ACTIONS = ("none", "calendar_list", "calendar_create", "calendar_move", "calendar_delete", "mail_search", "mail_reply", "mail_compose", "mail_send_draft",
-           *MAIL_CHANGES, "life_note", *GITHUB_ACTIONS)
+           *MAIL_CHANGES, "life_note", *GITHUB_ACTIONS, "web_search")
 NOTE_KINDS = ("job", "reminder", "contact", "money")
 
 _SYSTEM = (
     "You map ONE user message to the single calendar, mail or note action it asks for. Reply with one JSON object and nothing else:\n"
-    '{"action":"none|calendar_list|calendar_create|calendar_move|calendar_delete|mail_search|mail_reply|mail_compose|mail_send_draft|mail_trash|mail_archive|mail_mark_read|life_note|github_repos|github_issues|github_pulls|github_create_issue",'
+    '{"action":"none|calendar_list|calendar_create|calendar_move|calendar_delete|mail_search|mail_reply|mail_compose|mail_send_draft|mail_trash|mail_archive|mail_mark_read|life_note|github_repos|github_issues|github_pulls|github_create_issue|web_search",'
+    '"web_query":"for web_search: a short search-engine query in the user\'s language; add the month and year when the question is about something recent",'
     '"send":"true only if the user explicitly asks to SEND (invia/manda/send) the email now, false to prepare a draft",'
     '"repo":"GitHub repository for github_* (name or owner/name)","issue_title":"title for github_create_issue","issue_body":"details for github_create_issue",'
     '"mail_query":"Gmail search selecting exactly the mail meant, e.g. is:unread newer_than:1d, from:rossi, subject:fattura",'
@@ -68,6 +69,10 @@ _SYSTEM = (
     "'I sent Ann the invoice') -> a follow-up: note_kind=reminder, contact_name=<the person>, title='<person> ha risposto su: <what>?' "
     "(English: 'Did <person> reply about <what>?'), due = 3 working days after today at 09:00. "
     "'entro <weekday>' means the next such day after today, never today. "
+    "web_search: the answer is on the internet and can change over time: news, recent events, sports results, prices, opening hours, "
+    "who holds a role now, release dates, or the user explicitly asks to search online / on Google ('chi ha vinto l\'ultimo gran premio?', "
+    "'cerca su internet gli orari del museo egizio'). Not for weather, not for the user's own calendar, mail or notes, not for general "
+    "knowledge that does not change. "
     "If the message is a short yes/ok/go ahead, the action is the one the assistant offered in the RECENT CONVERSATION. none: anything else (questions, chat, writing text, "
     "other apps). Resolve relative dates ('domani', 'venerdì', 'next Monday', 'tra due ore') from NOW below. If a create or "
     "move has no time, use 09:00. Use 'it'/'that' references with the RECENT CONVERSATION to fill target. Never invent "
@@ -143,6 +148,13 @@ def _complete_title(title: str, prompt: str, name: str) -> str:
         wm = _REMIND_WHAT_RE.search(prompt or "")
         t = (wm.group("what") if wm else "").strip()
         t = re.split(r"\s+(?:quando|appena|la\s+prossima\s+volta|next\s+time|when)\b", t, maxsplit=1, flags=re.IGNORECASE)[0].strip(" ,")
+    # "Ricordare il contratto" says nothing more than the request: what is left is the topic ("del contratto")
+    meta = re.match(r"(?i)^(?:ricordar(?:e|si|mi|gli|le|lo|la)?|remember|remind\s+(?:him|her|them|me))\s+(?:(?:di|del|della|about|of)\s+)?(?P<rest>.+)$", t)
+    if meta:
+        rest = meta.group("rest")
+        art = re.match(r"(?i)^(il|lo|la|l'|i|gli|le|un|una|uno)\s*(?P<noun>.+)$", rest)
+        contracted = {"il": "del", "lo": "dello", "la": "della", "l'": "dell'", "i": "dei", "gli": "degli", "le": "delle", "un": "di un", "una": "di una", "uno": "di uno"}
+        t = (contracted[art.group(1).lower()] + ("" if art.group(1) == "l'" else " ") + art.group("noun")) if art else rest
     if t and (_FRAGMENT_RE.match(t) or len(t.split()) < 2):
         en = bool(re.search(r"\b(remind|next time|when|talk)\b", prompt or "", re.IGNORECASE)) and not re.search(r"\bricord", prompt or "", re.I)
         who = f" {'with' if en else 'con'} {name}" if name else ""
@@ -162,9 +174,18 @@ def _person_reminder_from_text(prompt: str) -> dict[str, Any] | None:
             "trigger": "person"}
 
 
+# questions whose answer is on the web and changes over time (news, results, prices, opening hours)
+_WEB_SIGNAL_RE = re.compile(
+    r"\b(cerca\w*|internet|online|google|notizi\w*|news|ultim[oaie]|recent\w*|attual\w*|vint[oa]|vince|risultat\w*|"
+    r"classific\w*|partit\w*|gara|gran\s+premio|orari\w*|apre|aprono|chiude|chiudono|aperto|prezz\w*|cost[ae]|quotazion\w*|borsa|uscit[oa]|"
+    r"esce|latest|won|wins|score|results?|price|cost|opens?|closes?|hours|released?|search|look\s+up)\b",
+    re.IGNORECASE,
+)
+
+
 def worth_routing(prompt: str) -> bool:
     """Cheap pre-check so ordinary chat never pays for an extra model call."""
-    return bool(_SIGNAL_RE.search(prompt or "") or _MONEY_RE.search(prompt or ""))
+    return bool(_SIGNAL_RE.search(prompt or "") or _MONEY_RE.search(prompt or "") or _WEB_SIGNAL_RE.search(prompt or ""))
 
 
 def _parse(text: str) -> dict[str, Any] | None:
@@ -203,6 +224,20 @@ def _local(raw: str, tz: Any) -> dt.datetime | None:
     return d
 
 
+# "cerca su internet …", "search online for …": clear enough on its own, also when the model is unreachable
+_WEB_RE = re.compile(r"\b(?:cerca(?:mi|re)?|trova(?:mi)?|guarda|search|look\s+up|google)\b(?:\s+(?:per\s+me|for\s+me))?\s+"
+                     r"(?:su\s+internet|su\s+google|online|on\s+line|in\s+rete|sul\s+web|on\s+the\s+web|the\s+web|the\s+internet|on\s+google|on\s+internet)\b[\s:,]*(?P<q>.*)$",
+                     re.IGNORECASE | re.DOTALL)
+
+
+def _web_from_text(prompt: str) -> dict[str, Any] | None:
+    m = _WEB_RE.search(prompt or "")
+    if not m:
+        return None
+    q = re.sub(r"(?i)^(?:for|about|per|riguardo(?:\s+a)?)\s+", "", (m.group("q") or "").strip(" ?.!")) or (prompt or "")[: m.start()].strip(" ?.!,")
+    return {"action": "web_search", "web_query": q} if q else None
+
+
 def route(prompt: str, *, provider: Any, history: list[Any] | None = None, now: dt.datetime | None = None) -> dict[str, Any]:
     """Returns {"action": ..., plus validated fields}. Always a dict; "none" on any doubt."""
     if provider is None or type(provider).__name__ == "UnresolvedProvider":
@@ -219,7 +254,7 @@ def route(prompt: str, *, provider: Any, history: list[Any] | None = None, now: 
             ])
     except Exception as exc:  # noqa: BLE001 - the model is unreachable: sentences clear enough on their own still work
         resp = None
-        if not (_money_from_text(prompt) or _person_reminder_from_text(prompt)):
+        if not (_money_from_text(prompt) or _person_reminder_from_text(prompt) or _web_from_text(prompt)):
             return {"action": "none", "reason": type(exc).__name__}
     data = _parse(getattr(resp, "content", "") or "") if resp is not None else None
     money = _money_from_text(prompt)
@@ -227,6 +262,8 @@ def route(prompt: str, *, provider: Any, history: list[Any] | None = None, now: 
         data = money
     elif (not data or data.get("action") in (None, "none")) and _person_reminder_from_text(prompt):
         data = _person_reminder_from_text(prompt)  # "la prossima volta che vedo Giulia ricordami di…": clear enough without the model
+    elif _web_from_text(prompt) and (not data or data.get("action") in (None, "none", "web_search")):
+        data = {**_web_from_text(prompt), **({"web_query": data["web_query"]} if data and data.get("web_query") else {})}
     if not data or data.get("action") not in ACTIONS or data["action"] == "none":
         return {"action": "none"}
     tz = now.tzinfo
@@ -325,6 +362,9 @@ def route(prompt: str, *, provider: Any, history: list[Any] | None = None, now: 
         if not to and not name:
             return {"action": "none", "reason": "incomplete"}
         return {"action": action, "to": to if to and to in (prompt or "") else "", "contact_name": name, "instructions": instructions, "send": send}
+    if action == "web_search":
+        q = re.sub(r"\s+", " ", str(data.get("web_query") or "")).strip()[:200]
+        return {"action": action, "query": q} if q else {"action": "none", "reason": "incomplete"}
     if action == "mail_search":
         q = re.sub(r"[\r\n]+", " ", str(data.get("mail_query") or "in:inbox")).strip()[:200] or "in:inbox"
         return {"action": action, "query": q}

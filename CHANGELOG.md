@@ -9,6 +9,26 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+- **The Presence**: Aether opens on a full-screen orb that listens, thinks and speaks, with the day around it; hold Space to talk (also with the empty message box focused); barge-in stops Aether when you start speaking.
+- **Natural voice** on the Mac (Kokoro, Sara or Nicola, downloaded once from Settings); Whisper for listening when a Groq or OpenAI key is set.
+- **Guided first minute** (name, city, voice), Settings → You.
+- **Life awareness**: Today and People & jobs; jobs, reminders, money owed ("Mario mi deve 200 euro"), reminders tied to a person ("quando sento Giulia…"), meeting prep ten minutes before an appointment with someone Aether knows, "what did I miss?", the close of the day and the Friday review, a nudge for clients you have not heard from.
+- **Web answers**: questions whose answer is on the internet (news, results, prices, opening hours) are searched and answered in a few sentences with the sources (Groq's own search with gpt-oss, DuckDuckGo otherwise).
+- **Connections in one click**: Google Calendar and Gmail (loopback OAuth with PKCE), GitHub (device code), Telegram on the phone (QR pairing); Gmail and GitHub from chat, always confirmed and undoable.
+- Weather (Open-Meteo), "apri Spotify", spoken "sì / no / annulla".
+
+### Changed
+- One personal space, one interface (chat and Presence); advanced tools under a switch in Settings.
+- Settings opens on General; plain Italian wording in the model and data tabs.
+
+### Fixed
+- "Cosa ho domani?" includes Aether's own reminders and jobs and says when Google Calendar is not connected (it used to answer "nothing" while a reminder was due).
+- A mail written without Gmail is signed with your name and says it was not sent (it used to offer to send it).
+- Remembered facts are said back to you ("il tuo colore preferito"), reminder confirmations read "ti ricordo di chiamare…".
+- Connections → Advanced → "Sync all" called a route that does not exist.
+- DuckDuckGo results lost their snippets (the parser stopped before them).
+
 ---
 
 ## [v1.8.1] - 2026-10-20

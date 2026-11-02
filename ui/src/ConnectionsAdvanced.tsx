@@ -792,9 +792,10 @@ export function ConnectionsAdvanced({ initialExecutionId, initialTab }: Connecti
   const handleSyncAll = async () => {
     setSyncingAll(true);
     try {
-      const res = await fetch(apiUrl('/api/connections/sync_all'), { method: 'POST' });
+      const res = await fetch(apiUrl('/api/connections/sync'), { method: 'POST' });
       const data = await res.json();
-      const total = data.total_items_ingested || 0;
+      if (!res.ok) throw new Error(typeof data?.detail === 'string' ? data.detail : t('connUiUnableToSyncTheServices'));
+      const total = data.total_items_synced || 0;
       if (total === 0) {
         showToast(t('connUiSyncCompletedNoNewItemsFound'), 'info');
       } else {

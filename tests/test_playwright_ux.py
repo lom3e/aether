@@ -85,8 +85,9 @@ def test_playwright_workspace_and_conversation_flow(tmp_path, monkeypatch):
             assert page.is_visible("button:has-text('Analyze competitor')")
             page.fill("[data-testid='sidebar-search-input']", "")
 
-            # 6. Test Settings -> Workspace tab
+            # 6. Test Settings -> Workspace tab (Settings opens on General)
             page.click("button[title='Settings']")
+            page.get_by_role("tab", name="Workspace").click()
             page.wait_for_selector("text=Danger Zone", timeout=5000)
             assert page.is_visible("text=Danger Zone")
 

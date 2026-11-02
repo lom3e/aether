@@ -299,6 +299,8 @@ class GroqProvider(AIProvider):
         body: dict[str, Any] = {"model": model, "messages": msgs, "stream": stream}
         if tools:
             body["tools"] = [t if "type" in t else {"type": "function", "function": t} for t in tools]
+            if any(t.get("type") == "browser_search" for t in body["tools"]):
+                body["tool_choice"] = "required"  # Groq's own web search (gpt-oss): asked for, so it must run
         if output_schema is not None:
             schema = json.dumps(self._schema_dict(output_schema), ensure_ascii=False)
             instruction = (
@@ -347,6 +349,17 @@ class GroqProvider(AIProvider):
         if output_schema is not None:
             content = self._validate_structured(content, output_schema)
 
+        # Groq's built-in browser_search: the pages opened first (what the answer read), then the search hits
+        sources: list[dict[str, str]] = []
+        tools_run = msg.get("executed_tools") or []
+        for t in sorted(tools_run, key=lambda t: 0 if str(t.get("type", "")).endswith("open") else 1):
+            for r in ((t.get("search_results") or {}).get("results") or []):
+                url = str(r.get("url") or "")
+                if url.startswith("http") and url not in {x["url"] for x in sources}:
+                    title = re.sub(r"\s+-\s+viewing lines.*$", "", str(r.get("title") or "")).strip()
+                    sources.append({"title": title if title and not title.startswith("www.") else "", "url": url})
+        if tools_run:
+            content = re.sub(r"\s*【[^】]*】", "", content).strip()  # its citation marks point at internal cursors, not at links
         usage = data.get("usage") or {}
         normalized = Message(role="assistant", content=content, tool_calls=calls or None)
         response = ProviderResponse(
@@ -360,6 +373,7 @@ class GroqProvider(AIProvider):
             finish_reason=choice.get("finish_reason") or "stop",
             message=normalized,
             provider=self.PROVIDER_ID,
+            sources=sources,
         )
         return response
 

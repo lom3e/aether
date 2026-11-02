@@ -15,7 +15,7 @@ import sys
 import os
 from pathlib import Path
 import pytest
-from playwright.sync_api import sync_playwright
+from playwright.sync_api import expect, sync_playwright
 
 from aether.workspace.registry import WorkspaceRegistry
 
@@ -70,11 +70,11 @@ def test_playwright_missions_e2e_flow(tmp_path, monkeypatch):
             # 2. Click Missions button in Sidebar using robust data-testid
             page.click("[data-testid='nav-missions']")
             page.wait_for_selector("h1:has-text('Missions')", timeout=5000)
-            assert page.is_visible("h1:has-text('Missions')")
+            expect(page.locator("h1:has-text('Missions')").first).to_be_visible(timeout=5000)
 
             # 3. Verify Empty State
             page.wait_for_selector("text=No missions yet", timeout=5000)
-            assert page.is_visible("text=No missions yet")
+            expect(page.locator("text=No missions yet").first).to_be_visible(timeout=5000)
 
             # 4. Click "+ New Mission"
             page.click("button:has-text('New Mission')")
@@ -91,44 +91,44 @@ def test_playwright_missions_e2e_flow(tmp_path, monkeypatch):
 
             # 6. Verify Executive Single-Pane Cockpit Elements
             page.wait_for_selector("text=Objective", timeout=5000)
-            assert page.is_visible("text=Design Distributed Vector Index")
-            assert page.is_visible("text=Objective")
-            assert page.is_visible("text=Workforce")
-            assert page.is_visible("text=Stages")
-            assert page.is_visible("text=Results")
+            expect(page.locator("text=Design Distributed Vector Index").first).to_be_visible(timeout=5000)
+            expect(page.locator("text=Objective").first).to_be_visible(timeout=5000)
+            expect(page.locator("text=Workforce").first).to_be_visible(timeout=5000)
+            expect(page.locator("text=Stages").first).to_be_visible(timeout=5000)
+            expect(page.locator("text=Results").first).to_be_visible(timeout=5000)
 
             # Verify Slice 2B: Human-Centered Workforce & Role Presence
             if page.is_visible("button:has-text('Details')"):
                 page.click("button:has-text('Details')")
                 page.wait_for_selector("text=Underlying Model", timeout=5000)
-                assert page.is_visible("text=Underlying Model")
+                expect(page.locator("text=Underlying Model").first).to_be_visible(timeout=5000)
                 page.click("button:has-text('Close')")
 
             # Verify contextual actions in Draft state (No developer select dropdown)
-            assert page.is_visible("button:has-text('Start Mission')")
+            expect(page.locator("button:has-text('Start Mission')").first).to_be_visible(timeout=5000)
 
             # 7. Test Mission Runtime Execution: Draft -> Start -> Real Execution Run #1
             page.click("button:has-text('Start Mission')")
             page.wait_for_selector("text=Run #1", timeout=45000)
-            assert page.is_visible("text=Run #1")
+            expect(page.locator("text=Run #1").first).to_be_visible(timeout=5000)
 
             # Wait for execution run to complete and show Re-run action
             page.wait_for_selector("button:has-text('Re-run Mission')", timeout=30000)
-            assert page.is_visible("button:has-text('Re-run Mission')")
+            expect(page.locator("button:has-text('Re-run Mission')").first).to_be_visible(timeout=5000)
 
             # Verify truthful workforce state (Completed, not Standby)
-            assert page.is_visible("span:has-text('Completed')")
+            expect(page.locator("span:has-text('Completed')").first).to_be_visible(timeout=5000)
 
             # Verify progressive disclosure: Show details / Hide details if output exists
             if page.is_visible("button:has-text('Show details')"):
                 page.click("button:has-text('Show details')")
-                assert page.is_visible("button:has-text('Hide details')")
+                expect(page.locator("button:has-text('Hide details')").first).to_be_visible(timeout=5000)
                 page.click("button:has-text('Hide details')")
 
             # 8. Test Re-run -> Dispatches Execution Run #2
             page.click("button:has-text('Re-run Mission')")
             page.wait_for_selector("text=Run #2", timeout=45000)
-            assert page.is_visible("text=Run #2")
+            expect(page.locator("text=Run #2").first).to_be_visible(timeout=5000)
 
             # 9. Add second milestone inline using "+ Add Step" (Slice 2C)
             page.click("button:has-text('Add Step')")
@@ -138,30 +138,30 @@ def test_playwright_missions_e2e_flow(tmp_path, monkeypatch):
             page.click("form button[type='submit']")
 
             page.wait_for_selector("text=Run Latency Benchmarks", timeout=5000)
-            assert page.is_visible("text=Run Latency Benchmarks")
-            assert page.is_visible("text=Stage 1")
-            assert page.is_visible("text=Stage 2")
+            expect(page.locator("text=Run Latency Benchmarks").first).to_be_visible(timeout=5000)
+            expect(page.locator("text=Stage 1").first).to_be_visible(timeout=5000)
+            expect(page.locator("text=Stage 2").first).to_be_visible(timeout=5000)
 
             # Verify Slice 2D: Deliverables / Results
-            assert page.is_visible("text=Results")
+            expect(page.locator("text=Results").first).to_be_visible(timeout=5000)
 
             # 10. Test Progressive Disclosure Slide-Over Inspector (Slice 2E)
             page.click("button:has-text('Inspect')")
             page.wait_for_selector("text=Mission Execution Inspector", timeout=5000)
-            assert page.is_visible("text=Mission Execution Inspector")
-            assert page.is_visible("text=Execution Graph")
-            assert page.is_visible("text=Activity Trace")
-            assert page.is_visible("text=Telemetry & Specs")
+            expect(page.locator("text=Mission Execution Inspector").first).to_be_visible(timeout=5000)
+            expect(page.locator("text=Execution Graph").first).to_be_visible(timeout=5000)
+            expect(page.locator("text=Activity Trace").first).to_be_visible(timeout=5000)
+            expect(page.locator("text=Telemetry & Specs").first).to_be_visible(timeout=5000)
 
             # Click Activity Trace tab (verifying real runtime activities logged)
             page.click("button:has-text('Activity Trace')")
             page.wait_for_selector("text=Execution Run #", timeout=5000)
-            assert page.is_visible("text=Execution Run #")
+            expect(page.locator("text=Execution Run #").first).to_be_visible(timeout=5000)
 
             # Click Telemetry & Specs tab
             page.click("button:has-text('Telemetry & Specs')")
             page.wait_for_selector("text=Mission ID", timeout=5000)
-            assert page.is_visible("text=Mission ID")
+            expect(page.locator("text=Mission ID").first).to_be_visible(timeout=5000)
 
             page.click("button:has-text('Close Inspector')")
 
@@ -172,7 +172,7 @@ def test_playwright_missions_e2e_flow(tmp_path, monkeypatch):
             page.fill("textarea", "Quick inquiry without any mission")
             page.click("button:has-text('Run Task')")
             page.wait_for_selector("text=Quick inquiry without any mission", timeout=5000)
-            assert page.is_visible("text=Quick inquiry without any mission")
+            expect(page.locator("text=Quick inquiry without any mission").first).to_be_visible(timeout=5000)
 
             browser.close()
     finally:

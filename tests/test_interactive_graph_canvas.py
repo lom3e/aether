@@ -25,7 +25,7 @@ from unittest.mock import MagicMock
 import pytest
 from starlette.requests import Request
 from fastapi import HTTPException
-from playwright.sync_api import sync_playwright
+from playwright.sync_api import expect, sync_playwright
 
 from aether.coordination.events import EventEmitter, EventType
 from aether.core.execution import ExecutionResult
@@ -232,8 +232,8 @@ def test_playwright_interactive_execution_graph_canvas(tmp_path: Path, monkeypat
             # 5. Open Inspector in Blueprint mode (Screenshot 1: Small/Blueprint Graph)
             page.click("button:has-text('Inspect')")
             page.wait_for_selector(".execution-graph-canvas-container", timeout=7000)
-            assert page.is_visible(".execution-graph-canvas-container")
-            assert page.is_visible("text=Blueprint Specification")
+            expect(page.locator(".execution-graph-canvas-container").first).to_be_visible(timeout=5000)
+            expect(page.locator("text=Blueprint Specification").first).to_be_visible(timeout=5000)
 
             page.wait_for_selector(".interactive-node", timeout=5000)
             nodes = page.locator(".interactive-node")
@@ -258,9 +258,9 @@ def test_playwright_interactive_execution_graph_canvas(tmp_path: Path, monkeypat
             # Verify Canvas elements
             page.wait_for_selector(".execution-graph-canvas-container svg", timeout=5000)
             page.wait_for_selector(".edges-layer", timeout=5000)
-            assert page.is_visible(".execution-graph-canvas-container svg")
-            assert page.is_visible(".edges-layer")
-            assert page.is_visible(".nodes-layer")
+            expect(page.locator(".execution-graph-canvas-container svg").first).to_be_visible(timeout=5000)
+            expect(page.locator(".edges-layer").first).to_be_visible(timeout=5000)
+            expect(page.locator(".nodes-layer").first).to_be_visible(timeout=5000)
 
             # 7. Test Zoom controls (+, -, Fit-to-View, Reset)
             zoom_text_el = page.locator(".canvas-toolbar span:has-text('%')")
@@ -289,8 +289,8 @@ def test_playwright_interactive_execution_graph_canvas(tmp_path: Path, monkeypat
             first_node.click()
 
             page.wait_for_selector(".node-inspector-drawer", timeout=5000)
-            assert page.is_visible(".node-inspector-drawer")
-            assert page.is_visible("text=Relationships")
+            expect(page.locator(".node-inspector-drawer").first).to_be_visible(timeout=5000)
+            expect(page.locator("text=Relationships").first).to_be_visible(timeout=5000)
 
             # Save Screenshot 3: Selected Node Inspector Drawer
             screenshot_inspector = screenshots_dir / "slice7_selected_node_inspector.png"
@@ -301,7 +301,7 @@ def test_playwright_interactive_execution_graph_canvas(tmp_path: Path, monkeypat
             if rel_button.is_visible():
                 rel_button.click()
                 page.wait_for_timeout(300)
-                assert page.is_visible(".node-inspector-drawer")
+                expect(page.locator(".node-inspector-drawer").first).to_be_visible(timeout=5000)
 
             # Close Node Inspector Drawer via X
             page.click("[data-testid='close-node-drawer-btn']")
@@ -320,7 +320,7 @@ def test_playwright_interactive_execution_graph_canvas(tmp_path: Path, monkeypat
             page.click("button:has-text('Inspect')")
             page.wait_for_selector(".execution-graph-canvas-container", timeout=7000)
             page.wait_for_selector("text=Run #2", timeout=5000)
-            assert page.is_visible("text=Run #2")
+            expect(page.locator("text=Run #2").first).to_be_visible(timeout=5000)
 
             # Save Screenshot 4: Run #2 Switched Canvas Scope
             screenshot_run2 = screenshots_dir / "slice7_run2_switched_canvas.png"

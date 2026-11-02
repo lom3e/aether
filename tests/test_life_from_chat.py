@@ -132,6 +132,6 @@ def test_a_reminder_never_creates_a_client(tmp_path):
         svc._router_provider_override = Model({"action": "life_note", "note_kind": "reminder", "title": "Chiamare il commercialista",
                                                "contact_name": "commercialista", "due": _friday_9().strftime("%Y-%m-%dT10:00")})
         msg = svc.process_prompt(workspace_id=ws.name, prompt="ricordami di chiamare il commercialista venerdì alle 10")
-        assert msg.content.startswith("Ti ricordo **Chiamare il commercialista**") and "alle 10:00" in msg.content and "ai clienti" not in msg.content
+        assert msg.content.startswith("Ti ricordo di **chiamare il commercialista**") and "alle 10:00" in msg.content and "ai clienti" not in msg.content
     finally:
         ws.close()

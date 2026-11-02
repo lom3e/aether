@@ -87,11 +87,8 @@ class DuckDuckGoSearchBackend(BaseWebSearchBackend):
         # Find result containers in DuckDuckGo HTML
         # Match pattern: <a class="result__url" href="..."> or <a class="result__snippet" ...>
         # Match <a class="result__snippet"[^>]*>(.*?)</a>
-        result_blocks = re.findall(
-            r'<div[^>]*class="[^"]*result\s+results_links[^"]*"[^>]*>(.*?)</div>\s*</div>',
-            html_content,
-            re.DOTALL,
-        )
+        # One chunk per result: from a result container to the next (a non-greedy "</div></div>" stopped before the snippet).
+        result_blocks = re.split(r'<div[^>]*class="[^"]*\bresult\s+results_links[^"]*"[^>]*>', html_content)[1:]
 
         if not result_blocks:
             # Fallback block matching

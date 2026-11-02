@@ -62,6 +62,7 @@ class ProviderResponse:
     finish_reason: str = "stop"
     message: Message | None = None
     provider: str = ""  # which provider actually produced this response (traceability)
+    sources: list[dict[str, str]] = field(default_factory=list)  # web pages a server-side search read or found ({"title", "url"})
 
 
 @dataclass
